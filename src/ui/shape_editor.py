@@ -216,3 +216,42 @@ class ShapeEditorDialog(QDialog):
 
     def get_shapes(self) -> list[Shape]:
         return list(self._shapes)
+
+
+class PatternEditorDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None,
+                 existing: Shape | None = None,
+                 title: str = "图案编辑器") -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedSize(300, 360)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        self._editor = ShapeGridEditor(grid_size=5)
+        if existing is not None and existing.cells:
+            self._editor.set_cells(set(existing.cells))
+        layout.addWidget(self._editor, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        btn_row = QHBoxLayout()
+        clear_btn = QPushButton("清空")
+        clear_btn.clicked.connect(self._editor.clear)
+        btn_row.addWidget(clear_btn)
+        btn_row.addStretch()
+
+        ok_btn = QPushButton("确定")
+        ok_btn.setStyleSheet(
+            "QPushButton { background: #10B981; color: white; border: none; padding: 6px 20px; }"
+            "QPushButton:hover { background: #059669; }"
+        )
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+    def get_shape(self) -> Shape:
+        return self._editor.get_shape()

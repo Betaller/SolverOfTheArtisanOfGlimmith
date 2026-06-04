@@ -227,16 +227,34 @@ class PropertyPanel(QWidget):
         patterns_label.setStyleSheet("font-weight: bold; font-size: 11px; color: #475569;")
         L.addWidget(patterns_label)
 
+        from src.ui.shape_editor import PatternEditorDialog
+
+        def _edit_shape_pattern():
+            dialog = PatternEditorDialog(self, existing=cell.shape_pattern, title="拼块图案编辑")
+            if dialog.exec():
+                shape = dialog.get_shape()
+                self._board.cell(r, c).shape_pattern = shape if shape.area > 0 else None
+                self.board_modified.emit()
+                self._rebuild_cell()
+
+        def _edit_fence_pattern():
+            dialog = PatternEditorDialog(self, existing=cell.fence_pattern, title="围栏标记编辑")
+            if dialog.exec():
+                shape = dialog.get_shape()
+                self._board.cell(r, c).fence_pattern = shape if shape.area > 0 else None
+                self.board_modified.emit()
+                self._rebuild_cell()
+
         has_sp = cell.shape_pattern is not None
         sp_btn = QPushButton(f"拼块图案 {'有' if has_sp else '无'}")
         sp_btn.setStyleSheet("QPushButton { font-size: 11px; padding: 4px 8px; }")
-        sp_btn.clicked.connect(lambda: None)
+        sp_btn.clicked.connect(lambda: _edit_shape_pattern())
         L.addWidget(sp_btn)
 
         has_fp = cell.fence_pattern is not None
         fp_btn = QPushButton(f"围栏标记 {'有' if has_fp else '无'}")
         fp_btn.setStyleSheet("QPushButton { font-size: 11px; padding: 4px 8px; }")
-        fp_btn.clicked.connect(lambda: None)
+        fp_btn.clicked.connect(lambda: _edit_fence_pattern())
         L.addWidget(fp_btn)
 
     # ── Cell setters ──

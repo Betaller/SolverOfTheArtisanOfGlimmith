@@ -23,6 +23,7 @@ from src.ui.grid_widget import GridWidget
 from src.ui.constraint_panel import ConstraintPanel
 from src.ui.tool_palette import ToolPalette
 from src.ui.property_panel import PropertyPanel
+from src.ui.puzzle_browser import PuzzleBrowser
 from src.ui.solver_runner import SolverThread
 from src.ui.theme import MODE_COLORS
 
@@ -114,8 +115,10 @@ class MainWindow(QMainWindow):
         left_panel.setMaximumWidth(280)
         self._tool_palette = ToolPalette()
         self._constraint_panel = ConstraintPanel()
+        self._puzzle_browser = PuzzleBrowser()
         left_panel.addTab(self._tool_palette, "工具")
         left_panel.addTab(self._constraint_panel, "规则配置")
+        left_panel.addTab(self._puzzle_browser, "谜题列表")
 
         self._grid_widget = GridWidget()
         self._grid_widget.setMinimumWidth(400)
@@ -194,6 +197,7 @@ class MainWindow(QMainWindow):
         self._grid_widget.status_message.connect(self._status_label.setText)
         self._property_panel.board_modified.connect(self._grid_widget.update)
         self._constraint_panel.rules_changed.connect(self._on_rules_changed)
+        self._puzzle_browser.puzzle_selected.connect(self._on_puzzle_browser_selected)
 
     def _on_compass_applied(self, clue: CompassClue) -> None:
         self._grid_widget.set_compass(clue)
@@ -341,6 +345,12 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        self._load_puzzle_file(path)
+
+    def _on_puzzle_browser_selected(self, path: str) -> None:
+        self._load_puzzle_file(path)
+
+    def _load_puzzle_file(self, path: str) -> None:
         try:
             self._puzzle = self._puzzle_service.load_puzzle(path)
             self._current_file = path

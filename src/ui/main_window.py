@@ -278,7 +278,7 @@ class MainWindow(QMainWindow):
             self._grid_widget.set_overlay_info([], [])
             return
         from src.models.puzzle import RULE_NAMES
-        rule_names = [RULE_NAMES.get(r.type, r.type) for r in self._puzzle.rules]
+        rule_names = list(dict.fromkeys(RULE_NAMES.get(r.type, r.type) for r in self._puzzle.rules))
         shapes = []
         pool_rule = self._puzzle.get_rule("shape_pool")
         if pool_rule is not None:
@@ -435,6 +435,7 @@ class MainWindow(QMainWindow):
         self._property_panel.select_vertex(r, c)
 
     def _on_rules_changed(self) -> None:
+        self._update_overlay()
         if self._puzzle:
             warnings = self._puzzle_service.validate_rules(self._puzzle)
             if warnings:

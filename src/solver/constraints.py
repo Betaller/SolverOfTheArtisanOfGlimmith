@@ -72,23 +72,41 @@ def check_rule_shape_pool(puzzle: Puzzle, board: Board) -> bool:
     return True
 
 
+def _rose_symbol_types(puzzle: Puzzle, board: Board | None = None) -> list[str]:
+    rule = puzzle.get_rule("rose_window")
+    if rule is None:
+        return []
+    symbol_types: list[str] = rule.params.get("symbol_types", [])
+    if symbol_types:
+        return symbol_types
+    if board is not None:
+        return sorted({c.symbol for c in board.cells() if c.symbol is not None})
+    return []
+
+
+def _rose_M(puzzle: Puzzle, board: Board) -> int:
+    symbol_types = _rose_symbol_types(puzzle, board)
+    if not symbol_types:
+        return 0
+    counts = Counter(c.symbol for c in board.cells() if c.symbol is not None and c.symbol in symbol_types)
+    return next(iter(counts.values())) if len(set(counts.values())) == 1 else 0
+
+
 def check_rule_rose_window(puzzle: Puzzle, board: Board) -> bool:
     rule = puzzle.get_rule("rose_window")
     if rule is None:
         return True
-    symbol_types: list[str] = rule.params.get("symbol_types", [])
+    symbol_types = _rose_symbol_types(puzzle, board)
     if not symbol_types:
         return False
     N = len(symbol_types)
     
     symbol_counts: Counter[str] = Counter()
-    symbol_positions: dict[str, list[tuple[int, int]]] = {s: [] for s in symbol_types}
     for c in board.cells():
         if c.symbol is not None:
             if c.symbol not in symbol_types:
                 return False
             symbol_counts[c.symbol] += 1
-            symbol_positions[c.symbol].append((c.row, c.col))
     
     if len(set(symbol_counts.values())) != 1:
         return False

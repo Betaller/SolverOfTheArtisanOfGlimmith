@@ -1,0 +1,10 @@
+-r requirements.txt
+pytest>=8.0.0
+pytest-benchmark>=4.0.0
+pytest-qt>=4.2.0
+pytest-timeout>=2.2.0
+coverage>=7.0.0
+black>=24.0.0
+ruff>=0.3.0
+mypy>=1.8.0
+pre-commit>=3.6.0

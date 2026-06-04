@@ -1,0 +1,58 @@
+[project]
+name = "tagsolver"
+version = "0.1.0"
+description = "Solver and editor for the puzzle game '格里米斯的工匠' (Grimm's Craftsman)"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6.0",
+    "numpy>=1.24.0",
+    "attrs>=23.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-benchmark>=4.0.0",
+    "pytest-qt>=4.2.0",
+    "pytest-timeout>=2.2.0",
+    "coverage>=7.0.0",
+    "black>=24.0.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "ARG", "C4"]
+
+[tool.mypy]
+strict = true
+python_version = "3.10"
+disallow_untyped_defs = true
+disallow_any_unimported = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: 耗时较长的测试",
+    "solver: 求解器相关测试",
+    "ui: UI 相关测试",
+    "benchmark: 性能基准测试",
+]
+addopts = "-q --tb=short"
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == .__main__.",
+]

@@ -17,6 +17,8 @@ from src.solver.candidates import (
     _max_region_area, _min_region_area, _frontier,
     _enumerate_regions, _region_feasible,
     _check_compass_dir, _shape_matches, _is_rectangle_shape,
+    _count_components, _get_all_components, _has_internal_boundary,
+    _boundary_graph_is_bipartite,
 )
 
 from src.solver.checks import (
@@ -144,6 +146,10 @@ class BacktrackSolver:
                 self._unassign(board, region_cells)
                 continue
 
+            if not self._rose_capacity_ok(board, new_unassigned):
+                self._unassign(board, region_cells)
+                continue
+
             result = self._search(board, new_unassigned, new_regions, next_rid + 1)
             if result is not None:
                 return result
@@ -173,6 +179,37 @@ class BacktrackSolver:
             return False
         return True
 
+    def _rose_capacity_ok(self, board: Board, unassigned: set[tuple[int, int]]) -> bool:
+        if not self.puzzle.has_rule("rose_window"):
+            return True
+        M = _rose_M(self.puzzle, board)
+        if M <= 0:
+            return True
+        assigned_ids: set[int] = set()
+        for r in range(board.height):
+            for c in range(board.width):
+                rid = board.cell(r, c).region_id
+                if rid is not None:
+                    assigned_ids.add(rid)
+        remaining_regions = M - len(assigned_ids)
+        if remaining_regions <= 0:
+            return len(unassigned) == 0
+        remaining_cells = len(unassigned)
+        if remaining_cells < remaining_regions:
+            return False
+        comp_count = _count_components(unassigned, board, self._pre_boundaries)
+        if comp_count > remaining_regions:
+            return False
+        if comp_count == 1:
+            comps = _get_all_components(unassigned, board, self._pre_boundaries)
+            if comps and _has_internal_boundary(comps[0], self._pre_boundaries):
+                if remaining_regions == 1:
+                    return False
+                if remaining_regions == 2:
+                    if not _boundary_graph_is_bipartite(comps[0], self._pre_boundaries):
+                        return False
+        return True
+
     def _pick_seed(self, unassigned: set[tuple[int, int]]) -> tuple[int, int]:
         if self.puzzle.has_rule("area") and hasattr(self, '_board'):
             clue_seeds = [p for p in unassigned if self._board.cell(p[0], p[1]).number is not None]
@@ -184,7 +221,6 @@ class BacktrackSolver:
             if sym_seeds:
                 return min(sym_seeds)
         return min(unassigned)
-
 
 from src.solver.candidates import (
     _get_complete_area as _get_complete_area_fn,

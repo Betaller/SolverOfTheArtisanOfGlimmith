@@ -80,6 +80,98 @@ def _get_component(self, board: Board, seed: tuple[int, int],
     return component
 
 
+def _count_components(unassigned: set[tuple[int, int]], board: Board,
+                      pre_boundaries: set[tuple[int, int, int, int]]) -> int:
+    if not pre_boundaries:
+        return 1 if unassigned else 0
+    visited: set[tuple[int, int]] = set()
+    components = 0
+    for seed in sorted(unassigned):
+        if seed in visited:
+            continue
+        components += 1
+        stack: list[tuple[int, int]] = [seed]
+        while stack:
+            r, c = stack.pop()
+            if (r, c) in visited:
+                continue
+            visited.add((r, c))
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if (nr, nc) in unassigned and (nr, nc) not in visited:
+                    key = (r, c, nr, nc) if r < nr or (r == nr and c < nc) else (nr, nc, r, c)
+                    if key not in pre_boundaries:
+                        stack.append((nr, nc))
+    return components
+
+
+def _get_all_components(unassigned: set[tuple[int, int]], board: Board,
+                        pre_boundaries: set[tuple[int, int, int, int]]) -> list[set[tuple[int, int]]]:
+    """Return each connected component (ignoring pre-boundary edges) as a separate set."""
+    if not pre_boundaries:
+        return [set(unassigned)] if unassigned else []
+    visited: set[tuple[int, int]] = set()
+    result: list[set[tuple[int, int]]] = []
+    for seed in sorted(unassigned):
+        if seed in visited:
+            continue
+        comp: set[tuple[int, int]] = set()
+        stack: list[tuple[int, int]] = [seed]
+        while stack:
+            r, c = stack.pop()
+            if (r, c) in visited:
+                continue
+            visited.add((r, c))
+            comp.add((r, c))
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if (nr, nc) in unassigned and (nr, nc) not in visited:
+                    key = (r, c, nr, nc) if r < nr or (r == nr and c < nc) else (nr, nc, r, c)
+                    if key not in pre_boundaries:
+                        stack.append((nr, nc))
+        result.append(comp)
+    return result
+
+
+def _has_internal_boundary(component: set[tuple[int, int]],
+                           pre_boundaries: set[tuple[int, int, int, int]]) -> bool:
+    """Check if a component contains both endpoints of any pre-boundary."""
+    for r1, c1, r2, c2 in pre_boundaries:
+        if (r1, c1) in component and (r2, c2) in component:
+            return True
+    return False
+
+
+def _boundary_graph_is_bipartite(component: set[tuple[int, int]],
+                                 pre_boundaries: set[tuple[int, int, int, int]]) -> bool:
+    """Check if the boundary subgraph within a component is bipartite (2-colorable).
+    
+    A non-bipartite boundary graph means 3+ regions are needed just to satisfy
+    the boundary constraints, which is impossible with only 2 remaining regions.
+    """
+    adj: dict[tuple[int, int], set[tuple[int, int]]] = {}
+    for r1, c1, r2, c2 in pre_boundaries:
+        if (r1, c1) in component and (r2, c2) in component:
+            adj.setdefault((r1, c1), set()).add((r2, c2))
+            adj.setdefault((r2, c2), set()).add((r1, c1))
+    if not adj:
+        return True
+    colors: dict[tuple[int, int], int] = {}
+    for start in adj:
+        if start not in colors:
+            colors[start] = 0
+            queue: deque[tuple[int, int]] = deque([start])
+            while queue:
+                cur = queue.popleft()
+                for nb in adj.get(cur, set()):
+                    if nb not in colors:
+                        colors[nb] = 1 - colors[cur]
+                        queue.append(nb)
+                    elif colors[nb] == colors[cur]:
+                        return False
+    return True
+
+
 def _check_compass_dir(self, board: Board, r: int, c: int,
                        dr: int, dc: int, expected: int,
                        region_cells: set[tuple[int, int]]) -> bool:
@@ -149,6 +241,20 @@ def _region_feasible(self, board: Board, cells: set[tuple[int, int]]) -> bool:
         symbols = [board.cell(r, c).symbol for r, c in cells if board.cell(r, c).symbol is not None]
         if len(symbols) > 1:
             return False
+
+    if self.puzzle.has_rule("rose_window"):
+        from src.solver.constraints import _rose_symbol_types
+        rose_symbols = _rose_symbol_types(self.puzzle, board)
+        if rose_symbols:
+            region_syms: set[str] = set()
+            for r, c in cells:
+                sym = board.cell(r, c).symbol
+                if sym is not None:
+                    if sym not in rose_symbols:
+                        return False
+                    if sym in region_syms:
+                        return False
+                    region_syms.add(sym)
 
     if self.puzzle.has_rule("precise") or self.puzzle.has_rule("range") or self.puzzle.has_rule("shape_pool") or self.puzzle.has_rule("puzzle_piece"):
         target_area = self._get_complete_area()
@@ -313,7 +419,9 @@ def _generate_region_candidates(self, board: Board, seed: tuple[int, int],
     if not results:
         results = [{seed}]
 
-    if self.puzzle.has_rule("same"):
+    if self.puzzle.has_rule("rose_window"):
+        results.sort(key=lambda s: len(s))
+    elif self.puzzle.has_rule("same"):
         results.sort(key=lambda s: len(s))
     else:
         results.sort(key=lambda s: len(s), reverse=True)

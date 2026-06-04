@@ -197,6 +197,27 @@ class BacktrackSolver:
                 return clue_seeds[0]
         return min(unassigned)
 
+    def _get_component(
+        self,
+        board: Board,
+        seed: tuple[int, int],
+        unassigned: set[tuple[int, int]],
+    ) -> set[tuple[int, int]]:
+        if not self._pre_boundaries:
+            return set(unassigned)
+        component: set[tuple[int, int]] = {seed}
+        queue: deque[tuple[int, int]] = deque([seed])
+        while queue:
+            r, c = queue.popleft()
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if (nr, nc) in unassigned and (nr, nc) not in component:
+                    key = (r, c, nr, nc) if r < nr or (r == nr and c < nc) else (nr, nc, r, c)
+                    if key not in self._pre_boundaries:
+                        component.add((nr, nc))
+                        queue.append((nr, nc))
+        return component
+
     def _generate_region_candidates(
         self,
         board: Board,
@@ -205,29 +226,34 @@ class BacktrackSolver:
     ) -> list[set[tuple[int, int]]]:
         results: list[set[tuple[int, int]]] = []
 
-        if self.puzzle.has_rule("shape_pool") and not self._pre_boundaries_blocking:
+        if self.puzzle.has_rule("shape_pool"):
             pool_rule = self.puzzle.get_rule("shape_pool")
             if pool_rule is not None:
                 pool_shapes = pool_rule.params.get("shapes", [])
                 if pool_shapes:
+                    component = self._get_component(board, seed, unassigned)
                     from src.solver.shapes import all_transformations
                     seen: set[frozenset] = set()
+                    sr, sc = seed
                     for ps in pool_shapes:
                         for tf in all_transformations(ps.cells):
-                            for dr in range(board.height):
-                                for dc in range(board.width):
-                                    placed_fs = frozenset((r + dr, c + dc) for (r, c) in tf)
-                                    if placed_fs in seen:
+                            for rs, cs in tf:
+                                dr = sr - rs
+                                dc = sc - cs
+                                placed_fs = frozenset((r + dr, c + dc) for (r, c) in tf)
+                                if placed_fs in seen:
+                                    continue
+                                seen.add(placed_fs)
+                                if component:
+                                    if any((r, c) not in component for (r, c) in placed_fs):
                                         continue
-                                    seen.add(placed_fs)
-                                    if seed not in placed_fs:
-                                        continue
+                                else:
                                     if any((r, c) not in unassigned for (r, c) in placed_fs):
                                         continue
-                                    placed = set(placed_fs)
-                                    if not self._region_feasible(board, placed):
-                                        continue
-                                    results.append(placed)
+                                placed = set(placed_fs)
+                                if not self._region_feasible(board, placed):
+                                    continue
+                                results.append(placed)
                     if results:
                         results.sort(key=lambda s: len(s), reverse=True)
                         return results
@@ -492,6 +518,13 @@ class BacktrackSolver:
             for r, c in new_cells:
                 cell = board.cell(r, c)
                 if cell.number is not None and len(new_cells) < cell.number:
+                    return False
+
+        if self.puzzle.has_rule("shape_pool"):
+            pool_rule = self.puzzle.get_rule("shape_pool")
+            if pool_rule is not None:
+                pool_shapes = pool_rule.params.get("shapes", [])
+                if pool_shapes and len(new_cells) not in {s.area for s in pool_shapes}:
                     return False
 
         new_shape = Shape(cells=frozenset(new_cells))

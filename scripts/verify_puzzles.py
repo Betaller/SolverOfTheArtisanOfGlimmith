@@ -36,7 +36,7 @@ def test_one(args: tuple[str, float]) -> PuzzleResult:
     path, timeout = args
     name = path.replace('\\', '/').split('/')[-1]
     try:
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             data = json.load(f)
         puzzle = dict_to_puzzle(data)
 

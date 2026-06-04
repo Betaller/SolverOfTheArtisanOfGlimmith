@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import threading
 from collections import deque
 
 from src.models.board import Board
@@ -68,6 +69,22 @@ class BacktrackSolver:
                     if solution.solved:
                         return solution
             self._board = self._board_from_puzzle()
+
+            symbol_types = _rose_symbol_types(self.puzzle, self._board)
+            if symbol_types:
+                first_type = symbol_types[0]
+                seeds = [(r, c) for r in range(self._board.height) for c in range(self._board.width)
+                         if self._board.cell(r, c).symbol == first_type and not self._board.cell(r, c).blocked]
+                if len(seeds) > 1:
+                    result = self._solve_rose_parallel(self._board, all_positions, seeds)
+                    if result is not None:
+                        update_boundary_edges(self._board)
+                        solution = self.validator.validate(self.puzzle, self._board)
+                        solution.steps_taken = self.steps
+                        solution.elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
+                        if solution.solved:
+                            return solution
+                    self._board = self._board_from_puzzle()
         result = self._search(self._board, all_positions, {}, 0)
 
         if result is None:
@@ -362,6 +379,44 @@ class BacktrackSolver:
                 if rid is not None:
                     regions.setdefault(rid, set()).add((r, c))
         return regions
+
+    def _solve_rose_parallel(self, board: Board,
+                              all_positions: set[tuple[int, int]],
+                              seeds: list[tuple[int, int]]) -> dict[int, set[tuple[int, int]]] | None:
+        n = len(seeds)
+        per_seed_timeout = max(1.0, self.timeout / n)
+        result_container: list[dict[int, set[tuple[int, int]]] | None] = [None]
+
+        def _try_seed(seed_idx: int) -> None:
+            seed = seeds[seed_idx]
+            sub = BacktrackSolver(self.puzzle)
+            sub_board = sub._board_from_puzzle()
+            rs, cs = seed
+            sub_board.cell(rs, cs).region_id = 0
+            sub_unassigned = all_positions - {seed}
+            sub_regions = {0: {seed}}
+            sub.start_time = time.monotonic()
+            sub.timeout = per_seed_timeout
+            sub.steps = 0
+            sub._first_shape_key = None
+            sub_result = sub._search(sub_board, sub_unassigned, sub_regions, 1)
+            if sub_result is not None and result_container[0] is None:
+                result_container[0] = sub_result
+                for r in range(board.height):
+                    for c in range(board.width):
+                        dst = board.cell(r, c)
+                        src = sub_board.cell(r, c)
+                        dst.region_id = src.region_id
+                self.steps += sub.steps
+
+        threads = []
+        for i in range(n):
+            t = threading.Thread(target=_try_seed, args=(i,), daemon=True)
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join(timeout=max(1.0, self.timeout))
+        return result_container[0]
 
 from src.solver.candidates import (
     _get_complete_area as _get_complete_area_fn,

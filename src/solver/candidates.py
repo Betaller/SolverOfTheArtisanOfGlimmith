@@ -353,7 +353,16 @@ def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
     if len(results) >= 200:
         return
 
-    frontier_list = sorted(frontier)
+    if self.puzzle.has_rule("rose_window") and self._pre_boundaries:
+        frontier_list = sorted(frontier, key=lambda c: sum(
+            1 for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]
+            if 0 <= c[0]+dr < board.height and 0 <= c[1]+dc < board.width
+            and ((min(c[0],c[0]+dr), min(c[1],c[1]+dc),
+                  max(c[0],c[0]+dr), max(c[1],c[1]+dc))
+                in self._pre_boundaries)
+        ))
+    else:
+        frontier_list = sorted(frontier)
     for i, cell in enumerate(frontier_list):
         new_region = current | {cell}
         new_frontier = (frontier - {cell}) | self._frontier({cell}, unassigned - new_region)

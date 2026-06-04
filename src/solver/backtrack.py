@@ -384,7 +384,7 @@ class BacktrackSolver:
                               all_positions: set[tuple[int, int]],
                               seeds: list[tuple[int, int]]) -> dict[int, set[tuple[int, int]]] | None:
         n = len(seeds)
-        per_seed_timeout = max(1.0, self.timeout / n)
+        per_seed_timeout = min(10.0, max(1.0, self.timeout / n))
         result_container: list[dict[int, set[tuple[int, int]]] | None] = [None]
 
         def _try_seed(seed_idx: int) -> None:
@@ -414,8 +414,9 @@ class BacktrackSolver:
             t = threading.Thread(target=_try_seed, args=(i,), daemon=True)
             threads.append(t)
             t.start()
+        join_timeout = per_seed_timeout + 2.0
         for t in threads:
-            t.join(timeout=max(1.0, self.timeout))
+            t.join(timeout=join_timeout)
         return result_container[0]
 
 from src.solver.candidates import (

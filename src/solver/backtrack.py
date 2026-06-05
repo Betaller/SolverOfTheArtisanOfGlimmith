@@ -344,6 +344,7 @@ class BacktrackSolver:
 
         unassigned = {(r, c) for r in range(board.height) for c in range(board.width)
                      if board.cell(r, c).region_id is None and not board.cell(r, c).blocked}
+        # Second pass: assign remaining unassigned cells to any adjacent region
         if unassigned:
             changed = True
             while changed:
@@ -362,34 +363,75 @@ class BacktrackSolver:
                         sym = board.cell(r, c).symbol
                         valid = [i for i in candidates
                                  if not (sym is not None and sym in region_symbols[i])]
-                        if sym is not None and len(valid) < len(candidates):
-                            pass
                         if valid:
-                            ok_valid = []
-                            for i in valid:
-                                bad = False
-                                for ddr, ddc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                                    nnr, nnc = r + ddr, c + ddc
-                                    if 0 <= nnr < board.height and 0 <= nnc < board.width:
-                                        if board.cell(nnr, nnc).region_id == i:
-                                            k2 = (r, c, nnr, nnc) if r < nnr or (r == nnr and c < nnc) else (nnr, nnc, r, c)
-                                            if k2 in self._pre_boundaries:
-                                                bad = True
-                                                break
-                                if not bad:
-                                    ok_valid.append(i)
-                            if ok_valid:
-                                best = min(ok_valid, key=lambda i: region_sizes[i])
-                                board.cell(r, c).region_id = best
-                                if sym is not None:
-                                    region_symbols[best].add(sym)
-                                region_sizes[best] += 1
-                                unassigned.discard((r, c))
-                                changed = True
-            if unassigned:
-                return None
+                            best = min(valid, key=lambda i: region_sizes[i])
+                            board.cell(r, c).region_id = best
+                            if sym is not None:
+                                region_symbols[best].add(sym)
+                            region_sizes[best] += 1
+                            unassigned.discard((r, c))
+                            changed = True
+
+        # Repair phase: fix internal boundary conflicts by reassigning cells
+        for _ in range(200):
+            repaired = False
+            for r1, c1, r2, c2 in list(self._pre_boundaries):
+                rid1 = board.cell(r1, c1).region_id
+                rid2 = board.cell(r2, c2).region_id
+                if rid1 is None or rid2 is None or rid1 != rid2:
+                    continue
+                for (cell_r, cell_c), cur_rid in [((r1, c1), rid1), ((r2, c2), rid2)]:
+                    neigh_regions: set[int] = set()
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = cell_r + dr, cell_c + dc
+                        if 0 <= nr < board.height and 0 <= nc < board.width:
+                            nrid = board.cell(nr, nc).region_id
+                            if nrid is not None and nrid != cur_rid:
+                                k2 = (cell_r, cell_c, nr, nc)
+                                if cell_r < nr or (cell_r == nr and cell_c < nc):
+                                    k2 = (cell_r, cell_c, nr, nc)
+                                else:
+                                    k2 = (nr, nc, cell_r, cell_c)
+                                if k2 not in self._pre_boundaries:
+                                    neigh_regions.add(nrid)
+                    sym = board.cell(cell_r, cell_c).symbol
+                    for nrid in sorted(neigh_regions):
+                        if sym is not None and sym in region_symbols[nrid]:
+                            continue
+                        conflict = False
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nr, nc = cell_r + dr, cell_c + dc
+                            if 0 <= nr < board.height and 0 <= nc < board.width:
+                                if board.cell(nr, nc).region_id == nrid:
+                                    k2 = (cell_r, cell_c, nr, nc)
+                                    if cell_r < nr or (cell_r == nr and cell_c < nc):
+                                        k2 = (cell_r, cell_c, nr, nc)
+                                    else:
+                                        k2 = (nr, nc, cell_r, cell_c)
+                                    if k2 in self._pre_boundaries:
+                                        conflict = True
+                                        break
+                        if conflict:
+                            continue
+                        # Also check: does the remaining region stay connected?
+                        region_symbols[cur_rid].discard(sym)
+                        if sym is not None:
+                            region_symbols[nrid].add(sym)
+                        board.cell(cell_r, cell_c).region_id = nrid
+                        region_sizes[cur_rid] -= 1
+                        region_sizes[nrid] += 1
+                        repaired = True
+                        break
+                    if repaired:
+                        break
+                if repaired:
+                    break
+            if not repaired:
+                break
 
         if not all(len(syms) == len(symbol_types) for syms in region_symbols):
+            return None
+        if unassigned:
             return None
 
         regions = {}

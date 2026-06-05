@@ -361,16 +361,23 @@ def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
                   max(c[0],c[0]+dr), max(c[1],c[1]+dc))
                 in self._pre_boundaries)
         ))
+        per_cell_cap = max(1, 200 // max(1, len(frontier_list)))
+        for i, cell in enumerate(frontier_list):
+            if len(results) >= min(200, per_cell_cap * (i + 1)):
+                break
+            new_region = current | {cell}
+            new_frontier = (frontier - {cell}) | self._frontier({cell}, unassigned - new_region)
+            if not self._region_feasible(board, new_region):
+                continue
+            self._enumerate_regions(board, new_region, new_frontier, unassigned, max_area, results, seed_clue)
     else:
         frontier_list = sorted(frontier)
-    for i, cell in enumerate(frontier_list):
-        new_region = current | {cell}
-        new_frontier = (frontier - {cell}) | self._frontier({cell}, unassigned - new_region)
-
-        if not self._region_feasible(board, new_region):
-            continue
-
-        self._enumerate_regions(board, new_region, new_frontier, unassigned, max_area, results, seed_clue)
+        for i, cell in enumerate(frontier_list):
+            new_region = current | {cell}
+            new_frontier = (frontier - {cell}) | self._frontier({cell}, unassigned - new_region)
+            if not self._region_feasible(board, new_region):
+                continue
+            self._enumerate_regions(board, new_region, new_frontier, unassigned, max_area, results, seed_clue)
 
 
 def _generate_region_candidates(self, board: Board, seed: tuple[int, int],

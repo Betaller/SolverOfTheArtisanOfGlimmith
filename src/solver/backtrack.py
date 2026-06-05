@@ -75,15 +75,35 @@ class BacktrackSolver:
                 first_type = symbol_types[0]
                 seeds = [(r, c) for r in range(self._board.height) for c in range(self._board.width)
                          if self._board.cell(r, c).symbol == first_type and not self._board.cell(r, c).blocked]
-                if len(seeds) > 1:
-                    result = self._solve_rose_parallel(self._board, all_positions, seeds)
-                    if result is not None:
-                        update_boundary_edges(self._board)
-                        solution = self.validator.validate(self.puzzle, self._board)
-                        solution.steps_taken = self.steps
-                        solution.elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
-                        if solution.solved:
-                            return solution
+                n_seeds = len(seeds)
+                if n_seeds > 1:
+                    per_seed = min(30.0, max(1.0, self.timeout / n_seeds))
+                    for seed_idx, seed in enumerate(seeds):
+                        elapsed = time.monotonic() - self.start_time
+                        if elapsed > self.timeout:
+                            break
+                        sub = BacktrackSolver(self.puzzle)
+                        sub_board = sub._board_from_puzzle()
+                        rs, cs = seed
+                        sub_board.cell(rs, cs).region_id = 0
+                        sub_unassigned = all_positions - {seed}
+                        sub_regions = {0: {seed}}
+                        sub.start_time = time.monotonic()
+                        sub.timeout = min(per_seed, self.timeout - elapsed)
+                        sub.steps = 0
+                        sub._first_shape_key = None
+                        sub_result = sub._search(sub_board, sub_unassigned, sub_regions, 1)
+                        if sub_result is not None:
+                            for r in range(board.height):
+                                for c in range(board.width):
+                                    board.cell(r, c).region_id = sub_board.cell(r, c).region_id
+                            self.steps += sub.steps
+                            update_boundary_edges(self._board)
+                            solution = self.validator.validate(self.puzzle, self._board)
+                            solution.steps_taken = self.steps
+                            solution.elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
+                            if solution.solved:
+                                return solution
                     self._board = self._board_from_puzzle()
         result = self._search(self._board, all_positions, {}, 0)
 
@@ -228,7 +248,7 @@ class BacktrackSolver:
         if remaining_cells < remaining_regions:
             return False
         comp_count = _count_components(unassigned, board, self._pre_boundaries)
-        if comp_count > remaining_regions:
+        if remaining_regions <= 2 and comp_count > remaining_regions:
             return False
         if comp_count == 1:
             comps = _get_all_components(unassigned, board, self._pre_boundaries)

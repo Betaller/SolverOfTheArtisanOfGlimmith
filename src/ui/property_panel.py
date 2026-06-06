@@ -20,7 +20,7 @@ QSpinBox { min-width: 80px; }
 def _sep(layout: QVBoxLayout) -> None:
     line = QFrame()
     line.setFrameShape(QFrame.Shape.HLine)
-    line.setStyleSheet("background: #E0E3E8; max-height: 1px; margin: 2px 0;")
+    line.setStyleSheet("background: palette(mid); max-height: 1px; margin: 2px 0;")
     layout.addWidget(line)
 
 
@@ -50,15 +50,15 @@ class PropertyPanel(QWidget):
         self._layout.setSpacing(6)
 
         title = QLabel("属性面板")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E293B;")
+        title.setStyleSheet("font-size: 14px; font-weight: bold;")
         self._layout.addWidget(title)
         _sep(self._layout)
 
         self._info = QLabel("未选中任何对象")
         self._info.setWordWrap(True)
         self._info.setStyleSheet(
-            "font-size: 12px; color: #94A3B8; padding: 8px; "
-            "background: #F8FAFC; border: 1px solid #E0E3E8; border-radius: 6px;"
+            "font-size: 12px; padding: 8px; "
+            "border: 1px solid palette(mid); border-radius: 6px;"
         )
         self._layout.addWidget(self._info)
 
@@ -171,7 +171,7 @@ class PropertyPanel(QWidget):
         # ── Compass ──
         _sep(L)
         compass_label = QLabel("罗盘")
-        compass_label.setStyleSheet("font-weight: bold; font-size: 11px; color: #475569;")
+        compass_label.setStyleSheet("font-weight: bold; font-size: 11px;")
         L.addWidget(compass_label)
 
         cg = QGridLayout()
@@ -198,7 +198,7 @@ class PropertyPanel(QWidget):
         cg.addWidget(sl, 1, 0)
         center = QLabel("●")
         center.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        center.setStyleSheet("font-size: 14px; color: #5B9BD5;")
+        center.setStyleSheet("font-size: 14px;")
         cg.addWidget(center, 1, 1)
         cg.addWidget(sr2, 1, 2)
         cg.addWidget(QLabel("  "), 2, 0)
@@ -224,7 +224,7 @@ class PropertyPanel(QWidget):
         # ── Patterns ──
         _sep(L)
         patterns_label = QLabel("图案")
-        patterns_label.setStyleSheet("font-weight: bold; font-size: 11px; color: #475569;")
+        patterns_label.setStyleSheet("font-weight: bold; font-size: 11px;")
         L.addWidget(patterns_label)
 
         from src.ui.shape_editor import PatternEditorDialog
@@ -297,8 +297,8 @@ class PropertyPanel(QWidget):
 
         self._info.setText(
             '<b style="font-size:13px;">边框 ({},{})-({},{})</b><br>'
-            '<span style="color:#64748B;">分割:</span> {}<br>'
-            '<span style="color:#64748B;">约束:</span> {}'.format(
+            '<span>分割:</span> {}<br>'
+            '<span>约束:</span> {}'.format(
                 r1, c1, r2, c2, "是" if e.is_boundary else "否", constraint_str
             )
         )
@@ -312,15 +312,15 @@ class PropertyPanel(QWidget):
             tb = QPushButton("取消分割线")
             tb.setStyleSheet(
                 "QPushButton { font-size: 12px; padding: 6px; border-radius: 5px; font-weight: bold; "
-                "background: #FEF2F2; color: #DC2626; border: 1px solid #FCA5A5; }"
-                "QPushButton:hover { background: #FEE2E2; }"
+                "color: #EF4444; border: 1px solid #EF4444; }"
+                "QPushButton:hover { background: #3D1F1F; }"
             )
         else:
             tb = QPushButton("设为分割线")
             tb.setStyleSheet(
                 "QPushButton { font-size: 12px; padding: 6px; border-radius: 5px; font-weight: bold; "
-                "background: #EFF6FF; color: #2563EB; border: 1px solid #93C5FD; }"
-                "QPushButton:hover { background: #DBEAFE; }"
+                "color: #3B82F6; border: 1px solid #3B82F6; }"
+                "QPushButton:hover { background: #1E3A5F; }"
             )
         tb.clicked.connect(self._toggle_boundary)
         L.addWidget(tb)
@@ -380,8 +380,8 @@ class PropertyPanel(QWidget):
         _sep(L)
         cl = QPushButton("清除约束")
         cl.setStyleSheet(
-            "QPushButton { font-size: 11px; padding: 5px; border-radius: 4px; color: #DC2626; }"
-            "QPushButton:hover { background: #FEF2F2; }"
+            "QPushButton { font-size: 11px; padding: 5px; border-radius: 4px; color: #EF4444; }"
+            "QPushButton:hover { background: #3D1F1F; }"
         )
         cl.clicked.connect(self._clear_edge_constraint)
         L.addWidget(cl)
@@ -427,7 +427,7 @@ class PropertyPanel(QWidget):
             return
         self._info.setText(
             '<b style="font-size:13px;">顶点 ({},{})</b><br>'
-            '<span style="color:#64748B;">望塔:</span> {}'.format(
+            '<span>望塔:</span> {}'.format(
                 vr, vc, v.watchtower if v.watchtower is not None else "无"
             )
         )

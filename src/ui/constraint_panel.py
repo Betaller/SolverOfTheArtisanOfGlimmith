@@ -57,7 +57,7 @@ class ConstraintPanel(QWidget):
         layout.setSpacing(4)
 
         title = QLabel("规则配置")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #1E293B; padding: 2px 0;")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; padding: 2px 0;")
         layout.addWidget(title)
 
         scroll = QScrollArea()
@@ -93,12 +93,10 @@ class ConstraintPanel(QWidget):
             QGroupBox {
                 font-size: 12px;
                 font-weight: bold;
-                color: #475569;
-                border: 1px solid #E0E3E8;
+                border: 1px solid palette(mid);
                 border-radius: 6px;
                 margin-top: 8px;
                 padding: 12px 6px 6px;
-                background: #FFFFFF;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -132,7 +130,7 @@ class ConstraintPanel(QWidget):
         row.addLayout(header)
 
         desc = QLabel(RULE_DESCRIPTIONS.get(rule_type, ""))
-        desc.setStyleSheet("color: #94A3B8; font-size: 11px; padding-left: 24px;")
+        desc.setStyleSheet("font-size: 11px; padding-left: 24px;")
         desc.setWordWrap(True)
         row.addWidget(desc)
 

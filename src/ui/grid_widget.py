@@ -10,7 +10,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget, QMenu
 
 from src.models.board import Board, Cell, Edge, EdgeConstraintType, Vertex, Shape, CompassClue
-from src.ui.theme import REGION_COLORS
+from src.ui import theme as _ui_theme
 
 
 MODE_CURSORS = {
@@ -120,9 +120,9 @@ class GridWidget(QWidget):
 
     def _get_color(self, region_id: int | None) -> QColor:
         if region_id is None:
-            return QColor("#F0F0F0")
+            return QColor(_ui_theme.colors.cell_bg_null)
         if region_id not in self._region_colors:
-            color = REGION_COLORS[region_id % len(REGION_COLORS)]
+            color = _ui_theme.REGION_COLORS[region_id % len(_ui_theme.REGION_COLORS)]
             self._region_colors[region_id] = QColor(color)
         return self._region_colors[region_id]
 
@@ -706,7 +706,7 @@ class GridWidget(QWidget):
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "未加载谜题")
             return
 
-        painter.fillRect(self.rect(), QColor("#FFFFFF"))
+        painter.fillRect(self.rect(), QColor(_ui_theme.colors.grid_bg))
 
         self._draw_cells(painter)
         self._draw_selection(painter)
@@ -724,17 +724,17 @@ class GridWidget(QWidget):
                 rect = self._cell_rect(r, c)
 
                 if cell.blocked:
-                    painter.fillRect(rect, QColor("#2C3E50"))
-                    painter.setPen(QPen(QColor("#1A252F"), 1))
+                    painter.fillRect(rect, QColor(_ui_theme.colors.cell_blocked_bg))
+                    painter.setPen(QPen(QColor(_ui_theme.colors.cell_blocked_border), 1))
                     painter.drawRect(rect)
-                    painter.setPen(QPen(QColor("#5D6D7E"), 2))
+                    painter.setPen(QPen(QColor(_ui_theme.colors.cell_blocked_x), 2))
                     painter.drawLine(rect.topLeft(), rect.bottomRight())
                     painter.drawLine(rect.topRight(), rect.bottomLeft())
                     continue
 
                 color = self._get_color(cell.region_id)
                 painter.fillRect(rect, color)
-                painter.setPen(QPen(QColor("#E2E8F0"), 1))
+                painter.setPen(QPen(QColor(_ui_theme.colors.cell_border), 1))
                 painter.drawRect(rect)
 
     def _draw_outer_edge(self, painter: QPainter, key: tuple[int, int, int, int]) -> None:
@@ -752,7 +752,7 @@ class GridWidget(QWidget):
             painter.drawLine(QPointF(x, y1), QPointF(x, y2))
 
     def _draw_boundary_edges(self, painter: QPainter) -> None:
-        pen = QPen(QColor("#B8860B"), 6)
+        pen = QPen(QColor(_ui_theme.colors.boundary_edge), 6)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
         for e in self.board.edges():
@@ -762,7 +762,7 @@ class GridWidget(QWidget):
         for key in self._outer_boundaries:
             self._draw_outer_edge(painter, key)
 
-        painter.setPen(QPen(QColor("#FFD700"), 2.5))
+        painter.setPen(QPen(QColor(_ui_theme.colors.boundary_highlight), 2.5))
         for e in self.board.edges():
             if e.is_boundary:
                 x1, y1, x2, y2 = self._edge_endpoints(e)
@@ -771,7 +771,7 @@ class GridWidget(QWidget):
             self._draw_outer_edge(painter, key)
 
     def _draw_grid_lines(self, painter: QPainter) -> None:
-        painter.setPen(QPen(QColor("#E2E8F0"), 1))
+        painter.setPen(QPen(QColor(_ui_theme.colors.grid_line), 1))
         for e in self.board.edges():
             x1, y1, x2, y2 = self._edge_endpoints(e)
             painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
@@ -785,14 +785,14 @@ class GridWidget(QWidget):
             sz = max(18, self._cell_size // 4)
             bg = QRectF(mx - sz * 0.6, my - sz * 0.5, sz * 1.2, sz)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor("#FFF8E1")))
+            painter.setBrush(QBrush(QColor(_ui_theme.colors.edge_constr_bg)))
             painter.drawRoundedRect(bg, 4, 4)
-            painter.setPen(QPen(QColor("#F59E0B"), 1))
+            painter.setPen(QPen(QColor(_ui_theme.colors.edge_constr_border), 1))
             painter.drawRoundedRect(bg, 4, 4)
 
             font = QFont("Segoe UI", self._cell_size // 6, QFont.Weight.Bold)
             painter.setFont(font)
-            painter.setPen(QPen(QColor("#D97706")))
+            painter.setPen(QPen(QColor(_ui_theme.colors.edge_constr_text)))
 
             ct = e.constraint.type
             if ct == EdgeConstraintType.HETEROGENEOUS:
@@ -827,13 +827,13 @@ class GridWidget(QWidget):
                 y = self._padding + (v.row + 0.5) * self._cell_size
                 r = self._cell_size // 5
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QBrush(QColor("#EDE9FE")))
+                painter.setBrush(QBrush(QColor(_ui_theme.colors.watchtower_bg)))
                 painter.drawEllipse(QPointF(x, y), r, r)
-                painter.setPen(QPen(QColor("#7C3AED"), 2))
+                painter.setPen(QPen(QColor(_ui_theme.colors.watchtower_border), 2))
                 painter.drawEllipse(QPointF(x, y), r, r)
                 font = QFont("Segoe UI", self._cell_size // 4, QFont.Weight.Bold)
                 painter.setFont(font)
-                painter.setPen(QPen(QColor("#7C3AED")))
+                painter.setPen(QPen(QColor(_ui_theme.colors.watchtower_text)))
                 painter.drawText(QRectF(x - r, y - r, r * 2, r * 2),
                                  Qt.AlignmentFlag.AlignCenter, str(v.watchtower))
 
@@ -850,24 +850,24 @@ class GridWidget(QWidget):
                     bg = QRectF(rect.x() + margin, rect.y() + margin,
                                  rect.width() - margin * 2, rect.height() - margin * 2)
                     painter.setPen(Qt.PenStyle.NoPen)
-                    painter.setBrush(QBrush(QColor("#FEF2F2")))
+                    painter.setBrush(QBrush(QColor(_ui_theme.colors.symbol_bg)))
                     painter.drawRoundedRect(bg, 6, 6)
-                    painter.setPen(QPen(QColor("#FCA5A5"), 2))
+                    painter.setPen(QPen(QColor(_ui_theme.colors.symbol_border), 2))
                     painter.drawRoundedRect(bg, 6, 6)
                     font = QFont("Segoe UI", self._cell_size * 3 // 5, QFont.Weight.Bold)
                     painter.setFont(font)
-                    painter.setPen(QPen(QColor("#DC2626")))
+                    painter.setPen(QPen(QColor(_ui_theme.colors.symbol_text)))
                     painter.drawText(bg, Qt.AlignmentFlag.AlignCenter, cell.symbol)
 
                 if cell.number is not None and cell.symbol is None:
                     font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)
                     painter.setFont(font)
-                    painter.setPen(QPen(QColor("#1E293B")))
+                    painter.setPen(QPen(QColor(_ui_theme.colors.number_text)))
                     painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(cell.number))
                 elif cell.number is not None:
                     font = QFont("Segoe UI", self._cell_size // 3, QFont.Weight.Bold)
                     painter.setFont(font)
-                    painter.setPen(QPen(QColor("#1E293B")))
+                    painter.setPen(QPen(QColor(_ui_theme.colors.number_text)))
                     painter.drawText(QRectF(rect.x() + 4, rect.y() + 3,
                                               rect.width() - 8, rect.height() * 0.4),
                                      Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, str(cell.number))
@@ -878,7 +878,7 @@ class GridWidget(QWidget):
                 if cell.shape_pattern is not None:
                     font = QFont("Segoe UI", self._cell_size // 6)
                     painter.setFont(font)
-                    painter.setPen(QPen(QColor("#7C3AED")))
+                    painter.setPen(QPen(QColor(_ui_theme.colors.shape_label)))
                     label = f"P{len(cell.shape_pattern.cells)}"
                     painter.drawText(QRectF(rect.x(), rect.bottom() - rect.height() * 0.3,
                                               rect.width(), rect.height() * 0.3),
@@ -889,7 +889,7 @@ class GridWidget(QWidget):
         off = self._cell_size * 0.3
         font_small = QFont("Segoe UI", self._cell_size // 7)
         painter.setFont(font_small)
-        painter.setPen(QPen(QColor("#2563EB"), 1))
+        painter.setPen(QPen(QColor(_ui_theme.colors.compass_text), 1))
 
         def draw_at(txt: str, dx: float, dy: float) -> None:
             if txt == "-1":
@@ -902,7 +902,7 @@ class GridWidget(QWidget):
         draw_at(str(cp.left) if cp.left >= 0 else "-1", -off, 0)
         draw_at(str(cp.right) if cp.right >= 0 else "-1", off, 0)
 
-        painter.setPen(QPen(QColor("#BFDBFE"), 1))
+        painter.setPen(QPen(QColor(_ui_theme.colors.compass_line), 1))
         painter.drawLine(QPointF(cx, cy), QPointF(cx, cy - off + 8))
         painter.drawLine(QPointF(cx, cy), QPointF(cx, cy + off - 8))
         painter.drawLine(QPointF(cx, cy), QPointF(cx - off + 8, cy))
@@ -912,12 +912,12 @@ class GridWidget(QWidget):
         if self._selected_cell is not None:
             r, c = self._selected_cell
             rect = self._cell_rect(r, c)
-            painter.setPen(QPen(QColor("#3B82F6"), 3))
+            painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 3))
             painter.drawRect(rect)
             if self._inline_number:
                 font = QFont("Segoe UI", self._cell_size // 4, QFont.Weight.Bold)
                 painter.setFont(font)
-                painter.setPen(QPen(QColor("#3B82F6")))
+                painter.setPen(QPen(QColor(_ui_theme.colors.inline_number)))
                 painter.drawText(QRectF(rect.x() + 4, rect.bottom() - rect.height() * 0.35,
                                           rect.width() * 0.6, rect.height() * 0.3),
                                  Qt.AlignmentFlag.AlignLeft, self._inline_number + "|")
@@ -927,7 +927,7 @@ class GridWidget(QWidget):
             e = self.board.edge_between(r1, c1, r2, c2) if self.board is not None else None
             if e is not None:
                 x1, y1, x2, y2 = self._edge_endpoints(e)
-                painter.setPen(QPen(QColor("#3B82F6"), 5))
+                painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 5))
                 painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
         if self._selected_vertex is not None or self._boundary_start_vertex is not None:
@@ -935,26 +935,26 @@ class GridWidget(QWidget):
             if v is not None:
                 x = self._padding + v[1] * self._cell_size
                 y = self._padding + v[0] * self._cell_size
-                painter.setPen(QPen(QColor("#3B82F6"), 3))
-                painter.setBrush(QBrush(QColor("#DBEAFE")))
+                painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 3))
+                painter.setBrush(QBrush(QColor(_ui_theme.colors.selection_vertex_fill)))
                 painter.drawEllipse(QPointF(x, y), self._cell_size // 6, self._cell_size // 6)
 
         if self._boundary_start_vertex is not None:
             x = self._padding + self._boundary_start_vertex[1] * self._cell_size
             y = self._padding + self._boundary_start_vertex[0] * self._cell_size
-            painter.setPen(QPen(QColor("#3B82F6"), 2, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 2, Qt.PenStyle.DashLine))
             painter.drawEllipse(QPointF(x, y), self._cell_size // 4, self._cell_size // 4)
 
         if self._hover_cell is not None and self._hover_cell != self._selected_cell:
             r, c = self._hover_cell
             rect = self._cell_rect(r, c)
-            painter.setPen(QPen(QColor("#60A5FA"), 2))
+            painter.setPen(QPen(QColor(_ui_theme.colors.hover_cell), 2))
             painter.drawRect(rect)
 
         if self._hover_vertex is not None and self._hover_vertex != self._selected_vertex:
             x = self._padding + self._hover_vertex[1] * self._cell_size
             y = self._padding + self._hover_vertex[0] * self._cell_size
-            painter.setPen(QPen(QColor("#60A5FA"), 2))
+            painter.setPen(QPen(QColor(_ui_theme.colors.hover_vertex), 2))
             painter.drawEllipse(QPointF(x, y), self._cell_size // 8, self._cell_size // 8)
 
     def _draw_rule_overlay(self, painter: QPainter) -> None:
@@ -1004,26 +1004,26 @@ class GridWidget(QWidget):
 
         bg = QRectF(x0, y0, total_w, total_h)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(255, 255, 255, 235)))
+        painter.setBrush(QBrush(QColor(*_ui_theme.colors.overlay_bg)))
         painter.drawRoundedRect(bg, 8, 8)
-        painter.setPen(QPen(QColor("#D0D5DD"), 1))
+        painter.setPen(QPen(QColor(_ui_theme.colors.overlay_border), 1))
         painter.drawRoundedRect(bg, 8, 8)
 
         cx = x0 + 8
         cy = y0 + pad
 
-        painter.setPen(QPen(QColor("#1E293B")))
+        painter.setPen(QPen(QColor(_ui_theme.colors.overlay_text)))
         for ln in lines:
             painter.drawText(QPointF(cx, cy + fm.ascent()), ln)
             cy += line_h
 
         if self._overlay_shapes:
             cy += gap
-            painter.setPen(QPen(QColor("#64748B")))
+            painter.setPen(QPen(QColor(_ui_theme.colors.overlay_header)))
             painter.drawText(QPointF(cx, cy + fm.ascent()), "形状池")
             cy += fm.height() + gap
-            painter.setPen(QPen(QColor("#3B82F6")))
-            painter.setBrush(QBrush(QColor("#DBEAFE")))
+            painter.setPen(QPen(QColor(_ui_theme.colors.shape_mini_pen)))
+            painter.setBrush(QBrush(QColor(_ui_theme.colors.shape_mini_fill)))
             for row in shape_rows:
                 rx = cx
                 for s in row:
@@ -1055,8 +1055,8 @@ class GridWidget(QWidget):
         gap = 1
         scale = (cell_sz - gap * max(w, h)) / max(w, h) if max(w, h) > 0 else cell_sz
         scale = max(4, scale)
-        painter.setPen(QPen(QColor("#3B82F6"), 1))
-        painter.setBrush(QBrush(QColor("#DBEAFE")))
+        painter.setPen(QPen(QColor(_ui_theme.colors.shape_mini_pen), 1))
+        painter.setBrush(QBrush(QColor(_ui_theme.colors.shape_mini_fill)))
         for r, c in shape.cells:
             nx = x0 + (c - min_c) * (scale + gap)
             ny = y0 + (r - min_r) * (scale + gap)

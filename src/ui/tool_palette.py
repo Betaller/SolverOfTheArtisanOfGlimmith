@@ -20,13 +20,6 @@ QPushButton {
     border-left: 3px solid %s;
     border-radius: 5px;
     font-size: 12px;
-    background: #FFFFFF;
-    border: 1px solid #E0E3E8;
-    border-left: 3px solid %s;
-}
-QPushButton:hover {
-    background: %s;
-    border-color: %s;
 }
 QPushButton:checked {
     background: %s;
@@ -81,26 +74,20 @@ class ToolPalette(QWidget):
     def _add_section_header(self, layout: QVBoxLayout, text: str) -> None:
         label = QLabel(text)
         label.setStyleSheet(
-            "font-size: 10px; font-weight: bold; color: #64748B; "
-            "padding: 1px 0;"
+            "font-size: 10px; font-weight: bold; padding: 1px 0;"
         )
         layout.addWidget(label)
 
     def _add_separator(self, layout: QVBoxLayout) -> None:
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet("background: #E0E3E8; max-height: 1px; margin: 2px 0;")
+        line.setStyleSheet("background: palette(mid); max-height: 1px; margin: 2px 0;")
         layout.addWidget(line)
 
     def _make_tool_button(self, mode: str, label: str) -> QPushButton:
         color = MODE_COLORS.get(mode, "#5B9BD5")
-        hover_bg = "#F0F4FF"
-        checked_bg = color
-        style = MODE_BUTTON_STYLE % (
-            color, color,
-            hover_bg, color,
-            checked_bg, color, "#FFFFFF",
-        )
+        hover_bg = color  # for checked state
+        style = MODE_BUTTON_STYLE % (color, hover_bg, color, color)
         btn = QPushButton(label)
         btn.setCheckable(True)
         btn.setStyleSheet(style)
@@ -137,7 +124,7 @@ class ToolPalette(QWidget):
         wbox = QVBoxLayout()
         wbox.setSpacing(0)
         wlabel = QLabel("列")
-        wlabel.setStyleSheet("font-size: 9px; color: #94A3B8; padding: 0;")
+        wlabel.setStyleSheet("font-size: 9px; padding: 0;")
         wlabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._width_spin = QSpinBox()
         self._width_spin.setRange(2, 16)
@@ -151,13 +138,13 @@ class ToolPalette(QWidget):
 
         label = QLabel("\u00d7")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setStyleSheet("font-size: 16px; font-weight: bold; color: #64748B; padding: 6px 0 0 0;")
+        label.setStyleSheet("font-size: 16px; font-weight: bold; padding: 6px 0 0 0;")
         row.addWidget(label)
 
         hbox = QVBoxLayout()
         hbox.setSpacing(0)
         hlabel = QLabel("行")
-        hlabel.setStyleSheet("font-size: 9px; color: #94A3B8; padding: 0;")
+        hlabel.setStyleSheet("font-size: 9px; padding: 0;")
         hlabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._height_spin = QSpinBox()
         self._height_spin.setRange(2, 16)
@@ -204,7 +191,6 @@ class ToolPalette(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(
                 "QPushButton { font-size: 12px; border-radius: 3px; padding: 1px; }"
-                "QPushButton:hover { background: #F0F4FF; border-color: #5B9BD5; }"
             )
             btn.clicked.connect(lambda checked, s=sym: self._set_symbol(s))
             quick_row.addWidget(btn)
@@ -245,7 +231,7 @@ class ToolPalette(QWidget):
 
         center = QLabel("\u25C9")
         center.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        center.setStyleSheet("font-size: 14px; color: #5B9BD5;")
+        center.setStyleSheet("font-size: 14px;")
 
         gl.addWidget(QLabel("  "), 0, 0)
         gl.addWidget(self._compass_up, 0, 1)

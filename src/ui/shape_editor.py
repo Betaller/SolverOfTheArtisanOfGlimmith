@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QGroupBox, QFrame,
 )
 
+from src.ui import theme as _ui_theme
+
 from src.models.board import Shape
 from src.solver.shapes import normalize, canonical_key
 
@@ -76,16 +78,16 @@ class ShapeGridEditor(QWidget):
                 rect = QRectF(x, y, CELL_SIZE, CELL_SIZE)
 
                 if (r, c) in self._cells:
-                    painter.fillRect(rect, QColor("#3B82F6"))
-                    painter.setPen(QPen(QColor("#2563EB"), 1))
+                    painter.fillRect(rect, QColor(_ui_theme.colors.shape_editor_active_bg))
+                    painter.setPen(QPen(QColor(_ui_theme.colors.shape_editor_active_border), 1))
                 else:
-                    painter.fillRect(rect, QColor("#F8FAFC"))
-                    painter.setPen(QPen(QColor("#D0D5DD"), 1))
+                    painter.fillRect(rect, QColor(_ui_theme.colors.shape_editor_empty_bg))
+                    painter.setPen(QPen(QColor(_ui_theme.colors.shape_editor_empty_border), 1))
 
                 painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 2, 2)
 
         area = len(self._cells)
-        painter.setPen(QPen(QColor("#475569")))
+        painter.setPen(QPen(QColor(_ui_theme.colors.shape_editor_area_text)))
         painter.setFont(self.font())
         painter.drawText(QRectF(0, self.grid_size * CELL_SIZE + 6,
                                   self.grid_size * CELL_SIZE, 18),
@@ -109,10 +111,10 @@ class ShapeEditorDialog(QDialog):
         editor_group = QGroupBox("绘制形状（点击/拖动填充格子）")
         editor_group.setStyleSheet("""
             QGroupBox {
-                font-size: 13px; font-weight: bold; color: #1E293B;
-                border: 1px solid #E0E3E8; border-radius: 8px;
+                font-size: 13px; font-weight: bold;
+                border: 1px solid palette(mid);
+                border-radius: 8px;
                 margin-top: 12px; padding: 16px 12px 12px;
-                background: #FFFFFF;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -147,10 +149,10 @@ class ShapeEditorDialog(QDialog):
         pool_group = QGroupBox("形状池列表")
         pool_group.setStyleSheet("""
             QGroupBox {
-                font-size: 13px; font-weight: bold; color: #1E293B;
-                border: 1px solid #E0E3E8; border-radius: 8px;
+                font-size: 13px; font-weight: bold;
+                border: 1px solid palette(mid);
+                border-radius: 8px;
                 margin-top: 12px; padding: 16px 12px 12px;
-                background: #FFFFFF;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;

@@ -145,16 +145,14 @@ class MainWindow(QMainWindow):
         self._progress_bar.setTextVisible(False)
         self._progress_bar.setVisible(False)
         self._progress_bar.setStyleSheet(
-            "QProgressBar { background: #E0E3E8; border: none; border-radius: 3px; }"
+            "QProgressBar { border: none; border-radius: 3px; }"
             "QProgressBar::chunk { background: #3B82F6; border-radius: 3px; }"
         )
         control_layout.addWidget(self._progress_bar)
 
         reset_btn = QPushButton("重置")
         reset_btn.setStyleSheet(
-            "QPushButton { font-size: 13px; padding: 8px; border-radius: 6px; "
-            "background: #F8FAFC; color: #64748B; border: 1px solid #D0D5DD; }"
-            "QPushButton:hover { background: #F1F5F9; }"
+            "QPushButton { font-size: 13px; padding: 8px; border-radius: 6px; }"
         )
         reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         reset_btn.clicked.connect(self._on_reset)
@@ -163,8 +161,8 @@ class MainWindow(QMainWindow):
         self._result_label = QLabel("就绪")
         self._result_label.setWordWrap(True)
         self._result_label.setStyleSheet(
-            "font-size: 12px; color: #64748B; padding: 8px; "
-            "background: #F8FAFC; border: 1px solid #E0E3E8; border-radius: 6px;"
+            "font-size: 12px; padding: 8px; "
+            "border: 1px solid palette(mid); border-radius: 6px;"
         )
         self._result_label.setAlignment(Qt.AlignmentFlag.AlignTop)
         control_layout.addWidget(self._result_label)

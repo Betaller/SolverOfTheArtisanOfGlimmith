@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QLabel, QSplitter, QFrame,
 )
 
+from src.ui import theme as _ui_theme
+
 from src.models.puzzle import RULE_NAMES
 
 
@@ -65,7 +67,7 @@ class PuzzlePreviewWidget(QWidget):
 
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), QColor("#FFFFFF"))
+        p.fillRect(self.rect(), QColor(_ui_theme.colors.preview_bg))
 
         info = self._info
         gw = info.width
@@ -115,15 +117,15 @@ class PuzzlePreviewWidget(QWidget):
                 y = oy + r * cell_size
                 rect = QRectF(x, y, cell_size, cell_size)
                 if (r, c) in blocked_set:
-                    p.fillRect(rect, QColor("#2C3E50"))
+                    p.fillRect(rect, QColor(_ui_theme.colors.preview_blocked_bg))
                 else:
-                    p.fillRect(rect, QColor("#F0F4F8"))
-                p.setPen(QPen(QColor("#D0D5DD"), 0.5))
+                    p.fillRect(rect, QColor(_ui_theme.colors.preview_cell_normal))
+                p.setPen(QPen(QColor(_ui_theme.colors.preview_cell_border), 0.5))
                 p.drawRect(rect)
 
         # Draw boundaries
         if boundary_set:
-            p.setPen(QPen(QColor("#B8860B"), max(1.5, cell_size * 0.12)))
+            p.setPen(QPen(QColor(_ui_theme.colors.preview_boundary), max(1.5, cell_size * 0.12)))
         for e in edges:
             if e.get("is_boundary"):
                 r1, c1, r2, c2 = e["r1"], e["c1"], e["r2"], e["c2"]
@@ -143,7 +145,7 @@ class PuzzlePreviewWidget(QWidget):
         # Summary overlay
         font = QFont("Segoe UI", 8)
         p.setFont(font)
-        p.setPen(QColor("#64748B"))
+        p.setPen(QColor(_ui_theme.colors.preview_summary_text))
         summary = f"{gh}×{gw}"
         if info.blocked_count:
             summary += f"  {info.blocked_count}障碍"
@@ -179,8 +181,7 @@ class PuzzleBrowser(QWidget):
         self._search_input.setClearButtonEnabled(True)
         self._search_input.textChanged.connect(self._apply_filters)
         self._search_input.setStyleSheet(
-            "QLineEdit { padding: 4px 8px; border: 1px solid #D0D5DD; "
-            "border-radius: 4px; font-size: 12px; }"
+            "QLineEdit { padding: 4px 8px; border-radius: 4px; font-size: 12px; }"
         )
         search_layout.addWidget(self._search_input)
 
@@ -188,8 +189,7 @@ class PuzzleBrowser(QWidget):
         self._category_combo.addItem("全部")
         self._category_combo.currentIndexChanged.connect(self._apply_filters)
         self._category_combo.setStyleSheet(
-            "QComboBox { padding: 4px 6px; border: 1px solid #D0D5DD; "
-            "border-radius: 4px; font-size: 12px; }"
+            "QComboBox { padding: 4px 6px; border-radius: 4px; font-size: 12px; }"
         )
         search_layout.addWidget(self._category_combo)
         layout.addLayout(search_layout)
@@ -202,11 +202,10 @@ class PuzzleBrowser(QWidget):
         self._list_widget.currentItemChanged.connect(self._on_selection_changed)
         self._list_widget.itemDoubleClicked.connect(self._on_item_activated)
         self._list_widget.setStyleSheet(
-            "QListWidget { border: 1px solid #E0E3E8; border-radius: 4px; "
-            "background: #FFFFFF; font-size: 12px; }"
+            "QListWidget { border-radius: 4px; font-size: 12px; }"
             "QListWidget::item { padding: 4px 6px; }"
-            "QListWidget::item:selected { background: #E0F2FE; color: #1E293B; }"
-            "QListWidget::item:hover { background: #F1F5F9; }"
+            "QListWidget::item:selected { background: #2A4A6A; }"
+            "QListWidget::item:hover { background: palette(alternate-base); }"
         )
         splitter.addWidget(self._list_widget)
 
@@ -221,7 +220,7 @@ class PuzzleBrowser(QWidget):
 
         self._preview_label = QLabel("选择谜题以预览")
         self._preview_label.setWordWrap(True)
-        self._preview_label.setStyleSheet("font-size: 11px; color: #94A3B8; padding: 2px 4px;")
+        self._preview_label.setStyleSheet("font-size: 11px; padding: 2px 4px;")
         preview_layout.addWidget(self._preview_label)
 
         splitter.addWidget(preview_container)

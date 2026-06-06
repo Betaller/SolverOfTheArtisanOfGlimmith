@@ -20,6 +20,7 @@ from src.solver.candidates import (
     _check_compass_dir, _shape_matches, _is_rectangle_shape,
     _count_components, _get_all_components, _has_internal_boundary,
     _boundary_graph_is_bipartite,
+    _rose_stop_expanding, _has_size_constraint,
 )
 
 from src.solver.checks import (
@@ -73,30 +74,42 @@ class BacktrackSolver:
             symbol_types = _rose_symbol_types(self.puzzle, self._board)
             if symbol_types:
                 first_type = symbol_types[0]
-                seeds = [(r, c) for r in range(self._board.height) for c in range(self._board.width)
-                         if self._board.cell(r, c).symbol == first_type and not self._board.cell(r, c).blocked]
-                n_seeds = len(seeds)
-                if n_seeds > 1:
-                    per_seed = min(30.0, max(1.0, self.timeout / n_seeds))
-                    for seed_idx, seed in enumerate(seeds):
+                seeds = sorted((r, c) for r in range(self._board.height)
+                               for c in range(self._board.width)
+                               if self._board.cell(r, c).symbol == first_type
+                               and not self._board.cell(r, c).blocked)
+                for seed in seeds:
+                    elapsed = time.monotonic() - self.start_time
+                    if elapsed > self.timeout:
+                        break
+                    self._board = self._board_from_puzzle()
+                    local_all = {(r, c) for r in range(self._board.height)
+                                 for c in range(self._board.width)
+                                 if not self._board.cell(r, c).blocked}
+                    candidates = self._generate_region_candidates(self._board, seed, local_all)
+                    per_candidate_timeout = max(1.0, (self.timeout - elapsed) / max(1, len(candidates)))
+                    for region_cells in candidates:
                         elapsed = time.monotonic() - self.start_time
                         if elapsed > self.timeout:
                             break
                         sub = BacktrackSolver(self.puzzle)
                         sub_board = sub._board_from_puzzle()
-                        rs, cs = seed
-                        sub_board.cell(rs, cs).region_id = 0
-                        sub_unassigned = all_positions - {seed}
-                        sub_regions = {0: {seed}}
+                        for r, c in region_cells:
+                            sub_board.cell(r, c).region_id = 0
+                        sub_unassigned = local_all - region_cells
                         sub.start_time = time.monotonic()
-                        sub.timeout = min(per_seed, self.timeout - elapsed)
+                        sub.timeout = min(per_candidate_timeout, self.timeout - elapsed)
                         sub.steps = 0
                         sub._first_shape_key = None
-                        sub_result = sub._search(sub_board, sub_unassigned, sub_regions, 1)
+                        sub_result = sub._search(sub_board, sub_unassigned, {0: region_cells}, 1)
                         if sub_result is not None:
-                            for r in range(board.height):
-                                for c in range(board.width):
-                                    board.cell(r, c).region_id = sub_board.cell(r, c).region_id
+                            for rid, cells in sub_result.items():
+                                if rid != 0:
+                                    for r, c in cells:
+                                        sub_board.cell(r, c).region_id = rid
+                            for r in range(sub_board.height):
+                                for c in range(sub_board.width):
+                                    self._board.cell(r, c).region_id = sub_board.cell(r, c).region_id
                             self.steps += sub.steps
                             update_boundary_edges(self._board)
                             solution = self.validator.validate(self.puzzle, self._board)
@@ -104,7 +117,9 @@ class BacktrackSolver:
                             solution.elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
                             if solution.solved:
                                 return solution
-                    self._board = self._board_from_puzzle()
+                        self.steps += 1
+            self._board = self._board_from_puzzle()
+
         result = self._search(self._board, all_positions, {}, 0)
 
         if result is None:
@@ -248,7 +263,7 @@ class BacktrackSolver:
         if remaining_cells < remaining_regions:
             return False
         comp_count = _count_components(unassigned, board, self._pre_boundaries)
-        if remaining_regions <= 2 and comp_count > remaining_regions:
+        if comp_count > remaining_regions:
             return False
         if comp_count == 1:
             comps = _get_all_components(unassigned, board, self._pre_boundaries)
@@ -258,7 +273,72 @@ class BacktrackSolver:
                 if remaining_regions == 2:
                     if not _boundary_graph_is_bipartite(comps[0], self._pre_boundaries):
                         return False
+
+        rose_symbols = _rose_symbol_types(self.puzzle, board)
+        if rose_symbols and len(rose_symbols) >= 2:
+            if not self._check_symbol_reachability(board, unassigned, rose_symbols):
+                return False
+
+        if rose_symbols and len(rose_symbols) == 1:
+            comps = _get_all_components(unassigned, board, self._pre_boundaries)
+            sym_type = rose_symbols[0]
+            for comp in comps:
+                sym_count = sum(1 for (r, c) in comp
+                                if board.cell(r, c).symbol == sym_type)
+                if sym_count == 0 or len(comp) < sym_count:
+                    return False
+
         return True
+
+    def _check_symbol_reachability(self, board: Board, unassigned: set[tuple[int, int]],
+                                    rose_symbols: list[str]) -> bool:
+        for i, src_type in enumerate(rose_symbols):
+            src_cells = [(r, c) for r, c in unassigned
+                         if board.cell(r, c).symbol == src_type]
+            if not src_cells:
+                continue
+            all_target_types = set(rose_symbols) - {src_type}
+            target_cells = {(r, c) for r, c in unassigned
+                            if board.cell(r, c).symbol in all_target_types}
+            if not target_cells:
+                continue
+            same_type_barriers = {(r, c) for r, c in unassigned
+                                  if board.cell(r, c).symbol == src_type}
+            for sr, sc in src_cells:
+                barriers = same_type_barriers - {(sr, sc)}
+                if not self._bfs_reachable((sr, sc), target_cells, unassigned,
+                                           barriers, board.height, board.width,
+                                           self._pre_boundaries):
+                    return False
+        return True
+
+    @staticmethod
+    def _bfs_reachable(start: tuple[int, int], targets: set[tuple[int, int]],
+                       unassigned: set[tuple[int, int]],
+                       barriers: set[tuple[int, int]],
+                       h: int, w: int,
+                       pre_boundaries: set[tuple[int, int, int, int]] | None = None) -> bool:
+        from collections import deque
+        visited: set[tuple[int, int]] = set()
+        q: deque[tuple[int, int]] = deque([start])
+        while q:
+            r, c = q.popleft()
+            if (r, c) in visited:
+                continue
+            visited.add((r, c))
+            if (r, c) in targets:
+                return True
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < h and 0 <= nc < w:
+                    if (nr, nc) in unassigned and (nr, nc) not in barriers:
+                        if pre_boundaries:
+                            key = (r, c, nr, nc) if r < nr or (r == nr and c < nc) else (nr, nc, r, c)
+                            if key in pre_boundaries:
+                                continue
+                        if (nr, nc) not in visited:
+                            q.append((nr, nc))
+        return False
 
     def _pick_seed(self, unassigned: set[tuple[int, int]]) -> tuple[int, int]:
         if self.puzzle.has_rule("area") and hasattr(self, '_board'):
@@ -274,173 +354,13 @@ class BacktrackSolver:
 
     def _solve_rose_growth(self, board: Board,
                            all_positions: set[tuple[int, int]]) -> dict[int, set[tuple[int, int]]] | None:
-        symbol_types = _rose_symbol_types(self.puzzle, board)
-        if not symbol_types:
-            return None
-        M = _rose_M(self.puzzle, board)
-        if M <= 0:
-            return None
+        from src.solver.region_match import solve_by_region_match
+        result = solve_by_region_match(self.puzzle, board, self._pre_boundaries)
+        if result is not None:
+            return result
 
-        first_type = symbol_types[0]
-        seeds = [(r, c) for r in range(board.height) for c in range(board.width)
-                 if board.cell(r, c).symbol == first_type and not board.cell(r, c).blocked]
-        if len(seeds) != M:
-            return None
-
-        boundary_endpoints: set[tuple[int, int]] = set()
-        for r1, c1, r2, c2 in self._pre_boundaries:
-            boundary_endpoints.add((r1, c1))
-            boundary_endpoints.add((r2, c2))
-
-        region_symbols: list[set[str]] = [{first_type} for _ in range(M)]
-        region_sizes: list[int] = [1] * M
-
-        for i, (r, c) in enumerate(seeds):
-            board.cell(r, c).region_id = i
-
-        queue: deque[tuple[int, int, int, int]] = deque()
-        for i, (r, c) in enumerate(seeds):
-            queue.append((r, c, i, 0))
-
-        while queue:
-            r, c, rid, dist = queue.popleft()
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nr, nc = r + dr, c + dc
-                if not (0 <= nr < board.height and 0 <= nc < board.width):
-                    continue
-                if board.cell(nr, nc).blocked:
-                    continue
-                if board.cell(nr, nc).region_id is not None:
-                    continue
-                key = (r, c, nr, nc) if r < nr or (r == nr and c < nc) else (nr, nc, r, c)
-                if key in self._pre_boundaries:
-                    continue
-
-                sym = board.cell(nr, nc).symbol
-                if sym is not None and sym in region_symbols[rid]:
-                    continue
-                if (nr, nc) in boundary_endpoints:
-                    in_same = False
-                    for ddr, ddc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                        nnr, nnc = nr + ddr, nc + ddc
-                        if 0 <= nnr < board.height and 0 <= nnc < board.width:
-                            if board.cell(nnr, nnc).region_id == rid:
-                                k2 = (nr, nc, nnr, nnc)
-                                if nr < nnr or (nr == nnr and nc < nnc):
-                                    k2 = (nr, nc, nnr, nnc)
-                                else:
-                                    k2 = (nnr, nnc, nr, nc)
-                                if k2 in self._pre_boundaries:
-                                    in_same = True
-                                    break
-                    if in_same:
-                        continue
-
-                board.cell(nr, nc).region_id = rid
-                if sym is not None:
-                    region_symbols[rid].add(sym)
-                region_sizes[rid] += 1
-                queue.append((nr, nc, rid, dist + 1))
-
-        unassigned = {(r, c) for r in range(board.height) for c in range(board.width)
-                     if board.cell(r, c).region_id is None and not board.cell(r, c).blocked}
-        # Second pass: assign remaining unassigned cells to any adjacent region
-        if unassigned:
-            changed = True
-            while changed:
-                changed = False
-                for r, c in list(unassigned):
-                    candidates: set[int] = set()
-                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                        nr, nc = r + dr, c + dc
-                        if 0 <= nr < board.height and 0 <= nc < board.width:
-                            nrid = board.cell(nr, nc).region_id
-                            if nrid is not None:
-                                key = (r, c, nr, nc) if r < nr or (r == nr and c < nc) else (nr, nc, r, c)
-                                if key not in self._pre_boundaries:
-                                    candidates.add(nrid)
-                    if candidates:
-                        sym = board.cell(r, c).symbol
-                        valid = [i for i in candidates
-                                 if not (sym is not None and sym in region_symbols[i])]
-                        if valid:
-                            best = min(valid, key=lambda i: region_sizes[i])
-                            board.cell(r, c).region_id = best
-                            if sym is not None:
-                                region_symbols[best].add(sym)
-                            region_sizes[best] += 1
-                            unassigned.discard((r, c))
-                            changed = True
-
-        # Repair phase: fix internal boundary conflicts by reassigning cells
-        for _ in range(200):
-            repaired = False
-            for r1, c1, r2, c2 in list(self._pre_boundaries):
-                rid1 = board.cell(r1, c1).region_id
-                rid2 = board.cell(r2, c2).region_id
-                if rid1 is None or rid2 is None or rid1 != rid2:
-                    continue
-                for (cell_r, cell_c), cur_rid in [((r1, c1), rid1), ((r2, c2), rid2)]:
-                    neigh_regions: set[int] = set()
-                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                        nr, nc = cell_r + dr, cell_c + dc
-                        if 0 <= nr < board.height and 0 <= nc < board.width:
-                            nrid = board.cell(nr, nc).region_id
-                            if nrid is not None and nrid != cur_rid:
-                                k2 = (cell_r, cell_c, nr, nc)
-                                if cell_r < nr or (cell_r == nr and cell_c < nc):
-                                    k2 = (cell_r, cell_c, nr, nc)
-                                else:
-                                    k2 = (nr, nc, cell_r, cell_c)
-                                if k2 not in self._pre_boundaries:
-                                    neigh_regions.add(nrid)
-                    sym = board.cell(cell_r, cell_c).symbol
-                    for nrid in sorted(neigh_regions):
-                        if sym is not None and sym in region_symbols[nrid]:
-                            continue
-                        conflict = False
-                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                            nr, nc = cell_r + dr, cell_c + dc
-                            if 0 <= nr < board.height and 0 <= nc < board.width:
-                                if board.cell(nr, nc).region_id == nrid:
-                                    k2 = (cell_r, cell_c, nr, nc)
-                                    if cell_r < nr or (cell_r == nr and cell_c < nc):
-                                        k2 = (cell_r, cell_c, nr, nc)
-                                    else:
-                                        k2 = (nr, nc, cell_r, cell_c)
-                                    if k2 in self._pre_boundaries:
-                                        conflict = True
-                                        break
-                        if conflict:
-                            continue
-                        # Also check: does the remaining region stay connected?
-                        region_symbols[cur_rid].discard(sym)
-                        if sym is not None:
-                            region_symbols[nrid].add(sym)
-                        board.cell(cell_r, cell_c).region_id = nrid
-                        region_sizes[cur_rid] -= 1
-                        region_sizes[nrid] += 1
-                        repaired = True
-                        break
-                    if repaired:
-                        break
-                if repaired:
-                    break
-            if not repaired:
-                break
-
-        if not all(len(syms) == len(symbol_types) for syms in region_symbols):
-            return None
-        if unassigned:
-            return None
-
-        regions = {}
-        for r in range(board.height):
-            for c in range(board.width):
-                rid = board.cell(r, c).region_id
-                if rid is not None:
-                    regions.setdefault(rid, set()).add((r, c))
-        return regions
+        from src.solver.rose_growth import solve_rose_growth
+        return solve_rose_growth(self.puzzle, board, self._pre_boundaries)
 
     def _solve_rose_parallel(self, board: Board,
                               all_positions: set[tuple[int, int]],
@@ -495,6 +415,8 @@ from src.solver.candidates import (
     _check_compass_dir as _check_compass_dir_fn,
     _shape_matches as _shape_matches_fn,
     _is_rectangle_shape as _is_rectangle_shape_fn,
+    _rose_stop_expanding as _rose_stop_expanding_fn,
+    _has_size_constraint as _has_size_constraint_fn,
 )
 from src.solver.checks import (
     _check_incremental as _check_incremental_fn,
@@ -519,4 +441,6 @@ BacktrackSolver._is_rectangle_shape = _is_rectangle_shape_fn
 BacktrackSolver._check_incremental = _check_incremental_fn
 BacktrackSolver._get_adjacent_region_ids = _get_adjacent_region_ids_fn
 BacktrackSolver._check_global_constraints = _check_global_constraints_fn
+BacktrackSolver._rose_stop_expanding = _rose_stop_expanding_fn
+BacktrackSolver._has_size_constraint = _has_size_constraint_fn
 BacktrackSolver._check_compass_final = _check_compass_final_fn

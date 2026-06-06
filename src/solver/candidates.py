@@ -325,12 +325,52 @@ def _region_feasible(self, board: Board, cells: set[tuple[int, int]]) -> bool:
     return True
 
 
+def _rose_stop_expanding(self, board: Board, region: set[tuple[int, int]]) -> bool:
+    """Return True if this region already has all rose_window symbols and
+    no other size/shape constraint requires further expansion."""
+    if not self.puzzle.has_rule("rose_window"):
+        return False
+    if self._has_size_constraint():
+        return False
+    from src.solver.constraints import _rose_symbol_types
+    rose_syms = _rose_symbol_types(self.puzzle, board)
+    if not rose_syms or len(rose_syms) < 2:
+        return False
+    region_syms = {board.cell(r, c).symbol for r, c in region if board.cell(r, c).symbol is not None}
+    return region_syms == set(rose_syms)
+
+
+def _has_size_constraint(self) -> bool:
+    """Check if the puzzle has any rule that constrains region size or shape."""
+    return (
+        self.puzzle.has_rule("precise")
+        or self.puzzle.has_rule("area")
+        or self.puzzle.has_rule("range")
+        or self.puzzle.has_rule("shape_pool")
+        or self.puzzle.has_rule("compass")
+        or self.puzzle.has_rule("puzzle_piece")
+        or self.puzzle.has_rule("block")
+        or self.puzzle.has_rule("non_block")
+        or self.puzzle.has_rule("solitary")
+        or self.puzzle.has_rule("same")
+        or self.puzzle.has_rule("different")
+    )
+
+
 def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
                        frontier: set[tuple[int, int]], unassigned: set[tuple[int, int]],
                        max_area: int, results: list[set[tuple[int, int]]],
                        seed_clue: int | None = None) -> None:
     if len(current) > max_area:
         return
+
+    if hasattr(self, '_enum_budget'):
+        self._enum_budget += 1
+        if hasattr(self, 'start_time') and self._enum_budget % 2000 == 0:
+            import time
+            if time.monotonic() - self.start_time > getattr(self, 'timeout', 30.0):
+                self._enum_budget = 999999
+                return
 
     if seed_clue is not None:
         if len(current) == seed_clue:
@@ -344,6 +384,16 @@ def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
                 results.append(set(current))
             elif len(current) > max(target_areas):
                 return
+        elif self.puzzle.has_rule("rose_window") and not self._has_size_constraint():
+            from src.solver.constraints import _rose_symbol_types as _rst3
+            rose_syms = _rst3(self.puzzle, board)
+            if rose_syms and len(rose_syms) >= 2:
+                if {board.cell(r, c).symbol for r, c in current
+                        if board.cell(r, c).symbol is not None} == set(rose_syms):
+                    results.append(set(current))
+            else:
+                if len(current) >= self._min_region_area():
+                    results.append(set(current))
         elif len(current) >= self._min_region_area():
             results.append(set(current))
 
@@ -353,7 +403,10 @@ def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
     if len(results) >= 200:
         return
 
-    if self.puzzle.has_rule("rose_window") and self._pre_boundaries:
+    if self._rose_stop_expanding(board, current):
+        return
+
+    if self.puzzle.has_rule("rose_window") and self._pre_boundaries and self._pre_boundaries_blocking:
         frontier_list = sorted(frontier, key=lambda c: sum(
             1 for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]
             if 0 <= c[0]+dr < board.height and 0 <= c[1]+dc < board.width
@@ -371,7 +424,30 @@ def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
                 continue
             self._enumerate_regions(board, new_region, new_frontier, unassigned, max_area, results, seed_clue)
     else:
-        frontier_list = sorted(frontier)
+        if self.puzzle.has_rule("rose_window"):
+            from src.solver.constraints import _rose_symbol_types as _rst_enum
+            rose_syms = _rst_enum(self.puzzle, board)
+            if rose_syms:
+                current_syms = {board.cell(r, c).symbol for r, c in current
+                                if board.cell(r, c).symbol is not None}
+                needed = set(rose_syms) - current_syms
+                if needed:
+                    needed_cells = [(r, c) for r, c in unassigned
+                                    if board.cell(r, c).symbol in needed]
+                    def _dist_to_needed(cell: tuple[int, int]) -> int:
+                        cr, cc = cell
+                        return min(abs(cr - nr) + abs(cc - nc)
+                                   for nr, nc in needed_cells) if needed_cells else 0
+                    frontier_list = sorted(frontier, key=lambda c: (
+                        0 if board.cell(c[0], c[1]).symbol in needed else 1,
+                        _dist_to_needed(c),
+                        c[0], c[1]))
+                else:
+                    frontier_list = sorted(frontier)
+            else:
+                frontier_list = sorted(frontier)
+        else:
+            frontier_list = sorted(frontier)
         for i, cell in enumerate(frontier_list):
             new_region = current | {cell}
             new_frontier = (frontier - {cell}) | self._frontier({cell}, unassigned - new_region)
@@ -424,19 +500,65 @@ def _generate_region_candidates(self, board: Board, seed: tuple[int, int],
         target_areas = self._target_areas()
         if target_areas:
             max_area = max(target_areas)
+        elif self.puzzle.has_rule("rose_window") and not self._has_size_constraint():
+            from src.solver.constraints import _rose_symbol_types as _rst4, _rose_M as _rM
+            rose_syms = _rst4(self.puzzle, board)
+            M_val = _rM(self.puzzle, board)
+            if rose_syms and M_val > 0:
+                total_fillable = len(unassigned)
+                for r in range(board.height):
+                    for c in range(board.width):
+                        if board.cell(r, c).assigned and not board.cell(r, c).blocked:
+                            total_fillable += 1
+                avg = total_fillable / M_val
+                if len(rose_syms) >= 2:
+                    if total_fillable > 50:
+                        max_area = max(len(rose_syms), int(avg * 1.5))
+                    else:
+                        max_area = max(len(rose_syms), int(avg * 2.0))
+                else:
+                    max_area = self._max_region_area()
+            else:
+                max_area = self._max_region_area()
         else:
             max_area = self._max_region_area()
 
     initial: set[tuple[int, int]] = {seed}
     frontier = self._frontier(initial, unassigned)
 
+    self._enum_budget = 0
     self._enumerate_regions(board, initial, frontier, unassigned, max_area, results, seed_clue=clue_target)
 
     if not results:
-        results = [{seed}]
+        if self.puzzle.has_rule("rose_window"):
+            from src.solver.constraints import _rose_symbol_types as _rst_fb
+            if _rst_fb(self.puzzle, board):
+                # {seed} can never be valid for rose_window (missing symbols)
+                pass
+            else:
+                results = [{seed}]
+        else:
+            results = [{seed}]
 
     if self.puzzle.has_rule("rose_window"):
-        results.sort(key=lambda s: len(s))
+        from src.solver.constraints import _rose_symbol_types as _rst_sort
+        rose_syms = _rst_sort(self.puzzle, board)
+        if rose_syms and len(rose_syms) >= 2:
+            def _rose_sort_key(s: set[tuple[int, int]]) -> tuple[int, int]:
+                syms = {board.cell(r, c).symbol for r, c in s if board.cell(r, c).symbol is not None}
+                return (0 if syms == set(rose_syms) else 1, len(s))
+            results.sort(key=_rose_sort_key)
+        else:
+            # For 1-symbol rose_window, sort by closeness to average region size
+            from src.solver.constraints import _rose_M as _rM2
+            Mv = _rM2(self.puzzle, board)
+            if Mv > 0:
+                total = sum(1 for r in range(board.height) for c in range(board.width)
+                           if not board.cell(r, c).blocked)
+                target = total / Mv
+                results.sort(key=lambda s: abs(len(s) - target))
+            else:
+                results.sort(key=lambda s: len(s))
     elif self.puzzle.has_rule("same"):
         results.sort(key=lambda s: len(s))
     else:

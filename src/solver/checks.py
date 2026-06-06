@@ -68,6 +68,8 @@ def _check_incremental(self, board: Board, regions: dict[int, set[tuple[int, int
                     if sym in region_syms:
                         return False
                     region_syms.add(sym)
+            if region_syms != set(rose_symbols):
+                return False
             M = _rose_M(self.puzzle, board)
             if M > 0 and len(regions) > M:
                 return False

@@ -97,6 +97,62 @@ def _can_partition(
     return True
 
 
+def _compute_forced_atoms(
+    board: Board,
+    pre_boundaries: set[tuple[int, int, int, int]],
+    all_positions: set[tuple[int, int]],
+) -> dict[tuple[int, int], frozenset[tuple[int, int]]]:
+    """Detect cells with only one accessible neighbor → must be same region.
+    
+    Returns a dict mapping each atom cell to its full atom (frozenset).
+    """
+    forced: dict[tuple[int, int], tuple[int, int]] = {}
+    for r, c in all_positions:
+        neighbors = []
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < board.height and 0 <= nc < board.width:
+                if (nr, nc) not in all_positions:
+                    continue
+                key = (r, c, nr, nc) if r < nr or (r == nr and c < nc) else (nr, nc, r, c)
+                if key in pre_boundaries:
+                    continue
+                neighbors.append((nr, nc))
+        if len(neighbors) == 1:
+            forced[(r, c)] = neighbors[0]
+    
+    # Union-find to group chained forced pairs into atoms
+    parent: dict[tuple[int, int], tuple[int, int]] = {}
+    def find(x: tuple[int, int]) -> tuple[int, int]:
+        parent.setdefault(x, x)
+        if parent[x] != x:
+            parent[x] = find(parent[x])
+        return parent[x]
+    def union(a: tuple[int, int], b: tuple[int, int]) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+    
+    for a, b in forced.items():
+        union(a, b)
+    
+    # Group by root
+    groups: dict[tuple[int, int], set[tuple[int, int]]] = {}
+    for a, b in forced.items():
+        root = find(a)
+        groups.setdefault(root, set()).add(a)
+        groups.setdefault(root, set()).add(b)
+    
+    result: dict[tuple[int, int], frozenset[tuple[int, int]]] = {}
+    for root, cells in groups.items():
+        if len(cells) > 1:
+            frozen = frozenset(cells)
+            for cell in cells:
+                result[cell] = frozen
+    
+    return result
+
+
 def solve_by_region_match(
     puzzle: Puzzle,
     board: Board,
@@ -134,6 +190,9 @@ def solve_by_region_match(
     all_seed_cells = {(r, c) for r in range(board.height) for c in range(board.width)
                       if board.cell(r, c).symbol is not None and not board.cell(r, c).blocked}
 
+    # Precompute forced atoms: cells with only one accessible neighbor must be same region
+    forced_atoms = _compute_forced_atoms(board, pre_boundaries, all_positions)
+
     # Step 2: generate all legal complete regions for each seed
     from src.solver.backtrack import BacktrackSolver
     solver = BacktrackSolver(puzzle)
@@ -160,7 +219,7 @@ def solve_by_region_match(
     else:
         for seed in seeds:
             gen_board = solver._board_from_puzzle()
-            candidates = solver._generate_region_candidates(gen_board, seed, all_positions)
+            candidates = solver._generate_region_candidates(gen_board, seed, all_positions, forced_atoms)
             candidates = [c for c in candidates
                           if {board.cell(r, c).symbol for r, c in c
                               if board.cell(r, c).symbol is not None} == set(symbol_types)]
@@ -199,20 +258,18 @@ def solve_by_region_match(
             return None
         all_candidates[i] = filtered
 
-    # Sort by size ascending (small first = better for matching when space is tight)
-    # Keep top candidates for speed
-    # Step 3: pre-filter candidates (for BFS-generated 1-symbol candidates)
-    if len(symbol_types) == 1:
-        N = len(symbol_types)
-        for i in range(len(all_candidates)):
-            filtered = []
-            for cand in all_candidates[i]:
-                remaining = all_positions - cand
-                if _can_partition(remaining, all_seed_cells, pre_boundaries, board, N):
-                    filtered.append(cand)
-            if not filtered:
-                return None
-            all_candidates[i] = filtered
+    # Step 3: pre-filter candidates by component reachability
+    # Each remaining connected component must be large enough to hold all N symbol types
+    N = len(symbol_types)
+    for i in range(len(all_candidates)):
+        filtered = []
+        for cand in all_candidates[i]:
+            remaining = all_positions - cand
+            if _can_partition(remaining, all_seed_cells, pre_boundaries, board, N):
+                filtered.append(cand)
+        if not filtered:
+            return None
+        all_candidates[i] = filtered
 
     for i in range(len(all_candidates)):
         all_candidates[i].sort(key=len)
@@ -220,31 +277,83 @@ def solve_by_region_match(
     for i in range(len(all_candidates)):
         all_candidates[i].sort(key=len)
 
-    # Step 4: match
+    # Step 4: two-phase matching — first find area combos, then match per combo
     val_board = solver._board_from_puzzle()
-
     import time as _time
     t_start = _time.monotonic()
-    result = _match_regions(
-        val_board, pre_boundaries, symbol_types,
-        all_candidates, all_positions, all_seed_cells,
-        total_cells, 0, set(), {},
-        t_start, 10.0,
-    )
-    if result is not None:
-        from src.solver.validator import SolutionValidator
-        for rid, cells in result.items():
-            for r, c in cells:
-                val_board.cell(r, c).region_id = rid
-        v = SolutionValidator()
-        val = v.validate(puzzle, val_board)
-        if val.solved:
-            for r in range(board.height):
-                for c in range(board.width):
-                    board.cell(r, c).region_id = val_board.cell(r, c).region_id
-            return result
+
+    min_area_per_region = max(1, len(symbol_types))
+    # Collect feasible sizes per seed from actual candidates
+    seed_size_sets = [sorted({len(c) for c in candidates}) for candidates in all_candidates]
+    # Filter candidates by size for fast lookup later
+    candidates_by_size: list[dict[int, list[set[tuple[int, int]]]]] = []
+    for candidates_i in all_candidates:
+        by_size: dict[int, list[set[tuple[int, int]]]] = {}
+        for c in candidates_i:
+            by_size.setdefault(len(c), []).append(c)
+        candidates_by_size.append(by_size)
+
+    area_combos = _enum_area_combos_bounded(total_cells, M, min_area_per_region, seed_size_sets, 0)
+    # Sort: try balanced combos first (smaller variance)
+    area_combos.sort(key=lambda c: max(c) - min(c))
+
+    for area_combo in area_combos:
+        if _time.monotonic() - t_start > 60.0:
+            break
+        # Get pre-filtered candidates for this size combo
+        sized_candidates: list[list[set[tuple[int, int]]]] = []
+        feasible = True
+        for i, target_sz in enumerate(area_combo):
+            candidates = candidates_by_size[i].get(target_sz)
+            if not candidates:
+                feasible = False
+                break
+            sized_candidates.append(candidates)
+        if not feasible:
+            continue
+
+        combo_start = _time.monotonic()
+        result = _match_regions_mrv(
+            val_board, pre_boundaries,
+            sized_candidates, all_positions,
+            total_cells, set(), {},
+            _start_time=combo_start, _timeout=1.0,
+        )
+        if result is not None:
+            from src.solver.validator import SolutionValidator
+            for rid, cells in result.items():
+                for r, c in cells:
+                    val_board.cell(r, c).region_id = rid
+            v = SolutionValidator()
+            val = v.validate(puzzle, val_board)
+            if val.solved:
+                for r in range(board.height):
+                    for c in range(board.width):
+                        board.cell(r, c).region_id = val_board.cell(r, c).region_id
+                return result
 
     return None
+
+
+def _enum_area_combos_bounded(
+    total: int, parts: int, min_val: int,
+    allowed: list[list[int]], depth: int,
+) -> list[tuple[int, ...]]:
+    """Generate tuples where parts[i] ∈ allowed[depth+i] and sum = total."""
+    if depth == parts - 1:
+        remaining = total
+        if remaining in allowed[depth] and remaining >= min_val:
+            return [(remaining,)]
+        return []
+    results: list[tuple[int, ...]] = []
+    for sz in allowed[depth]:
+        if sz < min_val:
+            continue
+        if sz > total - min_val * (parts - depth - 1):
+            continue
+        for rest in _enum_area_combos_bounded(total - sz, parts, min_val, allowed, depth + 1):
+            results.append((sz,) + rest)
+    return results
 
 
 def _match_regions(
@@ -322,6 +431,92 @@ def _match_regions(
             all_candidates, all_positions, all_seed_cells,
             total_cells,
             seed_idx + 1, new_covered, {**assignment, seed_idx: cand},
+            _start_time, _timeout,
+        )
+        if result is not None:
+            return result
+
+        for r, c in cand:
+            board.cell(r, c).region_id = None
+
+    return None
+
+
+def _match_regions_mrv(
+    board: Board,
+    pre_boundaries: set[tuple[int, int, int, int]],
+    all_candidates: list[list[set[tuple[int, int]]]],
+    all_positions: set[tuple[int, int]],
+    total_cells: int,
+    covered: set[tuple[int, int]],
+    assignment: dict[int, set[tuple[int, int]]],
+    _start_time: float = 0.0,
+    _timeout: float = 10.0,
+) -> dict[int, set[tuple[int, int]]] | None:
+    """Match regions using MRV (minimum remaining values) heuristic.
+    
+    Instead of fixed seed order, always pick the unassigned seed with
+    the fewest candidates compatible with currently covered cells.
+    """
+    import time
+    if _start_time > 0 and time.monotonic() - _start_time > _timeout:
+        return None
+
+    # Find unassigned seeds
+    all_indices = set(range(len(all_candidates)))
+    unassigned = all_indices - set(assignment.keys())
+    if not unassigned:
+        if covered == all_positions:
+            for rid, cells in assignment.items():
+                for r, c in cells:
+                    board.cell(r, c).region_id = rid
+            if check_boundary_consistency(board):
+                return assignment
+            for rid in assignment:
+                for r, c in assignment[rid]:
+                    board.cell(r, c).region_id = None
+        return None
+
+    # Pick the unassigned seed with fewest compatible candidates
+    best_idx = -1
+    best_count = 999999
+    best_cands: list[set[tuple[int, int]]] = []
+    for idx in unassigned:
+        remaining = all_positions - covered
+        count = sum(1 for c in all_candidates[idx] if not (c & covered))
+        if count == 0:
+            return None  # no candidate can fit
+        if count < best_count:
+            best_count = count
+            best_idx = idx
+            best_cands = [c for c in all_candidates[idx] if not (c & covered)]
+
+    if best_idx < 0:
+        return None
+
+    remaining_cells = total_cells - len(covered)
+    remaining_seeds = len(unassigned) - 1
+
+    for cand in best_cands:
+        sz = len(cand)
+        if sz > remaining_cells - remaining_seeds:
+            continue
+
+        # Check boundary
+        for r, c in cand:
+            board.cell(r, c).region_id = best_idx
+        boundary_ok = _check_boundaries_partial(board, pre_boundaries)
+        if not boundary_ok:
+            for r, c in cand:
+                board.cell(r, c).region_id = None
+            continue
+
+        new_covered = covered | cand
+        new_assignment = {**assignment, best_idx: cand}
+
+        result = _match_regions_mrv(
+            board, pre_boundaries, all_candidates, all_positions,
+            total_cells, new_covered, new_assignment,
             _start_time, _timeout,
         )
         if result is not None:

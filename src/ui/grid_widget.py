@@ -846,18 +846,10 @@ class GridWidget(QWidget):
                 cy = rect.center().y()
 
                 if cell.symbol is not None and cell.symbol:
-                    margin = rect.width() * 0.08
-                    bg = QRectF(rect.x() + margin, rect.y() + margin,
-                                 rect.width() - margin * 2, rect.height() - margin * 2)
-                    painter.setPen(Qt.PenStyle.NoPen)
-                    painter.setBrush(QBrush(QColor(_ui_theme.colors.symbol_bg)))
-                    painter.drawRoundedRect(bg, 6, 6)
-                    painter.setPen(QPen(QColor(_ui_theme.colors.symbol_border), 2))
-                    painter.drawRoundedRect(bg, 6, 6)
-                    font = QFont("Segoe UI", self._cell_size * 3 // 5, QFont.Weight.Bold)
+                    font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)
                     painter.setFont(font)
                     painter.setPen(QPen(QColor(_ui_theme.colors.symbol_text)))
-                    painter.drawText(bg, Qt.AlignmentFlag.AlignCenter, cell.symbol)
+                    painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, cell.symbol)
 
                 if cell.number is not None and cell.symbol is None:
                     font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)

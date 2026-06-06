@@ -326,8 +326,7 @@ def _region_feasible(self, board: Board, cells: set[tuple[int, int]]) -> bool:
 
 
 def _rose_stop_expanding(self, board: Board, region: set[tuple[int, int]]) -> bool:
-    """Return True if this region already has all rose_window symbols and
-    no other size/shape constraint requires further expansion."""
+    """Return True only when region size is fully determined by external constraints."""
     if not self.puzzle.has_rule("rose_window"):
         return False
     if self._has_size_constraint():
@@ -336,8 +335,8 @@ def _rose_stop_expanding(self, board: Board, region: set[tuple[int, int]]) -> bo
     rose_syms = _rose_symbol_types(self.puzzle, board)
     if not rose_syms or len(rose_syms) < 2:
         return False
-    region_syms = {board.cell(r, c).symbol for r, c in region if board.cell(r, c).symbol is not None}
-    return region_syms == set(rose_syms)
+    # Multi-symbol: don't stop — region may need filler cells beyond symbols
+    return False
 
 
 def _has_size_constraint(self) -> bool:
@@ -360,7 +359,8 @@ def _has_size_constraint(self) -> bool:
 def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
                        frontier: set[tuple[int, int]], unassigned: set[tuple[int, int]],
                        max_area: int, results: list[set[tuple[int, int]]],
-                       seed_clue: int | None = None) -> None:
+                       seed_clue: int | None = None,
+                       forced_atoms: dict | None = None) -> None:
     if len(current) > max_area:
         return
 
@@ -400,29 +400,38 @@ def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
     if len(current) >= max_area:
         return
 
-    if len(results) >= 200:
+    if len(results) >= 400:
         return
 
     if self._rose_stop_expanding(board, current):
         return
 
     if self.puzzle.has_rule("rose_window") and self._pre_boundaries and self._pre_boundaries_blocking:
-        frontier_list = sorted(frontier, key=lambda c: sum(
-            1 for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]
-            if 0 <= c[0]+dr < board.height and 0 <= c[1]+dc < board.width
-            and ((min(c[0],c[0]+dr), min(c[1],c[1]+dc),
-                  max(c[0],c[0]+dr), max(c[1],c[1]+dc))
-                in self._pre_boundaries)
+        frontier_list = sorted(frontier, key=lambda c: (
+            0 if (forced_atoms and forced_atoms.get(c) is not None) else 1,
+            0 if board.cell(c[0], c[1]).symbol is None else 1,
+            sum(1 for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]
+                if 0 <= c[0]+dr < board.height and 0 <= c[1]+dc < board.width
+                and ((min(c[0],c[0]+dr), min(c[1],c[1]+dc),
+                      max(c[0],c[0]+dr), max(c[1],c[1]+dc))
+                    in self._pre_boundaries))
         ))
-        per_cell_cap = max(1, 200 // max(1, len(frontier_list)))
+        per_cell_cap = max(1, 400 // max(1, len(frontier_list)))
         for i, cell in enumerate(frontier_list):
-            if len(results) >= min(200, per_cell_cap * (i + 1)):
+            if len(results) >= min(400, per_cell_cap * (i + 1)):
                 break
-            new_region = current | {cell}
-            new_frontier = (frontier - {cell}) | self._frontier({cell}, unassigned - new_region)
+            atom = forced_atoms.get(cell) if forced_atoms else None
+            if atom is not None:
+                new_cells = set(atom) - current
+                if not new_cells:
+                    continue
+            else:
+                new_cells = {cell}
+            new_region = current | new_cells
+            new_frontier = (frontier - new_cells) | self._frontier(new_cells, unassigned - new_region)
             if not self._region_feasible(board, new_region):
                 continue
-            self._enumerate_regions(board, new_region, new_frontier, unassigned, max_area, results, seed_clue)
+            self._enumerate_regions(board, new_region, new_frontier, unassigned, max_area, results, seed_clue, forced_atoms)
     else:
         if self.puzzle.has_rule("rose_window"):
             from src.solver.constraints import _rose_symbol_types as _rst_enum
@@ -439,26 +448,57 @@ def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
                         return min(abs(cr - nr) + abs(cc - nc)
                                    for nr, nc in needed_cells) if needed_cells else 0
                     frontier_list = sorted(frontier, key=lambda c: (
-                        0 if board.cell(c[0], c[1]).symbol in needed else 1,
+                        0 if (forced_atoms and forced_atoms.get(c) is not None) else 1,
+                        0 if board.cell(c[0], c[1]).symbol is None else
+                        (0 if board.cell(c[0], c[1]).symbol in needed else 2),
                         _dist_to_needed(c),
                         c[0], c[1]))
                 else:
-                    frontier_list = sorted(frontier)
+                    frontier_list = sorted(frontier, key=lambda c: (
+                        0 if (forced_atoms and forced_atoms.get(c) is not None) else 1,
+                        0 if board.cell(c[0], c[1]).symbol is None else 1,
+                        c[0], c[1]))
             else:
-                frontier_list = sorted(frontier)
+                frontier_list = sorted(frontier, key=lambda c: (
+                    0 if (forced_atoms and forced_atoms.get(c) is not None) else 1,
+                    0 if board.cell(c[0], c[1]).symbol is None else 1,
+                    c[0], c[1]))
         else:
-            frontier_list = sorted(frontier)
+            frontier_list = sorted(frontier, key=lambda c: (
+                0 if (forced_atoms and forced_atoms.get(c) is not None) else 1,
+                0 if board.cell(c[0], c[1]).symbol is None else 1,
+                c[0], c[1]))
         for i, cell in enumerate(frontier_list):
-            new_region = current | {cell}
-            new_frontier = (frontier - {cell}) | self._frontier({cell}, unassigned - new_region)
+            atom = forced_atoms.get(cell) if forced_atoms else None
+            if atom is not None:
+                new_cells = set(atom) - current
+                if not new_cells:
+                    continue
+            else:
+                new_cells = {cell}
+            new_region = current | new_cells
+            new_frontier = (frontier - new_cells) | self._frontier(new_cells, unassigned - new_region)
             if not self._region_feasible(board, new_region):
                 continue
-            self._enumerate_regions(board, new_region, new_frontier, unassigned, max_area, results, seed_clue)
+            self._enumerate_regions(board, new_region, new_frontier, unassigned, max_area, results, seed_clue, forced_atoms)
 
 
 def _generate_region_candidates(self, board: Board, seed: tuple[int, int],
-                                unassigned: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:
+                                unassigned: set[tuple[int, int]],
+                                forced_atoms: dict | None = None) -> list[set[tuple[int, int]]]:
     results: list[set[tuple[int, int]]] = []
+    
+    # Pre-expand seed to its full atom if applicable
+    if forced_atoms is not None:
+        atom = forced_atoms.get(seed)
+        if atom is not None:
+            current = set(atom)
+            if not current.issubset(unassigned):
+                return results
+        else:
+            current = {seed}
+    else:
+        current = {seed}
 
     if self.puzzle.has_rule("shape_pool"):
         pool_rule = self.puzzle.get_rule("shape_pool")
@@ -523,22 +563,21 @@ def _generate_region_candidates(self, board: Board, seed: tuple[int, int],
         else:
             max_area = self._max_region_area()
 
-    initial: set[tuple[int, int]] = {seed}
+    initial: set[tuple[int, int]] = set(current)
     frontier = self._frontier(initial, unassigned)
 
     self._enum_budget = 0
-    self._enumerate_regions(board, initial, frontier, unassigned, max_area, results, seed_clue=clue_target)
+    self._enumerate_regions(board, initial, frontier, unassigned, max_area, results, seed_clue=clue_target, forced_atoms=forced_atoms)
 
     if not results:
         if self.puzzle.has_rule("rose_window"):
             from src.solver.constraints import _rose_symbol_types as _rst_fb
             if _rst_fb(self.puzzle, board):
-                # {seed} can never be valid for rose_window (missing symbols)
                 pass
             else:
-                results = [{seed}]
+                results = [initial]
         else:
-            results = [{seed}]
+            results = [initial]
 
     if self.puzzle.has_rule("rose_window"):
         from src.solver.constraints import _rose_symbol_types as _rst_sort

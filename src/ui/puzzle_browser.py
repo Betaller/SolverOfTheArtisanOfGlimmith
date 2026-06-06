@@ -89,6 +89,8 @@ class PuzzlePreviewWidget(QWidget):
 
         blocked_set: set[tuple[int, int]] = set()
         boundary_set: set[tuple[int, int, int, int]] = set()
+        cell_symbols: dict[tuple[int, int], str] = {}
+        cell_numbers: dict[tuple[int, int], int] = {}
         has_numbers = False
         has_symbols = False
 
@@ -102,8 +104,10 @@ class PuzzlePreviewWidget(QWidget):
                 blocked_set.add((r, c_))
             if "number" in c:
                 has_numbers = True
+                cell_numbers[(r, c_)] = c["number"]
             if "symbol" in c:
                 has_symbols = True
+                cell_symbols[(r, c_)] = c["symbol"]
 
         for e in edges:
             if e.get("is_boundary"):
@@ -130,17 +134,36 @@ class PuzzlePreviewWidget(QWidget):
             if e.get("is_boundary"):
                 r1, c1, r2, c2 = e["r1"], e["c1"], e["r2"], e["c2"]
                 if r1 == r2:
-                    y = oy + r1 * cell_size
-                    x1 = ox + c1 * cell_size if c1 < c2 else ox + c2 * cell_size
-                    x2 = ox + (c1 if c1 > c2 else c2) * cell_size
+                    # Adjacent horizontally → draw vertical line at shared edge
+                    x = ox + max(c1, c2) * cell_size
+                    y1 = oy + r1 * cell_size
+                    y2 = oy + (r1 + 1) * cell_size
+                    p.drawLine(QPointF(x, y1), QPointF(x, y2))
                 else:
-                    x = ox + c1 * cell_size
-                    y1 = oy + r1 * cell_size if r1 < r2 else oy + r2 * cell_size
-                    y2 = oy + (r1 if r1 > r2 else r2) * cell_size
-                p.drawLine(QPointF(x1, y), QPointF(x2, y))
+                    # Adjacent vertically → draw horizontal line at shared edge
+                    y = oy + max(r1, r2) * cell_size
+                    x1 = ox + c1 * cell_size
+                    x2 = ox + (c1 + 1) * cell_size
+                    p.drawLine(QPointF(x1, y), QPointF(x2, y))
 
                 # Draw outer boundaries too
                 # (simplified - just show internal boundaries)
+
+        # Draw numbers and symbols
+        small_font = QFont("Segoe UI", max(5, cell_size // 2), QFont.Weight.Bold)
+        p.setFont(small_font)
+        for (r, c_), num in cell_numbers.items():
+            x = ox + c_ * cell_size
+            y = oy + r * cell_size
+            rect = QRectF(x, y, cell_size, cell_size)
+            p.setPen(QColor(_ui_theme.colors.number_text))
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(num))
+        for (r, c_), sym in cell_symbols.items():
+            x = ox + c_ * cell_size
+            y = oy + r * cell_size
+            rect = QRectF(x, y, cell_size, cell_size)
+            p.setPen(QColor(_ui_theme.colors.symbol_text))
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, sym)
 
         # Summary overlay
         font = QFont("Segoe UI", 8)

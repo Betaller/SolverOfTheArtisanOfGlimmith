@@ -200,6 +200,17 @@ def _solve_singlesymbol(
         if not fixed_any:
             break
 
+    # Repair symbol distribution: ensure each region has exactly one seed symbol
+    _repair_symbol_distribution(board, region_cells, M)
+
+    # Final check: each region must have exactly one symbol
+    for i in range(M):
+        sym_count = sum(1 for r, c in region_cells[i] if board.cell(r, c).symbol is not None)
+        if sym_count != 1:
+            return None
+
+    return _build_regions(board)
+
 
 def _solve_multisymbol(
     puzzle: Puzzle, board: Board,
@@ -344,6 +355,41 @@ def _solve_multisymbol(
         return None
 
     return _build_regions(board)
+
+
+def _repair_symbol_distribution(
+    board: Board, region_cells: list[set[tuple[int, int]]], M: int
+) -> bool:
+    """Ensure each region has exactly one seed symbol. Returns True if fixed."""
+    h, w = board.height, board.width
+    for _ in range(200):
+        # find regions with 0 or 2+ symbols
+        excess = [i for i in range(M) if sum(1 for r,c in region_cells[i] if board.cell(r,c).symbol is not None) > 1]
+        deficit = [i for i in range(M) if sum(1 for r,c in region_cells[i] if board.cell(r,c).symbol is not None) == 0]
+        if not excess and not deficit:
+            return True
+        if not excess or not deficit:
+            break
+        # move one non-symbol cell from an excess region to a deficit region
+        for ei in excess:
+            for r, c in list(region_cells[ei]):
+                if board.cell(r, c).symbol is None:
+                    for di in deficit:
+                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                            nr, nc = r + dr, c + dc
+                            if 0 <= nr < h and 0 <= nc < w and board.cell(nr, nc).region_id == di:
+                                board.cell(r, c).region_id = di
+                                region_cells[ei].discard((r, c))
+                                region_cells[di].add((r, c))
+                                break
+                        else:
+                            continue
+                        break
+                    break
+            else:
+                continue
+            break
+    return sum(1 for i in range(M) if sum(1 for r,c in region_cells[i] if board.cell(r,c).symbol is not None) == 0) == 0
 
 
 def _would_violate(board: Board, r: int, c: int, rid: int,

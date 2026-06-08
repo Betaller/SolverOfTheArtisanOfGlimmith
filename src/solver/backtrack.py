@@ -58,7 +58,10 @@ class BacktrackSolver:
             solution.elapsed_ms = 0
             return solution
         if self.puzzle.has_rule("rose_window"):
-            result = self._solve_rose_growth(self._board, all_positions)
+            if not self._has_size_constraint():
+                result = self._solve_rose_growth(self._board, all_positions)
+            else:
+                result = None
             if result is not None:
                 from src.solver.constraints import check_boundary_consistency
                 if check_boundary_consistency(self._board):

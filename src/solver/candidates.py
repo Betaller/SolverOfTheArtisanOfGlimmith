@@ -255,6 +255,13 @@ def _region_feasible(self, board: Board, cells: set[tuple[int, int]]) -> bool:
                     if sym in region_syms:
                         return False
                     region_syms.add(sym)
+            if len(rose_symbols) >= 2:
+                pool_rule = self.puzzle.get_rule("shape_pool")
+                if pool_rule is not None:
+                    pool_shapes = pool_rule.params.get("shapes", [])
+                    if pool_shapes and len(cells) in {s.area for s in pool_shapes}:
+                        if region_syms != set(rose_symbols):
+                            return False
 
     if self.puzzle.has_rule("precise") or self.puzzle.has_rule("range") or self.puzzle.has_rule("shape_pool") or self.puzzle.has_rule("puzzle_piece"):
         target_area = self._get_complete_area()
@@ -381,7 +388,18 @@ def _enumerate_regions(self, board: Board, current: set[tuple[int, int]],
         target_areas = self._target_areas()
         if target_areas:
             if len(current) in target_areas:
-                results.append(set(current))
+                if self.puzzle.has_rule("rose_window"):
+                    from src.solver.constraints import _rose_symbol_types as _rst_ta
+                    rose_syms_ta = _rst_ta(self.puzzle, board)
+                    if rose_syms_ta and len(rose_syms_ta) >= 2:
+                        current_syms = {board.cell(r, c).symbol for r, c in current
+                                        if board.cell(r, c).symbol is not None}
+                        if current_syms == set(rose_syms_ta):
+                            results.append(set(current))
+                    else:
+                        results.append(set(current))
+                else:
+                    results.append(set(current))
             elif len(current) > max(target_areas):
                 return
         elif self.puzzle.has_rule("rose_window") and not self._has_size_constraint():

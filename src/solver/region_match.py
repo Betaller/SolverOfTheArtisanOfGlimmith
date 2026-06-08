@@ -158,7 +158,12 @@ def solve_by_region_match(
     board: Board,
     pre_boundaries: set[tuple[int, int, int, int]],
 ) -> dict[int, set[tuple[int, int]]] | None:
-    """Solve rose_window by precomputing all legal regions then matching."""
+    """Solve rose_window by precomputing all legal regions then matching.
+    
+    Only handles pure rose_window puzzles (no additional shape/size constraints).
+    """
+    if puzzle.has_rule("shape_pool") or puzzle.has_rule("puzzle_piece"):
+        return None
     symbol_types = _rose_symbol_types(puzzle, board)
     if not symbol_types:
         return None

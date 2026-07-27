@@ -6,7 +6,7 @@ from PySide6.QtCore import QThread, Signal
 
 from src.models.puzzle import Puzzle
 from src.models.solution import Solution
-from src.solver.backtrack import BacktrackSolver
+from src.solver.base import default_router
 
 
 class SolverThread(QThread):
@@ -28,8 +28,8 @@ class SolverThread(QThread):
 
     def run(self) -> None:
         try:
-            solver = BacktrackSolver(self._puzzle)
-            self._result = solver.solve(timeout=self._timeout)
+            router = default_router()
+            self._result = router.route(self._puzzle, timeout=self._timeout)
             if not self._cancelled:
                 self.finished.emit(self._result)
         except Exception as e:

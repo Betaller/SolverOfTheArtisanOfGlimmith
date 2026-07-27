@@ -30,13 +30,32 @@ from src.solver.checks import (
 
 from src.solver.shapes import canonical_key, shapes_equal, match_shape_pool
 
+from src.solver.base import Solver
+
 # ── reference: third_party/AoG_Solver (Neptune17, C++) + glimmith-solver (JS) ──
 
 
-class BacktrackSolver:
-    def __init__(self, puzzle: Puzzle) -> None:
-        self.puzzle = puzzle
-        self.propagator = ConstraintPropagator(puzzle)
+class BacktrackSolver(Solver):
+    name = "backtrack"
+
+    @classmethod
+    def supports(cls, puzzle: Puzzle) -> bool:
+        return True
+
+    def solve(self, puzzle: Puzzle | None = None, timeout: float = 30.0) -> Solution:
+        if puzzle is not None:
+            self.__init__(puzzle)  # type: ignore[misc]
+        if not hasattr(self, 'puzzle') or self.puzzle is None:
+            raise ValueError("puzzle required")
+        return self._do_solve(timeout)
+
+    def __init__(self, puzzle: Puzzle | None = None) -> None:
+        if puzzle is not None:
+            self.puzzle = puzzle
+            self.propagator = ConstraintPropagator(puzzle)
+        else:
+            self.puzzle = None  # type: ignore[assignment]
+            self.propagator = None  # type: ignore[assignment]
         self.validator = SolutionValidator()
         self.steps = 0
         self.start_time = 0.0
@@ -45,7 +64,9 @@ class BacktrackSolver:
         self._pre_boundaries: set[tuple[int, int, int, int]] = set()
         self._pre_boundaries_blocking: bool = False
 
-    def solve(self, timeout: float = 30.0) -> Solution:
+    def _do_solve(self, timeout: float = 30.0) -> Solution:
+        if self.propagator is None and self.puzzle is not None:
+            self.propagator = ConstraintPropagator(self.puzzle)
         self.timeout = timeout
         self.start_time = time.monotonic()
         self.steps = 0

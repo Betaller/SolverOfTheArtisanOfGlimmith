@@ -41,7 +41,7 @@ class SolverRouter:
 
     def __init__(self, solvers: list[Solver]) -> None:
         self._solvers = solvers
-        self._attempts: list[SolverAttempt] = field(default_factory=list)
+        self._attempts: list[SolverAttempt] = []
 
     @property
     def attempts(self) -> list[SolverAttempt]:

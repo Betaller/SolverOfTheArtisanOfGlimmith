@@ -18,7 +18,7 @@ class RegionInfo:
 
 @dataclass(slots=True)
 class Solution:
-    board: Board
+    board: Board | None = None
     solved: bool = False
     regions: list[RegionInfo] = field(default_factory=list)
     steps_taken: int = 0

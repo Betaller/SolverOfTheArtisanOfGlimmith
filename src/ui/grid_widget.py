@@ -426,7 +426,9 @@ class GridWidget(QWidget):
             if edge is not None:
                 self._edge_context_menu(pos, *edge)
             elif vertex is not None:
-                self._vertex_context_menu(pos, vertex[0], vertex[1])
+                # Map grid vertex position → Board vertex coordinates
+                vr, vc = vertex[0] - 1, vertex[1] - 1
+                self._vertex_context_menu(pos, vr, vc)
             elif cell is not None:
                 self._cell_context_menu(pos, cell[0], cell[1])
             return
@@ -461,13 +463,15 @@ class GridWidget(QWidget):
 
         if self._mode == self.MODE_WATCHTOWER:
             if vertex is not None:
-                v = self.board.vertex_at(vertex[0], vertex[1])
+                # Map grid vertex position → Board vertex (offset by -1)
+                vr, vc = vertex[0] - 1, vertex[1] - 1
+                v = self.board.vertex_at(vr, vc)
                 if v is not None:
                     v.watchtower = self._current_number
                     self._selected_vertex = vertex
                     self._selected_cell = None
                     self._selected_edge = None
-                    self.vertex_clicked.emit(vertex[0], vertex[1])
+                    self.vertex_clicked.emit(vr, vc)
                     self.update()
             return
 
@@ -523,7 +527,8 @@ class GridWidget(QWidget):
                 self._selected_vertex = vertex
                 self._selected_cell = None
                 self._selected_edge = None
-                self.vertex_clicked.emit(vertex[0], vertex[1])
+                # Emit Board vertex coords (offset by -1 from grid position)
+                self.vertex_clicked.emit(vertex[0] - 1, vertex[1] - 1)
             elif cell is not None:
                 self._selected_cell = cell
                 self._selected_edge = None

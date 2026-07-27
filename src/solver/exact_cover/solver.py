@@ -39,11 +39,12 @@ class ExactCoverSolver(Solver):
             hi = puzzle.get_rule("range").params.get("max", 999)
             return hi <= 12 and hw <= 80
         if puzzle.has_rule("area"):
-            max_clue = max(
-                (c.number for c in puzzle.cells if c.number is not None),
-                default=0,
-            )
+            max_clue = max((c.number for c in puzzle.cells if c.number is not None), default=0)
             return hw <= 80 and 2 <= max_clue <= 12
+        # Estimate region size from clue count (solitary) or compass hints
+        est_size = _estimate_region_size(puzzle)
+        if est_size > 0 and est_size <= 12 and hw <= 80:
+            return True
         return False
 
     def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
@@ -224,7 +225,27 @@ class ExactCoverSolver(Solver):
                                 return out
             return out
 
-        # ── area small grid: BFS 枚举 bounded by area clue ──
+        # ── estimated sizes from clues ──
+        est_size = _estimate_region_size(puzzle)
+        if est_size > 0 and est_size <= 12:
+            lo = max(1, est_size * 3 // 4)
+            hi = min(est_size * 5 // 4, puzzle.height * puzzle.width)
+            seen: set[frozenset[tuple[int, int]]] = set()
+            for seed in sorted(all_pos):
+                if time.monotonic() > self._deadline:
+                    break
+                for target in range(lo, hi + 1):
+                    for cand in _bfs_polyominoes(board, seed, all_pos, target, self._deadline, puzzle):
+                        fs = frozenset(cand)
+                        if fs not in seen:
+                            seen.add(fs)
+                            if _region_ok(board, cand, puzzle):
+                                out.append(cand)
+                            if len(out) >= 5000:
+                                return out
+            return out
+
+        # ── area: BFS bounded by area clue ──
         if puzzle.has_rule("area"):
             areas = set()
             for r in range(puzzle.height):
@@ -408,3 +429,49 @@ def _global_check(board: Board, regions: dict[int, set[tuple[int, int]]],
             if e.is_boundary:
                 pass
     return True
+
+
+def _estimate_region_size(puzzle: Puzzle) -> int:
+    """Estimate target region size from clues/constraints."""
+    fillable = sum(1 for c in puzzle.cells if not c.blocked)
+    if puzzle.has_rule("area"):
+        sizes = [c.number for c in puzzle.cells if c.number is not None]
+        if sizes:
+            return max(sizes)
+    if puzzle.has_rule("solitary"):
+        clues = sum(1 for c in puzzle.cells if (
+            c.symbol is not None or c.compass is not None
+            or c.number is not None or c.shape_pattern is not None
+        ))
+        if clues > 0:
+            return fillable // clues
+    if puzzle.has_rule("compass"):
+        max_min = 1
+        for c in puzzle.cells:
+            if c.compass is not None:
+                s = 1 + sum(
+                    max(0, getattr(c.compass, d))
+                    for d in ("up", "down", "left", "right")
+                )
+                max_min = max(max_min, s)
+        if max_min > 1:
+            return max_min
+    if puzzle.has_rule("rose_window"):
+        from src.solver.constraints import _rose_M
+        board = Board(puzzle.height, puzzle.width)
+        M = _rose_M(puzzle, board)
+        if M > 0:
+            return fillable // M
+    return 0
+
+
+class FallbackExactCoverSolver(ExactCoverSolver):
+    """Last-resort DLX exact cover for ANY puzzle after DFS fails."""
+
+    name = "dlx_fallback"
+
+    @classmethod
+    def supports(cls, puzzle: Puzzle) -> bool:
+        hw = puzzle.height * puzzle.width
+        return hw <= 80 and _estimate_region_size(puzzle) > 0
+

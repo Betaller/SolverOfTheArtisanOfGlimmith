@@ -608,67 +608,58 @@ class BacktrackSolver:
 
         conflict_matrix = self._build_ec_conflicts(candidates, all_positions)
 
-        selected: list[int] = []
-        covered: set[tuple[int, int]] = set()
+        # Use DLX (Dancing Links) for faster exact cover (≈ aog's approach)
+        from src.solver.dlx import Dlx
+
+        fillable_indices = sorted(all_positions)
+        cell_to_idx = {c: i for i, c in enumerate(fillable_indices)}
+        num_cols = len(fillable_indices)
+
+        has_edge_constraints = any(
+            puzzle.has_rule(r) for r in ("heterogeneous", "homogeneous", "inequality", "difference")
+        ) or puzzle.has_rule("differentiation") or puzzle.has_rule("mixed")
+
+        dlx = Dlx(num_cols)
+        for idx, cc in enumerate(candidates):
+            cols = sorted(cell_to_idx[c] for c in cc if c in cell_to_idx)
+            dlx.add_row(idx, cols)
+
+        solution_rows: list[int] = []
         result: dict[int, set[tuple[int, int]]] | None = None
 
-        def dfs() -> bool:
+        def _final_check(sol: list[int]) -> bool:
             nonlocal result
             self.steps += 1
-            elapsed = time.monotonic() - self.start_time
-            if elapsed > self.timeout or self.steps % 2000 == 0 and time.monotonic() - self.start_time > self.timeout:
-                return False
+            regions: dict[int, set[tuple[int, int]]] = {}
+            for ri, ci in enumerate(sol):
+                regions[ri] = set(candidates[ci])
+                for r, c in regions[ri]:
+                    board.cell(r, c).region_id = ri
+            if self._check_global_constraints(board, regions):
+                result = regions
+                return False  # stop search — found solution
+            return True  # continue
 
-            if len(covered) == len(all_positions):
-                regions: dict[int, set[tuple[int, int]]] = {}
-                for ri, ci in enumerate(selected):
-                    regions[ri] = set(candidates[ci])
-                    for r, c in regions[ri]:
-                        board.cell(r, c).region_id = ri
-                if self._check_global_constraints(board, regions):
-                    result = regions
-                    return True
-                return False
+        if has_edge_constraints:
+            def _row_check(sol: list[int]) -> bool:
+                self.steps += 1
+                for i in range(len(sol)):
+                    ci = sol[i]
+                    for j in range(i):
+                        cj = sol[j]
+                        if cj in conflict_matrix[ci]:
+                            return False
+                return True
+            dlx.search_with_check(solution_rows, _row_check, _final_check)
+        else:
+            dlx.search(solution_rows, _final_check)
 
-            best_cell, best_opts = None, None
-            for cell in sorted(all_positions):
-                if cell in covered:
-                    continue
-                opts = []
-                for ci in cell_to_cands[cell]:
-                    cc = candidates[ci]
-                    if any(c in covered for c in cc):
-                        continue
-                    if any(si in conflict_matrix[ci] for si in selected):
-                        continue
-                    opts.append(ci)
-                if not opts:
-                    return False
-                if best_opts is None or len(opts) < len(best_opts):
-                    best_cell = cell
-                    best_opts = opts
-                    if len(best_opts) == 1:
-                        break
-            if best_opts is None:
-                return False
-
-            for ci in best_opts:
-                selected.append(ci)
-                for c in candidates[ci]:
-                    covered.add(c)
-                if dfs():
-                    return True
-                selected.pop()
-                for c in candidates[ci]:
-                    covered.discard(c)
-            return False
-
-        if dfs() and result is not None:
+        if result is not None:
             return result
         # Reset region IDs on failure
-        for r in range(board.height):
-            for c in range(board.width):
-                board.cell(r, c).region_id = None
+        for r2 in range(board.height):
+            for c2 in range(board.width):
+                board.cell(r2, c2).region_id = None
         return None
 
     def _generate_all_candidates(self, all_positions: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:

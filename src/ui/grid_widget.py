@@ -45,7 +45,7 @@ class GridWidget(QWidget):
         self.board: Board | None = None
         self._mode = self.MODE_SELECT
         self._cell_size = 60
-        self._padding = 20
+        self._padding = 40
         self._selected_cell: tuple[int, int] | None = None
         self._selected_edge: tuple[int, int, int, int] | None = None
         self._selected_vertex: tuple[int, int] | None = None

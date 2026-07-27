@@ -1,0 +1,15 @@
+[submodule "third_party/AoG_Solver"]
+	path = third_party/AoG_Solver
+	url = https://github.com/Neptune17/AoG_Solver.git
+[submodule "third_party/TAGSolver"]
+	path = third_party/TAGSolver
+	url = https://github.com/hhhxiao/TAGSolver.git
+[submodule "third_party/shape-helper"]
+	path = third_party/shape-helper
+	url = https://github.com/acasperw/shape-helper-for-the-artisan-of-glimmith.git
+[submodule "third_party/glimmith-solver"]
+	path = third_party/glimmith-solver
+	url = https://github.com/shartiniquais/glimmith-solver.git
+[submodule "third_party/aog"]
+	path = third_party/aog
+	url = https://github.com/lifthrasiir/aog.git

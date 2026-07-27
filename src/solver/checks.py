@@ -100,25 +100,32 @@ def _check_incremental(self, board: Board, regions: dict[int, set[tuple[int, int
 
     if self.puzzle.has_rule("heterogeneous") or self.puzzle.has_rule("homogeneous"):
         from src.models.board import EdgeConstraintType
-        for e in board.edges():
-            if e.constraint is None:
-                continue
-            c1 = board.cell(e.r1, e.c1)
-            c2 = board.cell(e.r2, e.c2)
-            if not c1.assigned or not c2.assigned:
-                continue
-            if c1.region_id == c2.region_id:
-                continue
-            rid1, rid2 = c1.region_id, c2.region_id
-            if rid1 == new_rid or rid2 == new_rid:
+        # Only check edges adjacent to the new region (O(new_cells) vs O(all_edges))
+        checked: set[tuple] = set()
+        for r, c in new_cells:
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if not (0 <= nr < board.height and 0 <= nc < board.width):
+                    continue
+                neighbor = board.cell(nr, nc)
+                if not neighbor.assigned or neighbor.region_id == new_rid:
+                    continue
+                edge = board.edge_between(r, c, nr, nc)
+                if edge is None or edge.constraint is None:
+                    continue
+                ekey = (min(r, nr), min(c, nc), max(r, nr), max(c, nc))
+                if ekey in checked:
+                    continue
+                checked.add(ekey)
+                rid1, rid2 = new_rid, neighbor.region_id
                 cells1 = regions[rid1]
                 cells2 = regions[rid2]
                 s1 = Shape(cells=frozenset(cells1))
                 s2 = Shape(cells=frozenset(cells2))
                 eq = canonical_key(s1.cells) == canonical_key(s2.cells)
-                if e.constraint.type == EdgeConstraintType.HETEROGENEOUS and eq:
+                if edge.constraint.type == EdgeConstraintType.HETEROGENEOUS and eq:
                     return False
-                if e.constraint.type == EdgeConstraintType.HOMOGENEOUS and not eq:
+                if edge.constraint.type == EdgeConstraintType.HOMOGENEOUS and not eq:
                     return False
 
     if self.puzzle.has_rule("differentiation"):

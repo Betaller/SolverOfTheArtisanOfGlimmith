@@ -4,7 +4,7 @@ import time
 import threading
 from collections import deque
 
-from src.models.board import Board
+from src.models.board import Board, Shape
 from src.models.puzzle import Puzzle
 from src.models.solution import Solution
 from src.solver.exceptions import NoSolutionError, SolverTimeoutError
@@ -27,6 +27,10 @@ from src.solver.checks import (
     _check_incremental, _get_adjacent_region_ids,
     _check_global_constraints, _check_compass_final,
 )
+
+from src.solver.shapes import canonical_key, shapes_equal, match_shape_pool
+
+# ── reference: third_party/AoG_Solver (Neptune17, C++) + glimmith-solver (JS) ──
 
 
 class BacktrackSolver:
@@ -122,6 +126,16 @@ class BacktrackSolver:
                                 return solution
                         self.steps += 1
             self._board = self._board_from_puzzle()
+
+        # ── try exact-cover for bounded-candidate puzzles (≈ glimmith-solver / aog DLX) ──
+        ec_result = self._try_exact_cover(all_positions)
+        if ec_result is not None:
+            update_boundary_edges(self._board)
+            solution = self.validator.validate(self.puzzle, self._board)
+            solution.steps_taken = self.steps
+            solution.elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
+            if solution.solved:
+                return solution
 
         result = self._search(self._board, all_positions, {}, 0)
 
@@ -231,20 +245,83 @@ class BacktrackSolver:
             board.cell(r, c).region_id = None
 
     def _remaining_capacity_ok(self, board: Board, unassigned: set[tuple[int, int]]) -> bool:
-        if not self.puzzle.has_rule("area"):
+        """Component-level feasibility (inspired by Neptune17 empty_area_check).
+
+        After each region placement, analyzes remaining connected components for:
+        - area clue capacity, size range, fixed-size divisibility
+        - rose window composition (symbol reachability, region count)
+        - compass direction feasibility
+        """
+        if not unassigned:
             return True
-        remaining = len(unassigned)
-        clue_sum = 0
-        clue_count = 0
-        for r, c in unassigned:
-            n = board.cell(r, c).number
-            if n is not None:
-                clue_sum += n
-                clue_count += 1
-        if clue_sum > remaining:
-            return False
-        if clue_count > 0 and clue_count > remaining:
-            return False
+
+        puzzle = self.puzzle
+        pre = self._pre_boundaries
+        comps = _get_all_components(unassigned, board, pre)
+
+        for comp in comps:
+            max_possible = len(comp)
+            if _has_internal_boundary(comp, pre) and not _boundary_graph_is_bipartite(comp, pre):
+                max_possible = max_possible * 2 // 3
+
+            if puzzle.has_rule("precise"):
+                t = puzzle.get_rule("precise").params.get("area", 0)
+                if max_possible < t or len(comp) % t != 0:
+                    return False
+                if len(comp) == t and _has_internal_boundary(comp, pre):
+                    return False
+
+            if puzzle.has_rule("range"):
+                mn = puzzle.get_rule("range").params.get("min", 1)
+                if max_possible < mn:
+                    return False
+
+            if puzzle.has_rule("area"):
+                clue_sum = sum(
+                    board.cell(r, c).number for r, c in comp
+                    if board.cell(r, c).number is not None
+                )
+                if clue_sum > len(comp):
+                    return False
+
+            if puzzle.has_rule("same") and self._first_shape_key is not None:
+                # Only check divisibility when we know the target size (after first region)
+                if puzzle.has_rule("precise"):
+                    target = puzzle.get_rule("precise").params.get("area", 0)
+                    if len(comp) % target != 0:
+                        return False
+
+            if puzzle.has_rule("compass"):
+                for r, c in comp:
+                    cell = board.cell(r, c)
+                    if cell.compass is not None:
+                        for dr, dc, attr in [(-1, 0, "up"), (1, 0, "down"), (0, -1, "left"), (0, 1, "right")]:
+                            expected = getattr(cell.compass, attr)
+                            if expected == -1:
+                                continue
+                            cnt = 0
+                            cr, cc = r + dr, c + dc
+                            while 0 <= cr < board.height and 0 <= cc < board.width:
+                                if board.cell(cr, cc).blocked:
+                                    break
+                                if board.cell(cr, cc).assigned:
+                                    break
+                                if (cr, cc) in comp:
+                                    cnt += 1
+                                cr += dr
+                                cc += dc
+                            if cnt < expected:
+                                return False
+
+            if puzzle.has_rule("rose_window"):
+                sym_count = sum(1 for (r, c) in comp if board.cell(r, c).symbol is not None)
+                rose_s = _rose_symbol_types(puzzle, board)
+                if rose_s and len(rose_s) == 1:
+                    if sym_count == 0:
+                        return False
+                    if sym_count == 1 and _has_internal_boundary(comp, pre):
+                        return False
+
         return True
 
     def _rose_capacity_ok(self, board: Board, unassigned: set[tuple[int, int]]) -> bool:
@@ -344,16 +421,99 @@ class BacktrackSolver:
         return False
 
     def _pick_seed(self, unassigned: set[tuple[int, int]]) -> tuple[int, int]:
-        if self.puzzle.has_rule("area") and hasattr(self, '_board'):
-            clue_seeds = [p for p in unassigned if self._board.cell(p[0], p[1]).number is not None]
+        """Multi-priority seed selection (inspired by Neptune17 AoG_Solver).
+
+        Priority cascade: puzzle_piece → area clues → rose symbols → compass →
+        constraint-adjacent → corners → isolated → top-left.
+        """
+        board = getattr(self, '_board', None)
+
+        if board is not None and self.puzzle.has_rule("puzzle_piece"):
+            pieces = [p for p in unassigned if board.cell(p[0], p[1]).shape_pattern is not None]
+            if pieces:
+                return min(pieces)
+
+        if board is not None and self.puzzle.has_rule("area"):
+            clue_seeds = [(p, board.cell(p[0], p[1]).number) for p in unassigned
+                          if board.cell(p[0], p[1]).number is not None]
             if clue_seeds:
-                clue_seeds.sort(key=lambda p: self._board.cell(p[0], p[1]).number)
-                return clue_seeds[0]
-        if self.puzzle.has_rule("rose_window") and hasattr(self, '_board'):
-            sym_seeds = [p for p in unassigned if self._board.cell(p[0], p[1]).symbol is not None]
-            if sym_seeds:
-                return min(sym_seeds)
+                clue_seeds.sort(key=lambda x: x[1])
+                return clue_seeds[0][0]
+
+        if board is not None and self.puzzle.has_rule("rose_window"):
+            rose_s = _rose_symbol_types(self.puzzle, board)
+            if rose_s:
+                sym_seeds = [p for p in unassigned if board.cell(p[0], p[1]).symbol is not None]
+                if sym_seeds:
+                    return min(sym_seeds)
+
+        if board is not None and self.puzzle.has_rule("compass"):
+            compass_s = [p for p in unassigned if board.cell(p[0], p[1]).compass is not None]
+            if compass_s:
+                return min(compass_s)
+
+        if board is not None:
+            constraint_seed = self._find_constraint_adjacent_seed(unassigned)
+            if constraint_seed:
+                return constraint_seed
+
+            corner = self._find_corner_seed(unassigned)
+            if corner:
+                return corner
+
+            isolated = self._find_isolated_seed(unassigned)
+            if isolated:
+                return isolated
+
         return min(unassigned)
+
+    def _count_blocked_sides(self, r: int, c: int) -> int:
+        cnt = 0
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = r + dr, c + dc
+            if not (0 <= nr < self._board.height and 0 <= nc < self._board.width):
+                cnt += 1
+                continue
+            nb = self._board.cell(nr, nc)
+            if nb.blocked or nb.assigned:
+                cnt += 1
+                continue
+            key = (r, c, nr, nc) if r < nr or (r == nr and c < nc) else (nr, nc, r, c)
+            if key in self._pre_boundaries:
+                cnt += 1
+        return cnt
+
+    def _find_isolated_seed(self, unassigned: set[tuple[int, int]]) -> tuple[int, int] | None:
+        for p in sorted(unassigned):
+            if self._count_blocked_sides(p[0], p[1]) == 4:
+                return p
+        return None
+
+    def _find_corner_seed(self, unassigned: set[tuple[int, int]]) -> tuple[int, int] | None:
+        for p in sorted(unassigned):
+            if self._count_blocked_sides(p[0], p[1]) >= 3:
+                return p
+        return None
+
+    def _find_constraint_adjacent_seed(self, unassigned: set[tuple[int, int]]) -> tuple[int, int] | None:
+        assigned: set[tuple[int, int]] = set()
+        for r in range(self._board.height):
+            for c in range(self._board.width):
+                if self._board.cell(r, c).assigned:
+                    assigned.add((r, c))
+        if not assigned:
+            return None
+        for r, c in sorted(unassigned):
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if (nr, nc) in assigned:
+                    key = (r, c, nr, nc) if r < nr or (r == nr and c < nc) else (nr, nc, r, c)
+                    if key in self._pre_boundaries:
+                        continue
+                    edge = self._board.edge_between(r, c, nr, nc)
+                    if edge is not None and edge.constraint is not None:
+                        return (r, c)
+        return None
 
     def _solve_rose_growth(self, board: Board,
                            all_positions: set[tuple[int, int]]) -> dict[int, set[tuple[int, int]]] | None:
@@ -403,6 +563,318 @@ class BacktrackSolver:
         for t in threads:
             t.join(timeout=join_timeout)
         return result_container[0]
+
+    def _try_exact_cover(self, all_positions: set[tuple[int, int]]) -> dict[int, set[tuple[int, int]]] | None:
+        """Pre-pass: exact-cover for bounded-candidate puzzles (≈ glimmith-solver / aog DLX).
+
+        Only applicable when region candidates are bounded (shape_pool, block, precise).
+        Pre-generates ALL legal candidates, then solves as exact cover with MRV heuristic.
+        """
+        puzzle = self.puzzle
+        board = self._board
+
+        if not puzzle.has_rule("shape_pool") and not puzzle.has_rule("block") and not puzzle.has_rule("precise"):
+            return None
+        if puzzle.has_rule("shape_pool"):
+            pool = puzzle.get_rule("shape_pool")
+            if pool is not None:
+                shapes = pool.params.get("shapes", [])
+                if not shapes:
+                    return None
+                total = sum(1 for _ in all_positions)
+                max_placements = sum(len(_all_transformations(s.cells)) for s in shapes)
+                if total * max_placements > 100000:
+                    return None
+        elif puzzle.has_rule("precise") and not puzzle.has_rule("block"):
+            if puzzle.height * puzzle.width > 25:
+                return None
+
+        candidates = self._generate_all_candidates(all_positions)
+        if not candidates:
+            return None
+
+        from collections import defaultdict
+        cell_to_cands: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for idx, cc in enumerate(candidates):
+            for c in cc:
+                cell_to_cands[c].append(idx)
+        for pos in sorted(all_positions):
+            if pos not in cell_to_cands or not cell_to_cands[pos]:
+                # Reset board for clean fallback
+                for r in range(board.height):
+                    for c in range(board.width):
+                        board.cell(r, c).region_id = None
+                return None
+
+        conflict_matrix = self._build_ec_conflicts(candidates, all_positions)
+
+        selected: list[int] = []
+        covered: set[tuple[int, int]] = set()
+        result: dict[int, set[tuple[int, int]]] | None = None
+
+        def dfs() -> bool:
+            nonlocal result
+            self.steps += 1
+            elapsed = time.monotonic() - self.start_time
+            if elapsed > self.timeout or self.steps % 2000 == 0 and time.monotonic() - self.start_time > self.timeout:
+                return False
+
+            if len(covered) == len(all_positions):
+                regions: dict[int, set[tuple[int, int]]] = {}
+                for ri, ci in enumerate(selected):
+                    regions[ri] = set(candidates[ci])
+                    for r, c in regions[ri]:
+                        board.cell(r, c).region_id = ri
+                if self._check_global_constraints(board, regions):
+                    result = regions
+                    return True
+                return False
+
+            best_cell, best_opts = None, None
+            for cell in sorted(all_positions):
+                if cell in covered:
+                    continue
+                opts = []
+                for ci in cell_to_cands[cell]:
+                    cc = candidates[ci]
+                    if any(c in covered for c in cc):
+                        continue
+                    if any(si in conflict_matrix[ci] for si in selected):
+                        continue
+                    opts.append(ci)
+                if not opts:
+                    return False
+                if best_opts is None or len(opts) < len(best_opts):
+                    best_cell = cell
+                    best_opts = opts
+                    if len(best_opts) == 1:
+                        break
+            if best_opts is None:
+                return False
+
+            for ci in best_opts:
+                selected.append(ci)
+                for c in candidates[ci]:
+                    covered.add(c)
+                if dfs():
+                    return True
+                selected.pop()
+                for c in candidates[ci]:
+                    covered.discard(c)
+            return False
+
+        if dfs() and result is not None:
+            return result
+        # Reset region IDs on failure
+        for r in range(board.height):
+            for c in range(board.width):
+                board.cell(r, c).region_id = None
+        return None
+
+    def _generate_all_candidates(self, all_positions: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:
+        puzzle = self.puzzle
+        board = self._board
+        results: list[set[tuple[int, int]]] = []
+
+        if puzzle.has_rule("shape_pool"):
+            pool_rule = puzzle.get_rule("shape_pool")
+            if pool_rule is not None:
+                pool_shapes = pool_rule.params.get("shapes", [])
+                seen: set[frozenset[tuple[int, int]]] = set()
+                for seed in sorted(all_positions):
+                    sr, sc = seed
+                    for ps in pool_shapes:
+                        for tf in _all_transformations(ps.cells):
+                            for rs, cs in tf:
+                                dr, dc = sr - rs, sc - cs
+                                placed: set[tuple[int, int]] = set()
+                                valid = True
+                                for r2, c2 in tf:
+                                    nr, nc = r2 + dr, c2 + dc
+                                    if (nr, nc) not in all_positions:
+                                        valid = False
+                                        break
+                                    if board.cell(nr, nc).blocked:
+                                        valid = False
+                                        break
+                                    placed.add((nr, nc))
+                                if not valid:
+                                    continue
+                                placed_fs = frozenset(placed)
+                                if placed_fs in seen:
+                                    continue
+                                seen.add(placed_fs)
+                                if not self._region_feasible(board, placed):
+                                    continue
+                                results.append(placed)
+                return results
+
+        if puzzle.has_rule("block"):
+            prec_area = puzzle.get_rule("precise").params["area"] if puzzle.has_rule("precise") else None
+            seen: set[frozenset[tuple[int, int]]] = set()
+            for h in range(1, puzzle.height + 1):
+                for w in range(1, puzzle.width + 1):
+                    area = h * w
+                    if prec_area is not None and area != prec_area:
+                        continue
+                    for r in range(puzzle.height - h + 1):
+                        for c in range(puzzle.width - w + 1):
+                            cells = frozenset((r + dr, c + dc) for dr in range(h) for dc in range(w))
+                            if cells in seen:
+                                continue
+                            seen.add(cells)
+                            cell_set = set(cells)
+                            if not cell_set.issubset(all_positions):
+                                continue
+                            if not self._region_feasible(board, cell_set):
+                                continue
+                            results.append(cell_set)
+            return results
+
+        if puzzle.has_rule("precise"):
+            target = puzzle.get_rule("precise").params["area"]
+            seen: set[frozenset[tuple[int, int]]] = set()
+            for seed in sorted(all_positions):
+                for cand in _bfs_fixed_shape(board, seed, all_positions, target,
+                                             self._pre_boundaries, self):
+                    fs = frozenset(cand)
+                    if fs not in seen:
+                        seen.add(fs)
+                        if self._region_feasible(board, cand):
+                            results.append(cand)
+                        if len(results) >= 8000:
+                            return results
+            return results
+
+        return results
+
+    def _build_ec_conflicts(self, candidates: list[set[tuple[int, int]]],
+                            all_positions: set[tuple[int, int]]) -> list[set[int]]:
+        n = len(candidates)
+        conflicts: list[set[int]] = [set() for _ in range(n)]
+        puzzle = self.puzzle
+        board = self._board
+        cell_to_cand: dict[tuple[int, int], int] = {}
+        for idx, cc in enumerate(candidates):
+            for c in cc:
+                cell_to_cand[c] = idx
+
+        for pos in sorted(all_positions):
+            if pos not in cell_to_cand:
+                continue
+            ci = cell_to_cand[pos]
+            r, c = pos
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < board.height and 0 <= nc < board.width:
+                    if (nr, nc) in cell_to_cand:
+                        cj = cell_to_cand[(nr, nc)]
+                        if ci == cj:
+                            continue
+                        ci_cells, cj_cells = candidates[ci], candidates[cj]
+
+                        if puzzle.has_rule("heterogeneous") or puzzle.has_rule("homogeneous"):
+                            edge = board.edge_between(r, c, nr, nc)
+                            if edge is not None and edge.constraint is not None:
+                                from src.models.board import EdgeConstraintType
+                                s1 = Shape(cells=frozenset(ci_cells))
+                                s2 = Shape(cells=frozenset(cj_cells))
+                                eq = canonical_key(s1.cells) == canonical_key(s2.cells)
+                                if edge.constraint.type == EdgeConstraintType.HETEROGENEOUS and eq:
+                                    conflicts[ci].add(cj); conflicts[cj].add(ci)
+                                if edge.constraint.type == EdgeConstraintType.HOMOGENEOUS and not eq:
+                                    conflicts[ci].add(cj); conflicts[cj].add(ci)
+
+                        if puzzle.has_rule("differentiation"):
+                            if len(ci_cells) == len(cj_cells):
+                                conflicts[ci].add(cj); conflicts[cj].add(ci)
+
+                        if puzzle.has_rule("mixed"):
+                            si = canonical_key(Shape(cells=frozenset(ci_cells)).cells)
+                            sj = canonical_key(Shape(cells=frozenset(cj_cells)).cells)
+                            if si == sj:
+                                conflicts[ci].add(cj); conflicts[cj].add(ci)
+
+        def _shape_key(idx: int) -> str:
+            return canonical_key(Shape(cells=frozenset(candidates[idx])).cells)
+
+        if puzzle.has_rule("different"):
+            for i in range(n):
+                ki = _shape_key(i)
+                for j in range(i + 1, n):
+                    if _shape_key(j) == ki:
+                        conflicts[i].add(j); conflicts[j].add(i)
+
+        if puzzle.has_rule("same"):
+            for i in range(n):
+                ki = _shape_key(i)
+                for j in range(i + 1, n):
+                    if _shape_key(j) != ki:
+                        conflicts[i].add(j); conflicts[j].add(i)
+
+        return conflicts
+
+
+def _all_transformations(cells: frozenset[tuple[int, int]]) -> list[frozenset[tuple[int, int]]]:
+    from src.solver.shapes import rotate_90, rotate_180, rotate_270, flip_horizontal, flip_vertical
+    s = cells
+    r1 = rotate_90(s)
+    r2 = rotate_180(s)
+    r3 = rotate_270(s)
+    fh = flip_horizontal(s)
+    fv = flip_vertical(s)
+    fh_r1 = rotate_90(fh)
+    fh_r2 = rotate_180(fh)
+    fh_r3 = rotate_270(fh)
+    seen: set[frozenset[tuple[int, int]]] = set()
+    result: list[frozenset[tuple[int, int]]] = []
+    for t in [s, r1, r2, r3, fh, fv, fh_r1, fh_r2, fh_r3]:
+        if t not in seen:
+            seen.add(t)
+            result.append(t)
+    return result
+
+
+def _bfs_fixed_shape(board, seed, unassigned, target_size, pre_boundaries, solver):
+    from collections import deque
+    results: list[set[tuple[int, int]]] = []
+    seen: set[frozenset[tuple[int, int]]] = set()
+    budget = 0
+
+    def _enumerate(current: set[tuple[int, int]], frontier: set[tuple[int, int]]):
+        nonlocal budget
+        if len(current) == target_size:
+            fs = frozenset(current)
+            if fs not in seen:
+                seen.add(fs)
+                results.append(set(current))
+            return
+        if len(results) >= 5000:
+            return
+        for cell in sorted(frontier):
+            new_region = current | {cell}
+            new_frontier = (frontier - {cell}) | {
+                nb for r, c in [cell] for nb in [(r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)]
+                if nb in unassigned and nb not in new_region
+            }
+            budget += 1
+            if budget % 5000 == 0:
+                import time as _t
+                if _t.monotonic() - solver.start_time > solver.timeout:
+                    return
+            if not solver._region_feasible(board, new_region):
+                continue
+            _enumerate(new_region, new_frontier)
+
+    initial = {seed}
+    frontier = set()
+    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        nr, nc = seed[0] + dr, seed[1] + dc
+        if (nr, nc) in unassigned:
+            frontier.add((nr, nc))
+    _enumerate(initial, frontier)
+    return results
+
 
 from src.solver.candidates import (
     _get_complete_area as _get_complete_area_fn,

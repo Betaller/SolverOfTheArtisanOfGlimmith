@@ -98,8 +98,8 @@ class GridWidget(QWidget):
     def sizeHint(self) -> QSize:
         if self.board is None:
             return QSize(400, 300)
-        w = self._padding * 2 + self.board.width * self._cell_size + 190
-        h = self._padding * 2 + self.board.height * self._cell_size + 20
+        w = self._padding * 2 + self.board.width * self._cell_size
+        h = self._padding * 2 + self.board.height * self._cell_size
         return QSize(w, h)
 
     def minimumSizeHint(self) -> QSize:
@@ -782,7 +782,7 @@ class GridWidget(QWidget):
         if event.angleDelta().y() > 0:
             self._cell_size = min(120, self._cell_size + 5)
         else:
-            self._cell_size = max(20, self._cell_size - 5)
+            self._cell_size = max(15, self._cell_size - 5)
         self._cache_rects()
         self.update()
 

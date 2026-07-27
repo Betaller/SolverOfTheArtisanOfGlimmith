@@ -95,7 +95,7 @@ class MainWindow(QMainWindow):
         self._undo_depth = 100
 
         self.setWindowTitle("格里米斯的工匠 - 求解器")
-        self.resize(1320, 840)
+        self.resize(1400, 900)
 
         self._setup_status_bar()
         self._setup_ui()
@@ -128,8 +128,8 @@ class MainWindow(QMainWindow):
 
         right_panel = QSplitter(Qt.Orientation.Vertical)
         self._property_panel = PropertyPanel()
-        self._property_panel.setMinimumWidth(240)
-        self._property_panel.setMaximumWidth(320)
+        self._property_panel.setMinimumWidth(220)
+        self._property_panel.setMaximumWidth(300)
 
         control_widget = QWidget()
         control_layout = QVBoxLayout(control_widget)

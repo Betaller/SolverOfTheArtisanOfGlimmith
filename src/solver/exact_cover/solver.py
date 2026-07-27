@@ -24,11 +24,27 @@ class ExactCoverSolver(Solver):
 
     @classmethod
     def supports(cls, puzzle: Puzzle) -> bool:
-        return (
-            puzzle.has_rule("shape_pool")
-            or (puzzle.has_rule("block") and (puzzle.has_rule("precise") or puzzle.has_rule("range")))
-            or (puzzle.has_rule("precise") and puzzle.height * puzzle.width <= 25)
-        )
+        hw = puzzle.height * puzzle.width
+        if puzzle.has_rule("shape_pool"):
+            return True
+        if puzzle.has_rule("block"):
+            h, w = puzzle.height, puzzle.width
+            est = sum((h - rh + 1) * (w - rw + 1) for rh in range(1, h + 1) for rw in range(1, w + 1))
+            if puzzle.has_rule("precise") or puzzle.has_rule("range"):
+                return est <= 20000
+            return est <= 5000 and hw <= 80
+        if puzzle.has_rule("precise"):
+            return hw <= 80
+        if puzzle.has_rule("range"):
+            hi = puzzle.get_rule("range").params.get("max", 999)
+            return hi <= 12 and hw <= 80
+        if puzzle.has_rule("area"):
+            max_clue = max(
+                (c.number for c in puzzle.cells if c.number is not None),
+                default=0,
+            )
+            return hw <= 80 and 2 <= max_clue <= 12
+        return False
 
     def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
         self._start = time.monotonic()
@@ -140,15 +156,17 @@ class ExactCoverSolver(Solver):
                             out.append(placed)
             return out
 
-        # ── block + size constraint: 枚举所有合法矩形 ──
+        # ── block: 枚举所有合法矩形 ──
         if puzzle.has_rule("block"):
             h, w = puzzle.height, puzzle.width
             if puzzle.has_rule("precise"):
                 lo = hi = puzzle.get_rule("precise").params["area"]
-            else:
+            elif puzzle.has_rule("range"):
                 rr = puzzle.get_rule("range")
                 lo = rr.params.get("min", 1)
                 hi = rr.params.get("max", h * w)
+            else:
+                lo, hi = 1, h * w
             seen: set[frozenset[tuple[int, int]]] = set()
             for rh in range(1, h + 1):
                 for rw in range(1, w + 1):
@@ -184,6 +202,51 @@ class ExactCoverSolver(Solver):
                             out.append(cand)
                         if len(out) >= 8000:
                             return out
+            return out
+
+        # ── range small grid: BFS 枚举 bounded by range ──
+        if puzzle.has_rule("range"):
+            rr = puzzle.get_rule("range")
+            lo = rr.params.get("min", 1)
+            hi = rr.params.get("max", puzzle.height * puzzle.width)
+            seen: set[frozenset[tuple[int, int]]] = set()
+            for seed in sorted(all_pos):
+                if time.monotonic() > self._deadline:
+                    break
+                for target in range(lo, hi + 1):
+                    for cand in _bfs_polyominoes(board, seed, all_pos, target, self._deadline, puzzle):
+                        fs = frozenset(cand)
+                        if fs not in seen:
+                            seen.add(fs)
+                            if _region_ok(board, cand, puzzle):
+                                out.append(cand)
+                            if len(out) >= 10000:
+                                return out
+            return out
+
+        # ── area small grid: BFS 枚举 bounded by area clue ──
+        if puzzle.has_rule("area"):
+            areas = set()
+            for r in range(puzzle.height):
+                for c in range(puzzle.width):
+                    n = board.cell(r, c).number
+                    if n is not None:
+                        areas.add(n)
+            if not areas:
+                areas = set(range(1, min(11, puzzle.height * puzzle.width + 1)))
+            seen: set[frozenset[tuple[int, int]]] = set()
+            for seed in sorted(all_pos):
+                if time.monotonic() > self._deadline:
+                    break
+                for target in areas:
+                    for cand in _bfs_polyominoes(board, seed, all_pos, target, self._deadline, puzzle):
+                        fs = frozenset(cand)
+                        if fs not in seen:
+                            seen.add(fs)
+                            if _region_ok(board, cand, puzzle):
+                                out.append(cand)
+                            if len(out) >= 10000:
+                                return out
             return out
 
         return out

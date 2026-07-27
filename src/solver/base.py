@@ -47,6 +47,10 @@ class SolverRouter:
     def attempts(self) -> list[SolverAttempt]:
         return self._attempts
 
+    @property
+    def solvers(self) -> list[Solver]:
+        return self._solvers
+
     def route(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
         self._attempts = []
         start = time.monotonic()

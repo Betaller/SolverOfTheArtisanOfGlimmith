@@ -51,6 +51,7 @@ class GridWidget(QWidget):
         self._selected_vertex: tuple[int, int] | None = None
         self._hover_cell: tuple[int, int] | None = None
         self._hover_vertex: tuple[int, int] | None = None
+        self._hover_edge: tuple[int, int, int, int] | None = None
         self._region_colors: dict[int, QColor] = {}
         self._current_symbol: str | None = None
         self._current_number: int | None = None
@@ -79,6 +80,9 @@ class GridWidget(QWidget):
         self._selected_cell = None
         self._selected_edge = None
         self._selected_vertex = None
+        self._hover_cell = None
+        self._hover_vertex = None
+        self._hover_edge = None
         self._boundary_start_vertex = None
         self._boundary_dragging = False
         self._last_boundary_vertex = None
@@ -628,20 +632,33 @@ class GridWidget(QWidget):
                 if cell is not None:
                     self.status_message.emit(f"单元格 ({cell[0]}, {cell[1]})")
         else:
-            # SELECT / NUMBER / SYMBOL / COMPASS modes: check vertex hover first
+            # SELECT / NUMBER / SYMBOL / COMPASS modes: check vertex → edge → cell
             v = self._hit_test_vertex(pos)
-            if v != self._hover_vertex:
-                self._hover_vertex = v
-                self._hover_cell = None
-                self.update()
+            e = self._hit_test_edge(pos)
+            changed = False
             if v is not None:
+                if v != self._hover_vertex:
+                    self._hover_vertex = v
+                    self._hover_cell = None
+                    self._hover_edge = None
+                    changed = True
                 self.status_message.emit(f"顶点 ({v[0]}, {v[1]})")
+            elif e is not None:
+                if e != self._hover_edge:
+                    self._hover_edge = e
+                    self._hover_cell = None
+                    self._hover_vertex = None
+                    changed = True
+                self.status_message.emit(f"边框 ({e[0]},{e[1]})-({e[2]},{e[3]})")
             else:
                 cell = self._hit_test_cell(pos)
+                if self._hover_edge is not None or self._hover_vertex is not None:
+                    changed = True
+                self._hover_edge = None
+                self._hover_vertex = None
                 if cell != self._hover_cell:
                     self._hover_cell = cell
-                    self._hover_vertex = None
-                    self.update()
+                    changed = True
                 if cell is not None:
                     c_obj = self.board.cell(cell[0], cell[1])
                     extras = []
@@ -655,6 +672,8 @@ class GridWidget(QWidget):
                     self.status_message.emit(f"单元格 ({cell[0]}, {cell[1]}){suffix}")
                 elif not self._hover_vertex:
                     self.status_message.emit("")
+            if changed:
+                self.update()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if self.board is None:
@@ -1007,6 +1026,13 @@ class GridWidget(QWidget):
             y = self._padding + self._hover_vertex[0] * self._cell_size
             painter.setPen(QPen(QColor(_ui_theme.colors.hover_vertex), 2))
             painter.drawEllipse(QPointF(x, y), self._cell_size // 8, self._cell_size // 8)
+
+        if self._hover_edge is not None and self._hover_edge != self._selected_edge:
+            e = self.board.edge_between(*self._hover_edge)
+            if e is not None:
+                x1, y1, x2, y2 = self._edge_endpoints(e)
+                painter.setPen(QPen(QColor(_ui_theme.colors.hover_cell), 3))
+                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
     def _draw_rule_overlay(self, painter: QPainter) -> None:
         if not self._overlay_rules and not self._overlay_shapes:

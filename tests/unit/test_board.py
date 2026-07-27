@@ -24,21 +24,25 @@ class TestBoardConstruction:
         assert b.height == 16
         assert b.width == 16
 
+    def test_valid_large_grid(self) -> None:
+        board = Board(50, 50)
+        assert board.height == 50 and board.width == 50
+
     def test_invalid_height_too_small(self) -> None:
         with pytest.raises(ValueError, match="Grid size"):
             Board(1, 4)
 
-    def test_invalid_height_too_large(self) -> None:
+    def test_invalid_height_too_small(self) -> None:
         with pytest.raises(ValueError, match="Grid size"):
-            Board(17, 4)
+            Board(1, 4)
 
     def test_invalid_width_too_small(self) -> None:
         with pytest.raises(ValueError, match="Grid size"):
             Board(4, 1)
 
-    def test_invalid_width_too_large(self) -> None:
+    def test_invalid_width_too_small(self) -> None:
         with pytest.raises(ValueError, match="Grid size"):
-            Board(4, 17)
+            Board(4, 1)
 
     def test_invalid_both_dimensions(self) -> None:
         with pytest.raises(ValueError, match="Grid size"):

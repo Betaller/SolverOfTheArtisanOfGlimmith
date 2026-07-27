@@ -24,7 +24,6 @@ class ExactCoverSolver(Solver):
 
     @classmethod
     def supports(cls, puzzle: Puzzle) -> bool:
-        # Explicit shape_pool or block always supported
         if puzzle.has_rule("shape_pool"):
             return True
         if puzzle.has_rule("block"):
@@ -33,15 +32,9 @@ class ExactCoverSolver(Solver):
             if puzzle.has_rule("precise") or puzzle.has_rule("range"):
                 return est <= 20000
             return est <= 5000
-
-        # Any puzzle with a bounded region size can use the polyomino cache
-        hw = puzzle.height * puzzle.width
-        if hw > 100:
-            return False
         targets = _collect_target_sizes(puzzle)
         if targets:
-            max_target = max(targets)
-            return max_target <= 12 and hw <= 100
+            return max(targets) <= 12
         return False
 
     def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:

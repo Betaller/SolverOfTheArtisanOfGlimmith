@@ -740,6 +740,17 @@
   ],
   "rules": [
     {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ]
+      }
+    },
+    {
       "type": "watchtower",
       "params": {}
     }

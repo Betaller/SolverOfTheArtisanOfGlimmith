@@ -1,0 +1,172 @@
+{
+  "category": "6-gemini-delta",
+  "zone": "Zone1",
+  "puzzle_count": 33,
+  "puzzles": [
+    {
+      "filename": "0027.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0027.puz",
+      "id": "0027"
+    },
+    {
+      "filename": "0091.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0091.puz",
+      "id": "0091"
+    },
+    {
+      "filename": "0097.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0097.puz",
+      "id": "0097"
+    },
+    {
+      "filename": "0099.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0099.puz",
+      "id": "0099"
+    },
+    {
+      "filename": "0105nopad.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0105nopad.puz",
+      "id": "0105nopad"
+    },
+    {
+      "filename": "0106nopad.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0106nopad.puz",
+      "id": "0106nopad"
+    },
+    {
+      "filename": "0107nopad.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0107nopad.puz",
+      "id": "0107nopad"
+    },
+    {
+      "filename": "0108.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0108.puz",
+      "id": "0108"
+    },
+    {
+      "filename": "0109.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0109.puz",
+      "id": "0109"
+    },
+    {
+      "filename": "0114.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0114.puz",
+      "id": "0114"
+    },
+    {
+      "filename": "0126.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0126.puz",
+      "id": "0126"
+    },
+    {
+      "filename": "0528.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0528.puz",
+      "id": "0528"
+    },
+    {
+      "filename": "0529.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0529.puz",
+      "id": "0529"
+    },
+    {
+      "filename": "0530.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0530.puz",
+      "id": "0530"
+    },
+    {
+      "filename": "0531.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0531.puz",
+      "id": "0531"
+    },
+    {
+      "filename": "0533.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0533.puz",
+      "id": "0533"
+    },
+    {
+      "filename": "0536.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0536.puz",
+      "id": "0536"
+    },
+    {
+      "filename": "0672.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0672.puz",
+      "id": "0672"
+    },
+    {
+      "filename": "0673.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0673.puz",
+      "id": "0673"
+    },
+    {
+      "filename": "0692.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0692.puz",
+      "id": "0692"
+    },
+    {
+      "filename": "0694.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0694.puz",
+      "id": "0694"
+    },
+    {
+      "filename": "0946.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/0946.puz",
+      "id": "0946"
+    },
+    {
+      "filename": "1024.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1024.puz",
+      "id": "1024"
+    },
+    {
+      "filename": "1025.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1025.puz",
+      "id": "1025"
+    },
+    {
+      "filename": "1160.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1160.puz",
+      "id": "1160"
+    },
+    {
+      "filename": "1161.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1161.puz",
+      "id": "1161"
+    },
+    {
+      "filename": "1162.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1162.puz",
+      "id": "1162"
+    },
+    {
+      "filename": "1241.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1241.puz",
+      "id": "1241"
+    },
+    {
+      "filename": "1275.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1275.puz",
+      "id": "1275"
+    },
+    {
+      "filename": "1276.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1276.puz",
+      "id": "1276"
+    },
+    {
+      "filename": "1278.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1278.puz",
+      "id": "1278"
+    },
+    {
+      "filename": "1280.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1280.puz",
+      "id": "1280"
+    },
+    {
+      "filename": "1415pad.puz",
+      "path": "AGeri/Puzzles/Zone1/6-gemini-delta/1415pad.puz",
+      "id": "1415pad"
+    }
+  ]
+}

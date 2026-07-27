@@ -38,13 +38,13 @@ class NewPuzzleDialog(QDialog):
         layout.setSpacing(12)
 
         self._height_spin = QSpinBox()
-        self._height_spin.setRange(2, 16)
+        self._height_spin.setRange(2, 50)
         self._height_spin.setValue(6)
         self._height_spin.setFixedWidth(80)
         layout.addRow("高度:", self._height_spin)
 
         self._width_spin = QSpinBox()
-        self._width_spin.setRange(2, 16)
+        self._width_spin.setRange(2, 50)
         self._width_spin.setValue(6)
         self._width_spin.setFixedWidth(80)
         layout.addRow("宽度:", self._width_spin)

@@ -1,0 +1,287 @@
+{
+  "category": "5-inequality",
+  "zone": "Zone3",
+  "puzzle_count": 56,
+  "puzzles": [
+    {
+      "filename": "0152.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0152.puz",
+      "id": "0152"
+    },
+    {
+      "filename": "0190.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0190.puz",
+      "id": "0190"
+    },
+    {
+      "filename": "0251.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0251.puz",
+      "id": "0251"
+    },
+    {
+      "filename": "0262.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0262.puz",
+      "id": "0262"
+    },
+    {
+      "filename": "0265.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0265.puz",
+      "id": "0265"
+    },
+    {
+      "filename": "0273.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0273.puz",
+      "id": "0273"
+    },
+    {
+      "filename": "0484b.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0484b.puz",
+      "id": "0484b"
+    },
+    {
+      "filename": "0578.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0578.puz",
+      "id": "0578"
+    },
+    {
+      "filename": "0579.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0579.puz",
+      "id": "0579"
+    },
+    {
+      "filename": "0582.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0582.puz",
+      "id": "0582"
+    },
+    {
+      "filename": "0583.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0583.puz",
+      "id": "0583"
+    },
+    {
+      "filename": "0584.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0584.puz",
+      "id": "0584"
+    },
+    {
+      "filename": "0585.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0585.puz",
+      "id": "0585"
+    },
+    {
+      "filename": "0586.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0586.puz",
+      "id": "0586"
+    },
+    {
+      "filename": "0607.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0607.puz",
+      "id": "0607"
+    },
+    {
+      "filename": "0611.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0611.puz",
+      "id": "0611"
+    },
+    {
+      "filename": "0727.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0727.puz",
+      "id": "0727"
+    },
+    {
+      "filename": "0728.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0728.puz",
+      "id": "0728"
+    },
+    {
+      "filename": "0729.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0729.puz",
+      "id": "0729"
+    },
+    {
+      "filename": "0735.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0735.puz",
+      "id": "0735"
+    },
+    {
+      "filename": "0841.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0841.puz",
+      "id": "0841"
+    },
+    {
+      "filename": "0843.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0843.puz",
+      "id": "0843"
+    },
+    {
+      "filename": "0845.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0845.puz",
+      "id": "0845"
+    },
+    {
+      "filename": "0846.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0846.puz",
+      "id": "0846"
+    },
+    {
+      "filename": "0894.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0894.puz",
+      "id": "0894"
+    },
+    {
+      "filename": "0895.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0895.puz",
+      "id": "0895"
+    },
+    {
+      "filename": "0896.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0896.puz",
+      "id": "0896"
+    },
+    {
+      "filename": "0898fix2.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0898fix2.puz",
+      "id": "0898fix2"
+    },
+    {
+      "filename": "0899.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0899.puz",
+      "id": "0899"
+    },
+    {
+      "filename": "0900.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0900.puz",
+      "id": "0900"
+    },
+    {
+      "filename": "0901.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0901.puz",
+      "id": "0901"
+    },
+    {
+      "filename": "0902.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0902.puz",
+      "id": "0902"
+    },
+    {
+      "filename": "0903.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0903.puz",
+      "id": "0903"
+    },
+    {
+      "filename": "0904.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0904.puz",
+      "id": "0904"
+    },
+    {
+      "filename": "0905.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0905.puz",
+      "id": "0905"
+    },
+    {
+      "filename": "0907.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0907.puz",
+      "id": "0907"
+    },
+    {
+      "filename": "0908v2.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0908v2.puz",
+      "id": "0908v2"
+    },
+    {
+      "filename": "0910.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0910.puz",
+      "id": "0910"
+    },
+    {
+      "filename": "0911.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0911.puz",
+      "id": "0911"
+    },
+    {
+      "filename": "0912.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/0912.puz",
+      "id": "0912"
+    },
+    {
+      "filename": "1207b.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1207b.puz",
+      "id": "1207b"
+    },
+    {
+      "filename": "1208.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1208.puz",
+      "id": "1208"
+    },
+    {
+      "filename": "1209.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1209.puz",
+      "id": "1209"
+    },
+    {
+      "filename": "1210.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1210.puz",
+      "id": "1210"
+    },
+    {
+      "filename": "1382.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1382.puz",
+      "id": "1382"
+    },
+    {
+      "filename": "1397a.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1397a.puz",
+      "id": "1397a"
+    },
+    {
+      "filename": "1398.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1398.puz",
+      "id": "1398"
+    },
+    {
+      "filename": "1399.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1399.puz",
+      "id": "1399"
+    },
+    {
+      "filename": "1407a.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1407a.puz",
+      "id": "1407a"
+    },
+    {
+      "filename": "1408.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1408.puz",
+      "id": "1408"
+    },
+    {
+      "filename": "1409.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1409.puz",
+      "id": "1409"
+    },
+    {
+      "filename": "1410.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1410.puz",
+      "id": "1410"
+    },
+    {
+      "filename": "1411.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1411.puz",
+      "id": "1411"
+    },
+    {
+      "filename": "1412.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1412.puz",
+      "id": "1412"
+    },
+    {
+      "filename": "1413.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1413.puz",
+      "id": "1413"
+    },
+    {
+      "filename": "1414.puz",
+      "path": "AGeri/Puzzles/Zone3/5-inequality/1414.puz",
+      "id": "1414"
+    }
+  ]
+}

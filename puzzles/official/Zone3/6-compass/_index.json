@@ -1,0 +1,177 @@
+{
+  "category": "6-compass",
+  "zone": "Zone3",
+  "puzzle_count": 34,
+  "puzzles": [
+    {
+      "filename": "0299.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0299.puz",
+      "id": "0299"
+    },
+    {
+      "filename": "0389.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0389.puz",
+      "id": "0389"
+    },
+    {
+      "filename": "0468.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0468.puz",
+      "id": "0468"
+    },
+    {
+      "filename": "0495.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0495.puz",
+      "id": "0495"
+    },
+    {
+      "filename": "0513.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0513.puz",
+      "id": "0513"
+    },
+    {
+      "filename": "0517.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0517.puz",
+      "id": "0517"
+    },
+    {
+      "filename": "0518.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0518.puz",
+      "id": "0518"
+    },
+    {
+      "filename": "0521.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0521.puz",
+      "id": "0521"
+    },
+    {
+      "filename": "0523.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0523.puz",
+      "id": "0523"
+    },
+    {
+      "filename": "0524.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0524.puz",
+      "id": "0524"
+    },
+    {
+      "filename": "0525.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0525.puz",
+      "id": "0525"
+    },
+    {
+      "filename": "0627.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0627.puz",
+      "id": "0627"
+    },
+    {
+      "filename": "0684.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0684.puz",
+      "id": "0684"
+    },
+    {
+      "filename": "0711.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0711.puz",
+      "id": "0711"
+    },
+    {
+      "filename": "0712.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0712.puz",
+      "id": "0712"
+    },
+    {
+      "filename": "0714.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0714.puz",
+      "id": "0714"
+    },
+    {
+      "filename": "0715.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0715.puz",
+      "id": "0715"
+    },
+    {
+      "filename": "0716.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0716.puz",
+      "id": "0716"
+    },
+    {
+      "filename": "0717.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0717.puz",
+      "id": "0717"
+    },
+    {
+      "filename": "0718.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0718.puz",
+      "id": "0718"
+    },
+    {
+      "filename": "0719.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0719.puz",
+      "id": "0719"
+    },
+    {
+      "filename": "0720.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0720.puz",
+      "id": "0720"
+    },
+    {
+      "filename": "0721.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0721.puz",
+      "id": "0721"
+    },
+    {
+      "filename": "0722.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0722.puz",
+      "id": "0722"
+    },
+    {
+      "filename": "0724.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0724.puz",
+      "id": "0724"
+    },
+    {
+      "filename": "0726.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0726.puz",
+      "id": "0726"
+    },
+    {
+      "filename": "0767.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0767.puz",
+      "id": "0767"
+    },
+    {
+      "filename": "0885.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0885.puz",
+      "id": "0885"
+    },
+    {
+      "filename": "0886.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0886.puz",
+      "id": "0886"
+    },
+    {
+      "filename": "0887.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0887.puz",
+      "id": "0887"
+    },
+    {
+      "filename": "0888.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0888.puz",
+      "id": "0888"
+    },
+    {
+      "filename": "0889.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/0889.puz",
+      "id": "0889"
+    },
+    {
+      "filename": "1394.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/1394.puz",
+      "id": "1394"
+    },
+    {
+      "filename": "1395b.puz",
+      "path": "AGeri/Puzzles/Zone3/6-compass/1395b.puz",
+      "id": "1395b"
+    }
+  ]
+}

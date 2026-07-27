@@ -1534,6 +1534,14 @@
     {
       "type": "same",
       "params": {}
+    },
+    {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "A"
+        ]
+      }
     }
   ],
   "shape_pool": []

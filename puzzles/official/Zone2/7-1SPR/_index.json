@@ -1,0 +1,192 @@
+{
+  "category": "7-1SPR",
+  "zone": "Zone2",
+  "puzzle_count": 37,
+  "puzzles": [
+    {
+      "filename": "0129b.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0129b.puz",
+      "id": "0129b"
+    },
+    {
+      "filename": "0385.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0385.puz",
+      "id": "0385"
+    },
+    {
+      "filename": "0503.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0503.puz",
+      "id": "0503"
+    },
+    {
+      "filename": "0504.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0504.puz",
+      "id": "0504"
+    },
+    {
+      "filename": "0564.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0564.puz",
+      "id": "0564"
+    },
+    {
+      "filename": "0565.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0565.puz",
+      "id": "0565"
+    },
+    {
+      "filename": "0567.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0567.puz",
+      "id": "0567"
+    },
+    {
+      "filename": "0568.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0568.puz",
+      "id": "0568"
+    },
+    {
+      "filename": "0639.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0639.puz",
+      "id": "0639"
+    },
+    {
+      "filename": "0640.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0640.puz",
+      "id": "0640"
+    },
+    {
+      "filename": "0675.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0675.puz",
+      "id": "0675"
+    },
+    {
+      "filename": "0702.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0702.puz",
+      "id": "0702"
+    },
+    {
+      "filename": "0785.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0785.puz",
+      "id": "0785"
+    },
+    {
+      "filename": "0786.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0786.puz",
+      "id": "0786"
+    },
+    {
+      "filename": "0787.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0787.puz",
+      "id": "0787"
+    },
+    {
+      "filename": "0788.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0788.puz",
+      "id": "0788"
+    },
+    {
+      "filename": "0789.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0789.puz",
+      "id": "0789"
+    },
+    {
+      "filename": "0790.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0790.puz",
+      "id": "0790"
+    },
+    {
+      "filename": "0791.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0791.puz",
+      "id": "0791"
+    },
+    {
+      "filename": "0793.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0793.puz",
+      "id": "0793"
+    },
+    {
+      "filename": "0794.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0794.puz",
+      "id": "0794"
+    },
+    {
+      "filename": "0795.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0795.puz",
+      "id": "0795"
+    },
+    {
+      "filename": "0796.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0796.puz",
+      "id": "0796"
+    },
+    {
+      "filename": "0797.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0797.puz",
+      "id": "0797"
+    },
+    {
+      "filename": "0798.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0798.puz",
+      "id": "0798"
+    },
+    {
+      "filename": "0808.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0808.puz",
+      "id": "0808"
+    },
+    {
+      "filename": "0811.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/0811.puz",
+      "id": "0811"
+    },
+    {
+      "filename": "1184.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1184.puz",
+      "id": "1184"
+    },
+    {
+      "filename": "1185.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1185.puz",
+      "id": "1185"
+    },
+    {
+      "filename": "1186.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1186.puz",
+      "id": "1186"
+    },
+    {
+      "filename": "1264.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1264.puz",
+      "id": "1264"
+    },
+    {
+      "filename": "1316.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1316.puz",
+      "id": "1316"
+    },
+    {
+      "filename": "1317.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1317.puz",
+      "id": "1317"
+    },
+    {
+      "filename": "1318.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1318.puz",
+      "id": "1318"
+    },
+    {
+      "filename": "1319.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1319.puz",
+      "id": "1319"
+    },
+    {
+      "filename": "1320.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1320.puz",
+      "id": "1320"
+    },
+    {
+      "filename": "1321.puz",
+      "path": "AGeri/Puzzles/Zone2/7-1SPR/1321.puz",
+      "id": "1321"
+    }
+  ]
+}

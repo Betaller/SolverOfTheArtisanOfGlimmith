@@ -1,0 +1,12 @@
+{
+  "category": "7-finalboss",
+  "zone": "Zone3",
+  "puzzle_count": 1,
+  "puzzles": [
+    {
+      "filename": "1152.puz",
+      "path": "AGeri/Puzzles/Zone3/7-finalboss/1152.puz",
+      "id": "1152"
+    }
+  ]
+}

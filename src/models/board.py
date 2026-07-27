@@ -102,8 +102,8 @@ class Vertex:
 
 class Board:
     def __init__(self, height: int, width: int) -> None:
-        if height < 2 or height > 16 or width < 2 or width > 16:
-            raise ValueError(f"Grid size must be 2..16, got {height}x{width}")
+        if height < 2 or width < 2:
+            raise ValueError(f"Grid size must be at least 2x2, got {height}x{width}")
         self.height = height
         self.width = width
         self._cells: list[list[Cell]] = [

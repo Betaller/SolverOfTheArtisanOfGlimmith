@@ -1,0 +1,202 @@
+{
+  "category": "8-poly",
+  "zone": "Zone1",
+  "puzzle_count": 39,
+  "puzzles": [
+    {
+      "filename": "0123.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0123.puz",
+      "id": "0123"
+    },
+    {
+      "filename": "0128.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0128.puz",
+      "id": "0128"
+    },
+    {
+      "filename": "0133.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0133.puz",
+      "id": "0133"
+    },
+    {
+      "filename": "0134.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0134.puz",
+      "id": "0134"
+    },
+    {
+      "filename": "0135.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0135.puz",
+      "id": "0135"
+    },
+    {
+      "filename": "0137.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0137.puz",
+      "id": "0137"
+    },
+    {
+      "filename": "0144.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0144.puz",
+      "id": "0144"
+    },
+    {
+      "filename": "0146.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0146.puz",
+      "id": "0146"
+    },
+    {
+      "filename": "0147.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0147.puz",
+      "id": "0147"
+    },
+    {
+      "filename": "0148.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0148.puz",
+      "id": "0148"
+    },
+    {
+      "filename": "0149.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0149.puz",
+      "id": "0149"
+    },
+    {
+      "filename": "0150.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0150.puz",
+      "id": "0150"
+    },
+    {
+      "filename": "0151.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0151.puz",
+      "id": "0151"
+    },
+    {
+      "filename": "0153.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0153.puz",
+      "id": "0153"
+    },
+    {
+      "filename": "0175.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0175.puz",
+      "id": "0175"
+    },
+    {
+      "filename": "0200.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0200.puz",
+      "id": "0200"
+    },
+    {
+      "filename": "0361.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0361.puz",
+      "id": "0361"
+    },
+    {
+      "filename": "0363.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0363.puz",
+      "id": "0363"
+    },
+    {
+      "filename": "0364.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0364.puz",
+      "id": "0364"
+    },
+    {
+      "filename": "0365.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0365.puz",
+      "id": "0365"
+    },
+    {
+      "filename": "0366.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0366.puz",
+      "id": "0366"
+    },
+    {
+      "filename": "0368.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0368.puz",
+      "id": "0368"
+    },
+    {
+      "filename": "0371.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0371.puz",
+      "id": "0371"
+    },
+    {
+      "filename": "0379.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0379.puz",
+      "id": "0379"
+    },
+    {
+      "filename": "0380.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0380.puz",
+      "id": "0380"
+    },
+    {
+      "filename": "0392.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/0392.puz",
+      "id": "0392"
+    },
+    {
+      "filename": "1040.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1040.puz",
+      "id": "1040"
+    },
+    {
+      "filename": "1042.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1042.puz",
+      "id": "1042"
+    },
+    {
+      "filename": "1043.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1043.puz",
+      "id": "1043"
+    },
+    {
+      "filename": "1046.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1046.puz",
+      "id": "1046"
+    },
+    {
+      "filename": "1048.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1048.puz",
+      "id": "1048"
+    },
+    {
+      "filename": "1049.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1049.puz",
+      "id": "1049"
+    },
+    {
+      "filename": "1051.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1051.puz",
+      "id": "1051"
+    },
+    {
+      "filename": "1053.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1053.puz",
+      "id": "1053"
+    },
+    {
+      "filename": "1054.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1054.puz",
+      "id": "1054"
+    },
+    {
+      "filename": "1057.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1057.puz",
+      "id": "1057"
+    },
+    {
+      "filename": "1058.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1058.puz",
+      "id": "1058"
+    },
+    {
+      "filename": "1245.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1245.puz",
+      "id": "1245"
+    },
+    {
+      "filename": "1423.puz",
+      "path": "AGeri/Puzzles/Zone1/8-poly/1423.puz",
+      "id": "1423"
+    }
+  ]
+}

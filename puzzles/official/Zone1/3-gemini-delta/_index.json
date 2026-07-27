@@ -1,0 +1,47 @@
+{
+  "category": "3-gemini-delta",
+  "zone": "Zone1",
+  "puzzle_count": 8,
+  "puzzles": [
+    {
+      "filename": "0042.puz",
+      "path": "AGeri/Puzzles/Zone1/3-gemini-delta/0042.puz",
+      "id": "0042"
+    },
+    {
+      "filename": "0043.puz",
+      "path": "AGeri/Puzzles/Zone1/3-gemini-delta/0043.puz",
+      "id": "0043"
+    },
+    {
+      "filename": "0095.puz",
+      "path": "AGeri/Puzzles/Zone1/3-gemini-delta/0095.puz",
+      "id": "0095"
+    },
+    {
+      "filename": "0096.puz",
+      "path": "AGeri/Puzzles/Zone1/3-gemini-delta/0096.puz",
+      "id": "0096"
+    },
+    {
+      "filename": "0101.puz",
+      "path": "AGeri/Puzzles/Zone1/3-gemini-delta/0101.puz",
+      "id": "0101"
+    },
+    {
+      "filename": "0693b.puz",
+      "path": "AGeri/Puzzles/Zone1/3-gemini-delta/0693b.puz",
+      "id": "0693b"
+    },
+    {
+      "filename": "1271.puz",
+      "path": "AGeri/Puzzles/Zone1/3-gemini-delta/1271.puz",
+      "id": "1271"
+    },
+    {
+      "filename": "1281.puz",
+      "path": "AGeri/Puzzles/Zone1/3-gemini-delta/1281.puz",
+      "id": "1281"
+    }
+  ]
+}

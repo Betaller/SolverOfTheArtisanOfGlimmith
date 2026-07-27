@@ -1,0 +1,212 @@
+{
+  "category": "10-same-shape-no-touch",
+  "zone": "Zone1",
+  "puzzle_count": 41,
+  "puzzles": [
+    {
+      "filename": "0079.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0079.puz",
+      "id": "0079"
+    },
+    {
+      "filename": "0080.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0080.puz",
+      "id": "0080"
+    },
+    {
+      "filename": "0157.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0157.puz",
+      "id": "0157"
+    },
+    {
+      "filename": "0159.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0159.puz",
+      "id": "0159"
+    },
+    {
+      "filename": "0165.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0165.puz",
+      "id": "0165"
+    },
+    {
+      "filename": "0167.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0167.puz",
+      "id": "0167"
+    },
+    {
+      "filename": "0179B.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0179B.puz",
+      "id": "0179B"
+    },
+    {
+      "filename": "0180.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0180.puz",
+      "id": "0180"
+    },
+    {
+      "filename": "0181.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0181.puz",
+      "id": "0181"
+    },
+    {
+      "filename": "0182.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0182.puz",
+      "id": "0182"
+    },
+    {
+      "filename": "0183.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0183.puz",
+      "id": "0183"
+    },
+    {
+      "filename": "0201.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0201.puz",
+      "id": "0201"
+    },
+    {
+      "filename": "0219.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0219.puz",
+      "id": "0219"
+    },
+    {
+      "filename": "0220.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0220.puz",
+      "id": "0220"
+    },
+    {
+      "filename": "0276.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0276.puz",
+      "id": "0276"
+    },
+    {
+      "filename": "0324.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0324.puz",
+      "id": "0324"
+    },
+    {
+      "filename": "0329.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0329.puz",
+      "id": "0329"
+    },
+    {
+      "filename": "0331.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0331.puz",
+      "id": "0331"
+    },
+    {
+      "filename": "0474.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/0474.puz",
+      "id": "0474"
+    },
+    {
+      "filename": "1029.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1029.puz",
+      "id": "1029"
+    },
+    {
+      "filename": "1031.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1031.puz",
+      "id": "1031"
+    },
+    {
+      "filename": "1033.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1033.puz",
+      "id": "1033"
+    },
+    {
+      "filename": "1065.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1065.puz",
+      "id": "1065"
+    },
+    {
+      "filename": "1066.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1066.puz",
+      "id": "1066"
+    },
+    {
+      "filename": "1068.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1068.puz",
+      "id": "1068"
+    },
+    {
+      "filename": "1069.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1069.puz",
+      "id": "1069"
+    },
+    {
+      "filename": "1070.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1070.puz",
+      "id": "1070"
+    },
+    {
+      "filename": "1122.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1122.puz",
+      "id": "1122"
+    },
+    {
+      "filename": "1123.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1123.puz",
+      "id": "1123"
+    },
+    {
+      "filename": "1167.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1167.puz",
+      "id": "1167"
+    },
+    {
+      "filename": "1243.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1243.puz",
+      "id": "1243"
+    },
+    {
+      "filename": "1244.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1244.puz",
+      "id": "1244"
+    },
+    {
+      "filename": "1252.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1252.puz",
+      "id": "1252"
+    },
+    {
+      "filename": "1424.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1424.puz",
+      "id": "1424"
+    },
+    {
+      "filename": "1426.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1426.puz",
+      "id": "1426"
+    },
+    {
+      "filename": "1427.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1427.puz",
+      "id": "1427"
+    },
+    {
+      "filename": "1428.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1428.puz",
+      "id": "1428"
+    },
+    {
+      "filename": "1429.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1429.puz",
+      "id": "1429"
+    },
+    {
+      "filename": "1435.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1435.puz",
+      "id": "1435"
+    },
+    {
+      "filename": "1438.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1438.puz",
+      "id": "1438"
+    },
+    {
+      "filename": "1439.puz",
+      "path": "AGeri/Puzzles/Zone1/10-same-shape-no-touch/1439.puz",
+      "id": "1439"
+    }
+  ]
+}

@@ -573,7 +573,18 @@ class BacktrackSolver:
         puzzle = self.puzzle
         board = self._board
 
-        if not puzzle.has_rule("shape_pool") and not puzzle.has_rule("precise"):
+        if puzzle.has_rule("block") and (puzzle.has_rule("precise") or puzzle.has_rule("range")):
+            # Block exact-cover only with size constraints — otherwise too many solutions
+            total_fillable = len(all_positions)
+            h = puzzle.height
+            w = puzzle.width
+            estimated = 0
+            for rh in range(1, h + 1):
+                for rw in range(1, w + 1):
+                    estimated += (h - rh + 1) * (w - rw + 1)
+            if estimated > 50000:
+                return None
+        elif not puzzle.has_rule("shape_pool") and not puzzle.has_rule("precise"):
             return None
         if puzzle.has_rule("shape_pool"):
             pool = puzzle.get_rule("shape_pool")

@@ -593,6 +593,11 @@ class BacktrackSolver:
         if not candidates:
             return None
 
+        # ── Inequality arc consistency (≈ aog pieces.rs cell_min/cell_max) ──
+        candidates = self._apply_inequality_bounds(candidates, all_positions)
+        if not candidates:
+            return None
+
         from collections import defaultdict
         cell_to_cands: dict[tuple[int, int], list[int]] = defaultdict(list)
         for idx, cc in enumerate(candidates):
@@ -804,6 +809,109 @@ class BacktrackSolver:
                         conflicts[i].add(j); conflicts[j].add(i)
 
         return conflicts
+
+    def _apply_inequality_bounds(self, candidates: list[set[tuple[int, int]]],
+                                  all_positions: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:
+        """Filter candidates using arc-consistent cell area bounds from inequality edges.
+
+        (≈ aog pieces.rs: cell_min/cell_max arrays propagated to convergence.)
+        """
+        puzzle = self.puzzle
+        board = self._board
+        if not puzzle.has_rule("inequality") and not puzzle.has_rule("difference"):
+            return candidates
+
+        n = len(all_positions)
+        cell_list = sorted(all_positions)
+        cell_to_idx = {c: i for i, c in enumerate(cell_list)}
+
+        # Collect inequality and difference constraints
+        pairs: list[tuple[int, int, str, int | None]] = []  # (small_idx, large_idx, kind, diff_val)
+        for r in range(board.height):
+            for c in range(board.width):
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = r + dr, c + dc
+                    if not (0 <= nr < board.height and 0 <= nc < board.width):
+                        continue
+                    edge = board.edge_between(r, c, nr, nc)
+                    if edge is None or edge.constraint is None:
+                        continue
+                    pos1 = (r, c)
+                    pos2 = (nr, nc)
+                    if pos1 not in cell_to_idx or pos2 not in cell_to_idx:
+                        continue
+                    i1 = cell_to_idx[pos1]
+                    i2 = cell_to_idx[pos2]
+                    ct = edge.constraint.type
+                    if ct == EdgeConstraintType.INEQUALITY:
+                        rev = edge.constraint.value == 1
+                        # Arrow points from larger to smaller region
+                        if rev:
+                            pairs.append((i1, i2, "inequality", None))  # i1 < i2
+                        else:
+                            pairs.append((i2, i1, "inequality", None))  # i2 < i1
+                    elif ct == EdgeConstraintType.DIFFERENCE:
+                        dv = edge.constraint.value or 1
+                        pairs.append((i1, i2, "difference", dv))
+
+        if not pairs:
+            return candidates
+
+        # Arc consistency propagation for inequality bounds
+        min_area = 1
+        max_area = puzzle.height * puzzle.width
+        cell_min = [min_area] * n
+        cell_max = [max_area] * n
+
+        changed = True
+        while changed:
+            changed = False
+            for small, large, kind, diff_val in pairs:
+                if kind == "inequality":
+                    # area(small) < area(large) → area(small) ≤ area(large) - 1
+                    new_max_small = cell_max[large] - 1
+                    if cell_max[small] > new_max_small:
+                        cell_max[small] = new_max_small
+                        changed = True
+                    new_min_large = cell_min[small] + 1
+                    if cell_min[large] < new_min_large:
+                        cell_min[large] = new_min_large
+                        changed = True
+                elif kind == "difference":
+                    dv = diff_val
+                    # |area(i1) - area(i2)| == dv
+                    # area(i1) ≤ area(i2) + dv  AND  area(i1) ≥ area(i2) - dv
+                    new_max_small = cell_max[large] + dv
+                    if cell_max[small] > new_max_small:
+                        cell_max[small] = new_max_small
+                        changed = True
+                    new_min_small = max(min_area, cell_min[large] - dv)
+                    if cell_min[small] < new_min_small:
+                        cell_min[small] = new_min_small
+                        changed = True
+                    new_max_large = cell_max[small] + dv
+                    if cell_max[large] > new_max_large:
+                        cell_max[large] = new_max_large
+                        changed = True
+                    new_min_large = max(min_area, cell_min[small] - dv)
+                    if cell_min[large] < new_min_large:
+                        cell_min[large] = new_min_large
+                        changed = True
+
+        # Filter candidates that violate derived bounds
+        filtered = []
+        for cc in candidates:
+            size = len(cc)
+            valid = True
+            for cell in cc:
+                if cell in cell_to_idx:
+                    idx = cell_to_idx[cell]
+                    if size < cell_min[idx] or size > cell_max[idx]:
+                        valid = False
+                        break
+            if valid:
+                filtered.append(cc)
+        return filtered
 
 
 def _all_transformations(cells: frozenset[tuple[int, int]]) -> list[frozenset[tuple[int, int]]]:

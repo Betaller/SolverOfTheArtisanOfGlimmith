@@ -90,6 +90,9 @@ class MainWindow(QMainWindow):
         self._puzzle: Puzzle | None = None
         self._current_file: str | None = None
         self._initial_puzzle_data: dict | None = None
+        self._undo_stack: list[dict] = []
+        self._redo_stack: list[dict] = []
+        self._undo_depth = 100
 
         self.setWindowTitle("格里米斯的工匠 - 求解器")
         self.resize(1320, 840)
@@ -193,7 +196,9 @@ class MainWindow(QMainWindow):
         self._grid_widget.vertex_clicked.connect(self._on_vertex_clicked)
         self._grid_widget.mode_changed.connect(self._on_grid_mode_changed)
         self._grid_widget.status_message.connect(self._status_label.setText)
+        self._grid_widget.board_modified.connect(self._on_board_modified)
         self._property_panel.board_modified.connect(self._grid_widget.update)
+        self._property_panel.board_modified.connect(self._on_board_modified)
         self._constraint_panel.rules_changed.connect(self._on_rules_changed)
         self._puzzle_browser.puzzle_selected.connect(self._on_puzzle_browser_selected)
 
@@ -242,6 +247,17 @@ class MainWindow(QMainWindow):
         file_menu.addAction(save_as_action)
 
         file_menu.addSeparator()
+        undo_action = QAction("撤销", self)
+        undo_action.setShortcut("Ctrl+Z")
+        undo_action.triggered.connect(self._on_undo)
+        file_menu.addAction(undo_action)
+
+        redo_action = QAction("重做", self)
+        redo_action.setShortcut("Ctrl+Shift+Z")
+        redo_action.triggered.connect(self._on_redo)
+        file_menu.addAction(redo_action)
+
+        file_menu.addSeparator()
         reset_action = QAction("重置", self)
         reset_action.setShortcut("Ctrl+R")
         reset_action.triggered.connect(self._on_reset)
@@ -266,6 +282,61 @@ class MainWindow(QMainWindow):
     def _setup_status_bar(self) -> None:
         self._status_label = QLabel("就绪")
         self.statusBar().addWidget(self._status_label)
+
+    def _save_undo_snapshot(self) -> None:
+        """Save current puzzle state for undo before a modification."""
+        self._sync_puzzle_from_ui()
+        if self._puzzle is None:
+            return
+        snap = puzzle_to_dict(self._puzzle)
+        if self._undo_stack and snap == self._undo_stack[-1]:
+            return
+        self._undo_stack.append(snap)
+        if len(self._undo_stack) > self._undo_depth:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+
+    def _on_undo(self) -> None:
+        if not self._undo_stack:
+            return
+        self._sync_puzzle_from_ui()
+        cur = puzzle_to_dict(self._puzzle) if self._puzzle else None
+        prev = self._undo_stack.pop()
+        if cur is not None:
+            self._redo_stack.append(cur)
+        self._apply_snapshot(prev)
+        self._status_label.setText("已撤销")
+
+    def _on_redo(self) -> None:
+        if not self._redo_stack:
+            return
+        self._sync_puzzle_from_ui()
+        cur = puzzle_to_dict(self._puzzle) if self._puzzle else None
+        nxt = self._redo_stack.pop()
+        if cur is not None:
+            self._undo_stack.append(cur)
+        self._apply_snapshot(nxt)
+        self._status_label.setText("已重做")
+
+    def _on_board_modified(self) -> None:
+        """Debounced undo snapshot save after user modifications."""
+        if hasattr(self, '_undo_timer'):
+            self._undo_timer.stop()
+        else:
+            self._undo_timer = QTimer()
+            self._undo_timer.setSingleShot(True)
+            self._undo_timer.timeout.connect(self._save_undo_snapshot)
+        self._undo_timer.start(300)
+
+    def _apply_snapshot(self, data: dict) -> None:
+        self._puzzle = dict_to_puzzle(data)
+        board = Board(self._puzzle.height, self._puzzle.width)
+        self._copy_puzzle_to_board(board)
+        self._grid_widget.set_board(board)
+        self._property_panel.set_board(board)
+        self._constraint_panel.set_puzzle(self._puzzle)
+        self._update_title()
+        self._update_overlay()
 
     def _show_about(self) -> None:
         QMessageBox.about(self, "关于",

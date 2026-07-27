@@ -30,6 +30,7 @@ class GridWidget(QWidget):
     vertex_clicked = Signal(int, int)
     mode_changed = Signal(str)
     status_message = Signal(str)
+    board_modified = Signal()
 
     MODE_SELECT = "select"
     MODE_BOUNDARY = "boundary"
@@ -85,9 +86,31 @@ class GridWidget(QWidget):
         if board is not None:
             for key in board.outer_boundaries:
                 self._outer_boundaries.add(key)
+            self._cache_rects()
         self._block_dragging = False
         self._inline_number = ""
         self.update()
+
+    def _cache_rects(self) -> None:
+        """Precompute hit-test rects for O(1) lookup instead of O(H×W) scan."""
+        if self.board is None:
+            return
+        h, w = self.board.height, self.board.width
+        pad, sz = self._padding, self._cell_size
+        self._cell_rects: dict[tuple[int, int], QRectF] = {}
+        self._vertex_positions: dict[tuple[int, int], QPointF] = {}
+        self._edge_rects: dict[tuple[int, int, int, int], tuple[float, float, float, float]] = {}
+
+        for r in range(h):
+            for c in range(w):
+                self._cell_rects[(r, c)] = QRectF(pad + c * sz, pad + r * sz, sz, sz)
+
+        for r in range(h + 1):
+            for c in range(w + 1):
+                self._vertex_positions[(r, c)] = QPointF(pad + c * sz, pad + r * sz)
+
+        for e in self.board.edges():
+            self._edge_rects[(e.r1, e.c1, e.r2, e.c2)] = self._edge_endpoints(e)
 
     def set_mode(self, mode: str) -> None:
         self._mode = mode
@@ -139,45 +162,45 @@ class GridWidget(QWidget):
     def _hit_test_cell(self, pos: QPointF) -> tuple[int, int] | None:
         if self.board is None:
             return None
-        for r in range(self.board.height):
-            for c in range(self.board.width):
-                if self._cell_rect(r, c).contains(pos):
-                    return (r, c)
+        if not hasattr(self, '_cell_rects') or not self._cell_rects:
+            return None
+        for (r, c), rect in self._cell_rects.items():
+            if rect.contains(pos):
+                return (r, c)
         return None
 
     def _hit_test_vertex(self, pos: QPointF) -> tuple[int, int] | None:
         if self.board is None:
             return None
+        if not hasattr(self, '_vertex_positions') or not self._vertex_positions:
+            return None
         threshold = max(10, self._cell_size // 7)
-        for r in range(self.board.height + 1):
-            for c in range(self.board.width + 1):
-                x = self._padding + c * self._cell_size
-                y = self._padding + r * self._cell_size
-                if abs(pos.x() - x) < threshold and abs(pos.y() - y) < threshold:
-                    if 0 <= r <= self.board.height and 0 <= c <= self.board.width:
-                        return (r, c)
+        for (r, c), pt in self._vertex_positions.items():
+            if abs(pos.x() - pt.x()) < threshold and abs(pos.y() - pt.y()) < threshold:
+                return (r, c)
         return None
 
     def _hit_test_edge(self, pos: QPointF) -> tuple[int, int, int, int] | None:
         if self.board is None:
             return None
+        if not hasattr(self, '_edge_rects') or not self._edge_rects:
+            return None
         threshold = max(10, self._cell_size // 7)
         best: tuple[float, tuple[int, int, int, int]] | None = None
-        for e in self.board.edges():
-            x1, y1, x2, y2 = self._edge_endpoints(e)
+        for key, (x1, y1, x2, y2) in self._edge_rects.items():
             dx = x2 - x1
             dy = y2 - y1
             length_sq = dx * dx + dy * dy
             if length_sq == 0:
                 continue
-            t = ((pos.x() - x1) * dx + (pos.y() - y1) * dy) / length_sq
-            t = max(0.0, min(1.0, t))
-            px = x1 + t * dx
-            py = y1 + t * dy
+            t_val = ((pos.x() - x1) * dx + (pos.y() - y1) * dy) / length_sq
+            t_val = max(0.0, min(1.0, t_val))
+            px = x1 + t_val * dx
+            py = y1 + t_val * dy
             dist = ((pos.x() - px) ** 2 + (pos.y() - py) ** 2) ** 0.5
             if dist < threshold:
                 if best is None or dist < best[0]:
-                    best = (dist, (e.r1, e.c1, e.r2, e.c2))
+                    best = (dist, key)
         return best[1] if best is not None else None
 
     def _edge_endpoints(self, e: Edge) -> tuple[float, float, float, float]:
@@ -320,6 +343,7 @@ class GridWidget(QWidget):
             cell.blocked = blocked
             if blocked:
                 self._clear_cell(cell)
+            self.board_modified.emit()
         self.update()
 
     def _toggle_blocked(self, r: int, c: int) -> None:
@@ -328,6 +352,7 @@ class GridWidget(QWidget):
         if cell.blocked:
             self._clear_cell(cell)
         self._selected_cell = (r, c)
+        self.board_modified.emit()
         self.update()
 
     def _set_cell_attr(self, r: int, c: int, attr: str, value) -> None:
@@ -356,6 +381,7 @@ class GridWidget(QWidget):
         e = self.board.edge_between(r1, c1, r2, c2)
         if e is not None:
             e.is_boundary = not e.is_boundary
+            self.board_modified.emit()
             self.update()
 
     def _set_edge_constraint(self, r1: int, c1: int, r2: int, c2: int,
@@ -410,10 +436,26 @@ class GridWidget(QWidget):
 
         if self._mode == self.MODE_BOUNDARY:
             if vertex is not None:
+                # Single click on a vertex: toggle the edge to an adjacent vertex
+                if edge is not None:
+                    self._toggle_edge_boundary(*edge)
+                    self._selected_edge = edge
+                    self._selected_vertex = None
+                    self._selected_cell = None
+                    self.update()
+                    return
+                # Start dragging from vertex
                 self._boundary_dragging = True
                 self._last_boundary_vertex = vertex
                 self._selected_vertex = vertex
                 self._boundary_start_vertex = None
+                self.update()
+            elif edge is not None:
+                # Click directly on edge to toggle
+                self._toggle_edge_boundary(*edge)
+                self._selected_edge = edge
+                self._selected_vertex = None
+                self._selected_cell = None
                 self.update()
             return
 
@@ -556,6 +598,7 @@ class GridWidget(QWidget):
                             self._outer_boundaries.add(okey)
                             if self.board is not None:
                                 self.board.outer_boundaries.append(okey)
+                self.board_modified.emit()
                 self._last_boundary_vertex = v
                 self._selected_vertex = v
                 self.update()
@@ -696,6 +739,7 @@ class GridWidget(QWidget):
             self._cell_size = min(120, self._cell_size + 5)
         else:
             self._cell_size = max(20, self._cell_size - 5)
+        self._cache_rects()
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:

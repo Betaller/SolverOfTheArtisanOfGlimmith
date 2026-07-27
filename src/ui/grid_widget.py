@@ -645,16 +645,16 @@ class GridWidget(QWidget):
                 if cell is not None:
                     c_obj = self.board.cell(cell[0], cell[1])
                     extras = []
-                if c_obj.number is not None:
-                    extras.append(f"#{c_obj.number}")
-                if c_obj.symbol is not None:
-                    extras.append(f"符号:{c_obj.symbol}")
-                if c_obj.blocked:
-                    extras.append("障碍")
-                suffix = f" [{' '.join(extras)}]" if extras else ""
-                self.status_message.emit(f"单元格 ({cell[0]}, {cell[1]}){suffix}")
-            elif not self._hover_vertex:
-                self.status_message.emit("")
+                    if c_obj.number is not None:
+                        extras.append(f"#{c_obj.number}")
+                    if c_obj.symbol is not None:
+                        extras.append(f"符号:{c_obj.symbol}")
+                    if c_obj.blocked:
+                        extras.append("障碍")
+                    suffix = f" [{' '.join(extras)}]" if extras else ""
+                    self.status_message.emit(f"单元格 ({cell[0]}, {cell[1]}){suffix}")
+                elif not self._hover_vertex:
+                    self.status_message.emit("")
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if self.board is None:

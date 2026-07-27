@@ -511,16 +511,34 @@ def _collect_target_sizes(puzzle: Puzzle) -> set[int]:
         if has_size_rule:
             # Compass refines the min bound, let other rules set max
             pass  # other rules already add their targets
+    if puzzle.has_rule("same"):
+        if puzzle.has_rule("rose_window"):
+            # Count each symbol type frequency → M = count of each = number of regions
+            sym_counts: dict[str, int] = {}
+            for c in puzzle.cells:
+                if c.symbol and c.symbol in "ABCDE":
+                    sym_counts[c.symbol] = sym_counts.get(c.symbol, 0) + 1
+            if sym_counts and len(set(sym_counts.values())) == 1:
+                M = list(sym_counts.values())[0]
+                if fillable % M == 0:
+                    targets.add(fillable // M)
+        else:
+            for s in range(2, min(13, fillable + 1)):
+                if fillable % s == 0:
+                    targets.add(s)
+    if puzzle.has_rule("different"):
+        pass
     if puzzle.has_rule("rose_window"):
-        from src.solver.constraints import _rose_M
-        board = Board(puzzle.height, puzzle.width)
-        M = _rose_M(puzzle, board)
-        if M > 0:
-            est = fillable // M
-            for d in (-1, 0, 1):
-                t = est + d
-                if 1 <= t <= 12:
-                    targets.add(t)
+        if not puzzle.has_rule("same"):
+            from src.solver.constraints import _rose_M
+            board = Board(puzzle.height, puzzle.width)
+            M = _rose_M(puzzle, board)
+            if M > 0:
+                est = fillable // M
+                for d in (-1, 0, 1):
+                    t = est + d
+                    if 1 <= t <= 12:
+                        targets.add(t)
 
     # Filter: only keep sizes that can pack the grid
     filtered: set[int] = set()

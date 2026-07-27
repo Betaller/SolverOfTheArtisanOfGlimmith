@@ -20,7 +20,7 @@ class RoseSolver(Solver):
 
     @classmethod
     def supports(cls, puzzle: Puzzle) -> bool:
-        return puzzle.has_rule("rose_window")
+        return puzzle.has_rule("rose_window") and not puzzle.has_rule("same") and not puzzle.has_rule("different")
 
     def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
         from src.solver.constraints import check_boundary_consistency

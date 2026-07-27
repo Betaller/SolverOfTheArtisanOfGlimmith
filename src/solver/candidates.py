@@ -239,7 +239,13 @@ def _region_feasible(self, board: Board, cells: set[tuple[int, int]]) -> bool:
 
     if self.puzzle.has_rule("solitary"):
         symbols = [board.cell(r, c).symbol for r, c in cells if board.cell(r, c).symbol is not None]
-        if len(symbols) > 1:
+        # Also count compass, number, shape_pattern as clues for solitary
+        other_clues = sum(1 for r, c in cells if (
+            board.cell(r, c).compass is not None
+            or board.cell(r, c).number is not None
+            or board.cell(r, c).shape_pattern is not None
+        ))
+        if len(symbols) + other_clues > 1:
             return False
 
     if self.puzzle.has_rule("rose_window"):
@@ -576,6 +582,47 @@ def _generate_region_candidates(self, board: Board, seed: tuple[int, int],
                         max_area = max(len(rose_syms), int(avg * 2.0))
                 else:
                     max_area = self._max_region_area()
+            else:
+                max_area = self._max_region_area()
+        elif self.puzzle.has_rule("solitary"):
+            # Each region must have exactly one clue cell → N regions, ~T/N cells each
+            total_fillable = len(unassigned)
+            for r in range(board.height):
+                for c in range(board.width):
+                    if board.cell(r, c).assigned and not board.cell(r, c).blocked:
+                        total_fillable += 1
+            clue_count = sum(1 for r in range(board.height) for c in range(board.width)
+                             if not board.cell(r, c).blocked and (
+                                 board.cell(r, c).symbol is not None
+                                 or board.cell(r, c).number is not None
+                                 or board.cell(r, c).compass is not None
+                                 or board.cell(r, c).shape_pattern is not None
+                             ))
+            if clue_count > 0:
+                avg = total_fillable / clue_count
+                max_area = max(clue_count, int(avg * 2.5))
+            else:
+                max_area = self._max_region_area()
+        elif self.puzzle.has_rule("compass") and not self._has_size_constraint():
+            # Compass clues give minimum region size from direction counts
+            max_compass_min = 0
+            for r in range(board.height):
+                for c in range(board.width):
+                    cell = board.cell(r, c)
+                    if cell.compass is not None:
+                        total = 1  # self
+                        if cell.compass.up >= 0:
+                            total += cell.compass.up
+                        if cell.compass.down >= 0:
+                            total += cell.compass.down
+                        if cell.compass.left >= 0:
+                            total += cell.compass.left
+                        if cell.compass.right >= 0:
+                            total += cell.compass.right
+                        if total > max_compass_min:
+                            max_compass_min = total
+            if max_compass_min > 0:
+                max_area = max_compass_min * 2
             else:
                 max_area = self._max_region_area()
         else:

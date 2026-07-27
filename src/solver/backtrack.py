@@ -620,10 +620,6 @@ class BacktrackSolver:
         cell_to_idx = {c: i for i, c in enumerate(fillable_indices)}
         num_cols = len(fillable_indices)
 
-        has_edge_constraints = any(
-            puzzle.has_rule(r) for r in ("heterogeneous", "homogeneous", "inequality", "difference")
-        ) or puzzle.has_rule("differentiation") or puzzle.has_rule("mixed")
-
         dlx = Dlx(num_cols)
         for idx, cc in enumerate(candidates):
             cols = sorted(cell_to_idx[c] for c in cc if c in cell_to_idx)
@@ -649,19 +645,7 @@ class BacktrackSolver:
                 return False  # stop search — found solution
             return True  # continue
 
-        if has_edge_constraints:
-            def _row_check(sol: list[int]) -> bool:
-                self.steps += 1
-                for i in range(len(sol)):
-                    ci = sol[i]
-                    for j in range(i):
-                        cj = sol[j]
-                        if cj in conflict_matrix[ci]:
-                            return False
-                return True
-            dlx.search_with_check(solution_rows, _row_check, _final_check)
-        else:
-            dlx.search(solution_rows, _final_check)
+        dlx.search(solution_rows, _final_check)
 
         if result is not None:
             return result

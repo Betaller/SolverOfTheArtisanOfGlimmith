@@ -35,7 +35,12 @@ def _check_incremental(self, board: Board, regions: dict[int, set[tuple[int, int
 
     if self.puzzle.has_rule("solitary"):
         symbols = [board.cell(r, c).symbol for r, c in new_cells if board.cell(r, c).symbol is not None]
-        if len(symbols) > 1:
+        other_clues = sum(1 for r, c in new_cells if (
+            board.cell(r, c).compass is not None
+            or board.cell(r, c).number is not None
+            or board.cell(r, c).shape_pattern is not None
+        ))
+        if len(symbols) + other_clues > 1:
             return False
 
     if self.puzzle.has_rule("precise"):
@@ -224,6 +229,50 @@ def _check_global_constraints(self, board: Board,
 
     if self.puzzle.has_rule("compass"):
         if not check_rule_compass(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("heterogeneous"):
+        if not check_rule_heterogeneous(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("homogeneous"):
+        if not check_rule_homogeneous(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("different"):
+        if not check_rule_different(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("same"):
+        if not check_rule_same(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("block"):
+        if not check_rule_block(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("non_block"):
+        if not check_rule_non_block(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("area"):
+        if not check_rule_area(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("precise"):
+        if not check_rule_precise(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("range"):
+        if not check_rule_range(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("puzzle_piece"):
+        if not check_rule_puzzle_piece(self.puzzle, board):
+            return False
+
+    if self.puzzle.has_rule("solitary"):
+        if not check_rule_solitary(self.puzzle, board):
             return False
 
     if self._pre_boundaries:

@@ -423,12 +423,11 @@ class GridWidget(QWidget):
                     self._selected_cell = cell
                     self.update()
                 return
-            if edge is not None:
-                self._edge_context_menu(pos, *edge)
-            elif vertex is not None:
-                # Map grid vertex position → Board vertex coordinates
+            if vertex is not None:
                 vr, vc = vertex[0] - 1, vertex[1] - 1
                 self._vertex_context_menu(pos, vr, vc)
+            elif edge is not None:
+                self._edge_context_menu(pos, *edge)
             elif cell is not None:
                 self._cell_context_menu(pos, cell[0], cell[1])
             return
@@ -520,17 +519,17 @@ class GridWidget(QWidget):
             return
 
         if self._mode == self.MODE_SELECT:
-            if edge is not None:
+            # Vertex first (more specific than edge), then edge, then cell
+            if vertex is not None:
+                self._selected_vertex = vertex
+                self._selected_cell = None
+                self._selected_edge = None
+                self.vertex_clicked.emit(vertex[0] - 1, vertex[1] - 1)
+            elif edge is not None:
                 self._selected_edge = edge
                 self._selected_cell = None
                 self._selected_vertex = None
                 self.edge_clicked.emit(edge[0], edge[1], edge[2], edge[3])
-            elif vertex is not None:
-                self._selected_vertex = vertex
-                self._selected_cell = None
-                self._selected_edge = None
-                # Emit Board vertex coords (offset by -1 from grid position)
-                self.vertex_clicked.emit(vertex[0] - 1, vertex[1] - 1)
             elif cell is not None:
                 self._selected_cell = cell
                 self._selected_edge = None
@@ -629,14 +628,23 @@ class GridWidget(QWidget):
                 if cell is not None:
                     self.status_message.emit(f"单元格 ({cell[0]}, {cell[1]})")
         else:
-            cell = self._hit_test_cell(pos)
-            if cell != self._hover_cell:
-                self._hover_cell = cell
-                self._hover_vertex = None
+            # SELECT / NUMBER / SYMBOL / COMPASS modes: check vertex hover first
+            v = self._hit_test_vertex(pos)
+            if v != self._hover_vertex:
+                self._hover_vertex = v
+                self._hover_cell = None
                 self.update()
-            if cell is not None:
-                c_obj = self.board.cell(cell[0], cell[1])
-                extras = []
+            if v is not None:
+                self.status_message.emit(f"顶点 ({v[0]}, {v[1]})")
+            else:
+                cell = self._hit_test_cell(pos)
+                if cell != self._hover_cell:
+                    self._hover_cell = cell
+                    self._hover_vertex = None
+                    self.update()
+                if cell is not None:
+                    c_obj = self.board.cell(cell[0], cell[1])
+                    extras = []
                 if c_obj.number is not None:
                     extras.append(f"#{c_obj.number}")
                 if c_obj.symbol is not None:

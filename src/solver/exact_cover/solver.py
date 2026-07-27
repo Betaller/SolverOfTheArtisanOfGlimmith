@@ -74,14 +74,88 @@ class ExactCoverSolver(Solver):
             cols = sorted(idx_map[c] for c in cc if c in idx_map)
             dlx.add_row(ci, cols)
 
+        # ── precompute incremental check data ──
+        edge_constraints = _build_edge_constraint_data(board, puzzle, all_pos, candidates)
+        has_incremental = _has_incremental_rules(puzzle)
+
         solution_rows: list[int] = []
         self._result: dict[int, set[tuple[int, int]]] | None = None
+
+        # Temporary buffer for row_check (cell→cand mapping)
+        cell_to_sel: list[int] = [-1] * (board.height * board.width)
+
+        def _row_check(sol: list[int]) -> bool:
+            """Incremental validation during DLX."""
+            self._steps += 1
+            if self._steps % 10000 == 0 and time.monotonic() > self._deadline:
+                return False
+            if not has_incremental:
+                return True
+            # Rebuild cell→selected-candidate mapping
+            for i in range(len(cell_to_sel)):
+                cell_to_sel[i] = -1
+            for pi, ci in enumerate(sol):
+                for cell in candidates[ci]:
+                    r, c = cell
+                    cell_to_sel[r * board.width + c] = pi
+
+            # Check edge constraints
+            for c1_idx, c2_idx, ct, val in edge_constraints:
+                p1 = cell_to_sel[c1_idx]
+                p2 = cell_to_sel[c2_idx]
+                if p1 < 0 or p2 < 0:
+                    continue
+                if p1 == p2:
+                    continue
+                a1 = len(candidates[sol[p1]])
+                a2 = len(candidates[sol[p2]])
+                s1_key = _shape_key(candidates[sol[p1]])
+                s2_key = _shape_key(candidates[sol[p2]])
+                if ct == "heterogeneous" and s1_key == s2_key:
+                    return False
+                if ct == "homogeneous" and s1_key != s2_key:
+                    return False
+                if ct == "inequality" and a1 >= a2:
+                    return False
+                if ct == "difference" and abs(a1 - a2) != val:
+                    return False
+
+            # Check same/different rules
+            if puzzle.has_rule("same") or puzzle.has_rule("different"):
+                shapes_seen: dict[str, int] = {}
+                for pi, ci in enumerate(sol):
+                    sk = _shape_key(candidates[ci])
+                    if puzzle.has_rule("different") and sk in shapes_seen:
+                        return False
+                    shapes_seen[sk] = pi
+                if puzzle.has_rule("same") and len(shapes_seen) > 1:
+                    return False
+
+            # Check adjacent differentiation / mixed
+            if puzzle.has_rule("differentiation") or puzzle.has_rule("mixed"):
+                for r in range(board.height):
+                    for c in range(board.width):
+                        for dr, dc in [(1, 0), (0, 1)]:
+                            nr, nc = r + dr, c + dc
+                            if not (0 <= nr < board.height and 0 <= nc < board.width):
+                                continue
+                            p1 = cell_to_sel[r * board.width + c]
+                            p2 = cell_to_sel[nr * board.width + nc]
+                            if p1 < 0 or p2 < 0 or p1 == p2:
+                                continue
+                            if puzzle.has_rule("differentiation"):
+                                if len(candidates[sol[p1]]) == len(candidates[sol[p2]]):
+                                    return False
+                            if puzzle.has_rule("mixed"):
+                                if _shape_key(candidates[sol[p1]]) == _shape_key(candidates[sol[p2]]):
+                                    return False
+
+            return True
 
         def _cb(sol: list[int]) -> bool:
             self._steps += 1
             if time.monotonic() > self._deadline:
                 return False
-            # Reset board
             for r in range(board.height):
                 for c in range(board.width):
                     board.cell(r, c).region_id = None
@@ -92,10 +166,13 @@ class ExactCoverSolver(Solver):
                     board.cell(r, c).region_id = ri
             if _global_check(board, regions, puzzle):
                 self._result = regions
-                return False  # found → stop
+                return False
             return True
 
-        dlx.search(solution_rows, lambda s: _cb(s))
+        if has_incremental:
+            dlx.search_with_check(solution_rows, _row_check, lambda s: _cb(s))
+        else:
+            dlx.search(solution_rows, lambda s: _cb(s))
 
         if self._result is None:
             return self._fail(board, "无解")
@@ -428,14 +505,19 @@ def _collect_target_sizes(puzzle: Puzzle) -> set[int]:
                 t = est + d
                 if 1 <= t <= 12:
                     targets.add(t)
+    # For compass: minimum bound only, don't use as target size
+    # (compass alone doesn't constrain the exact size)
     if puzzle.has_rule("compass"):
         max_min = 1
         for c in puzzle.cells:
             if c.compass is not None:
                 s = 1 + sum(max(0, getattr(c.compass, d)) for d in ("up", "down", "left", "right"))
                 max_min = max(max_min, s)
-        if max_min > 1:
-            targets.add(max_min)
+        # Only use compass size if another rule constrains the range
+        has_size_rule = puzzle.has_rule("precise") or puzzle.has_rule("range") or puzzle.has_rule("area")
+        if has_size_rule:
+            # Compass refines the min bound, let other rules set max
+            pass  # other rules already add their targets
     if puzzle.has_rule("rose_window"):
         from src.solver.constraints import _rose_M
         board = Board(puzzle.height, puzzle.width)
@@ -447,7 +529,32 @@ def _collect_target_sizes(puzzle: Puzzle) -> set[int]:
                 if 1 <= t <= 12:
                     targets.add(t)
 
-    return {t for t in targets if 1 <= t <= 12 and fillable % t == 0}
+    # Filter: only keep sizes that can pack the grid
+    filtered: set[int] = set()
+    for t in targets:
+        if t < 1 or t > 12:
+            continue
+        # For precise/area: strict divisibility
+        if puzzle.has_rule("precise"):
+            if fillable % t == 0:
+                filtered.add(t)
+        elif puzzle.has_rule("area"):
+            if fillable % t == 0:
+                filtered.add(t)
+        # For range: any size in range is valid (DLX handles packing)
+        elif puzzle.has_rule("range"):
+            filtered.add(t)
+        # For solitary/rose_window: exact count → must divide
+        elif puzzle.has_rule("solitary") or puzzle.has_rule("rose_window"):
+            if fillable % t == 0:
+                filtered.add(t)
+        # For compass: minimum bound only, any size is possible
+        else:
+            filtered.add(t)
+    # Always include size 1 as fallback if nothing else
+    if not filtered and 1 in targets:
+        filtered.add(1)
+    return filtered
 
 
 class FallbackExactCoverSolver(ExactCoverSolver):
@@ -458,4 +565,52 @@ class FallbackExactCoverSolver(ExactCoverSolver):
     @classmethod
     def supports(cls, puzzle: Puzzle) -> bool:
         return len(_collect_target_sizes(puzzle)) > 0
+
+
+def _shape_key(cells: set[tuple[int, int]]) -> str:
+    from src.solver.shapes import canonical_key
+    from src.models.board import Shape
+    return canonical_key(Shape(cells=frozenset(cells)).cells)
+
+
+def _has_incremental_rules(puzzle: Puzzle) -> bool:
+    return any(puzzle.has_rule(r) for r in (
+        "heterogeneous", "homogeneous", "inequality", "difference",
+        "same", "different", "differentiation", "mixed",
+    ))
+
+
+def _build_edge_constraint_data(
+    board: Board, puzzle: Puzzle, all_pos: set[tuple[int, int]],
+    candidates: list[set[tuple[int, int]]],
+) -> list[tuple[int, int, str, int | None]]:
+    """Build flat list of edge constraint checks: (cell1_idx, cell2_idx, type, value)."""
+    from src.models.board import EdgeConstraintType
+    w = board.width
+    data: list[tuple[int, int, str, int | None]] = []
+    for r in range(board.height):
+        for c in range(board.width):
+            if not board.cell(r, c).fillable:
+                continue
+            idx1 = r * w + c
+            for dr, dc in [(1, 0), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if not (0 <= nr < board.height and 0 <= nc < board.width):
+                    continue
+                if not board.cell(nr, nc).fillable:
+                    continue
+                idx2 = nr * w + nc
+                edge = board.edge_between(r, c, nr, nc)
+                if edge is None or edge.constraint is None:
+                    continue
+                ct = edge.constraint.type
+                if ct == EdgeConstraintType.HETEROGENEOUS:
+                    data.append((idx1, idx2, "heterogeneous", None))
+                elif ct == EdgeConstraintType.HOMOGENEOUS:
+                    data.append((idx1, idx2, "homogeneous", None))
+                elif ct == EdgeConstraintType.INEQUALITY:
+                    data.append((idx1, idx2, "inequality", None))
+                elif ct == EdgeConstraintType.DIFFERENCE:
+                    data.append((idx1, idx2, "difference", edge.constraint.value or 1))
+    return data
 

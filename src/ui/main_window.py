@@ -128,8 +128,8 @@ class MainWindow(QMainWindow):
 
         right_panel = QSplitter(Qt.Orientation.Vertical)
         self._property_panel = PropertyPanel()
-        self._property_panel.setMinimumWidth(220)
-        self._property_panel.setMaximumWidth(300)
+        self._property_panel.setMinimumWidth(260)
+        self._property_panel.setMaximumWidth(380)
 
         control_widget = QWidget()
         control_layout = QVBoxLayout(control_widget)
@@ -180,8 +180,8 @@ class MainWindow(QMainWindow):
         content.addWidget(self._grid_widget)
         content.addWidget(right_panel)
         content.setStretchFactor(0, 0)
-        content.setStretchFactor(1, 1)
-        content.setStretchFactor(2, 0)
+        content.setStretchFactor(1, 3)
+        content.setStretchFactor(2, 1)
         content.setHandleWidth(1)
 
         main_layout.addWidget(content)

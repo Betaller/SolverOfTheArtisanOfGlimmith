@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QSize
 from PySide6.QtGui import (
     QPainter, QPen, QBrush, QColor, QFont, QMouseEvent, QKeyEvent,
     QPaintEvent, QWheelEvent, QAction,
@@ -45,7 +45,7 @@ class GridWidget(QWidget):
         self.board: Board | None = None
         self._mode = self.MODE_SELECT
         self._cell_size = 60
-        self._padding = 40
+        self._padding = 24
         self._selected_cell: tuple[int, int] | None = None
         self._selected_edge: tuple[int, int, int, int] | None = None
         self._selected_vertex: tuple[int, int] | None = None
@@ -94,6 +94,16 @@ class GridWidget(QWidget):
         self._block_dragging = False
         self._inline_number = ""
         self.update()
+
+    def sizeHint(self) -> QSize:
+        if self.board is None:
+            return QSize(400, 300)
+        w = self._padding * 2 + self.board.width * self._cell_size + 190
+        h = self._padding * 2 + self.board.height * self._cell_size + 20
+        return QSize(w, h)
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
 
     def _cache_rects(self) -> None:
         """Precompute hit-test rects for O(1) lookup instead of O(H×W) scan."""

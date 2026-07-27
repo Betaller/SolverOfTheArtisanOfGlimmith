@@ -128,8 +128,8 @@ class MainWindow(QMainWindow):
 
         right_panel = QSplitter(Qt.Orientation.Vertical)
         self._property_panel = PropertyPanel()
-        self._property_panel.setMinimumWidth(220)
-        self._property_panel.setMaximumWidth(300)
+        self._property_panel.setMinimumWidth(240)
+        self._property_panel.setMaximumWidth(320)
 
         control_widget = QWidget()
         control_layout = QVBoxLayout(control_widget)

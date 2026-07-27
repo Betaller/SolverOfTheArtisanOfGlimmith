@@ -867,8 +867,8 @@ class GridWidget(QWidget):
     def _draw_vertices(self, painter: QPainter) -> None:
         for v in self.board.vertices():
             if v.watchtower is not None:
-                x = self._padding + (v.col + 0.5) * self._cell_size
-                y = self._padding + (v.row + 0.5) * self._cell_size
+                x = self._padding + (v.col + 1) * self._cell_size
+                y = self._padding + (v.row + 1) * self._cell_size
                 r = self._cell_size // 5
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(QColor(_ui_theme.colors.watchtower_bg)))

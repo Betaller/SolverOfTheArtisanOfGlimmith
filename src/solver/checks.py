@@ -118,6 +118,8 @@ def _check_incremental(self, board: Board, regions: dict[int, set[tuple[int, int
                     continue
                 checked.add(ekey)
                 rid1, rid2 = new_rid, neighbor.region_id
+                if rid1 not in regions or rid2 not in regions:
+                    continue
                 cells1 = regions[rid1]
                 cells2 = regions[rid2]
                 s1 = Shape(cells=frozenset(cells1))

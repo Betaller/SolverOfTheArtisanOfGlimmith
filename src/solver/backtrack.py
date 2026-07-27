@@ -573,7 +573,7 @@ class BacktrackSolver:
         puzzle = self.puzzle
         board = self._board
 
-        if not puzzle.has_rule("shape_pool") and not puzzle.has_rule("block") and not puzzle.has_rule("precise"):
+        if not puzzle.has_rule("shape_pool") and not puzzle.has_rule("precise"):
             return None
         if puzzle.has_rule("shape_pool"):
             pool = puzzle.get_rule("shape_pool")
@@ -635,6 +635,10 @@ class BacktrackSolver:
         def _final_check(sol: list[int]) -> bool:
             nonlocal result
             self.steps += 1
+            # Reset before checking (previous call may have dirtied the board)
+            for r3 in range(board.height):
+                for c3 in range(board.width):
+                    board.cell(r3, c3).region_id = None
             regions: dict[int, set[tuple[int, int]]] = {}
             for ri, ci in enumerate(sol):
                 regions[ri] = set(candidates[ci])
@@ -816,6 +820,7 @@ class BacktrackSolver:
 
         (≈ aog pieces.rs: cell_min/cell_max arrays propagated to convergence.)
         """
+        from src.models.board import EdgeConstraintType
         puzzle = self.puzzle
         board = self._board
         if not puzzle.has_rule("inequality") and not puzzle.has_rule("difference"):

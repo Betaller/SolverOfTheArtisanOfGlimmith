@@ -36,6 +36,7 @@ class ToolPalette(QWidget):
     number_changed = Signal(object)
     grid_size_changed = Signal(int, int)
     compass_applied = Signal(object)
+    watchtower_changed = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -56,8 +57,13 @@ class ToolPalette(QWidget):
 
         self._add_separator(layout)
 
-        self._add_section_header(layout, "数字 / 望塔值")
+        self._add_section_header(layout, "数字")
         self._setup_number_input(layout)
+
+        self._add_separator(layout)
+
+        self._add_section_header(layout, "望塔值")
+        self._setup_watchtower_input(layout)
 
         self._add_separator(layout)
 
@@ -175,6 +181,30 @@ class ToolPalette(QWidget):
         self._number_input.setValidator(QIntValidator(0, 999))
         self._number_input.textChanged.connect(self._on_number_changed)
         layout.addWidget(self._number_input)
+
+    def _setup_watchtower_input(self, layout: QVBoxLayout) -> None:
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(2)
+        self._watchtower_btns: list[QPushButton] = []
+        for v in [1, 2, 3, 4]:
+            btn = QPushButton(str(v))
+            btn.setFixedSize(38, 32)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(
+                "QPushButton { font-size: 16px; font-weight: bold; border-radius: 4px; "
+                "border: 2px solid palette(mid); }"
+                "QPushButton:checked { background: #7C3AED; color: white; border-color: #7C3AED; }"
+            )
+            btn.clicked.connect(lambda checked, val=v: self._on_watchtower_selected(val))
+            self._watchtower_btns.append(btn)
+            btn_row.addWidget(btn)
+        layout.addLayout(btn_row)
+
+    def _on_watchtower_selected(self, value: int) -> None:
+        for i, btn in enumerate(self._watchtower_btns):
+            btn.setChecked(i + 1 == value)
+        self.watchtower_changed.emit(value)
 
     def _setup_symbol_input(self, layout: QVBoxLayout) -> None:
         self._symbol_input = QLineEdit()

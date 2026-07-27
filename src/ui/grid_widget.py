@@ -467,7 +467,9 @@ class GridWidget(QWidget):
                 vr, vc = vertex[0] - 1, vertex[1] - 1
                 v = self.board.vertex_at(vr, vc)
                 if v is not None:
-                    v.watchtower = self._current_number
+                    val = self._current_number
+                    if val is not None and 1 <= val <= 4:
+                        v.watchtower = val
                     self._selected_vertex = vertex
                     self._selected_cell = None
                     self._selected_edge = None

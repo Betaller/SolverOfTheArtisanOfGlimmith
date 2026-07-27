@@ -437,7 +437,8 @@ class PropertyPanel(QWidget):
         wrow = QHBoxLayout()
         wrow.addWidget(QLabel("望塔值"))
         ws = QSpinBox()
-        ws.setRange(0, 999)
+        ws.setRange(0, 4)
+        ws.setSpecialValueText("—")
         ws.setValue(v.watchtower if v.watchtower is not None else 0)
         wrow.addWidget(ws)
         wa = QPushButton("设置")
@@ -454,5 +455,8 @@ class PropertyPanel(QWidget):
     def _set_watchtower(self, r: int, c: int, value: int | None) -> None:
         v = self._board.vertex_at(r, c)
         if v is not None:
-            v.watchtower = value
+            if value is not None and 1 <= value <= 4:
+                v.watchtower = value
+            elif value is None:
+                v.watchtower = None
             self.board_modified.emit()

@@ -190,6 +190,7 @@ class MainWindow(QMainWindow):
         self._tool_palette.number_changed.connect(self._grid_widget.set_number)
         self._tool_palette.symbol_changed.connect(self._grid_widget.set_symbol)
         self._tool_palette.compass_applied.connect(self._on_compass_applied)
+        self._tool_palette.watchtower_changed.connect(self._on_watchtower_changed)
         self._tool_palette.grid_size_changed.connect(self._on_grid_size_changed)
         self._grid_widget.cell_clicked.connect(self._on_cell_clicked)
         self._grid_widget.edge_clicked.connect(self._on_edge_clicked)
@@ -204,6 +205,9 @@ class MainWindow(QMainWindow):
 
     def _on_compass_applied(self, clue: CompassClue) -> None:
         self._grid_widget.set_compass(clue)
+
+    def _on_watchtower_changed(self, value: int) -> None:
+        self._grid_widget.set_number(value)
 
     def _on_grid_size_changed(self, w: int, h: int) -> None:
         self._create_new_puzzle(h, w)

@@ -6,6 +6,7 @@
 mod constraints;
 mod dlx;
 mod grid;
+mod polyomino;
 mod solver;
 mod types;
 

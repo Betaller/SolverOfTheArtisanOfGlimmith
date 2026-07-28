@@ -200,4 +200,65 @@ impl DancingLinks {
         self.uncover(col);
         false
     }
+
+    /// Search with an incremental validation callback.
+    /// `row_check` is called after each row selection with the current partial solution (row IDs).
+    /// If `row_check` returns false, the branch is pruned.
+    pub fn search_with_check(
+        &mut self,
+        depth: usize,
+        partial: &mut Vec<usize>,
+        row_check: &mut dyn FnMut(&[usize]) -> bool,
+        on_solution: &mut dyn FnMut(&[usize]) -> bool,
+    ) {
+        if let Some(d) = self.deadline {
+            if Instant::now() >= d {
+                return;
+            }
+        }
+        self.search_count += 1;
+
+        if self.nodes[0].right == 0 {
+            on_solution(partial);
+            return;
+        }
+
+        let col = match self.choose_column() {
+            Some(c) => c,
+            None => return,
+        };
+
+        self.cover(col);
+        let c_node = col + 1;
+        let mut r = self.nodes[c_node].down;
+        while r != c_node {
+            let row_id = self.nodes[r].row_id;
+            if let Some(rid) = row_id {
+                partial.push(rid);
+
+                // Incremental check
+                if row_check(partial) {
+                    // Cover all columns in this row
+                    let mut j = self.nodes[r].right;
+                    while j != r {
+                        self.cover(self.nodes[j].col - 1);
+                        j = self.nodes[j].right;
+                    }
+
+                    self.search_with_check(depth + 1, partial, row_check, on_solution);
+
+                    // Uncover
+                    j = self.nodes[r].left;
+                    while j != r {
+                        self.uncover(self.nodes[j].col - 1);
+                        j = self.nodes[j].left;
+                    }
+                }
+
+                partial.pop();
+            }
+            r = self.nodes[r].down;
+        }
+        self.uncover(col);
+    }
 }

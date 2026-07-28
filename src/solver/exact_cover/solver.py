@@ -42,6 +42,12 @@ class ExactCoverSolver(Solver):
         self._deadline = self._start + timeout
         self._steps = 0
 
+        # ── Specialized: same rule + polyomino cache ≈ aog's solve_match ──
+        if puzzle.has_rule("same") and not puzzle.has_rule("shape_pool"):
+            result = self._solve_same(puzzle, timeout)
+            if result is not None and result.solved:
+                return result
+
         board = self._board_from_puzzle(puzzle)
         all_pos = {(r, c) for r in range(board.height) for c in range(board.width)
                    if not board.cell(r, c).blocked}
@@ -174,6 +180,122 @@ class ExactCoverSolver(Solver):
         from src.solver.propagator import update_boundary_edges
         from src.solver.validator import SolutionValidator
 
+        update_boundary_edges(board)
+        sol = SolutionValidator().validate(puzzle, board)
+        sol.steps_taken = self._steps
+        sol.elapsed_ms = int((time.monotonic() - self._start) * 1000)
+        return sol
+
+    def _solve_same(self, puzzle: Puzzle, timeout: float) -> Solution | None:
+        """Specialized solver for 'same' rule (≈ aog's solve_match).
+
+        Enumerates all divisors of total cells, tries each free polyomino
+        of that size as the sole shape via DLX exact cover.
+        """
+        from src.solver.polyomino_cache import shapes_of_size
+
+        total = sum(1 for c in puzzle.cells if not c.blocked)
+        if total <= 1:
+            return None
+
+        # Collect divisor sizes (limited by cache and feasibility)
+        sizes: list[int] = []
+        for s in range(2, min(13, total)):
+            if total % s == 0 and s <= 12:
+                sizes.append(s)
+
+        if not sizes:
+            return None
+
+        # Check rose_window compatibility
+        rose_M = 0
+        if puzzle.has_rule("rose_window"):
+            sym_counts: dict[str, int] = {}
+            for c in puzzle.cells:
+                if c.symbol and c.symbol in "ABCDE":
+                    sym_counts[c.symbol] = sym_counts.get(c.symbol, 0) + 1
+            if sym_counts and len(set(sym_counts.values())) == 1:
+                rose_M = list(sym_counts.values())[0]
+
+        for area in sizes:
+            if time.monotonic() > self._deadline:
+                break
+            if rose_M > 0 and total // area != rose_M:
+                continue
+
+            for shape in shapes_of_size(area):
+                if time.monotonic() > self._deadline:
+                    break
+                # Create virtual shape_pool with just this shape
+                from src.models.puzzle import Rule
+                original_rules = list(puzzle.rules)
+                try:
+                    pool_rule = Rule("shape_pool", {"shapes": [shape]})
+                    puzzle.rules.append(pool_rule)
+
+                    result = self._solve_exact(puzzle, timeout)
+                    if result is not None and result.solved:
+                        return result
+                finally:
+                    puzzle.rules[:] = original_rules
+
+        return None
+
+    def _solve_exact(self, puzzle: Puzzle, timeout: float) -> Solution | None:
+        """Core exact cover: generate candidates from shape_pool, solve via DLX."""
+        board = self._board_from_puzzle(puzzle)
+        all_pos = {(r, c) for r in range(board.height) for c in range(board.width)
+                   if not board.cell(r, c).blocked}
+        if not all_pos:
+            return Solution(board=board, solved=True, steps_taken=0, elapsed_ms=0)
+
+        candidates = self._candidates(board, all_pos, puzzle)
+        if not candidates:
+            return None
+
+        from collections import defaultdict
+        fillable = sorted(all_pos)
+        idx_map = {c: i for i, c in enumerate(fillable)}
+        cell_cands: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for ci, cc in enumerate(candidates):
+            for c in cc:
+                cell_cands[c].append(ci)
+        for pos in fillable:
+            if not cell_cands[pos]:
+                return None
+
+        dlx = Dlx(len(fillable))
+        dlx._deadline = self._deadline
+        for ci, cc in enumerate(candidates):
+            cols = sorted(idx_map[c] for c in cc if c in idx_map)
+            dlx.add_row(ci, cols)
+
+        solution_rows: list[int] = []
+        result: dict[int, set[tuple[int, int]]] | None = None
+
+        def _cb(sol: list[int]) -> bool:
+            if time.monotonic() > self._deadline:
+                return False
+            for r in range(board.height):
+                for c in range(board.width):
+                    board.cell(r, c).region_id = None
+            regions: dict[int, set[tuple[int, int]]] = {}
+            for ri, ci in enumerate(sol):
+                regions[ri] = set(candidates[ci])
+                for r, c in regions[ri]:
+                    board.cell(r, c).region_id = ri
+            if _global_check(board, regions, puzzle):
+                result = regions
+                return False
+            return True
+
+        dlx.search(solution_rows, lambda s: _cb(s))
+
+        if result is None:
+            return None
+
+        from src.solver.propagator import update_boundary_edges
+        from src.solver.validator import SolutionValidator
         update_boundary_edges(board)
         sol = SolutionValidator().validate(puzzle, board)
         sol.steps_taken = self._steps

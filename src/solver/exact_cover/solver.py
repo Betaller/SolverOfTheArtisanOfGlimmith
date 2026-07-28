@@ -63,6 +63,7 @@ class ExactCoverSolver(Solver):
                 return self._fail(board, "部分单元格无候选覆盖")
 
         dlx = Dlx(len(fillable))
+        dlx._deadline = self._deadline
         for ci, cc in enumerate(candidates):
             cols = sorted(idx_map[c] for c in cc if c in idx_map)
             dlx.add_row(ci, cols)
@@ -255,7 +256,7 @@ class ExactCoverSolver(Solver):
                             out.append(ss)
             return out
 
-        # ── polyomino cache: 使用预计算形状库作为虚拟 shape_pool ──
+        # ── polyomino cache ──
         targets = _collect_target_sizes(puzzle)
         if targets:
             try:
@@ -263,19 +264,35 @@ class ExactCoverSolver(Solver):
             except ImportError:
                 pass
             else:
-                seen: set[frozenset[tuple[int, int]]] = set()
-                for target in sorted(targets):
+                total_fill = len(all_pos)
+                # Pre-select sizes: for range/area use all, for same/precise use divisible
+                if puzzle.has_rule("range") or (puzzle.has_rule("area") and not puzzle.has_rule("precise")):
+                    best = sorted(targets)
+                else:
+                    best = sorted([t for t in targets if total_fill % t == 0])
+                    if not best:
+                        best = sorted(targets)[:2]
+                    else:
+                        best = best[-2:]
+
+                # Precompute all transform variants per shape (cached once per size)
+                shape_transforms: list[list[frozenset[tuple[int, int]]]] = []
+                for target in best:
                     if target > 12:
                         continue
-                    shape_list = shapes_of_size(target)
-                    if not shape_list:
-                        continue
+                    for shape in shapes_of_size(target):
+                        shape_transforms.append(_at(shape.cells))
+
+                if not shape_transforms:
+                    pass  # fall through to BFS
+                else:
+                    seen: set[frozenset[tuple[int, int]]] = set()
                     for seed in sorted(all_pos):
-                        if time.monotonic() > self._deadline or len(out) >= 15000:
+                        if time.monotonic() > self._deadline or len(out) >= 8000:
                             break
                         sr, sc = seed
-                        for shape in shape_list:
-                            for tf in _at(shape.cells):
+                        for tf_list in shape_transforms:
+                            for tf in tf_list:
                                 for rs, cs in tf:
                                     dr, dc = sr - rs, sc - cs
                                     placed: set[tuple[int, int]] = set()
@@ -295,7 +312,7 @@ class ExactCoverSolver(Solver):
                                     if not _region_ok(board, placed, puzzle):
                                         continue
                                     out.append(placed)
-                return out
+                    return out
 
         return out
 
@@ -477,14 +494,14 @@ def _collect_target_sizes(puzzle: Puzzle) -> set[int]:
     if puzzle.has_rule("precise"):
         targets.add(puzzle.get_rule("precise").params["area"])
     if puzzle.has_rule("range"):
-        rr = puzzle.get_rule("range")
-        lo = rr.params.get("min", 1)
-        hi = min(rr.params.get("max", 999), fillable)
-        # Only add a few representative sizes, not the whole range
+        # Merge multiple range rules: effective min = max of mins, max = min of maxs
+        rr_rules = [r for r in puzzle.rules if r.type == "range"]
+        lo = max(r.params.get("min", 1) for r in rr_rules)
+        hi = min(r.params.get("max", 999) for r in rr_rules)
+        hi = min(hi, fillable)
         if hi - lo <= 5:
             targets.update(range(lo, hi + 1))
         else:
-            # Use midpoint and endpoints
             targets.add(lo)
             targets.add((lo + hi) // 2)
             targets.add(hi)

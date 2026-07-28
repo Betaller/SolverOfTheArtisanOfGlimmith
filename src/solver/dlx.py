@@ -31,6 +31,8 @@ class Dlx:
         self.col: list[int] = list(range(n))
         self.row_id: list[int] = [0] * n
         self.size: list[int] = [0] * n
+        self._deadline: float = float('inf')
+        self._node_count: int = 0
 
     def add_row(self, row_id: int, cols: list[int]) -> None:
         """Add a row that covers the given column indices (must be sorted)."""
@@ -113,6 +115,12 @@ class Dlx:
         """
         if self.right[0] == 0:
             return callback(solution)
+
+        self._node_count += 1
+        if self._node_count % 50000 == 0:
+            import time
+            if time.monotonic() > self._deadline:
+                return False
 
         c = self._choose_column()
         if self.size[c] == 0:

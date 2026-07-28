@@ -331,14 +331,6 @@
       "params": {}
     },
     {
-      "type": "rose_window",
-      "params": {
-        "symbol_types": [
-          "A"
-        ]
-      }
-    },
-    {
       "type": "watchtower",
       "params": {}
     }

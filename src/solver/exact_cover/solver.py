@@ -42,12 +42,6 @@ class ExactCoverSolver(Solver):
         self._deadline = self._start + timeout
         self._steps = 0
 
-        # ── Specialized: same rule + polyomino cache ≈ aog's solve_match ──
-        if puzzle.has_rule("same") and not puzzle.has_rule("shape_pool"):
-            result = self._solve_same(puzzle, timeout)
-            if result is not None and result.solved:
-                return result
-
         board = self._board_from_puzzle(puzzle)
         all_pos = {(r, c) for r in range(board.height) for c in range(board.width)
                    if not board.cell(r, c).blocked}
@@ -187,58 +181,37 @@ class ExactCoverSolver(Solver):
         return sol
 
     def _solve_same(self, puzzle: Puzzle, timeout: float) -> Solution | None:
-        """Specialized solver for 'same' rule (≈ aog's solve_match).
-
-        Enumerates all divisors of total cells, tries each free polyomino
-        of that size as the sole shape via DLX exact cover.
-        """
+        """Specialized solver for 'same' rule (≈ aog's solve_match, MAX_ENUM_SIZE=7)."""
         from src.solver.polyomino_cache import shapes_of_size
 
         total = sum(1 for c in puzzle.cells if not c.blocked)
         if total <= 1:
             return None
 
-        # Collect divisor sizes (limited by cache and feasibility)
-        sizes: list[int] = []
-        for s in range(2, min(13, total)):
-            if total % s == 0 and s <= 12:
-                sizes.append(s)
-
+        # Max area for exhaustive polyomino enumeration
+        MAX_ENUM = 7
+        sizes = [s for s in range(2, min(MAX_ENUM + 1, total)) if total % s == 0]
         if not sizes:
             return None
 
-        # Check rose_window compatibility
-        rose_M = 0
-        if puzzle.has_rule("rose_window"):
-            sym_counts: dict[str, int] = {}
-            for c in puzzle.cells:
-                if c.symbol and c.symbol in "ABCDE":
-                    sym_counts[c.symbol] = sym_counts.get(c.symbol, 0) + 1
-            if sym_counts and len(set(sym_counts.values())) == 1:
-                rose_M = list(sym_counts.values())[0]
-
-        for area in sizes:
-            if time.monotonic() > self._deadline:
+        # Try only the 2 smallest sizes and at most 3 shapes per size
+        shapes_tried = 0
+        for area in sorted(sizes)[:2]:
+            if time.monotonic() > self._deadline or shapes_tried >= 6:
                 break
-            if rose_M > 0 and total // area != rose_M:
-                continue
-
             for shape in shapes_of_size(area):
-                if time.monotonic() > self._deadline:
+                if time.monotonic() > self._deadline or shapes_tried >= 6:
                     break
-                # Create virtual shape_pool with just this shape
+                shapes_tried += 1
                 from src.models.puzzle import Rule
-                original_rules = list(puzzle.rules)
+                old_rules = list(puzzle.rules)
                 try:
-                    pool_rule = Rule("shape_pool", {"shapes": [shape]})
-                    puzzle.rules.append(pool_rule)
-
+                    puzzle.rules.append(Rule("shape_pool", {"shapes": [shape]}))
                     result = self._solve_exact(puzzle, timeout)
                     if result is not None and result.solved:
                         return result
                 finally:
-                    puzzle.rules[:] = original_rules
-
+                    puzzle.rules[:] = old_rules
         return None
 
     def _solve_exact(self, puzzle: Puzzle, timeout: float) -> Solution | None:

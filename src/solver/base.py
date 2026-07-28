@@ -102,8 +102,10 @@ def default_router() -> SolverRouter:
     from src.solver.exact_cover.solver import ExactCoverSolver, FallbackExactCoverSolver
     from src.solver.rose.solver import RoseSolver
     from src.solver.backtrack import BacktrackSolver
+    from src.solver.rust_solver import RustSolver
 
     return SolverRouter([
+        RustSolver(),
         ExactCoverSolver(),
         RoseSolver(),
         BacktrackSolver(),

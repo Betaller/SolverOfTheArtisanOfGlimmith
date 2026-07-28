@@ -469,6 +469,11 @@ def _collect_target_sizes(puzzle: Puzzle) -> set[int]:
     targets: set[int] = set()
     fillable = sum(1 for c in puzzle.cells if not c.blocked)
 
+    if puzzle.has_rule("shape_pool"):
+        pool = puzzle.get_rule("shape_pool")
+        if pool is not None:
+            for s in pool.params.get("shapes", []):
+                targets.add(s.area)
     if puzzle.has_rule("precise"):
         targets.add(puzzle.get_rule("precise").params["area"])
     if puzzle.has_rule("range"):
@@ -540,29 +545,22 @@ def _collect_target_sizes(puzzle: Puzzle) -> set[int]:
                     if 1 <= t <= 12:
                         targets.add(t)
 
-    # Filter: only keep sizes that can pack the grid
     filtered: set[int] = set()
+    has_multiple_sizes = puzzle.has_rule("range") or (puzzle.has_rule("area") and not puzzle.has_rule("precise"))
     for t in targets:
         if t < 1 or t > 12:
             continue
-        # For precise/area: strict divisibility
         if puzzle.has_rule("precise"):
             if fillable % t == 0:
                 filtered.add(t)
-        elif puzzle.has_rule("area"):
-            if fillable % t == 0:
-                filtered.add(t)
-        # For range: any size in range is valid (DLX handles packing)
-        elif puzzle.has_rule("range"):
+        elif has_multiple_sizes:
+            # range/area alone: any size works, DLX handles packing
             filtered.add(t)
-        # For solitary/rose_window: exact count → must divide
         elif puzzle.has_rule("solitary") or puzzle.has_rule("rose_window"):
             if fillable % t == 0:
                 filtered.add(t)
-        # For compass: minimum bound only, any size is possible
         else:
             filtered.add(t)
-    # Always include size 1 as fallback if nothing else
     if not filtered and 1 in targets:
         filtered.add(1)
     return filtered

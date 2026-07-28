@@ -249,15 +249,13 @@ def convert_aog_json(aog_data: dict) -> dict | None:
     if has_number and "area" not in existing_types:
         rules.append({"type": "area", "params": {}})
     if (has_symbol or has_compass) and "solitary" not in existing_types:
-        # Collect A-E symbols for rose_window
         symbol_types = set()
         for c in cells:
             s = c.get("symbol")
             if s and len(s) == 1 and s in "ABCDE":
                 symbol_types.add(s)
-        if symbol_types and "rose_window" not in existing_types:
+        if symbol_types and "rose_window" not in existing_types and "same" not in existing_types:
             rules.append({"type": "rose_window", "params": {"symbol_types": sorted(symbol_types)}})
-        # A-E symbols indicate rose_window, not solitary
     if has_heterogeneous and "heterogeneous" not in existing_types:
         rules.append({"type": "heterogeneous", "params": {}})
     if has_homogeneous and "homogeneous" not in existing_types:

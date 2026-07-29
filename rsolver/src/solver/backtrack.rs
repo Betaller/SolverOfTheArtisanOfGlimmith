@@ -89,8 +89,8 @@ fn compute_area_bounds(puzzle: &Puzzle) -> AreaBounds {
     for r in 0..h {
         for c in 0..w {
             if let Some(ref comp) = puzzle.cells[r][c].compass {
-                let needed = 1 + comp.up as usize + comp.down as usize
-                    + comp.left as usize + comp.right as usize;
+                let needed = 1 + comp.up.unwrap_or(0) as usize + comp.down.unwrap_or(0) as usize
+                    + comp.left.unwrap_or(0) as usize + comp.right.unwrap_or(0) as usize;
                 min_a = min_a.max(needed);
             }
         }
@@ -317,7 +317,8 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
                 if let Some(&rid) = state.cell_to_region.get(&(r, c)) {
                     if let Some(cells) = state.region_shapes.get(&rid) {
                         let (n, s, e, w) = count_directions(cells, r, c);
-                        let total = 1 + comp.up + comp.down + comp.left + comp.right;
+                        let total = 1 + comp.up.unwrap_or(0) + comp.down.unwrap_or(0)
+                            + comp.left.unwrap_or(0) + comp.right.unwrap_or(0);
                         if cells.len() < total as usize {
                             return false;
                         }

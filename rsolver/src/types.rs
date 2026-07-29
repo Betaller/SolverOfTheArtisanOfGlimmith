@@ -14,14 +14,14 @@ pub enum Direction {
 
 #[derive(Debug, Clone, Default)]
 pub struct CompassClue {
-    pub up: i64,
-    pub down: i64,
-    pub left: i64,
-    pub right: i64,
+    pub up: Option<i64>,
+    pub down: Option<i64>,
+    pub left: Option<i64>,
+    pub right: Option<i64>,
 }
 
 impl CompassClue {
-    pub fn get(&self, d: Direction) -> i64 {
+    pub fn get(&self, d: Direction) -> Option<i64> {
         match d {
             Direction::Up => self.up,
             Direction::Down => self.down,

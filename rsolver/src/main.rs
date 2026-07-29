@@ -41,10 +41,10 @@ struct CellJson {
 
 #[derive(Debug, Deserialize)]
 struct CompassJson {
-    up: i64,
-    down: i64,
-    left: i64,
-    right: i64,
+    up: Option<i64>,
+    down: Option<i64>,
+    left: Option<i64>,
+    right: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,6 +124,13 @@ struct SolutionJson {
 
 // ── Board builder ─────────────────────────────────────────────────────────────
 
+fn normalize_compass_value(v: Option<i64>) -> Option<i64> {
+    match v {
+        Some(x) if x >= 0 => Some(x),
+        _ => None,
+    }
+}
+
 fn build_puzzle(input: &PuzzleJson) -> Puzzle {
     let h = input.grid.height;
     let w = input.grid.width;
@@ -140,8 +147,10 @@ fn build_puzzle(input: &PuzzleJson) -> Puzzle {
         c.symbol = cd.symbol.as_ref().and_then(|s| s.chars().next());
         c.blocked = cd.blocked;
         c.compass = cd.compass.as_ref().map(|cp| CompassClue {
-            up: cp.up, down: cp.down,
-            left: cp.left, right: cp.right,
+            up: normalize_compass_value(cp.up),
+            down: normalize_compass_value(cp.down),
+            left: normalize_compass_value(cp.left),
+            right: normalize_compass_value(cp.right),
         });
     }
 

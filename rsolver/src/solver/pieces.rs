@@ -1,58 +1,44 @@
 //! Piece-based solver using DLX exact cover.
 //!
-//! For shape_pool / polyomino puzzles: generates all valid shape placements on the grid,
-//! builds a DLX matrix (columns = cells), and searches for an exact cover.
-//! Incremental validation (edge constraints, watchtower) happens during DLX search.
+//! Generates all valid shape placements from cell clues (area numbers, compass,
+//! shape pool), builds a DLX matrix (columns = cells), and finds exact cover.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Instant;
 
 use crate::dlx::DancingLinks;
 use crate::polyomino;
 use crate::types::*;
 
-/// A pre-computed shape placement that can be selected by DLX.
 #[derive(Debug, Clone)]
 struct Placement {
     cells: Vec<[usize; 2]>,
     area: usize,
     shape: Shape,
-    cell_ids_flat: Vec<usize>, // 1D cell indices for DLX
+    cell_ids_flat: Vec<usize>,
 }
 
-/// Result of pre-solving analysis.
 struct SolveContext {
-    /// (r,c) → flat cell index
     cell_to_idx: Vec<Vec<usize>>,
-    /// Number of fillable cells
     num_cells: usize,
-    /// Min/max area per cell (from inequality+compass bounds)
-    cell_min: Vec<Vec<usize>>,
-    cell_max: Vec<Vec<usize>>,
-    /// Effective puzzle-wide min/max area
     eff_min_area: usize,
     eff_max_area: usize,
-    /// Active shape pool shapes (with all transforms)
-    shape_variants: Vec<(Shape, Vec<Vec<[isize; 2]>>)>,
-    /// Watchtower data: (cells at vertex, target count)
     watchtowers: Vec<(Vec<[usize; 2]>, usize)>,
-    /// Edge constraints: ((r1,c1), (r2,c2), kind, value)
     edge_constraints: Vec<([usize; 2], [usize; 2], &'static str, Option<i64>)>,
-    /// Compass clues: (r, c, compass)
-    compasses: Vec<(usize, usize, CompassClue)>,
-    /// Rose window symbols that appear in the puzzle
-    rose_symbols: Vec<char>,
-    /// All fillable cell positions
     fillable: Vec<[usize; 2]>,
 }
 
-/// Solve the puzzle using DLX piece placement.
-/// Returns regions if solved, None otherwise.
-pub fn solve_pieces(puzzle: &Puzzle, timeout_ms: u64) -> Option<Vec<RegionInfo>> {
+const MAX_COMPASS_PLACEMENTS: usize = 2000;
+
+pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Option<Vec<RegionInfo>> {
     let deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
 
+    if !has_clues(puzzle) && puzzle.shape_pool.is_empty() {
+        return None; // fall back to backtrack
+    }
+
     let ctx = build_context(puzzle);
-    let placements = generate_placements(puzzle, &ctx);
+    let placements = generate_all_placements(puzzle, &ctx);
 
     if placements.is_empty() {
         if ctx.num_cells == 0 {
@@ -61,35 +47,45 @@ pub fn solve_pieces(puzzle: &Puzzle, timeout_ms: u64) -> Option<Vec<RegionInfo>>
         return None;
     }
 
-    // Build DLX: columns = cells
+    // Build DLX
     let mut dlx = DancingLinks::new(ctx.num_cells);
     for (i, p) in placements.iter().enumerate() {
         dlx.add_row(&p.cell_ids_flat, i);
     }
     dlx.set_deadline(deadline);
 
-    // For plain DLX (no edge constraints/watchtowers)
-    if ctx.edge_constraints.is_empty() && ctx.watchtowers.is_empty() {
-        dlx.search(0);
-        if dlx.solution_rows.is_empty() {
-            return None;
-        }
-        // Reconstruct: take the first solution
-        let row_ids = &dlx.solution_rows[0];
-        return Some(reconstruct_solution(
-            puzzle, &placements, row_ids, &ctx, 0,
-        ));
+    dlx.search(0);
+
+    if dlx.solution_rows.is_empty() {
+        return None;
     }
 
-    // DLX with incremental checking
-    dlx_search_with_check(dlx, &placements, &ctx)
+    // Validate each solution with edge constraints and watchtowers
+    for row_ids in &dlx.solution_rows {
+        if let Some(regions) = reconstruct_and_validate(&placements, row_ids, &ctx) {
+            return Some(regions);
+        }
+    }
+
+    None
+}
+
+fn has_clues(puzzle: &Puzzle) -> bool {
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width {
+            let cell = &puzzle.cells[r][c];
+            if cell.number.is_some() || cell.compass.is_some() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn build_context(puzzle: &Puzzle) -> SolveContext {
     let h = puzzle.height;
     let w = puzzle.width;
 
-    // Cell → flat index mapping
     let mut cell_to_idx = vec![vec![usize::MAX; w]; h];
     let mut num_cells = 0;
     let fillable: Vec<[usize; 2]> = (0..h)
@@ -102,70 +98,26 @@ fn build_context(puzzle: &Puzzle) -> SolveContext {
         })
         .collect();
 
-    // Calculate effective area bounds
-    let (eff_min, eff_max) = compute_area_bounds(puzzle, h, w);
-    let cell_min = vec![vec![eff_min; w]; h];
-    let cell_max = vec![vec![eff_max; w]; h];
+    let (eff_min, eff_max) = compute_eff_area_bounds(puzzle, h, w);
 
-    // Apply inequality propagation to narrow cell_min/max
-    let (cell_min, cell_max) = propagate_inequality_bounds(
-        puzzle, h, w, cell_min, cell_max, eff_min, eff_max,
-    );
-
-    // Build shape variants
-    let shape_variants = build_shape_variants(puzzle);
-
-    // Collect watchtowers
-    let watchtowers = collect_watchtowers(puzzle);
-
-    // Collect edge constraints
-    let edge_constraints = collect_edge_constraints(puzzle);
-
-    // Collect compass clues
-    let mut compasses = Vec::new();
-    for r in 0..h {
-        for c in 0..w {
-            if let Some(ref comp) = puzzle.cells[r][c].compass {
-                compasses.push((r, c, comp.clone()));
-            }
-        }
-    }
-
-    // Collect rose symbols
-    let mut rose_symbols = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for r in 0..h {
-        for c in 0..w {
-            if let Some(sym) = puzzle.cells[r][c].symbol {
-                if seen.insert(sym) {
-                    rose_symbols.push(sym);
-                }
-            }
-        }
-    }
+    let watchtowers = collect_watchtower_data(puzzle);
+    let edge_constraints = collect_edge_constraints_data(puzzle);
 
     SolveContext {
         cell_to_idx,
         num_cells,
-        cell_min,
-        cell_max,
         eff_min_area: eff_min,
         eff_max_area: eff_max,
-        shape_variants,
         watchtowers,
         edge_constraints,
-        compasses,
-        rose_symbols,
         fillable,
     }
 }
 
-/// Compute effective min/max area from rules.
-fn compute_area_bounds(puzzle: &Puzzle, h: usize, w: usize) -> (usize, usize) {
+fn compute_eff_area_bounds(puzzle: &Puzzle, h: usize, w: usize) -> (usize, usize) {
     let mut min_a = 1usize;
     let mut max_a = h * w;
 
-    // Check precise/range rules
     for rule in &puzzle.rules {
         match rule.ctype.as_str() {
             "precise" => {
@@ -182,39 +134,17 @@ fn compute_area_bounds(puzzle: &Puzzle, h: usize, w: usize) -> (usize, usize) {
                     max_a = max_a.min(v as usize);
                 }
             }
-            "solitary" => {
-                min_a = 1;
-                max_a = 1;
-            }
-            "block" => {
-                min_a = 4;
-                max_a = 4;
-            }
-            "non_block" => {
-                min_a = min_a.max(1);
-            }
+            "solitary" => { min_a = 1; max_a = 1; }
+            "block" => { min_a = 4; max_a = 4; }
             _ => {}
         }
     }
 
-    // Check for watchtower minimum region count → bounds max area
-    for vr in 0..h.saturating_sub(1) {
-        for vc in 0..w.saturating_sub(1) {
-            if puzzle.vertices[vr][vc].watchtower.is_some() {
-                // At least that many regions → each region can be at most total/regions
-                let target = puzzle.vertices[vr][vc].watchtower.unwrap() as usize;
-                let total = h * w;
-                max_a = max_a.min(total.saturating_div(target.max(1)) * 2);
-            }
-        }
-    }
-
-    // Adjust from compass clues (min area at least sum of direction + 1 for self)
     for r in 0..h {
         for c in 0..w {
             if let Some(ref comp) = puzzle.cells[r][c].compass {
-                let needed = 1 + comp.up as usize + comp.down as usize
-                    + comp.left as usize + comp.right as usize;
+                let needed = 1 + comp.up.unwrap_or(0) as usize + comp.down.unwrap_or(0) as usize
+                    + comp.left.unwrap_or(0) as usize + comp.right.unwrap_or(0) as usize;
                 min_a = min_a.max(needed);
             }
         }
@@ -223,102 +153,24 @@ fn compute_area_bounds(puzzle: &Puzzle, h: usize, w: usize) -> (usize, usize) {
     (min_a, max_a)
 }
 
-/// Arc consistency propagation for inequality edge clues.
-fn propagate_inequality_bounds(
-    puzzle: &Puzzle,
-    h: usize,
-    w: usize,
-    mut cell_min: Vec<Vec<usize>>,
-    mut cell_max: Vec<Vec<usize>>,
-    _eff_min: usize,
-    _eff_max: usize,
-) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
-    // Collect inequality pairs
-    let pairs: Vec<((usize, usize), (usize, usize))> = Vec::new(); // (smaller, larger)
-
-    // Horizontal edges: constraint type "inequality" → need to know direction
-    // In our JSON format, inequality edges have no direction info → skip for now
-    // Vertical edges: same
-
-    // For now, propagate based on compass clues (more precise)
-    for r in 0..h {
-        for c in 0..w {
-            if let Some(ref comp) = puzzle.cells[r][c].compass {
-                let min_a = 1 + comp.up as usize + comp.down as usize
-                    + comp.left as usize + comp.right as usize;
-                cell_min[r][c] = cell_min[r][c].max(min_a);
-                cell_max[r][c] = cell_max[r][c].min(min_a * 10);
-            }
-        }
-    }
-
-    // Propagate inequality: if a < b, then max(a) <= max(b) - 1 and min(b) >= min(a) + 1
-    let mut changed = true;
-    for _ in 0..100 {
-        if !changed {
-            break;
-        }
-        changed = false;
-        for &((sr, sc), (lr, lc)) in &pairs {
-            let new_max = cell_max[lr][lc].saturating_sub(1);
-            if cell_max[sr][sc] > new_max {
-                cell_max[sr][sc] = new_max;
-                changed = true;
-            }
-            let new_min = cell_min[sr][sc].saturating_add(1);
-            if cell_min[lr][lc] < new_min {
-                cell_min[lr][lc] = new_min;
-                changed = true;
-            }
-        }
-    }
-
-    (cell_min, cell_max)
-}
-
-/// Build shape variants: either from shape_pool or generate all polyominoes up to max_area.
-fn build_shape_variants(puzzle: &Puzzle) -> Vec<(Shape, Vec<Vec<[isize; 2]>>)> {
-    if !puzzle.shape_pool.is_empty() {
-        puzzle.shape_pool
-            .iter()
-            .map(|s| {
-                let transforms = polyomino::transforms(s);
-                (s.clone(), transforms)
-            })
-            .collect()
-    } else if puzzle.rules.iter().any(|r| r.ctype == "shape_pool" || r.ctype == "puzzle_piece") {
-        // For shape_pool without explicit pool, generate polyominoes up to max area
-        let h = puzzle.height;
-        let w = puzzle.width;
-        let max_a = h * w;
-        let limit = max_a.min(12); // cap at 12 for performance
-        let polys = polyomino::generate_polyominoes(limit);
-        polys.into_iter().map(|s| {
-            let transforms = polyomino::transforms(&s);
-            (s, transforms)
-        }).collect()
-    } else {
-        Vec::new()
-    }
-}
-
-fn collect_watchtowers(puzzle: &Puzzle) -> Vec<(Vec<[usize; 2]>, usize)> {
+fn collect_watchtower_data(puzzle: &Puzzle) -> Vec<(Vec<[usize; 2]>, usize)> {
     let h = puzzle.height;
     let w = puzzle.width;
     let mut result = Vec::new();
-
     for r in 0..h.saturating_sub(1) {
         for c in 0..w.saturating_sub(1) {
             if let Some(val) = puzzle.vertices[r][c].watchtower {
-                let cells = vec![[r, c], [r, c + 1], [r + 1, c], [r + 1, c + 1]];
-                result.push((cells, val as usize));
+                let v = val as usize;
+                if v >= 1 && v <= 4 {
+                    result.push((vec![[r, c], [r, c + 1], [r + 1, c], [r + 1, c + 1]], v));
+                }
             }
         }
     }
     result
 }
 
-fn collect_edge_constraints(
+fn collect_edge_constraints_data(
     puzzle: &Puzzle,
 ) -> Vec<([usize; 2], [usize; 2], &'static str, Option<i64>)> {
     let h = puzzle.height;
@@ -354,240 +206,377 @@ fn collect_edge_constraints(
     result
 }
 
-/// Generate all valid shape placements on the grid.
-fn generate_placements(puzzle: &Puzzle, ctx: &SolveContext) -> Vec<Placement> {
+fn generate_all_placements(puzzle: &Puzzle, ctx: &SolveContext) -> Vec<Placement> {
     let h = puzzle.height;
     let w = puzzle.width;
     let mut placements = Vec::new();
-    let mut seen: HashSet<Vec<usize>> = HashSet::new();
 
-    for (canonical_shape, transforms) in &ctx.shape_variants {
-        let area = canonical_shape.len();
-
-        for transform in transforms {
-            for r in 0..h {
-                for c in 0..w {
-                    let mut cells = Vec::with_capacity(area);
-                    let mut valid = true;
-
-                    for &[dr, dc] in transform {
-                        let nr = r as isize + dr;
-                        let nc = c as isize + dc;
-                        if nr < 0 || nr >= h as isize || nc < 0 || nc >= w as isize {
-                            valid = false;
-                            break;
+    // 1. Shape pool placements (if any)
+    if !puzzle.shape_pool.is_empty() {
+        for shape in &puzzle.shape_pool {
+            let transforms = polyomino::transforms(shape);
+            let area = shape.len();
+            for transform in &transforms {
+                let offset_drs: Vec<[isize; 2]> = transform.clone();
+                for r in 0..h {
+                    for c in 0..w {
+                        if let Some(cells) = try_place(&offset_drs, r, c, h, w, puzzle) {
+                            let flat = cells_to_flat(&cells, ctx);
+                            placements.push(Placement {
+                                cells,
+                                area,
+                                shape: shape.clone(),
+                                cell_ids_flat: flat,
+                            });
                         }
-                        let nr = nr as usize;
-                        let nc = nc as usize;
-                        let cell = &puzzle.cells[nr][nc];
-                        if cell.blocked {
-                            valid = false;
-                            break;
-                        }
-                        // Area bounds check
-                        if area < ctx.cell_min[nr][nc] || area > ctx.cell_max[nr][nc] {
-                            // Skip but don't invalidate — bounds are per-cell, placement
-                            // only needs to satisfy bounds of the specific cells it covers
-                        }
-                        cells.push([nr, nc]);
                     }
-                    if !valid {
-                        continue;
-                    }
+                }
+            }
+        }
+    }
 
-                    // Check for pre-cut boundaries within the placement
-                    if !check_internal_edges(puzzle, &cells) {
-                        continue;
-                    }
-
-                    // Check compass clues within the placement
-                    if !check_compass_in_placement(&cells, &ctx.compasses) {
-                        continue;
-                    }
-
-                    // Check rose window within the placement
-                    if !check_rose_in_placement(puzzle, &cells, &ctx.rose_symbols) {
-                        continue;
-                    }
-
-                    // Deduplicate by cell set
-                    let flat_ids: Vec<usize> = cells
-                        .iter()
-                        .map(|&[r, c]| ctx.cell_to_idx[r][c])
-                        .collect();
-                    let mut sorted_ids = flat_ids.clone();
-                    sorted_ids.sort();
-                    if !seen.insert(sorted_ids) {
-                        continue;
-                    }
-
+    // 2. Area number placements
+    for r in 0..h {
+        for c in 0..w {
+            if let Some(area) = puzzle.cells[r][c].number {
+                let target = area as usize;
+                if target < ctx.eff_min_area || target > ctx.eff_max_area {
+                    continue;
+                }
+                let mut results = Vec::new();
+                generate_polyominoes(puzzle, r, c, target, &mut results);
+                for cells in results {
+                    let mut canonical = cells.clone();
+                    normalize(&mut canonical);
+                    let flat = cells_to_flat(&cells, ctx);
                     placements.push(Placement {
                         cells,
-                        area,
-                        shape: canonical_shape.clone(),
-                        cell_ids_flat: flat_ids,
+                        area: target,
+                        shape: canonical,
+                        cell_ids_flat: flat,
                     });
                 }
             }
         }
     }
 
-    placements
-}
+    // 3. Compass clue placements (only for highly constrained clues)
+    for r in 0..h {
+        for c in 0..w {
+            if let Some(ref comp) = puzzle.cells[r][c].compass {
+                let spec_count = count_specified(comp);
+                let is_strip = (comp.east_west_strip()) || (comp.north_south_strip());
+                if spec_count < 3 && !is_strip {
+                    continue; // too loosely constrained
+                }
 
-/// Check that no pre-cut boundary edges exist within the placement's cells.
-fn check_internal_edges(puzzle: &Puzzle, cells: &[[usize; 2]]) -> bool {
-    let set: HashSet<(usize, usize)> = cells.iter().copied().map(|[r, c]| (r, c)).collect();
-
-    for &[r, c] in cells {
-        // Right neighbor
-        if set.contains(&(r, c + 1)) && puzzle.h_edges[r][c].is_boundary {
-            return false;
-        }
-        // Down neighbor
-        if set.contains(&(r + 1, c)) && puzzle.v_edges[r][c].is_boundary {
-            return false;
-        }
-    }
-    true
-}
-
-/// Check that compass clues within the placement are satisfied.
-fn check_compass_in_placement(cells: &[[usize; 2]], compasses: &[(usize, usize, CompassClue)]) -> bool {
-    let cell_map: HashSet<(usize, usize)> = cells.iter().copied().map(|[r, c]| (r, c)).collect();
-
-    for &(cr, cc, ref comp) in compasses {
-        if !cell_map.contains(&(cr, cc)) {
-            continue; // compass cell not in this placement
-        }
-
-        let mut n = 0i64;
-        let mut s = 0i64;
-        let mut e = 0i64;
-        let mut w = 0i64;
-
-        for &[r, c] in cells {
-            if (r, c) == (cr, cc) {
-                continue;
-            }
-            let dr = r as i64 - cr as i64;
-            let dc = c as i64 - cc as i64;
-            if dr < 0 {
-                n += 1;
-            }
-            if dr > 0 {
-                s += 1;
-            }
-            if dc > 0 {
-                e += 1;
-            }
-            if dc < 0 {
-                w += 1;
-            }
-        }
-
-        // Check that actual counts are consistent with given values
-        if comp.up != 0 || n > 0 {
-            if n != comp.up {
-                // Check if the compass value is a constraint or exact
-                // For now: treat as exact
-            }
-        }
-        _ = (s, e, w, comp);
-        // Simplified — just check total area is enough
-        let total = 1 + comp.up + comp.down + comp.left + comp.right;
-        if cells.len() < total as usize {
-            return false;
-        }
-    }
-    true
-}
-
-/// Check rose window: each symbol type must appear exactly once in the placement.
-fn check_rose_in_placement(puzzle: &Puzzle, cells: &[[usize; 2]], symbols: &[char]) -> bool {
-    for &sym in symbols {
-        let mut count = 0;
-        for &[r, c] in cells {
-            if let Some(s) = puzzle.cells[r][c].symbol {
-                if s == sym {
-                    count += 1;
-                    if count > 1 {
-                        return false;
-                    }
+                let results = generate_compass_polyominoes(puzzle, r, c, comp);
+                if results.len() > MAX_COMPASS_PLACEMENTS {
+                    continue;
+                }
+                for cells in results {
+                    let area = cells.len();
+                    let mut canonical = cells.clone();
+                    normalize(&mut canonical);
+                    let flat = cells_to_flat(&cells, ctx);
+                    placements.push(Placement {
+                        cells,
+                        area,
+                        shape: canonical,
+                        cell_ids_flat: flat,
+                    });
                 }
             }
         }
-        if count != 1 {
-            // If the puzzle has this symbol and the placement doesn't contain exactly one,
-            // that's okay — rose_window only checks in final solution
-            // For individual placements, any number is allowed as long as not >1
-        }
     }
-    true
+
+    // Deduplicate
+    let mut seen: HashSet<Vec<usize>> = HashSet::new();
+    placements.retain(|p| {
+        let mut ids = p.cell_ids_flat.clone();
+        ids.sort();
+        seen.insert(ids)
+    });
+
+    placements
 }
 
-/// DLX search with incremental constraint checking.
-fn dlx_search_with_check(
-    mut dlx: DancingLinks,
-    placements: &[Placement],
-    ctx: &SolveContext,
-) -> Option<Vec<RegionInfo>> {
-    // We implement a custom search that calls row_check after each row selection.
-    // Since our DLX doesn't have search_with_check natively,
-    // we modify the DLX to include a check callback.
-
-    // For now, run standard DLX and validate solutions post-hoc
-    dlx.search(0);
-
-    if dlx.solution_rows.is_empty() {
-        return None;
+impl CompassClue {
+    fn east_west_strip(&self) -> bool {
+        self.right == Some(0) && self.left == Some(0)
     }
-
-    // Validate each solution
-    for row_ids in &dlx.solution_rows {
-        let solution = reconstruct_solution_with_validation(
-            placements, row_ids, ctx,
-        );
-        if solution.is_some() {
-            return solution;
-        }
+    fn north_south_strip(&self) -> bool {
+        self.up == Some(0) && self.down == Some(0)
     }
-
-    None
 }
 
-fn reconstruct_solution(
-    _puzzle: &Puzzle,
-    placements: &[Placement],
-    row_ids: &[usize],
-    _ctx: &SolveContext,
-    _start_rid: usize,
-) -> Vec<RegionInfo> {
-    row_ids
+fn count_specified(comp: &CompassClue) -> usize {
+    [comp.up, comp.down, comp.right, comp.left]
         .iter()
-        .enumerate()
-        .map(|(rid, &row_id)| {
-            let p = &placements[row_id];
-            let mut norm = p.shape.clone();
-            normalize(&mut norm);
-            RegionInfo {
-                region_id: rid,
-                cells: p.cells.clone(),
-                area: p.area,
-                shape: norm,
-                normalized_shape_key: canonical_key(&p.shape),
-                matched_shape_name: None,
-            }
-        })
-        .collect()
+        .filter(|v| v.is_some())
+        .count()
 }
 
-fn reconstruct_solution_with_validation(
+fn try_place(
+    offsets: &[[isize; 2]],
+    r: usize,
+    c: usize,
+    h: usize,
+    w: usize,
+    puzzle: &Puzzle,
+) -> Option<Vec<[usize; 2]>> {
+    let mut cells = Vec::with_capacity(offsets.len());
+    for &[dr, dc] in offsets {
+        let nr = r as isize + dr;
+        let nc = c as isize + dc;
+        if nr < 0 || nr >= h as isize || nc < 0 || nc >= w as isize {
+            return None;
+        }
+        let nr = nr as usize;
+        let nc = nc as usize;
+        if puzzle.cells[nr][nc].blocked {
+            return None;
+        }
+        cells.push([nr, nc]);
+    }
+    Some(cells)
+}
+
+fn cells_to_flat(cells: &[[usize; 2]], ctx: &SolveContext) -> Vec<usize> {
+    cells.iter().map(|&[r, c]| ctx.cell_to_idx[r][c]).collect()
+}
+
+/// Generate all connected polyominoes of exactly `size` cells containing `(sr, sc)`.
+fn generate_polyominoes(
+    puzzle: &Puzzle,
+    sr: usize,
+    sc: usize,
+    size: usize,
+    results: &mut Vec<Vec<[usize; 2]>>,
+) {
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let mut current = vec![[sr, sc]];
+    let mut candidates = BTreeSet::new();
+
+    for (nr, nc) in neighbor_positions(sr, sc, h, w) {
+        if !puzzle.cells[nr][nc].blocked && !is_precut(puzzle, sr, sc, nr, nc) {
+            candidates.insert([nr, nc]);
+        }
+    }
+
+    poly_rec(puzzle, &mut current, &mut candidates, size, results);
+}
+
+fn poly_rec(
+    puzzle: &Puzzle,
+    current: &mut Vec<[usize; 2]>,
+    candidates: &mut BTreeSet<[usize; 2]>,
+    size: usize,
+    results: &mut Vec<Vec<[usize; 2]>>,
+) {
+    if current.len() == size {
+        results.push(current.clone());
+        return;
+    }
+    if candidates.is_empty() {
+        return;
+    }
+
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let mut my_candidates = candidates.clone();
+
+    while let Some(&next) = my_candidates.iter().next() {
+        my_candidates.remove(&next);
+        candidates.remove(&next);
+
+        let mut added = Vec::new();
+        for (nr, nc) in neighbor_positions(next[0], next[1], h, w) {
+            let pos = [nr, nc];
+            if puzzle.cells[nr][nc].blocked {
+                continue;
+            }
+            if is_precut(puzzle, next[0], next[1], nr, nc) {
+                continue;
+            }
+            if current.contains(&pos) || my_candidates.contains(&pos) {
+                continue;
+            }
+            if candidates.insert(pos) {
+                added.push(pos);
+            }
+        }
+
+        current.push(next);
+        poly_rec(puzzle, current, candidates, size, results);
+        current.pop();
+
+        for a in added {
+            candidates.remove(&a);
+        }
+    }
+}
+
+/// Generate all connected polyominoes containing `(sr, sc)` that satisfy compass constraints.
+fn generate_compass_polyominoes(
+    puzzle: &Puzzle,
+    sr: usize,
+    sc: usize,
+    compass: &CompassClue,
+) -> Vec<Vec<[usize; 2]>> {
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let mut results = Vec::new();
+    let mut current = vec![[sr, sc]];
+    let mut counts = [0usize; 4]; // N=0, S=1, E=2, W=3
+    let mut candidates = BTreeSet::new();
+
+    let sri = sr as isize;
+    let sci = sc as isize;
+
+    for (nr, nc) in neighbor_positions(sr, sc, h, w) {
+        if !puzzle.cells[nr][nc].blocked && !is_precut(puzzle, sr, sc, nr, nc) {
+            candidates.insert([nr, nc]);
+        }
+    }
+
+    compass_rec(
+        puzzle, &mut current, &mut counts, &mut candidates,
+        sri, sci, compass, &mut results,
+    );
+    results
+}
+
+fn compass_rec(
+    puzzle: &Puzzle,
+    current: &mut Vec<[usize; 2]>,
+    counts: &mut [usize; 4],
+    candidates: &mut BTreeSet<[usize; 2]>,
+    cr_i: isize,
+    cc_i: isize,
+    compass: &CompassClue,
+    results: &mut Vec<Vec<[usize; 2]>>,
+) {
+    // Check if any direction exceeds its compass value
+    if counts[0] > compass.up.unwrap_or(0) as usize
+        || counts[1] > compass.down.unwrap_or(0) as usize
+        || counts[2] > compass.right.unwrap_or(0) as usize
+        || counts[3] > compass.left.unwrap_or(0) as usize
+    {
+        return;
+    }
+
+    // Check if all specified directions are exactly satisfied
+    // (Note: in our format, 0 means "not specified" BUT ONLY if the compass is from the I/O layer
+    //  For compass clues, all values default to 0, meaning "no constraint in that direction")
+    let all_satisfied = compass.up.unwrap_or(0) == counts[0] as i64
+        && compass.down.unwrap_or(0) == counts[1] as i64
+        && compass.right.unwrap_or(0) == counts[2] as i64
+        && compass.left.unwrap_or(0) == counts[3] as i64;
+
+    if all_satisfied && current.len() > 1 {
+        results.push(current.clone());
+        // Continue: can grow in unspecified... but in our format all values are specified
+        // as 0 (meaning "exactly 0") or non-zero. So if all_satisfied, we're done.
+        return;
+    }
+
+    if candidates.is_empty() {
+        return;
+    }
+
+    let max_sz = current.len() + 20; // reasonable cap; actual max should be grid area
+    if current.len() >= max_sz {
+        return;
+    }
+
+    if results.len() >= MAX_COMPASS_PLACEMENTS {
+        return;
+    }
+
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let mut my_candidates = candidates.clone();
+
+    while let Some(&next) = my_candidates.iter().next() {
+        my_candidates.remove(&next);
+        candidates.remove(&next);
+
+        let dr = next[0] as isize - cr_i;
+        let dc = next[1] as isize - cc_i;
+
+        let dir_idx = if dr < 0 {
+            0
+        } else if dr > 0 {
+            1
+        } else if dc > 0 {
+            2
+        } else {
+            3
+        };
+
+        // Check direction limit BEFORE recursing
+        let at_limit = match dir_idx {
+            0 => compass.up.map_or(false, |v| counts[0] >= v as usize),
+            1 => compass.down.map_or(false, |v| counts[1] >= v as usize),
+            2 => compass.right.map_or(false, |v| counts[2] >= v as usize),
+            3 => compass.left.map_or(false, |v| counts[3] >= v as usize),
+            _ => false,
+        };
+
+        // Find neighbors reachable only through `next`
+        let mut added = Vec::new();
+        for (nr, nc) in neighbor_positions(next[0], next[1], h, w) {
+            let pos = [nr, nc];
+            if puzzle.cells[nr][nc].blocked {
+                continue;
+            }
+            if is_precut(puzzle, next[0], next[1], nr, nc) {
+                continue;
+            }
+            if current.contains(&pos) || my_candidates.contains(&pos) {
+                continue;
+            }
+            if candidates.insert(pos) {
+                added.push(pos);
+            }
+        }
+
+        if at_limit {
+            for a in added {
+                candidates.remove(&a);
+            }
+            continue;
+        }
+
+        counts[dir_idx] += 1;
+        current.push(next);
+        compass_rec(puzzle, current, counts, candidates, cr_i, cc_i, compass, results);
+        current.pop();
+        counts[dir_idx] -= 1;
+
+        for a in added {
+            candidates.remove(&a);
+        }
+    }
+}
+
+fn is_precut(puzzle: &Puzzle, r1: usize, c1: usize, r2: usize, c2: usize) -> bool {
+    if r1 == r2 {
+        let c = c1.min(c2);
+        puzzle.h_edges[r1][c].is_boundary
+    } else {
+        let r = r1.min(r2);
+        puzzle.v_edges[r][c1].is_boundary
+    }
+}
+
+fn reconstruct_and_validate(
     placements: &[Placement],
     row_ids: &[usize],
     ctx: &SolveContext,
 ) -> Option<Vec<RegionInfo>> {
-    // Build cell→piece mapping
     let mut piece_of_cell: HashMap<(usize, usize), usize> = HashMap::new();
     for (i, &row_id) in row_ids.iter().enumerate() {
         for &[r, c] in &placements[row_id].cells {
@@ -595,88 +584,65 @@ fn reconstruct_solution_with_validation(
         }
     }
 
-    // Check coverage: all fillable cells must be assigned
+    // Coverage check
     for &[r, c] in &ctx.fillable {
         if !piece_of_cell.contains_key(&(r, c)) {
             return None;
         }
     }
 
-    // Check edge constraints
+    // Edge constraints
     for &(c1, c2, kind, val) in &ctx.edge_constraints {
         let p1 = piece_of_cell.get(&(c1[0], c1[1]));
         let p2 = piece_of_cell.get(&(c2[0], c2[1]));
         let p1 = match p1 { Some(&v) => v, None => continue };
         let p2 = match p2 { Some(&v) => v, None => continue };
-        if p1 == p2 {
-            continue;
-        }
+        if p1 == p2 { continue; }
 
         let a1 = placements[row_ids[p1]].area;
         let a2 = placements[row_ids[p2]].area;
-
         match kind {
-            "inequality" => {
-                // Without direction info, just ensure different areas
-                if a1 == a2 {
-                    return None;
-                }
-            }
+            "inequality" => { if a1 == a2 { return None; } }
             "difference" => {
                 let diff = (a1 as i64 - a2 as i64).unsigned_abs() as usize;
                 if let Some(target) = val {
-                    if diff != target as usize {
-                        return None;
-                    }
+                    if diff != target as usize { return None; }
                 }
             }
             "delta" => {
-                if placements[row_ids[p1]].shape == placements[row_ids[p2]].shape {
-                    return None;
-                }
+                if placements[row_ids[p1]].shape == placements[row_ids[p2]].shape { return None; }
             }
             "gemini" => {
-                if placements[row_ids[p1]].shape != placements[row_ids[p2]].shape {
-                    return None;
-                }
+                if placements[row_ids[p1]].shape != placements[row_ids[p2]].shape { return None; }
             }
             _ => {}
         }
     }
 
-    // Check watchtowers
-    for &(ref cells, target) in &ctx.watchtowers {
+    // Watchtowers
+    for (ref cells, target) in &ctx.watchtowers {
         let mut pieces = Vec::new();
         for &[r, c] in cells {
             if let Some(&p) = piece_of_cell.get(&(r, c)) {
-                if !pieces.contains(&p) {
-                    pieces.push(p);
-                }
+                if !pieces.contains(&p) { pieces.push(p); }
             }
         }
-        if pieces.len() != target {
-            return None;
-        }
+        if pieces.len() != *target { return None; }
     }
 
-    // Build region info
-    let regions: Vec<RegionInfo> = row_ids
-        .iter()
-        .enumerate()
-        .map(|(rid, &row_id)| {
-            let p = &placements[row_id];
-            let mut norm = p.shape.clone();
-            normalize(&mut norm);
-            RegionInfo {
-                region_id: rid,
-                cells: p.cells.clone(),
-                area: p.area,
-                shape: norm,
-                normalized_shape_key: canonical_key(&p.shape),
-                matched_shape_name: None,
-            }
-        })
-        .collect();
+    let regions: Vec<RegionInfo> = row_ids.iter().enumerate().map(|(rid, &row_id)| {
+        let p = &placements[row_id];
+        let mut norm = p.shape.clone();
+        normalize(&mut norm);
+        RegionInfo {
+            region_id: rid,
+            cells: p.cells.clone(),
+            area: p.area,
+            shape: norm,
+            normalized_shape_key: canonical_key(&p.shape),
+            matched_shape_name: None,
+        }
+    }).collect();
 
     Some(regions)
 }

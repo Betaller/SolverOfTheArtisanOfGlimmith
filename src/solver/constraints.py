@@ -240,7 +240,11 @@ def check_rule_fence(puzzle: Puzzle, board: Board) -> bool:
             nr, nc = c.row + dr, c.col + dc
             if 0 <= nr < board.height and 0 <= nc < board.width:
                 neighbor = board.cell(nr, nc)
-                is_boundary = neighbor.assigned and neighbor.region_id != c.region_id
+                # a blocked (missing) cell counts as a boundary, matching the
+                # game: the region outline runs along the hole
+                is_boundary = neighbor.blocked or (
+                    neighbor.assigned and neighbor.region_id != c.region_id
+                )
             else:
                 is_boundary = True
             edge_bits.append(is_boundary)

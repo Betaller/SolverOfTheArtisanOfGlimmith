@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QSize
@@ -21,6 +22,20 @@ MODE_CURSORS = {
     "symbol": Qt.CursorShape.IBeamCursor,
     "compass": Qt.CursorShape.CrossCursor,
     "watchtower": Qt.CursorShape.CrossCursor,
+}
+
+# P-number coloured circles (matches the archive viewer)
+P_COLORS = ["#c84030", "#3060c0", "#cca020", "#30a040", "#8030c0"]
+
+# Fence diamond edges per F-value: (NW, NE, SW, SE) where NW = top-left corner,
+# NE = top-right, SW = bottom-left, SE = bottom-right (matches the archive).
+FENCE_EDGES: dict[str, tuple[int, int, int, int]] = {
+    "F0": (0, 0, 0, 0),
+    "F1": (0, 0, 0, 1),
+    "F2": (0, 1, 1, 0),
+    "F3": (0, 1, 1, 1),
+    "F4": (1, 1, 1, 1),
+    "F7": (1, 1, 0, 0),
 }
 
 
@@ -912,11 +927,25 @@ class GridWidget(QWidget):
 
             ct = e.constraint.type
             if ct == EdgeConstraintType.HETEROGENEOUS:
-                painter.drawText(QRectF(mx - 14, my - 10, 28, 20),
-                                 Qt.AlignmentFlag.AlignCenter, "≠")
+                # diff (异生): black box with δ, matches the archive viewer
+                bx = QRectF(mx - sz * 0.55, my - sz * 0.55, sz * 1.1, sz * 1.1)
+                painter.setPen(QPen(QColor("#555"), 1))
+                painter.setBrush(QBrush(QColor("#111")))
+                painter.drawRect(bx)
+                painter.setPen(QPen(QColor("#ffffff"), 1))
+                painter.setFont(QFont("Segoe UI Symbol", int(sz * 0.7), QFont.Weight.Bold))
+                painter.drawText(bx, Qt.AlignmentFlag.AlignCenter, "δ")
+                painter.setBrush(Qt.BrushStyle.NoBrush)
             elif ct == EdgeConstraintType.HOMOGENEOUS:
-                painter.drawText(QRectF(mx - 14, my - 10, 28, 20),
-                                 Qt.AlignmentFlag.AlignCenter, "=")
+                # twins (双生): white box with ♂, matches the archive viewer
+                bx = QRectF(mx - sz * 0.55, my - sz * 0.55, sz * 1.1, sz * 1.1)
+                painter.setPen(QPen(QColor("#555"), 1))
+                painter.setBrush(QBrush(QColor("#ffffff")))
+                painter.drawRect(bx)
+                painter.setPen(QPen(QColor("#111"), 1))
+                painter.setFont(QFont("Segoe UI Symbol", int(sz * 0.7), QFont.Weight.Bold))
+                painter.drawText(bx, Qt.AlignmentFlag.AlignCenter, "♂")
+                painter.setBrush(Qt.BrushStyle.NoBrush)
             elif ct == EdgeConstraintType.INEQUALITY:
                 rev = e.constraint.value == 1 if e.constraint is not None else False
                 if e.c1 == e.c2:
@@ -941,17 +970,33 @@ class GridWidget(QWidget):
             if v.watchtower is not None:
                 x = self._padding + (v.col + 1) * self._cell_size
                 y = self._padding + (v.row + 1) * self._cell_size
-                r = self._cell_size // 5
+                r = self._cell_size / 5
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(QColor(_ui_theme.colors.watchtower_bg)))
                 painter.drawEllipse(QPointF(x, y), r, r)
                 painter.setPen(QPen(QColor(_ui_theme.colors.watchtower_border), 2))
                 painter.drawEllipse(QPointF(x, y), r, r)
-                font = QFont("Segoe UI", self._cell_size // 4, QFont.Weight.Bold)
-                painter.setFont(font)
-                painter.setPen(QPen(QColor(_ui_theme.colors.watchtower_text)))
-                painter.drawText(QRectF(x - r, y - r, r * 2, r * 2),
-                                 Qt.AlignmentFlag.AlignCenter, str(v.watchtower))
+                # dice dots (matches the archive viewer), falls back to the
+                # number for out-of-range values
+                dots_map = {
+                    1: [(0.0, 0.0)],
+                    2: [(-0.4, 0.4), (0.4, -0.4)],
+                    3: [(-0.4, 0.4), (0.0, 0.0), (0.4, -0.4)],
+                    4: [(-0.4, -0.4), (0.4, -0.4), (-0.4, 0.4), (0.4, 0.4)],
+                }
+                dots = dots_map.get(v.watchtower)
+                if dots is not None:
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(QBrush(QColor(_ui_theme.colors.watchtower_text)))
+                    for dx, dy in dots:
+                        painter.drawEllipse(QPointF(x + dx * r, y + dy * r), r * 0.25, r * 0.25)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                else:
+                    font = QFont("Segoe UI", int(self._cell_size // 4), QFont.Weight.Bold)
+                    painter.setFont(font)
+                    painter.setPen(QPen(QColor(_ui_theme.colors.watchtower_text)))
+                    painter.drawText(QRectF(x - r, y - r, r * 2, r * 2),
+                                     Qt.AlignmentFlag.AlignCenter, str(v.watchtower))
 
     def _draw_clues(self, painter: QPainter) -> None:
         for r in range(self.board.height):
@@ -962,10 +1007,16 @@ class GridWidget(QWidget):
                 cy = rect.center().y()
 
                 if cell.symbol is not None and cell.symbol:
-                    font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)
-                    painter.setFont(font)
-                    painter.setPen(QPen(QColor(_ui_theme.colors.symbol_text)))
-                    painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, cell.symbol)
+                    if re.fullmatch(r"P[1-9]", cell.symbol):
+                        self._draw_p_circle(painter, cx, cy, int(cell.symbol[1]))
+                    else:
+                        font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)
+                        painter.setFont(font)
+                        painter.setPen(QPen(QColor(_ui_theme.colors.symbol_text)))
+                        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, cell.symbol)
+
+                if cell.fence_pattern is not None:
+                    self._draw_fence_diamond(painter, cx, cy, self._fence_diamond(cell.fence_pattern))
 
                 if cell.number is not None and cell.symbol is None:
                     font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)
@@ -987,6 +1038,65 @@ class GridWidget(QWidget):
                     self._draw_mini_shape_centered(
                         painter, cell.shape_pattern, cx, cy, self._cell_size * 0.6)
 
+    def _draw_p_circle(self, painter: QPainter, cx: float, cy: float, n: int) -> None:
+        """P-number coloured circle (matches the archive viewer)."""
+        r = self._cell_size * 0.24
+        color = P_COLORS[(n - 1) % len(P_COLORS)]
+        painter.setPen(QPen(QColor("#000000"), 1.5))
+        painter.setBrush(QBrush(QColor(color)))
+        painter.drawEllipse(QPointF(cx, cy), r, r)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _fence_diamond(self, pattern: Shape) -> str:
+        """Recover the F-value from the stored 3x3 directional pattern.
+
+        The pattern is {center} plus up/down/left/right boundary bits.  The
+        diamond edge set per F-value matches the archive viewer.
+        """
+        cells = pattern.cells
+        bits = {
+            "up": (0, 1) in cells,
+            "down": (2, 1) in cells,
+            "left": (1, 0) in cells,
+            "right": (1, 2) in cells,
+        }
+        count = sum(bits.values())
+        if count == 0:
+            return "F0"
+        if count == 1:
+            return "F1"
+        if count == 2:
+            if (bits["up"] and bits["down"]) or (bits["left"] and bits["right"]):
+                return "F2"
+            return "F7"
+        if count == 3:
+            return "F3"
+        return "F4"
+
+    def _draw_fence_diamond(self, painter: QPainter, cx: float, cy: float, fval: str) -> None:
+        """Fence diamond: solid for present edges, dotted for absent (matches
+        the archive viewer's renderFence)."""
+        nw, ne, sw, se = FENCE_EDGES[fval]
+        r = self._cell_size * 0.35
+        t = QPointF(cx, cy - r)
+        rp = QPointF(cx + r, cy)
+        b = QPointF(cx, cy + r)
+        l = QPointF(cx - r, cy)
+        segments = [(nw, t, l), (ne, t, rp), (sw, l, b), (se, rp, b)]
+
+        painter.setPen(QPen(QColor(80, 60, 30, 70), 1, Qt.PenStyle.DashLine))
+        for present, p1, p2 in segments:
+            if not present:
+                painter.drawLine(p1, p2)
+        painter.setPen(QPen(QColor("#2a1a08"), 1.8))
+        for present, p1, p2 in segments:
+            if present:
+                painter.drawLine(p1, p2)
+        painter.setBrush(QBrush(QColor("#2a1a08")))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(cx, cy), self._cell_size * 0.09, self._cell_size * 0.09)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
     def _draw_compass(self, painter: QPainter, cell: Cell, cx: float, cy: float) -> None:
         cp = cell.compass
         off = self._cell_size * 0.3
@@ -994,16 +1104,16 @@ class GridWidget(QWidget):
         painter.setFont(font_small)
         painter.setPen(QPen(QColor(_ui_theme.colors.compass_text), 1))
 
-        def draw_at(txt: str, dx: float, dy: float) -> None:
-            if txt == "-1":
-                txt = "∞"
+        def draw_at(value: int, dx: float, dy: float) -> None:
+            if value < 0:
+                return  # unconstrained direction: not drawn (matches the archive)
             painter.drawText(QRectF(cx + dx - 12, cy + dy - 8, 24, 16),
-                             Qt.AlignmentFlag.AlignCenter, txt)
+                             Qt.AlignmentFlag.AlignCenter, str(value))
 
-        draw_at(str(cp.up) if cp.up >= 0 else "-1", 0, -off)
-        draw_at(str(cp.down) if cp.down >= 0 else "-1", 0, off)
-        draw_at(str(cp.left) if cp.left >= 0 else "-1", -off, 0)
-        draw_at(str(cp.right) if cp.right >= 0 else "-1", off, 0)
+        draw_at(cp.up, 0, -off)
+        draw_at(cp.down, 0, off)
+        draw_at(cp.left, -off, 0)
+        draw_at(cp.right, off, 0)
 
         painter.setPen(QPen(QColor(_ui_theme.colors.compass_line), 1))
         painter.drawLine(QPointF(cx, cy), QPointF(cx, cy - off + 8))

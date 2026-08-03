@@ -13,13 +13,13 @@ import time
 import glob
 import argparse
 import concurrent.futures
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 sys.path.insert(0, '.')
 
 from src.io.puzzle_codec import dict_to_puzzle
-from src.solver.backtrack import BacktrackSolver
-from src.solver.validator import SolutionValidator
+from src.solver.base import default_router
+from src.validation.validator import IndependentValidator, solution_to_board
 
 
 @dataclass
@@ -30,10 +30,12 @@ class PuzzleResult:
     elapsed_ms: int
     validated: bool
     error: str | None = None
+    solver_used: str | None = None
+    attempts: list[str] = field(default_factory=list)
 
 
-def test_one(args: tuple[str, float]) -> PuzzleResult:
-    path, timeout = args
+def test_one(args: tuple[str, float, bool]) -> PuzzleResult:
+    path, timeout, log_failures = args
     name = path.replace('\\', '/').split('/')[-1]
     try:
         with open(path, encoding='utf-8') as f:
@@ -43,10 +45,19 @@ def test_one(args: tuple[str, float]) -> PuzzleResult:
         if not puzzle.rules:
             return PuzzleResult(name, True, 0, 0, True)
 
-        solver = BacktrackSolver(puzzle)
+        # run the same solver chain the app uses (Rust → ExactCover → Rose →
+        # Backtrack → FallbackDLX).  The router independently verifies every
+        # solver's answer and switches on wrong results.
+        router = default_router()
         start = time.monotonic()
-        solution = solver.solve(timeout=timeout)
+        solution = router.route(puzzle, timeout=timeout, puzzle_name=name)
         t_ms = int((time.monotonic() - start) * 1000)
+
+        attempts = [f"{a.solver_name}({'ok' if a.solved else 'fail'})"
+                    for a in router.attempts]
+        solver_used = next(
+            (a.solver_name for a in router.attempts if a.solved), None
+        )
 
         if not solution.solved:
             fillable = sum(1 for c in puzzle.cells if not c.blocked)
@@ -58,12 +69,15 @@ def test_one(args: tuple[str, float]) -> PuzzleResult:
             if pool_areas and fillable % max(pool_areas) != 0:
                 hint = f' [fillable={fillable} not divisible by pool_area={max(pool_areas)}]'
             return PuzzleResult(name, False, solution.steps_taken, t_ms, False,
-                                solution.error_message or '无解' + hint)
+                                solution.error_message or '无解' + hint,
+                                solver_used, attempts)
 
-        validator = SolutionValidator()
-        val = validator.validate(puzzle, solution.board)
+        # independent re-verification (decoupled from solver rule checks)
+        board = solution_to_board(puzzle, solution)
+        val = IndependentValidator().validate(puzzle, board)
         return PuzzleResult(name, True, solution.steps_taken, t_ms, val.solved,
-                            val.error_message if not val.solved else None)
+                            "; ".join(val.errors[:3]) if not val.solved else None,
+                            solver_used, attempts)
     except Exception as e:
         return PuzzleResult(name, False, 0, 0, False, str(e))
 
@@ -87,7 +101,7 @@ def main():
     print(f"共 {total} 个谜题，并行 {'CPU核数' if args.jobs<=0 else args.jobs} 线程\n")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs or None) as pool:
-        fut_map = {pool.submit(test_one, (f, args.timeout)): f for f in files}
+        fut_map = {pool.submit(test_one, (f, args.timeout, True)): f for f in files}
         done = 0
         for fut in concurrent.futures.as_completed(fut_map):
             done += 1
@@ -98,6 +112,7 @@ def main():
             else:
                 failed.append(r)
             print(f"[{done:>3}/{total}] {status} {r.name:<20} "
+                  f"via={r.solver_used or '-':<12} "
                   f"steps={r.steps:<6} time={r.elapsed_ms:>5}ms"
                   f"{'  ' + r.error if r.error else ''}")
 

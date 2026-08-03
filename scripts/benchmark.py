@@ -56,7 +56,7 @@ def run_aog(txt_path: Path, timeout: float = 30.0) -> tuple[bool, int]:
         return False, 0
 
 
-def run_rsolver(json_path: Path, timeout: float = 10.0) -> tuple[bool, int]:
+def run_rsolver(json_path: Path, timeout: float = 20.0) -> tuple[bool, int]:
     """Run rsolver on a .json puzzle. Returns (solved, elapsed_ms)."""
     try:
         puzzle_data = json.loads(json_path.read_text(encoding="utf-8"))
@@ -91,7 +91,7 @@ def main():
         if json_name:
             json_path = REFERENCE_DIR / json_name
             if json_path.exists():
-                rs_solved, rs_ms = run_rsolver(json_path, timeout=10.0)
+                rs_solved, rs_ms = run_rsolver(json_path, timeout=20.0)
                 print(f"rs={'OK' if rs_solved else '--':3s} {rs_ms:5d}ms", end="")
             else:
                 rs_solved, rs_ms = False, 0

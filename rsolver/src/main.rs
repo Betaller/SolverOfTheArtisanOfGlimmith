@@ -37,6 +37,10 @@ struct CellJson {
     blocked: bool,
     #[serde(default)]
     compass: Option<CompassJson>,
+    #[serde(default)]
+    fence_pattern: Option<Vec<[i64; 2]>>,
+    #[serde(default)]
+    shape_pattern: Option<Vec<[i64; 2]>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -152,6 +156,14 @@ fn build_puzzle(input: &PuzzleJson) -> Puzzle {
             left: normalize_compass_value(cp.left),
             right: normalize_compass_value(cp.right),
         });
+        c.fence_pattern = cd
+            .fence_pattern
+            .as_ref()
+            .map(|s| s.iter().map(|xy| [xy[0] as usize, xy[1] as usize]).collect());
+        c.shape_pattern = cd
+            .shape_pattern
+            .as_ref()
+            .map(|s| s.iter().map(|xy| [xy[0] as usize, xy[1] as usize]).collect());
     }
 
     // Build edges

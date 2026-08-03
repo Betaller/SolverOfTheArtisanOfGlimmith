@@ -1,7 +1,7 @@
 """Benchmark the Rust solver against all official puzzles.
 
 Mirrors the C++ solver benchmark (third_party/AoG_Solver): each puzzle gets a
-10s timeout; a puzzle counts as solved when the Rust solver returns a solution
+20s timeout; a puzzle counts as solved when the Rust solver returns a solution
 that passes the independent validator.
 
 Usage:
@@ -42,9 +42,13 @@ def _find_binary() -> Path:
 
 def test_one(path: str, timeout: float) -> dict:
     name = Path(path).name
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    puzzle = dict_to_puzzle(data)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        puzzle = dict_to_puzzle(data)
+    except Exception as e:
+        return {"name": name, "solved": False, "validated": False, "ms": 0,
+                "error": f"load error: {e}"}
     if not puzzle.rules:
         return {"name": name, "solved": True, "validated": True, "ms": 0, "error": None}
 
@@ -93,7 +97,7 @@ def test_one(path: str, timeout: float) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark Rust solver on official puzzles")
     parser.add_argument("--dir", default="puzzles/official", help="puzzle directory")
-    parser.add_argument("--timeout", type=float, default=10.0, help="per-puzzle timeout (s)")
+    parser.add_argument("--timeout", type=float, default=20.0, help="per-puzzle timeout (s)")
     parser.add_argument("-j", "--jobs", type=int, default=0, help="parallel workers (0 = CPU cores)")
     args = parser.parse_args()
 

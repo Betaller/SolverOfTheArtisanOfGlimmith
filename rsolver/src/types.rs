@@ -94,6 +94,7 @@ pub struct Cell {
     pub blocked: bool,
     pub compass: Option<CompassClue>,
     pub fence_pattern: Option<Shape>,
+    pub shape_pattern: Option<Shape>,
     pub region_id: Option<usize>,
 }
 
@@ -107,6 +108,7 @@ impl Cell {
             blocked: false,
             compass: None,
             fence_pattern: None,
+            shape_pattern: None,
             region_id: None,
         }
     }

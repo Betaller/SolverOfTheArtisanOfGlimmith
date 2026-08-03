@@ -10,8 +10,8 @@ from PySide6.QtGui import (
     QPainter, QPen, QBrush, QColor, QFont, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox,
-    QListWidget, QListWidgetItem, QLabel, QSplitter, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
+    QTreeWidget, QTreeWidgetItem, QLabel, QSplitter, QFrame,
 )
 
 from src.ui import theme as _ui_theme
@@ -21,14 +21,17 @@ from src.models.puzzle import RULE_NAMES
 
 PUZZLE_BASE = "puzzles"
 
+ALL_RULES = sorted(RULE_NAMES.keys())
+
 
 class PuzzleInfo:
     __slots__ = ("name", "path", "category", "height", "width",
-                 "rules", "blocked_count", "has_boundaries")
+                 "rules", "blocked_count", "has_boundaries", "difficulty")
 
     def __init__(self, name: str, path: str, category: str,
                  height: int, width: int, rules: list[str],
-                 blocked_count: int, has_boundaries: bool) -> None:
+                 blocked_count: int, has_boundaries: bool,
+                 difficulty: int | None = None) -> None:
         self.name = name
         self.path = path
         self.category = category
@@ -37,9 +40,25 @@ class PuzzleInfo:
         self.rules = rules
         self.blocked_count = blocked_count
         self.has_boundaries = has_boundaries
+        self.difficulty = difficulty
+
+    @property
+    def area(self) -> int:
+        return self.height * self.width
 
     def rule_display(self) -> str:
         return ", ".join(RULE_NAMES.get(r, r) for r in self.rules) if self.rules else "无规则"
+
+
+def _rule_type_matches(rule_type: str, token: str) -> bool:
+    """Match a rule type against a user token (rule key or Chinese name)."""
+    token = token.strip().lower()
+    if not token:
+        return False
+    if token in rule_type.lower():
+        return True
+    name = RULE_NAMES.get(rule_type, "")
+    return token in name.lower()
 
 
 class PuzzlePreviewWidget(QWidget):
@@ -75,7 +94,6 @@ class PuzzlePreviewWidget(QWidget):
         if gw <= 0 or gh <= 0:
             return
 
-        # Compute cell size to fit available space
         margin = 8
         avail_w = self.width() - margin * 2
         avail_h = self.height() - margin * 2
@@ -134,20 +152,15 @@ class PuzzlePreviewWidget(QWidget):
             if e.get("is_boundary"):
                 r1, c1, r2, c2 = e["r1"], e["c1"], e["r2"], e["c2"]
                 if r1 == r2:
-                    # Adjacent horizontally → draw vertical line at shared edge
                     x = ox + max(c1, c2) * cell_size
                     y1 = oy + r1 * cell_size
                     y2 = oy + (r1 + 1) * cell_size
                     p.drawLine(QPointF(x, y1), QPointF(x, y2))
                 else:
-                    # Adjacent vertically → draw horizontal line at shared edge
                     y = oy + max(r1, r2) * cell_size
                     x1 = ox + c1 * cell_size
                     x2 = ox + (c1 + 1) * cell_size
                     p.drawLine(QPointF(x1, y), QPointF(x2, y))
-
-                # Draw outer boundaries too
-                # (simplified - just show internal boundaries)
 
         # Draw numbers and symbols
         small_font = QFont("Segoe UI", max(5, cell_size // 2), QFont.Weight.Bold)
@@ -175,7 +188,7 @@ class PuzzlePreviewWidget(QWidget):
         if has_numbers:
             summary += " #"
         if has_symbols:
-            summary += " ◎"
+            summary += " 符"
         p.drawText(QRectF(ox, oy + total_h + 2, total_w, 16),
                    Qt.AlignmentFlag.AlignCenter, summary)
 
@@ -184,6 +197,10 @@ class PuzzlePreviewWidget(QWidget):
 
 class PuzzleBrowser(QWidget):
     puzzle_selected = Signal(str)
+
+    MODE_ALL = "包含全部 (与)"
+    MODE_ANY = "包含任一 (或)"
+    MODE_NONE = "排除 (非)"
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -197,10 +214,10 @@ class PuzzleBrowser(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
 
-        # Search bar
+        # ── Filter row 1: search + directory ──────────────────────────
         search_layout = QHBoxLayout()
         self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("搜索谜题...")
+        self._search_input.setPlaceholderText("搜索名称/规则...")
         self._search_input.setClearButtonEnabled(True)
         self._search_input.textChanged.connect(self._apply_filters)
         self._search_input.setStyleSheet(
@@ -209,7 +226,7 @@ class PuzzleBrowser(QWidget):
         search_layout.addWidget(self._search_input)
 
         self._category_combo = QComboBox()
-        self._category_combo.addItem("全部")
+        self._category_combo.addItem("全部目录")
         self._category_combo.currentIndexChanged.connect(self._apply_filters)
         self._category_combo.setStyleSheet(
             "QComboBox { padding: 4px 6px; border-radius: 4px; font-size: 12px; }"
@@ -217,22 +234,82 @@ class PuzzleBrowser(QWidget):
         search_layout.addWidget(self._category_combo)
         layout.addLayout(search_layout)
 
-        # List + Preview splitter
+        # ── Filter row 2: rule input + mode + size ────────────────────
+        rule_layout = QHBoxLayout()
+        self._rule_input = QLineEdit()
+        self._rule_input.setPlaceholderText("规则，如: shape_pool, 围栏")
+        self._rule_input.textChanged.connect(self._apply_filters)
+        self._rule_input.setStyleSheet(
+            "QLineEdit { padding: 4px 8px; border-radius: 4px; font-size: 12px; }"
+        )
+        rule_layout.addWidget(self._rule_input, 1)
+
+        self._rule_mode_combo = QComboBox()
+        for mode in (self.MODE_ALL, self.MODE_ANY, self.MODE_NONE):
+            self._rule_mode_combo.addItem(mode)
+        self._rule_mode_combo.currentIndexChanged.connect(self._apply_filters)
+        self._rule_mode_combo.setStyleSheet(
+            "QComboBox { padding: 4px 6px; border-radius: 4px; font-size: 12px; }"
+        )
+        rule_layout.addWidget(self._rule_mode_combo)
+        layout.addLayout(rule_layout)
+
+        # ── Filter row 3: size + blocked + boundary + difficulty ──────
+        extra_layout = QGridLayout()
+        extra_layout.setSpacing(4)
+
+        self._size_combo = QComboBox()
+        for text in ("全部大小", "小 (≤25格)", "中 (26~64格)", "大 (>64格)"):
+            self._size_combo.addItem(text)
+        self._size_combo.currentIndexChanged.connect(self._apply_filters)
+        extra_layout.addWidget(QLabel("大小"), 0, 0)
+        extra_layout.addWidget(self._size_combo, 0, 1)
+
+        self._blocked_combo = QComboBox()
+        for text in ("全部障碍", "有障碍格", "无障碍格"):
+            self._blocked_combo.addItem(text)
+        self._blocked_combo.currentIndexChanged.connect(self._apply_filters)
+        extra_layout.addWidget(QLabel("障碍"), 0, 2)
+        extra_layout.addWidget(self._blocked_combo, 0, 3)
+
+        self._boundary_combo = QComboBox()
+        for text in ("全部边界", "有预画边界", "无预画边界"):
+            self._boundary_combo.addItem(text)
+        self._boundary_combo.currentIndexChanged.connect(self._apply_filters)
+        extra_layout.addWidget(QLabel("边界"), 0, 4)
+        extra_layout.addWidget(self._boundary_combo, 0, 5)
+
+        self._difficulty_combo = QComboBox()
+        self._difficulty_combo.addItem("全部难度")
+        for d in range(1, 6):
+            self._difficulty_combo.addItem(f"难度 {d}")
+        self._difficulty_combo.addItem("难度 6+")
+        self._difficulty_combo.currentIndexChanged.connect(self._apply_filters)
+        extra_layout.addWidget(QLabel("难度"), 1, 0)
+        extra_layout.addWidget(self._difficulty_combo, 1, 1)
+
+        extra_layout.setColumnStretch(1, 1)
+        extra_layout.setColumnStretch(3, 1)
+        extra_layout.setColumnStretch(5, 1)
+        layout.addLayout(extra_layout)
+
+        # ── Tree + Preview splitter ───────────────────────────────────
         splitter = QSplitter(Qt.Orientation.Vertical)
 
-        self._list_widget = QListWidget()
-        self._list_widget.setSpacing(1)
-        self._list_widget.currentItemChanged.connect(self._on_selection_changed)
-        self._list_widget.itemDoubleClicked.connect(self._on_item_activated)
-        self._list_widget.setStyleSheet(
-            "QListWidget { border-radius: 4px; font-size: 12px; }"
-            "QListWidget::item { padding: 4px 6px; }"
-            "QListWidget::item:selected { background: #2A4A6A; }"
-            "QListWidget::item:hover { background: palette(alternate-base); }"
+        self._tree = QTreeWidget()
+        self._tree.setHeaderLabels(["题目"])
+        self._tree.setRootIsDecorated(True)
+        self._tree.setIndentation(14)
+        self._tree.currentItemChanged.connect(self._on_selection_changed)
+        self._tree.itemDoubleClicked.connect(self._on_item_activated)
+        self._tree.setStyleSheet(
+            "QTreeWidget { border-radius: 4px; font-size: 12px; }"
+            "QTreeWidget::item { padding: 3px 6px; }"
+            "QTreeWidget::item:selected { background: #2A4A6A; }"
+            "QTreeWidget::item:hover { background: palette(alternate-base); }"
         )
-        splitter.addWidget(self._list_widget)
+        splitter.addWidget(self._tree)
 
-        # Preview area
         preview_container = QWidget()
         preview_layout = QVBoxLayout(preview_container)
         preview_layout.setContentsMargins(0, 0, 0, 0)
@@ -241,7 +318,7 @@ class PuzzleBrowser(QWidget):
         self._preview_widget = PuzzlePreviewWidget()
         preview_layout.addWidget(self._preview_widget)
 
-        self._preview_label = QLabel("选择谜题以预览")
+        self._preview_label = QLabel("选择题目以预览")
         self._preview_label.setWordWrap(True)
         self._preview_label.setStyleSheet("font-size: 11px; padding: 2px 4px;")
         preview_layout.addWidget(self._preview_label)
@@ -295,11 +372,14 @@ class PuzzleBrowser(QWidget):
                     blocked = sum(1 for c in cells if c.get("blocked"))
                     edges = data.get("edges", [])
                     has_bd = any(e.get("is_boundary") for e in edges)
+                    meta = data.get("_meta", {})
+                    difficulty = meta.get("archive_difficulty")
 
                     info = PuzzleInfo(
                         name=name, path=fpath, category=label,
                         height=h, width=w, rules=rules,
                         blocked_count=blocked, has_boundaries=has_bd,
+                        difficulty=difficulty,
                     )
                     self._all_puzzles.append(info)
                     self._grid_cache[name] = data
@@ -308,34 +388,125 @@ class PuzzleBrowser(QWidget):
 
         self._apply_filters()
 
+    # ── Filter evaluation ────────────────────────────────────────────
+
+    def _parse_rule_tokens(self) -> list[str]:
+        raw = self._rule_input.text()
+        return [t.strip() for t in raw.replace("，", ",").split(",") if t.strip()]
+
+    def _matches_rules(self, info: PuzzleInfo) -> bool:
+        tokens = self._parse_rule_tokens()
+        if not tokens:
+            return True
+        # expand each token to the rule types it matches
+        matched: set[str] = set()
+        for tok in tokens:
+            for r in info.rules:
+                if _rule_type_matches(r, tok):
+                    matched.add(r)
+        mode = self._rule_mode_combo.currentText()
+        if mode == self.MODE_ALL:
+            # every token must match at least one rule
+            for tok in tokens:
+                if not any(_rule_type_matches(r, tok) for r in info.rules):
+                    return False
+            return True
+        if mode == self.MODE_ANY:
+            return bool(matched)
+        # MODE_NONE: exclude puzzles having any listed rule
+        return not matched
+
+    def _matches_size(self, info: PuzzleInfo) -> bool:
+        text = self._size_combo.currentText()
+        area = info.area
+        if text.startswith("小"):
+            return area <= 25
+        if text.startswith("中"):
+            return 26 <= area <= 64
+        if text.startswith("大"):
+            return area > 64
+        return True
+
+    def _matches_extra(self, info: PuzzleInfo) -> bool:
+        blk = self._blocked_combo.currentText()
+        if blk == "有障碍格" and info.blocked_count == 0:
+            return False
+        if blk == "无障碍格" and info.blocked_count > 0:
+            return False
+
+        bnd = self._boundary_combo.currentText()
+        if bnd == "有预画边界" and not info.has_boundaries:
+            return False
+        if bnd == "无预画边界" and info.has_boundaries:
+            return False
+
+        diff = self._difficulty_combo.currentText()
+        if diff.startswith("难度"):
+            try:
+                want = int(diff.split()[1].rstrip("+"))
+            except Exception:
+                want = None
+            if want is not None:
+                d = info.difficulty if info.difficulty is not None else 0
+                if diff.endswith("+") and d < want:
+                    return False
+                if not diff.endswith("+") and d != want:
+                    return False
+        return True
+
     def _apply_filters(self) -> None:
         search_text = self._search_input.text().strip().lower()
         category = self._category_combo.currentText()
 
-        self._list_widget.clear()
+        self._tree.clear()
+        grouped: dict[str, list[PuzzleInfo]] = {}
         for info in self._all_puzzles:
-            if category != "全部" and info.category != category:
+            if category != "全部目录" and info.category != category:
+                continue
+            if not self._matches_rules(info):
+                continue
+            if not self._matches_size(info):
+                continue
+            if not self._matches_extra(info):
                 continue
             if search_text:
                 if search_text not in info.name.lower():
                     if not any(search_text in r.lower() for r in info.rules):
-                        continue
-            item = QListWidgetItem(f"{info.name}  ({info.height}×{info.width})")
-            item.setData(Qt.ItemDataRole.UserRole, info.name)
-            self._list_widget.addItem(item)
+                        if not any(search_text in RULE_NAMES.get(r, r).lower() for r in info.rules):
+                            continue
+            grouped.setdefault(info.category, []).append(info)
 
+        total = 0
+        for cat in sorted(grouped):
+            top = QTreeWidgetItem([f"{cat}  ({len(grouped[cat])})"])
+            top.setData(0, Qt.ItemDataRole.UserRole, None)
+            for info in grouped[cat]:
+                child = QTreeWidgetItem([f"{info.name}  ({info.height}×{info.width})"])
+                child.setData(0, Qt.ItemDataRole.UserRole, info.name)
+                top.addChild(child)
+            self._tree.addTopLevelItem(top)
+            total += len(grouped[cat])
+
+        self._tree.expandAll()
+        self._tree.setHeaderLabel(f"题目 ({total})")
         self._preview_widget.clear()
-        self._preview_label.setText("选择谜题以预览")
+        self._preview_label.setText("选择题目以预览")
 
-    def _on_selection_changed(self, current: QListWidgetItem | None,
-                              previous: QListWidgetItem | None) -> None:
+    def _find_info(self, name: str) -> PuzzleInfo | None:
+        return next((p for p in self._all_puzzles if p.name == name), None)
+
+    def _on_selection_changed(self, current: QTreeWidgetItem | None,
+                              previous: QTreeWidgetItem | None) -> None:
         if current is None:
             self._preview_widget.clear()
-            self._preview_label.setText("选择谜题以预览")
+            self._preview_label.setText("选择题目以预览")
             return
-
-        name = current.data(Qt.ItemDataRole.UserRole)
-        info = next((p for p in self._all_puzzles if p.name == name), None)
+        name = current.data(0, Qt.ItemDataRole.UserRole)
+        if not name:
+            self._preview_widget.clear()
+            self._preview_label.setText("选择题目以预览")
+            return
+        info = self._find_info(name)
         if info is None:
             return
 
@@ -344,15 +515,18 @@ class PuzzleBrowser(QWidget):
             self._preview_widget.set_puzzle(info, data)
 
         rules_text = info.rule_display()
+        difficulty = f"  难度{info.difficulty}" if info.difficulty is not None else ""
         self._preview_label.setText(
-            f"<b>{info.name}</b>  {info.height}×{info.width}"
-            f"{'  🚫' + str(info.blocked_count) if info.blocked_count else ''}"
+            f"<b>{info.name}</b>  {info.height}×{info.width}{difficulty}"
+            f"{'  ' + str(info.blocked_count) + '障碍' if info.blocked_count else ''}"
             f"<br>{rules_text}"
         )
 
-    def _on_item_activated(self, item: QListWidgetItem) -> None:
-        name = item.data(Qt.ItemDataRole.UserRole)
-        info = next((p for p in self._all_puzzles if p.name == name), None)
+    def _on_item_activated(self, item: QTreeWidgetItem, column: int) -> None:
+        name = item.data(0, Qt.ItemDataRole.UserRole)
+        if not name:
+            return
+        info = self._find_info(name)
         if info is not None:
             self.puzzle_selected.emit(info.path)
 

@@ -839,12 +839,23 @@ class GridWidget(QWidget):
             y2 = pad + r2 * sz
             painter.drawLine(QPointF(x, y1), QPointF(x, y2))
 
+    def _is_auto_boundary(self, e: Edge) -> bool:
+        """Edge that separates a fillable cell from a blocked cell.
+
+        Such borders are always drawn, even when the puzzle data does not mark
+        the edge as a pre-drawn boundary, so the playable area's outline stays
+        visible on irregular boards.
+        """
+        c1 = self.board.cell(e.r1, e.c1)
+        c2 = self.board.cell(e.r2, e.c2)
+        return c1.blocked != c2.blocked
+
     def _draw_boundary_edges(self, painter: QPainter) -> None:
         pen = QPen(QColor(_ui_theme.colors.boundary_edge), 6)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
         for e in self.board.edges():
-            if e.is_boundary:
+            if e.is_boundary or self._is_auto_boundary(e):
                 x1, y1, x2, y2 = self._edge_endpoints(e)
                 painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
         for key in self._outer_boundaries:
@@ -852,7 +863,7 @@ class GridWidget(QWidget):
 
         painter.setPen(QPen(QColor(_ui_theme.colors.boundary_highlight), 2.5))
         for e in self.board.edges():
-            if e.is_boundary:
+            if e.is_boundary or self._is_auto_boundary(e):
                 x1, y1, x2, y2 = self._edge_endpoints(e)
                 painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
         for key in self._outer_boundaries:

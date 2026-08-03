@@ -343,29 +343,25 @@
       "r1": 5,
       "c1": 1,
       "r2": 5,
-      "c2": 2,
-      "is_boundary": true
+      "c2": 2
     },
     {
       "r1": 5,
       "c1": 2,
       "r2": 5,
-      "c2": 3,
-      "is_boundary": true
+      "c2": 3
     },
     {
       "r1": 5,
       "c1": 3,
       "r2": 5,
-      "c2": 4,
-      "is_boundary": true
+      "c2": 4
     },
     {
       "r1": 5,
       "c1": 4,
       "r2": 5,
-      "c2": 5,
-      "is_boundary": true
+      "c2": 5
     },
     {
       "r1": 0,
@@ -433,8 +429,7 @@
       "r1": 1,
       "c1": 4,
       "r2": 2,
-      "c2": 4,
-      "is_boundary": true
+      "c2": 4
     },
     {
       "r1": 1,
@@ -514,8 +509,7 @@
       "r1": 3,
       "c1": 5,
       "r2": 4,
-      "c2": 5,
-      "is_boundary": true
+      "c2": 5
     },
     {
       "r1": 4,
@@ -555,8 +549,7 @@
       "r1": 4,
       "c1": 5,
       "r2": 5,
-      "c2": 5,
-      "is_boundary": true
+      "c2": 5
     }
   ],
   "vertices": [
@@ -661,6 +654,7 @@
       "col": 4
     }
   ],
+  "outer_boundaries": [],
   "rules": [
     {
       "type": "shape_pool",

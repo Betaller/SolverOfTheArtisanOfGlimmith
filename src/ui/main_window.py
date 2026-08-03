@@ -120,6 +120,7 @@ class MainWindow(QMainWindow):
         self._tool_palette = ToolPalette()
         self._constraint_panel = ConstraintPanel()
         self._puzzle_browser = PuzzleBrowser()
+        self._shape_gallery = ShapeGalleryWidget()
         left_panel.addTab(self._tool_palette, "工具")
         left_panel.addTab(self._constraint_panel, "规则配置")
         left_panel.addTab(self._puzzle_browser, "谜题列表")

@@ -984,13 +984,8 @@ class GridWidget(QWidget):
                     self._draw_compass(painter, cell, cx, cy)
 
                 if cell.shape_pattern is not None:
-                    font = QFont("Segoe UI", self._cell_size // 6)
-                    painter.setFont(font)
-                    painter.setPen(QPen(QColor(_ui_theme.colors.shape_label)))
-                    label = f"P{len(cell.shape_pattern.cells)}"
-                    painter.drawText(QRectF(rect.x(), rect.bottom() - rect.height() * 0.3,
-                                              rect.width(), rect.height() * 0.3),
-                                     Qt.AlignmentFlag.AlignCenter, label)
+                    self._draw_mini_shape_centered(
+                        painter, cell.shape_pattern, cx, cy, self._cell_size * 0.6)
 
     def _draw_compass(self, painter: QPainter, cell: Cell, cx: float, cy: float) -> None:
         cp = cell.compass
@@ -1170,6 +1165,35 @@ class GridWidget(QWidget):
         gap = 1
         scale = (cell_sz - gap * max(w, h)) / max(w, h) if max(w, h) > 0 else cell_sz
         scale = max(4, scale)
+        painter.setPen(QPen(QColor(_ui_theme.colors.shape_mini_pen), 1))
+        painter.setBrush(QBrush(QColor(_ui_theme.colors.shape_mini_fill)))
+        for r, c in shape.cells:
+            nx = x0 + (c - min_c) * (scale + gap)
+            ny = y0 + (r - min_r) * (scale + gap)
+            painter.drawRoundedRect(QRectF(nx, ny, scale, scale), 1, 1)
+
+    def _draw_mini_shape_centered(self, painter: QPainter, shape: Shape,
+                                   cx: float, cy: float, cell_sz: float) -> None:
+        """Draw a mini shape scaled to cell_sz, centered on (cx, cy).
+
+        Used to render puzzle-piece (shape_pattern) clues as a shape thumbnail
+        inside the cell instead of a text label.
+        """
+        if not shape.cells:
+            return
+        rs = [r for r, _ in shape.cells]
+        cs = [c for _, c in shape.cells]
+        min_r, max_r = min(rs), max(rs)
+        min_c, max_c = min(cs), max(cs)
+        h = max_r - min_r + 1
+        w = max_c - min_c + 1
+        gap = 1
+        scale = (cell_sz - gap * max(w, h)) / max(w, h) if max(w, h) > 0 else cell_sz
+        scale = max(4, scale)
+        total_w = (w - 1) * (scale + gap) + scale
+        total_h = (h - 1) * (scale + gap) + scale
+        x0 = cx - total_w / 2
+        y0 = cy - total_h / 2
         painter.setPen(QPen(QColor(_ui_theme.colors.shape_mini_pen), 1))
         painter.setBrush(QBrush(QColor(_ui_theme.colors.shape_mini_fill)))
         for r, c in shape.cells:

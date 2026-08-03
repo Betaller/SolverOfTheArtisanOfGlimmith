@@ -805,6 +805,18 @@ class GridWidget(QWidget):
         self._draw_clues(painter)
         self._draw_rule_overlay(painter)
 
+    def _is_same_region_internal(self, e: Edge) -> bool:
+        """True when both cells are assigned to the same region.
+
+        Such edges are not drawn as grid lines so each region renders as one
+        contiguous colour block instead of a patchwork of bordered cells.
+        """
+        c1 = self.board.cell(e.r1, e.c1)
+        c2 = self.board.cell(e.r2, e.c2)
+        return (not c1.blocked and not c2.blocked
+                and c1.region_id is not None
+                and c1.region_id == c2.region_id)
+
     def _draw_cells(self, painter: QPainter) -> None:
         for r in range(self.board.height):
             for c in range(self.board.width):
@@ -822,8 +834,6 @@ class GridWidget(QWidget):
 
                 color = self._get_color(cell.region_id)
                 painter.fillRect(rect, color)
-                painter.setPen(QPen(QColor(_ui_theme.colors.cell_border), 1))
-                painter.drawRect(rect)
 
     def _draw_outer_edge(self, painter: QPainter, key: tuple[int, int, int, int]) -> None:
         r1, c1, r2, c2 = key
@@ -872,8 +882,15 @@ class GridWidget(QWidget):
     def _draw_grid_lines(self, painter: QPainter) -> None:
         painter.setPen(QPen(QColor(_ui_theme.colors.grid_line), 1))
         for e in self.board.edges():
+            if self._is_same_region_internal(e):
+                continue
             x1, y1, x2, y2 = self._edge_endpoints(e)
             painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+        # outer perimeter so the board outline stays visible even when the
+        # puzzle carries no explicit outer_boundaries
+        pad, sz = self._padding, self._cell_size
+        painter.drawRect(QRectF(pad, pad,
+                                self.board.width * sz, self.board.height * sz))
 
     def _draw_edge_constraints(self, painter: QPainter) -> None:
         for e in self.board.edges():

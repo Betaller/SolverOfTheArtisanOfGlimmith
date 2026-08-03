@@ -236,11 +236,11 @@ def _parse_puzzle(p: dict) -> dict:
 
     outer_boundaries = []
     for c in range(width):
-        outer_boundaries.append({"r1": -1, "c1": c, "r2": 0, "c2": c})
-        outer_boundaries.append({"r1": height - 1, "c1": c, "r2": height, "c2": c})
+        outer_boundaries.append({"r1": 0, "c1": c, "r2": 0, "c2": c + 1})
+        outer_boundaries.append({"r1": height, "c1": c, "r2": height, "c2": c + 1})
     for r in range(height):
-        outer_boundaries.append({"r1": r, "c1": -1, "r2": r, "c2": 0})
-        outer_boundaries.append({"r1": r, "c1": width - 1, "r2": r, "c2": width})
+        outer_boundaries.append({"r1": r, "c1": 0, "r2": r + 1, "c2": 0})
+        outer_boundaries.append({"r1": r, "c1": width, "r2": r + 1, "c2": width})
 
     rules = build_rules(
         p, shapes, has_compass, has_fence, has_numbers, constraint_types,

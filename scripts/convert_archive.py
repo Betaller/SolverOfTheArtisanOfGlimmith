@@ -278,16 +278,22 @@ def _apply_edge(entry: dict, glyph: str, cell_map: dict, fillable: list,
         entry["_glyph"] = True
     elif glyph in ("==", "="):
         entry["constraint"] = {"type": "homogeneous"}
+        entry["is_boundary"] = True
     elif glyph in ("!!", "!"):
         entry["constraint"] = {"type": "heterogeneous"}
+        entry["is_boundary"] = True
     elif glyph in ("^^", "<", "^"):
         entry["constraint"] = {"type": "inequality"}
+        entry["is_boundary"] = True
     elif glyph in ("vv", ">", "v"):
         entry["constraint"] = {"type": "inequality", "value": 1}
+        entry["is_boundary"] = True
     elif re.fullmatch(r"-\d", glyph):
         entry["constraint"] = {"type": "difference", "value": int(glyph[1])}
+        entry["is_boundary"] = True
     elif glyph.isdigit():
         entry["constraint"] = {"type": "difference", "value": int(glyph)}
+        entry["is_boundary"] = True
     elif glyph in ("--", "|"):
         pass
     elif glyph == "  " or glyph == " ":

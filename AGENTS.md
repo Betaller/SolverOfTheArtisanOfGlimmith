@@ -15,6 +15,7 @@ ruff check src/ tests/                     # lint
 ruff format src/ tests/                    # format (line-length=100)
 mypy src/                                  # typecheck (strict)
 pre-commit run --all-files                 # CI gate
+cd rsolver && cargo build --release        # build Rust solver
 ```
 
 ## Architecture
@@ -29,9 +30,11 @@ src/ui/constraint_panel.py              ← 22 rule checkboxes + shape editor
 src/solver/backtrack.py                 ← BacktrackSolver (region-by-region DFS)
 src/solver/constraints.py               ← 22 RULE_CHECKERS
 src/solver/validator.py                 ← SolutionValidator
+src/solver/rust_solver.py               ← RustSolver (subprocess → rsolver binary)
 src/models/board.py                     ← Board, Cell, Edge, Vertex, Shape, CompassClue
 src/models/puzzle.py                    ← Puzzle, Rule, RULE_NAMES
 src/io/puzzle_codec.py                  ← JSON serialize/deserialize
+rsolver/                                ← Rust solver (puzzle JSON stdin → solution JSON stdout)
 ```
 
 ## Key conventions
@@ -43,6 +46,8 @@ src/io/puzzle_codec.py                  ← JSON serialize/deserialize
 - Shape pool shapes: `Shape(cells=frozenset({(r,c),...}))`, normalized to origin
 - Solver respects pre-drawn boundaries (`is_boundary=True` forces different region IDs)
 - `properties_panel.board_modified` signal → `grid_widget.update()` for live refresh
+- `SolverRouter` chains solvers: RustSolver → ExactCover → Rose → Backtrack → FallbackDLX
+- Rust solver communicates via subprocess: puzzle JSON → stdin, solution JSON → stdout
 
 ## Solver quirks
 

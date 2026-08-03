@@ -13,3 +13,6 @@
 [submodule "third_party/aog"]
 	path = third_party/aog
 	url = https://github.com/lifthrasiir/aog.git
+[submodule "third_party/archiveofglimmith.github.io"]
+	path = third_party/archiveofglimmith.github.io
+	url = https://github.com/archiveofglimmith/archiveofglimmith.github.io.git

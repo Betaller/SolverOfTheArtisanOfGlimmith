@@ -24,6 +24,7 @@ from src.ui.constraint_panel import ConstraintPanel
 from src.ui.tool_palette import ToolPalette
 from src.ui.property_panel import PropertyPanel
 from src.ui.puzzle_browser import PuzzleBrowser
+from src.ui.shape_gallery import ShapeGalleryWidget, ShapeGalleryDialog
 from src.ui.solver_runner import SolverThread
 from src.ui.theme import MODE_COLORS
 
@@ -122,6 +123,7 @@ class MainWindow(QMainWindow):
         left_panel.addTab(self._tool_palette, "工具")
         left_panel.addTab(self._constraint_panel, "规则配置")
         left_panel.addTab(self._puzzle_browser, "谜题列表")
+        left_panel.addTab(self._shape_gallery, "形状工具")
 
         self._grid_widget = GridWidget()
         self._grid_widget.setMinimumWidth(400)
@@ -278,6 +280,12 @@ class MainWindow(QMainWindow):
         solve_action.setShortcut("F5")
         solve_action.triggered.connect(self._on_solve)
         solve_menu.addAction(solve_action)
+
+        view_menu = menubar.addMenu("视图")
+        shape_gallery_action = QAction("形状画廊（相异规则）", self)
+        shape_gallery_action.setShortcut("Ctrl+G")
+        shape_gallery_action.triggered.connect(self._open_shape_gallery)
+        view_menu.addAction(shape_gallery_action)
 
         help_menu = menubar.addMenu("帮助")
         about_action = QAction("关于", self)
@@ -448,6 +456,19 @@ class MainWindow(QMainWindow):
     def _on_puzzle_browser_selected(self, path: str) -> None:
         self._load_puzzle_file(path)
 
+    def _open_shape_gallery(self) -> None:
+        dialog = ShapeGalleryDialog(self)
+        if self._puzzle is not None:
+            dialog._size_combo.blockSignals(True)
+            size = dialog._size_combo.findText(
+                str(ShapeGalleryWidget._region_size(self._puzzle) or 1)
+            )
+            if size >= 0:
+                dialog._size_combo.setCurrentIndex(size)
+            dialog._size_combo.blockSignals(False)
+            dialog._populate()
+        dialog.exec()
+
     def _load_puzzle_file(self, path: str) -> None:
         try:
             self._puzzle = self._puzzle_service.load_puzzle(path)
@@ -459,6 +480,7 @@ class MainWindow(QMainWindow):
             self._grid_widget.set_board(board)
             self._property_panel.set_board(board)
             self._constraint_panel.set_puzzle(self._puzzle)
+            self._shape_gallery.set_puzzle(self._puzzle)
             self._save_initial_state()
             self._result_label.setText("已加载")
             self._status_label.setText(f"已加载: {os.path.basename(path)}")

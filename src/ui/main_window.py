@@ -351,12 +351,36 @@ class MainWindow(QMainWindow):
             "Powered by PySide6"
         )
 
+    def _rule_overlay_label(self, rule) -> str:
+        """Display name for a rule, including parameters where relevant."""
+        from src.models.puzzle import RULE_NAMES
+
+        name = RULE_NAMES.get(rule.type, rule.type)
+        params = rule.params
+        if rule.type == "range":
+            lo = params.get("min")
+            hi = params.get("max")
+            if lo is not None and hi is not None:
+                return f"{name} {lo}~{hi}"
+            if lo is not None:
+                return f"{name} ≥{lo}"
+            if hi is not None:
+                return f"{name} ≤{hi}"
+        elif rule.type == "precise":
+            area = params.get("area")
+            if area is not None:
+                return f"{name} {area}"
+        elif rule.type == "rose_window":
+            types = params.get("symbol_types")
+            if types:
+                return f"{name} {len(types)}种"
+        return name
+
     def _update_overlay(self) -> None:
         if self._puzzle is None:
             self._grid_widget.set_overlay_info([], [])
             return
-        from src.models.puzzle import RULE_NAMES
-        rule_names = list(dict.fromkeys(RULE_NAMES.get(r.type, r.type) for r in self._puzzle.rules))
+        rule_names = list(dict.fromkeys(self._rule_overlay_label(r) for r in self._puzzle.rules))
         shapes = []
         pool_rule = self._puzzle.get_rule("shape_pool")
         if pool_rule is not None:

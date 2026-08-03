@@ -349,6 +349,14 @@
   "rules": [
     {
       "type": "different"
+    },
+    {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "P1"
+        ]
+      }
     }
   ],
   "shape_pool": [],

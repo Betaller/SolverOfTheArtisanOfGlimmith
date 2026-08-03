@@ -339,7 +339,16 @@
       "c2": 7
     }
   ],
-  "rules": [],
+  "rules": [
+    {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "P1"
+        ]
+      }
+    }
+  ],
   "shape_pool": [],
   "_meta": {
     "archive_id": "0277",

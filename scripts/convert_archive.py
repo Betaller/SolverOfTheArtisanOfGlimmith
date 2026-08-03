@@ -67,6 +67,94 @@ def _compass_from_str(s: str) -> CompassClue:
     )
 
 
+def _archive_partition(p: dict, blocked: set[tuple[int, int]]) -> list[frozenset[tuple[int, int]]]:
+    """Parse the archive's compact solution into a region partition.
+
+    Returns a list of frozensets of (row, col), excluding blocked cells.
+    """
+    W, H = int(p["width"]), int(p["height"])
+    sol = p.get("solution") or []
+    if not sol:
+        return []
+    lines = [ln.ljust(3 * W + 1, " ") for ln in sol]
+    edges: set[tuple[int, int, int, int]] = set()
+    for r in range(H + 1):
+        if 2 * r >= len(lines):
+            break
+        row = lines[2 * r]
+        for c in range(W):
+            if row[3 * c + 1:3 * c + 3].strip():
+                edges.add((r - 1, c, r, c))
+    for r in range(H):
+        if 2 * r + 1 >= len(lines):
+            break
+        row = lines[2 * r + 1]
+        for c in range(W + 1):
+            if row[3 * c] == "#":
+                edges.add((r, c - 1, r, c))
+
+    comp = {(r, c): (r, c) for r in range(H) for c in range(W) if (r, c) not in blocked}
+
+    def find(x: tuple[int, int]) -> tuple[int, int]:
+        while comp[x] != x:
+            comp[x] = comp[comp[x]]
+            x = comp[x]
+        return x
+
+    def union(a: tuple[int, int], b: tuple[int, int]) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            comp[ra] = rb
+
+    for r in range(H):
+        for c in range(W):
+            if (r, c) in blocked:
+                continue
+            for dr, dc in ((1, 0), (0, 1)):
+                nr, nc = r + dr, c + dc
+                if nr < H and nc < W and (nr, nc) not in blocked and (r, c, nr, nc) not in edges:
+                    union((r, c), (nr, nc))
+    parts: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for r in range(H):
+        for c in range(W):
+            if (r, c) in blocked:
+                continue
+            root = find((r, c))
+            parts.setdefault(root, []).append((r, c))
+    return [frozenset(cells) for cells in parts.values()]
+
+
+def _is_rose_window(p: dict, p_symbols: dict[str, int],
+                    blocked: set[tuple[int, int]]) -> list[str] | None:
+    """Return sorted rose symbol types if the official solution confirms a
+    rose-window pattern (N types x M occurrences, M regions each containing
+    all N types), else None."""
+    if not p_symbols or len(set(p_symbols.values())) != 1:
+        return None
+    m = next(iter(p_symbols.values()))
+    types = set(p_symbols)
+    if not p.get("solution"):
+        # no official answer to confirm; only accept the multi-type case
+        return sorted(p_symbols) if len(p_symbols) >= 2 else None
+    part = _archive_partition(p, blocked)
+    if len(part) != m:
+        return None
+    # rebuild per-cell symbol positions from the grid
+    sym_pos: dict[tuple[int, int], str] = {}
+    W, H = int(p["width"]), int(p["height"])
+    for r in range(H):
+        row = (p["puzzle_grid"][2 * r + 1] or "").ljust(3 * W + 1, " ")
+        for c in range(W):
+            content = row[3 * c + 1:3 * c + 3]
+            if content in p_symbols:
+                sym_pos[(r, c)] = content
+    for cells in part:
+        syms = {sym_pos[pos] for pos in cells if pos in sym_pos}
+        if syms != types or len(syms) != len(types):
+            return None
+    return sorted(p_symbols)
+
+
 def _parse_cell_row(row: str, width: int, shape_ids: set[int]):
     """Greedy cell-row parser (mirrors the archive renderer, with S-id support).
 
@@ -247,6 +335,10 @@ def _parse_puzzle(p: dict) -> dict:
     rules = build_rules(
         p, shapes, has_compass, has_fence, has_numbers, constraint_types,
         bool(vt), is_spr, has_shape_bank, has_shape_pattern, p_symbols,
+        rose_types=_is_rose_window(
+            p, p_symbols,
+            {(r, c) for r in range(height) for c in range(width) if not fillable[r][c]},
+        ),
     )
 
     return {
@@ -308,7 +400,8 @@ def build_rules(p: dict, shapes: dict[int, Shape], has_compass: bool,
                 constraint_types: set[str], has_watchtower: bool,
                 is_spr: bool, has_shape_bank: bool,
                 has_shape_pattern: bool,
-                p_symbols: dict[str, int] | None = None) -> list[dict]:
+                p_symbols: dict[str, int] | None = None,
+                rose_types: list[str] | None = None) -> list[dict]:
     rules: list[dict] = []
 
     if has_shape_bank and shapes:
@@ -361,13 +454,13 @@ def build_rules(p: dict, shapes: dict[int, Shape], has_compass: bool,
     if has_watchtower:
         rules.append({"type": "watchtower"})
 
-    # Rose window: the P-number coloured circles. When at least two distinct
-    # symbol types each appear the same number of times, the puzzle is a rose
-    # window (N types × M occurrences, M regions each containing all N types).
-    if p_symbols and len(p_symbols) >= 2 and len(set(p_symbols.values())) == 1:
+    # Rose window: the P-number coloured circles. Verified against the
+    # archive's official solution (N types x M occurrences, M regions each
+    # containing all N types) — see _is_rose_window.
+    if rose_types:
         rules.append({
             "type": "rose_window",
-            "params": {"symbol_types": sorted(p_symbols)},
+            "params": {"symbol_types": rose_types},
         })
 
     return rules

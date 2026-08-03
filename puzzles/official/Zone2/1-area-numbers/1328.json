@@ -295,6 +295,14 @@
   "rules": [
     {
       "type": "area"
+    },
+    {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "P1"
+        ]
+      }
     }
   ],
   "shape_pool": [],

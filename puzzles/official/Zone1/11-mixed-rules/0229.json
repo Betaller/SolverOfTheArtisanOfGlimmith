@@ -713,6 +713,14 @@
       "params": {
         "area": 5
       }
+    },
+    {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "P1"
+        ]
+      }
     }
   ],
   "shape_pool": [],

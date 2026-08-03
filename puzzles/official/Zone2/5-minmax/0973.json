@@ -522,6 +522,14 @@
         "min": 2,
         "max": 3
       }
+    },
+    {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "P1"
+        ]
+      }
     }
   ],
   "shape_pool": [],

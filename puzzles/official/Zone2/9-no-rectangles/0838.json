@@ -391,6 +391,14 @@
   "rules": [
     {
       "type": "non_block"
+    },
+    {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "P1"
+        ]
+      }
     }
   ],
   "shape_pool": [],

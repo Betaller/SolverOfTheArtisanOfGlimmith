@@ -118,7 +118,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -129,7 +130,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

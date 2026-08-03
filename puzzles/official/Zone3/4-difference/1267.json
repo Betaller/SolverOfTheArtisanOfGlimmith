@@ -392,7 +392,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -403,7 +404,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 4,
@@ -414,7 +416,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 7,
@@ -425,7 +428,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 7,
@@ -436,7 +440,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 8,
@@ -447,7 +452,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -458,7 +464,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -469,7 +476,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -480,7 +488,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -491,7 +500,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -502,7 +512,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -513,7 +524,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 4,
@@ -524,7 +536,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 5,
@@ -535,7 +548,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 5,
@@ -546,7 +560,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

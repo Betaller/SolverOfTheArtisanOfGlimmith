@@ -116,7 +116,8 @@
       "constraint": {
         "type": "difference",
         "value": 7
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

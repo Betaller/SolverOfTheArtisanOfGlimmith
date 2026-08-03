@@ -556,7 +556,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -567,7 +568,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -578,7 +580,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 2,
@@ -589,7 +592,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 2,
@@ -599,7 +603,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 8,
@@ -609,7 +614,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 8,
@@ -620,7 +626,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 9,
@@ -630,7 +637,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 9,
@@ -641,7 +649,8 @@
       "constraint": {
         "type": "difference",
         "value": 2
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 9,
@@ -651,7 +660,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 9,
@@ -670,7 +680,8 @@
       "constraint": {
         "type": "difference",
         "value": 2
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -689,7 +700,8 @@
       "constraint": {
         "type": "difference",
         "value": 5
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -699,7 +711,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -710,7 +723,8 @@
       "constraint": {
         "type": "difference",
         "value": 3
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -721,7 +735,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -732,7 +747,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -743,7 +759,8 @@
       "constraint": {
         "type": "difference",
         "value": 6
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -754,7 +771,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -765,7 +783,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 8,
@@ -784,7 +803,8 @@
       "constraint": {
         "type": "difference",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 8,
@@ -795,7 +815,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 9,

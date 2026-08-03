@@ -558,7 +558,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -568,7 +569,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 4,
@@ -578,7 +580,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 4,
@@ -588,7 +591,8 @@
       "_glyph": true,
       "constraint": {
         "type": "heterogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 5,
@@ -598,7 +602,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 5,
@@ -608,7 +613,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -618,7 +624,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -628,7 +635,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -638,7 +646,8 @@
       "_glyph": true,
       "constraint": {
         "type": "heterogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -648,7 +657,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 2,
@@ -658,7 +668,8 @@
       "_glyph": true,
       "constraint": {
         "type": "heterogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -668,7 +679,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -678,7 +690,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -688,7 +701,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -698,7 +712,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 4,
@@ -708,7 +723,8 @@
       "_glyph": true,
       "constraint": {
         "type": "heterogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 4,
@@ -718,7 +734,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 5,
@@ -728,7 +745,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -738,7 +756,8 @@
       "_glyph": true,
       "constraint": {
         "type": "heterogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 6,
@@ -748,7 +767,8 @@
       "_glyph": true,
       "constraint": {
         "type": "heterogeneous"
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

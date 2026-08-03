@@ -80,7 +80,8 @@
       "constraint": {
         "type": "difference",
         "value": 0
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,

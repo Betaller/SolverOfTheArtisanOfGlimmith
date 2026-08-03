@@ -795,7 +795,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 7,
@@ -805,7 +806,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 2,
@@ -815,7 +817,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 9,
@@ -825,7 +828,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

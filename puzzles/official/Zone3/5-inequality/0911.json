@@ -280,7 +280,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -290,7 +291,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 2,
@@ -300,7 +302,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 4,
@@ -310,7 +313,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 4,
@@ -320,7 +324,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 5,
@@ -330,7 +335,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 7,
@@ -340,7 +346,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -350,7 +357,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -360,7 +368,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -370,7 +379,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 4,
@@ -380,7 +390,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

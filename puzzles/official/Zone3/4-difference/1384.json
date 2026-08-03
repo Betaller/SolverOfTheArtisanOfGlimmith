@@ -170,7 +170,8 @@
       "constraint": {
         "type": "difference",
         "value": 1
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

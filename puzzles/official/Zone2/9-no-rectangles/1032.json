@@ -119,7 +119,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

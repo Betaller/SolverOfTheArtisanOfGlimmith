@@ -115,7 +115,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 0,
@@ -125,7 +126,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

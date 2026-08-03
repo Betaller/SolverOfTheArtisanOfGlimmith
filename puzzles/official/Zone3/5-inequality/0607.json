@@ -63,7 +63,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -74,7 +75,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -84,7 +86,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

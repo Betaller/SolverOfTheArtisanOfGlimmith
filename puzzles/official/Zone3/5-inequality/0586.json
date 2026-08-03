@@ -187,7 +187,8 @@
       "_glyph": true,
       "constraint": {
         "type": "heterogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 2,
@@ -197,7 +198,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -207,7 +209,8 @@
       "_glyph": true,
       "constraint": {
         "type": "heterogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -217,7 +220,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 5,
@@ -227,7 +231,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -238,7 +243,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 1,
@@ -249,7 +255,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 2,
@@ -259,7 +266,8 @@
       "_glyph": true,
       "constraint": {
         "type": "homogeneous"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 2,
@@ -270,7 +278,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 2,
@@ -281,7 +290,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -291,7 +301,8 @@
       "_glyph": true,
       "constraint": {
         "type": "inequality"
-      }
+      },
+      "is_boundary": true
     },
     {
       "r1": 3,
@@ -302,7 +313,8 @@
       "constraint": {
         "type": "inequality",
         "value": 1
-      }
+      },
+      "is_boundary": true
     }
   ],
   "vertices": [],

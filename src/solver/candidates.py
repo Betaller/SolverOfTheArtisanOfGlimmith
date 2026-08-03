@@ -175,16 +175,10 @@ def _boundary_graph_is_bipartite(component: set[tuple[int, int]],
 def _check_compass_dir(self, board: Board, r: int, c: int,
                        dr: int, dc: int, expected: int,
                        region_cells: set[tuple[int, int]]) -> bool:
-    count = 0
-    cr, cc = r + dr, c + dc
-    while 0 <= cr < board.height and 0 <= cc < board.width:
-        if (cr, cc) in region_cells:
-            count += 1
-        else:
-            break
-        cr += dr
-        cc += dc
-    return count <= expected
+    from src.models.board import Cell
+    from src.solver.constraints import _compass_halfplane_count
+    cell = Cell(row=r, col=c)
+    return _compass_halfplane_count(cell, dr, dc, region_cells) <= expected
 
 
 def _shape_matches(self, shape: Shape, pattern: Shape) -> bool:
@@ -238,14 +232,13 @@ def _region_feasible(self, board: Board, cells: set[tuple[int, int]]) -> bool:
                     return False
 
     if self.puzzle.has_rule("solitary"):
-        symbols = [board.cell(r, c).symbol for r, c in cells if board.cell(r, c).symbol is not None]
-        # Also count compass, number, shape_pattern as clues for solitary
-        other_clues = sum(1 for r, c in cells if (
-            board.cell(r, c).compass is not None
+        clue_cells = sum(1 for r, c in cells if (
+            board.cell(r, c).symbol is not None
+            or board.cell(r, c).compass is not None
             or board.cell(r, c).number is not None
             or board.cell(r, c).shape_pattern is not None
         ))
-        if len(symbols) + other_clues > 1:
+        if clue_cells > 1:
             return False
 
     if self.puzzle.has_rule("rose_window"):

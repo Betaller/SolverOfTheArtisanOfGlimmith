@@ -402,27 +402,46 @@ def check_rule_watchtower(puzzle: Puzzle, board: Board) -> bool:
     return True
 
 
+def _compass_halfplane_count(cell: Cell, dr: int, dc: int,
+                             region_positions: set[tuple[int, int]]) -> int:
+    """Count region cells strictly in direction (dr, dc), excluding the cell.
+
+    Matches the game's compass rule (see glimmith-solver compassCounts): the
+    number on a compass axis is the count of ALL region cells in that
+    half-plane, not a contiguous straight line.
+    """
+    r, c = cell.row, cell.col
+    count = 0
+    for (rr, cc) in region_positions:
+        if rr == r and cc == c:
+            continue
+        if dr == -1 and rr < r:
+            count += 1
+        elif dr == 1 and rr > r:
+            count += 1
+        elif dc == -1 and cc < c:
+            count += 1
+        elif dc == 1 and cc > c:
+            count += 1
+    return count
+
+
 def check_rule_compass(puzzle: Puzzle, board: Board) -> bool:
     if not puzzle.has_rule("compass"):
         return True
+    regions = get_region_cells(board)
     for c in board.cells():
         if c.compass is None or not c.assigned:
             continue
+        region_cells = regions.get(c.region_id)
+        if region_cells is None:
+            return False
+        positions = {(cell.row, cell.col) for cell in region_cells}
         for dr, dc, attr in [(-1, 0, "up"), (1, 0, "down"), (0, -1, "left"), (0, 1, "right")]:
             expected = getattr(c.compass, attr)
             if expected == -1:
                 continue
-            count = 0
-            r, col = c.row + dr, c.col + dc
-            while 0 <= r < board.height and 0 <= col < board.width:
-                neighbor = board.cell(r, col)
-                if neighbor.assigned and neighbor.region_id == c.region_id:
-                    count += 1
-                else:
-                    break
-                r += dr
-                col += dc
-            if count != expected:
+            if _compass_halfplane_count(c, dr, dc, positions) != expected:
                 return False
     return True
 

@@ -553,7 +553,7 @@ class MainWindow(QMainWindow):
         self._result_label.setTextFormat(Qt.TextFormat.RichText)
         self._status_label.setText("求解中...")
 
-        self._solver_thread = SolverThread(self._puzzle, timeout=30)
+        self._solver_thread = SolverThread(self._puzzle, timeout=30, puzzle_name=self._current_file)
         self._solver_thread.finished.connect(self._on_solution_ready)
         self._solver_thread.error.connect(self._on_solver_error)
         self._solver_thread.start()

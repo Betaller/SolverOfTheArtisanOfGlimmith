@@ -863,8 +863,8 @@ class TestRuleCompass:
             [1, 1, 2],
             [3, 3, 3],
         ])
-        b.cell(0, 0).compass = CompassClue(up=-1, down=-1, left=-1, right=1)
-        # From (0,0) going right: (0,1) is same region -> count = 1
+        b.cell(0, 0).compass = CompassClue(up=-1, down=-1, left=-1, right=2)
+        # From (0,0): region-1 cells strictly to the right are (0,1),(1,1) -> count = 2
         assert check_rule_compass(puzzle, b) is True
 
     def test_compass_fails(self) -> None:
@@ -874,8 +874,8 @@ class TestRuleCompass:
             [1, 1, 2],
             [3, 3, 3],
         ])
-        b.cell(0, 0).compass = CompassClue(up=-1, down=-1, left=-1, right=2)
-        # From (0,0) going right: only (0,1) is same region -> count = 1, not 2
+        b.cell(0, 0).compass = CompassClue(up=-1, down=-1, left=-1, right=3)
+        # From (0,0): only (0,1),(1,1) are region-1 cells to the right -> count = 2, not 3
         assert check_rule_compass(puzzle, b) is False
 
     def test_compass_up_direction(self) -> None:

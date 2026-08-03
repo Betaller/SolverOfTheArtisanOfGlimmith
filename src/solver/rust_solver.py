@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from src.io.puzzle_codec import puzzle_to_dict
-from src.models.board import Shape
+from src.models.board import Board, Shape
 from src.models.puzzle import Puzzle
 from src.models.solution import Solution, RegionInfo
 from src.solver.base import Solver
@@ -94,13 +94,32 @@ class RustSolver(Solver):
                 matched_shape_name=rd.get("matched_shape_name"),
             ))
 
+        board = self._board_from_regions(puzzle, regions)
+
         return Solution(
             solved=True,
+            board=board,
             regions=regions,
             steps_taken=data.get("steps_taken", 0),
             elapsed_ms=data.get("elapsed_ms", 0),
             rule_results=data.get("rule_results", {}),
         )
+
+    @staticmethod
+    def _board_from_regions(puzzle: Puzzle, regions: list[RegionInfo]) -> Board:
+        board = Board(puzzle.height, puzzle.width)
+        for c in puzzle.cells:
+            dst = board.cell(c.row, c.col)
+            dst.number = c.number
+            dst.symbol = c.symbol
+            dst.shape_pattern = c.shape_pattern
+            dst.compass = c.compass
+            dst.fence_pattern = c.fence_pattern
+            dst.blocked = c.blocked
+        for region in regions:
+            for r, c in region.cells:
+                board.cell(r, c).region_id = region.region_id
+        return board
 
     @classmethod
     def supports(cls, puzzle: Puzzle) -> bool:

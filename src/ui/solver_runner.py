@@ -13,10 +13,12 @@ class SolverThread(QThread):
     finished = Signal(object)
     error = Signal(str)
 
-    def __init__(self, puzzle: Puzzle, timeout: float = 30.0, parent=None) -> None:
+    def __init__(self, puzzle: Puzzle, timeout: float = 30.0,
+                 puzzle_name: str | None = None, parent=None) -> None:
         super().__init__(parent)
         self._puzzle = puzzle
         self._timeout = timeout
+        self._puzzle_name = puzzle_name
         self._cancelled = False
         self._result: Solution | None = None
 
@@ -29,7 +31,8 @@ class SolverThread(QThread):
     def run(self) -> None:
         try:
             router = default_router()
-            self._result = router.route(self._puzzle, timeout=self._timeout)
+            self._result = router.route(self._puzzle, timeout=self._timeout,
+                                        puzzle_name=self._puzzle_name)
             if not self._cancelled:
                 self.finished.emit(self._result)
         except Exception as e:

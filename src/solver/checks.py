@@ -34,13 +34,13 @@ def _check_incremental(self, board: Board, regions: dict[int, set[tuple[int, int
     new_cells = regions[new_rid]
 
     if self.puzzle.has_rule("solitary"):
-        symbols = [board.cell(r, c).symbol for r, c in new_cells if board.cell(r, c).symbol is not None]
-        other_clues = sum(1 for r, c in new_cells if (
-            board.cell(r, c).compass is not None
+        clue_cells = sum(1 for r, c in new_cells if (
+            board.cell(r, c).symbol is not None
+            or board.cell(r, c).compass is not None
             or board.cell(r, c).number is not None
             or board.cell(r, c).shape_pattern is not None
         ))
-        if len(symbols) + other_clues > 1:
+        if clue_cells > 1:
             return False
 
     if self.puzzle.has_rule("precise"):
@@ -156,21 +156,12 @@ def _check_incremental(self, board: Board, regions: dict[int, set[tuple[int, int
 
 def _check_compass_final(self, board: Board, cell: Cell,
                           region_cells: set[tuple[int, int]]) -> bool:
-    r, c = cell.row, cell.col
+    from src.solver.constraints import _compass_halfplane_count
     for dr, dc, attr in [(-1, 0, "up"), (1, 0, "down"), (0, -1, "left"), (0, 1, "right")]:
         expected = getattr(cell.compass, attr)
         if expected == -1:
             continue
-        count = 0
-        cr, cc = r + dr, c + dc
-        while 0 <= cr < board.height and 0 <= cc < board.width:
-            if board.cell(cr, cc).region_id == cell.region_id:
-                count += 1
-            else:
-                break
-            cr += dr
-            cc += dc
-        if count != expected:
+        if _compass_halfplane_count(cell, dr, dc, region_cells) != expected:
             return False
     return True
 

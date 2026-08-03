@@ -145,6 +145,7 @@ def _parse_puzzle(p: dict) -> dict:
     has_fence = False
     has_numbers = False
     has_shape_pattern = False
+    p_symbols: dict[str, int] = {}
 
     # --- cell rows (odd indices) ---
     for r in range(height):
@@ -177,6 +178,7 @@ def _parse_puzzle(p: dict) -> dict:
                     )
                     has_fence = True
                 elif re.fullmatch(r"P[1-9]", content):
+                    p_symbols[content] = p_symbols.get(content, 0) + 1
                     if not is_spr:
                         cell["symbol"] = content
                 elif content[0] in "UDLR" and re.fullmatch(r"[UDLR\d]+", content):
@@ -244,7 +246,7 @@ def _parse_puzzle(p: dict) -> dict:
 
     rules = build_rules(
         p, shapes, has_compass, has_fence, has_numbers, constraint_types,
-        bool(vt), is_spr, has_shape_bank, has_shape_pattern,
+        bool(vt), is_spr, has_shape_bank, has_shape_pattern, p_symbols,
     )
 
     return {
@@ -299,7 +301,8 @@ def build_rules(p: dict, shapes: dict[int, Shape], has_compass: bool,
                 has_fence: bool, has_numbers: bool,
                 constraint_types: set[str], has_watchtower: bool,
                 is_spr: bool, has_shape_bank: bool,
-                has_shape_pattern: bool) -> list[dict]:
+                has_shape_pattern: bool,
+                p_symbols: dict[str, int] | None = None) -> list[dict]:
     rules: list[dict] = []
 
     if has_shape_bank and shapes:
@@ -351,6 +354,15 @@ def build_rules(p: dict, shapes: dict[int, Shape], has_compass: bool,
         rules.append({"type": "difference"})
     if has_watchtower:
         rules.append({"type": "watchtower"})
+
+    # Rose window: the P-number coloured circles. When at least two distinct
+    # symbol types each appear the same number of times, the puzzle is a rose
+    # window (N types × M occurrences, M regions each containing all N types).
+    if p_symbols and len(p_symbols) >= 2 and len(set(p_symbols.values())) == 1:
+        rules.append({
+            "type": "rose_window",
+            "params": {"symbol_types": sorted(p_symbols)},
+        })
 
     return rules
 

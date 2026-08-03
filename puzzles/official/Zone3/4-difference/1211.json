@@ -282,6 +282,15 @@
   "rules": [
     {
       "type": "difference"
+    },
+    {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "P1",
+          "P2"
+        ]
+      }
     }
   ],
   "shape_pool": [],

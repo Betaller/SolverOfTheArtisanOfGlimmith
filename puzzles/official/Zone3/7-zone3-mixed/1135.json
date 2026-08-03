@@ -1528,6 +1528,17 @@
     },
     {
       "type": "watchtower"
+    },
+    {
+      "type": "rose_window",
+      "params": {
+        "symbol_types": [
+          "P1",
+          "P2",
+          "P3",
+          "P4"
+        ]
+      }
     }
   ],
   "shape_pool": [],

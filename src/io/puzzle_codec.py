@@ -12,6 +12,22 @@ def shape_to_dict(shape: Shape) -> list[list[int]]:
     return [[r, c] for r, c in shape.cells]
 
 
+def _canonical_outer(edge: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:
+    """Canonicalize an outer-boundary segment.
+
+    The grid-widget expects top/bottom boundaries as horizontal segments
+    ``(r, c, r, c + 1)`` and left/right boundaries as vertical segments
+    ``(r, c, r + 1, c)``.  Normalize any adjacent-vertex segment to that form
+    (so reversed endpoint order or swapped storage can't corrupt rendering).
+    """
+    r1, c1, r2, c2 = edge
+    if r1 == r2 and abs(c1 - c2) == 1:
+        return (r1, min(c1, c2), r1, min(c1, c2) + 1)
+    if c1 == c2 and abs(r1 - r2) == 1:
+        return (min(r1, r2), c1, min(r1, r2) + 1, c1)
+    return None
+
+
 def shape_from_dict(d: list[list[int]]) -> Shape:
     return Shape(cells=frozenset((r, c) for r, c in d))
 
@@ -147,7 +163,7 @@ def dict_to_puzzle(data: dict[str, Any]) -> Puzzle:
     for ob in data.get("outer_boundaries", []):
         key = (int(ob["r1"]), int(ob["c1"]), int(ob["r2"]), int(ob["c2"]))
         outer_boundaries.append(key)
-
+    outer_boundaries = [k for k in map(_canonical_outer, outer_boundaries) if k is not None]
     return Puzzle(
         height=height, width=width,
         cells=board.cells(), edges=board.edges(),

@@ -455,13 +455,15 @@ def build_json(config, cells, edges, vertices):
             json_cells.append(cell)
     
     # Generate outer_boundaries
+    # Reference convention (matches src/ui/grid_widget.py _outer_key/_draw_outer_edge):
+    #   top/bottom are horizontal segments (r1 == r2), left/right are vertical (c1 == c2)
     outer_boundaries = []
     for c in range(W):
-        outer_boundaries.append({"r1": -1, "c1": c, "r2": 0, "c2": c})
-        outer_boundaries.append({"r1": H - 1, "c1": c, "r2": H, "c2": c})
+        outer_boundaries.append({"r1": 0, "c1": c, "r2": 0, "c2": c + 1})
+        outer_boundaries.append({"r1": H, "c1": c, "r2": H, "c2": c + 1})
     for r in range(H):
-        outer_boundaries.append({"r1": r, "c1": -1, "r2": r, "c2": 0})
-        outer_boundaries.append({"r1": r, "c1": W - 1, "r2": r, "c2": W})
+        outer_boundaries.append({"r1": r, "c1": 0, "r2": r + 1, "c2": 0})
+        outer_boundaries.append({"r1": r, "c1": W, "r2": r + 1, "c2": W})
     
     puzzle = {
         "version": "1.0",

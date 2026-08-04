@@ -212,8 +212,8 @@ fn dfs(
         state.cell_to_region.insert((r, c), rid);
         state.region_shapes.get_mut(&rid).unwrap().push([r, c]);
 
-        // Incremental watchtower check
-        if check_watchtowers_ok(state) {
+        // Incremental watchtower + ring check
+        if check_watchtowers_ok(state) && check_vertex_ring_ok(puzzle, r, c, state) {
             if dfs(puzzle, fillable, idx + 1, state) {
                 return true;
             }
@@ -229,8 +229,10 @@ fn dfs(
     state.cell_to_region.insert((r, c), new_rid);
     state.region_shapes.insert(new_rid, vec![[r, c]]);
 
-    if dfs(puzzle, fillable, idx + 1, state) {
-        return true;
+    if check_watchtowers_ok(state) && check_vertex_ring_ok(puzzle, r, c, state) {
+        if dfs(puzzle, fillable, idx + 1, state) {
+            return true;
+        }
     }
 
     state.cell_to_region.remove(&(r, c));
@@ -279,9 +281,83 @@ fn check_watchtowers_ok(state: &BacktrackState) -> bool {
     true
 }
 
+/// Number of solution boundaries around the interior vertex (r,c) (the corner
+/// shared by cells (r,c), (r+1,c), (r,c+1), (r+1,c+1)).
+fn vertex_boundary_count(puzzle: &Puzzle, state: &BacktrackState, r: usize, c: usize) -> usize {
+    let is_bound = |a: (usize, usize), b: (usize, usize)| -> bool {
+        if puzzle.cells[a.0][a.1].blocked || puzzle.cells[b.0][b.1].blocked {
+            return true;
+        }
+        match (state.cell_to_region.get(&a), state.cell_to_region.get(&b)) {
+            (Some(x), Some(y)) => x != y,
+            _ => true, // unassigned counts as a boundary
+        }
+    };
+    is_bound((r, c), (r + 1, c)) as usize
+        + is_bound((r, c), (r, c + 1)) as usize
+        + is_bound((r, c + 1), (r + 1, c + 1)) as usize
+        + is_bound((r + 1, c), (r + 1, c + 1)) as usize
+}
+
+/// Incremental ring/brick check: after assigning cell (r,c), verify its corner
+/// vertices don't already form a forbidden intersection (ring: 3 boundaries,
+/// brick: 4 boundaries).
+fn check_vertex_ring_ok(puzzle: &Puzzle, r: usize, c: usize, state: &BacktrackState) -> bool {
+    let has_ring = puzzle.rules.iter().any(|rule| rule.ctype == "ring");
+    let has_brick = puzzle.rules.iter().any(|rule| rule.ctype == "brick");
+    if !has_ring && !has_brick {
+        return true;
+    }
+    let h = puzzle.height as i32;
+    let w = puzzle.width as i32;
+    for (vr, vc) in [
+        (r as i32 - 1, c as i32 - 1),
+        (r as i32, c as i32 - 1),
+        (r as i32 - 1, c as i32),
+        (r as i32, c as i32),
+    ] {
+        if vr < 0 || vc < 0 || vr + 1 >= h || vc + 1 >= w {
+            continue;
+        }
+        let cells = [(vr, vc), (vr + 1, vc), (vr, vc + 1), (vr + 1, vc + 1)];
+        if !cells.iter().all(|&(a, b)| {
+            state.cell_to_region.contains_key(&(a as usize, b as usize))
+                || puzzle.cells[a as usize][b as usize].blocked
+        }) {
+            continue;
+        }
+        let bc = vertex_boundary_count(puzzle, state, vr as usize, vc as usize);
+        if (has_ring && bc == 3) || (has_brick && bc == 4) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Leaf ring/brick check: no interior vertex may form a forbidden intersection.
+fn check_ring_ok(puzzle: &Puzzle, state: &BacktrackState) -> bool {
+    let has_ring = puzzle.rules.iter().any(|rule| rule.ctype == "ring");
+    let has_brick = puzzle.rules.iter().any(|rule| rule.ctype == "brick");
+    if !has_ring && !has_brick {
+        return true;
+    }
+    for r in 0..puzzle.height.saturating_sub(1) {
+        for c in 0..puzzle.width.saturating_sub(1) {
+            let bc = vertex_boundary_count(puzzle, state, r, c);
+            if (has_ring && bc == 3) || (has_brick && bc == 4) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Global constraint check at leaf: all watchtowers satisfied, area bounds satisfied.
 fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     if !check_watchtowers_ok(state) {
+        return false;
+    }
+    if !check_ring_ok(puzzle, state) {
         return false;
     }
 

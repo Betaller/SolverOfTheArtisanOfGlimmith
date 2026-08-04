@@ -265,7 +265,74 @@ fn dfs_in_group_mark(x: i32, y: i32, core: &AoGCore) -> bool {
 
 // ── empty_area_check: main constraint check on remaining empty areas ─────────
 
+/// ring (no 3-way intersections): at a vertex whose four surrounding cells have
+/// exactly one still-empty cell, the empty cell will become a fresh region.
+/// If that forces exactly three solution boundaries at the vertex, the state is
+/// dead — the empty can never be filled validly and the solver never merges a
+/// cell into an already-placed region. (bilibili 环纹性质; mirrors the Python
+/// _check_ring boundary-count definition.)
+fn ring_t_junction_check(core: &AoGCore, sp: &Vec<Vec<u32>>) -> bool {
+    let n_row = core.n_row as i32;
+    let n_col = core.n_col as i32;
+    let max_px = 2 * n_row + 1;
+    let max_py = 2 * n_col + 1;
+    const FRESH: u32 = u32::MAX;
+    for x in 1..=n_row {
+        for y in 1..=n_col {
+            let px = to_puzzle_x(x) as usize;
+            let py = to_puzzle_y(y) as usize;
+            if core.puzzle[px][py] == AREA_BLOCK || sp[px][py] != AREA_NORMAL {
+                continue;
+            }
+            for (dx, dy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                let vx = px as i32 + dx;
+                let vy = py as i32 + dy;
+                // Cyclic corners: TL, TR, BL, BR. Edges: top (0,1), bottom
+                // (2,3), left (0,2), right (1,3).
+                let corners = [(vx - 1, vy - 1), (vx + 1, vy - 1), (vx - 1, vy + 1), (vx + 1, vy + 1)];
+                let mut rids = [0u32; 4];
+                let mut empty_count = 0usize;
+                let mut skip = false;
+                for k in 0..4 {
+                    let (cx, cy) = corners[k];
+                    if cx < 3 || cx > max_px || cy < 3 || cy > max_py {
+                        skip = true;
+                        break;
+                    }
+                    let cu = cx as usize;
+                    let cv = cy as usize;
+                    if core.puzzle[cu][cv] == AREA_BLOCK {
+                        skip = true;
+                        break;
+                    }
+                    let v = sp[cu][cv];
+                    if v == AREA_NORMAL {
+                        rids[k] = FRESH;
+                        empty_count += 1;
+                    } else {
+                        rids[k] = v & SOLVE_AREA_BIT;
+                    }
+                }
+                if skip || empty_count != 1 {
+                    continue;
+                }
+                let boundaries = (rids[0] != rids[1]) as u32
+                    + (rids[2] != rids[3]) as u32
+                    + (rids[0] != rids[2]) as u32
+                    + (rids[1] != rids[3]) as u32;
+                if boundaries == 3 {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 pub fn empty_area_check(core: &mut AoGCore, sp: &Vec<Vec<u32>>) -> bool {
+    if core.config.no_3_way_intersections && !ring_t_junction_check(core, sp) {
+        return false;
+    }
     dfs_group_mark(core);
     for x in 1..=core.n_row as i32 {
         for y in 1..=core.n_col as i32 {

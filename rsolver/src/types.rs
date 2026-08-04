@@ -160,6 +160,10 @@ pub struct Puzzle {
     pub vertices: Vec<Vec<Vertex>>,
     pub rules: Vec<Rule>,
     pub shape_pool: Vec<Shape>,
+    /// Outer border segments [r1, c1, r2, c2] that are explicitly recorded in
+    /// the puzzle JSON. Kept for round-tripping; the outer border is always a
+    /// region boundary in every solver.
+    pub outer_boundaries: Vec<[usize; 4]>,
 }
 
 // ── Solution ──────────────────────────────────────────────────────────────────

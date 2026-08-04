@@ -471,11 +471,12 @@ pub fn check_radar(x: i32, y: i32, core: &AoGCore, sp: &Vec<Vec<u32>>) -> bool {
                 filled_count += 1;
             }
         }
-        if filled_count == 4 {
-            if region_cnt != radar_value as usize {
-                return false;
-            }
-        } else if region_cnt + (4 - filled_count) < radar_value as usize {
+        let ok = if filled_count == 4 {
+            region_cnt == radar_value as usize
+        } else {
+            region_cnt + (4 - filled_count) >= radar_value as usize
+        };
+        if !ok {
             return false;
         }
     }
@@ -751,8 +752,15 @@ impl AoGCore {
                 for c in 0..w.saturating_sub(1) {
                     if let Some(val) = puzzle.vertices[r][c].watchtower {
                         if val >= 1 && val <= 4 {
-                            let px = 2 * r + 2;
-                            let py = 2 * c + 2;
+                            // Python `vertex(r,c)` is the shared corner of cells
+                            // (r,c),(r,c+1),(r+1,c),(r+1,c+1), i.e. the bottom-right
+                            // corner of cell (r,c).  In the padded grid a cell (r,c)
+                            // sits at (2r+3, 2c+3), so its bottom-right corner vertex
+                            // is (2r+4, 2c+4).  (2r+2, 2c+2) would be the top-left
+                            // corner of the same cell — a one-cell offset bug that
+                            // broke watchtower puzzles.)
+                            let px = 2 * r + 4;
+                            let py = 2 * c + 4;
                             puzzle_grid[px][py] |= (val as u32) << VERTEX_RADAR_BIT_SHIFT;
                         }
                     }
@@ -948,6 +956,15 @@ fn apply_line_constraint(mut lv: u32, ec: &EdgeConstraint, cell1_first: bool, ve
         EdgeConstraintType::Heterogeneous => lv |= LINE_DIFFERENT,
         EdgeConstraintType::Homogeneous => lv |= LINE_EQUAL,
         EdgeConstraintType::Inequality => {
+            // JSON `value` convention, shared with the Python solver, exact-cover
+            // solver and the independent validator (src/validation/validator.py):
+            //   value == 1 → the FIRST endpoint (r1,c1) region is LARGER
+            //   value != 1 → the SECOND endpoint (r2,c2) region is LARGER
+            //
+            // C++ LINE_LARGER means the upper/left neighbour is larger, i.e.
+            // the first endpoint (cell1) region; LINE_SMALLER the reverse.
+            // Both call sites pass cell1_first=true (cell1 is always the first
+            // endpoint of the edge), so this reduces to value==1 → LINE_LARGER.
             let reversed = ec.value == Some(1);
             if (reversed && cell1_first) || (!reversed && !cell1_first) {
                 lv |= LINE_LARGER;

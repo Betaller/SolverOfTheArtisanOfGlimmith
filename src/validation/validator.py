@@ -459,6 +459,11 @@ def _check_brick(puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]],
     if not puzzle.has_rule("brick"):
         return True
     for v in board.vertices():
+        # 4 路交叉 = 4 个**区域**在顶点相会。顶点周围若有 blocked（空格），
+        # 空格不是区域，不可能构成 4 路交叉——跳过（与 C++ check_tatami 一致，
+        # 后者把所有 blocked 视为同一个非区域值，永远不会计数为不同区域）。
+        if any(c.blocked for c in board.cells_surrounding_vertex(v.row, v.col)):
+            continue
         count = sum(1 for e in board.edges_surrounding_vertex(v.row, v.col)
                     if _solution_boundary(board, e.r1, e.c1, e.r2, e.c2))
         if count == 4:

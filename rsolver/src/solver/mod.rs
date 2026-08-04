@@ -78,8 +78,47 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     }
 }
 
-fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle) -> Solution {    let elapsed = start.elapsed().as_millis() as u64;
-    let rule_results = crate::constraints::check_all(&puzzle.rules, &regions);
+/// Every pre-drawn boundary (and every constrained edge) must separate two
+/// different regions.  The pieces / backtrack solvers are not boundary-aware,
+/// so this is the backstop that rejects a "solution" that crosses a drawn edge.
+fn regions_respect_boundaries(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
+    let mut rid: HashMap<(usize, usize), usize> = HashMap::new();
+    for reg in regions {
+        for &[r, c] in &reg.cells {
+            rid.insert((r, c), reg.region_id);
+        }
+    }
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width.saturating_sub(1) {
+            if puzzle.h_edges[r][c].is_boundary {
+                if let (Some(&a), Some(&b)) = (rid.get(&(r, c)), rid.get(&(r, c + 1))) {
+                    if a == b {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    for r in 0..puzzle.height.saturating_sub(1) {
+        for c in 0..puzzle.width {
+            if puzzle.v_edges[r][c].is_boundary {
+                if let (Some(&a), Some(&b)) = (rid.get(&(r, c)), rid.get(&(r + 1, c))) {
+                    if a == b {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle) -> Solution {
+    let elapsed = start.elapsed().as_millis() as u64;
+    if !regions_respect_boundaries(puzzle, &regions) {
+        return Solution::unsolved("Solution found but crosses a pre-drawn boundary");
+    }
+    let rule_results = crate::constraints::check_all(puzzle, &puzzle.rules, &regions);
     let solved = puzzle.rules.iter().all(|r| rule_results.contains(&r.ctype));
 
     Solution {

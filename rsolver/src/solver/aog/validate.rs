@@ -275,6 +275,16 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
             "brick" => {
                 for r in 0..h.saturating_sub(1) {
                     for c in 0..w.saturating_sub(1) {
+                        // A 4-way junction means four *regions* meeting at a
+                        // vertex.  A blocked cell around the vertex is empty
+                        // space, not a region, so it can never be a 4-way
+                        // junction.  (Mirrors the C++ check_tatami, which keeps
+                        // all blocked cells as one shared AREA_BLOCK value and
+                        // therefore never counts them as distinct regions.)
+                        let q = [(r, c), (r, c + 1), (r + 1, c), (r + 1, c + 1)];
+                        if q.iter().any(|&(rr, cc)| puzzle.cells[rr][cc].blocked) {
+                            continue;
+                        }
                         if count_boundary_edges_at_vertex(puzzle, &by_rid, r, c) == 4 {
                             return false;
                         }

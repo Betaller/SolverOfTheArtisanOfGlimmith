@@ -4,9 +4,9 @@
 use std::collections::HashSet;
 use crate::types::*;
 
-pub fn check_rule(rule: &Rule, regions: &[RegionInfo]) -> bool {
+pub fn check_rule(rule: &Rule, puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     match rule.ctype.as_str() {
-        "area" => check_area(regions),
+        "area" => check_area(puzzle, regions),
         "same" => check_same(regions),
         "different" => check_different(regions),
         "mixed" => check_mixed(regions),
@@ -32,26 +32,30 @@ pub fn check_rule(rule: &Rule, regions: &[RegionInfo]) -> bool {
     }
 }
 
-pub fn check_all(rules: &[Rule], regions: &[RegionInfo]) -> HashSet<String> {
+pub fn check_all(puzzle: &Puzzle, rules: &[Rule], regions: &[RegionInfo]) -> HashSet<String> {
     let mut passed = HashSet::new();
     for rule in rules {
-        if check_rule(rule, regions) {
+        if check_rule(rule, puzzle, regions) {
             passed.insert(rule.ctype.clone());
         }
     }
     passed
 }
 
-/// area: regions must have strictly increasing area.
-fn check_area(regions: &[RegionInfo]) -> bool {
-    if regions.len() < 2 {
-        return true;
+/// area: every cell carrying a number clue must belong to a region of exactly
+/// that size (the game's `area` rule), not "regions have strictly increasing
+/// areas" as this function originally claimed.
+fn check_area(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
+    for reg in regions {
+        for &[r, c] in &reg.cells {
+            if let Some(n) = puzzle.cells[r][c].number {
+                if n as usize != reg.area {
+                    return false;
+                }
+            }
+        }
     }
-    let first_area = regions[0].area as i64;
-    regions[1..].iter().enumerate().all(|(i, r)| {
-        let expected = first_area + (i + 1) as i64;
-        r.area as i64 == expected
-    })
+    true
 }
 
 /// same: all regions have the same area.
@@ -176,10 +180,39 @@ mod tests {
     }
 
     #[test]
-    fn test_check_area_strictly_increasing() {
-        let regions = vec![r(vec![[0, 0]], 3), r(vec![[0, 0]], 4), r(vec![[0, 0]], 5)];
-        assert!(check_area(&regions));
-        let regions = vec![r(vec![[0, 0]], 3), r(vec![[0, 0]], 3)];
-        assert!(!check_area(&regions));
+    fn test_check_area_number_clues() {
+        // area: a numbered cell must be in a region of exactly that size.
+        let mut cells = vec![vec![Cell::new(0, 0), Cell::new(0, 1)]];
+        cells[0][0].number = Some(2);
+        cells[0][1].number = Some(2);
+        let puzzle = Puzzle {
+            height: 1,
+            width: 2,
+            cells,
+            h_edges: Vec::new(),
+            v_edges: Vec::new(),
+            vertices: Vec::new(),
+            rules: Vec::new(),
+            shape_pool: Vec::new(),
+            outer_boundaries: Vec::new(),
+        };
+        let ok = vec![RegionInfo {
+            region_id: 1,
+            cells: vec![[0, 0], [0, 1]],
+            area: 2,
+            shape: vec![[0, 0], [0, 1]],
+            normalized_shape_key: String::new(),
+            matched_shape_name: None,
+        }];
+        assert!(check_area(&puzzle, &ok));
+        let bad = vec![RegionInfo {
+            region_id: 1,
+            cells: vec![[0, 0], [0, 1]],
+            area: 3, // wrong size
+            shape: vec![[0, 0], [0, 1]],
+            normalized_shape_key: String::new(),
+            matched_shape_name: None,
+        }];
+        assert!(!check_area(&puzzle, &bad));
     }
 }

@@ -135,15 +135,25 @@ fn normalize_compass_value(v: Option<i64>) -> Option<i64> {
     }
 }
 
-fn build_puzzle(input: &PuzzleJson) -> Puzzle {
+fn build_puzzle(input: &PuzzleJson) -> Result<Puzzle, String> {
     let h = input.grid.height;
     let w = input.grid.width;
+
+    if h == 0 || w == 0 {
+        return Err(format!("invalid grid size {}x{}", h, w));
+    }
 
     // Build cells
     let mut cells: Vec<Vec<Cell>> = (0..h)
         .map(|r| (0..w).map(|c| Cell::new(r, c)).collect())
         .collect();
     for cd in &input.cells {
+        if cd.row >= h || cd.col >= w {
+            return Err(format!(
+                "cell out of range: ({},{}) in {}x{} grid",
+                cd.row, cd.col, h, w
+            ));
+        }
         let c = &mut cells[cd.row][cd.col];
         c.row = cd.row;
         c.col = cd.col;
@@ -172,18 +182,36 @@ fn build_puzzle(input: &PuzzleJson) -> Puzzle {
 
     for ed in &input.edges {
         let (r1, c1, r2, c2) = (ed.r1, ed.c1, ed.r2, ed.c2);
-        let edge = if r1 == r2 {
+        // An edge must join two adjacent in-grid cells: same row & adjacent
+        // cols (horizontal) or same col & adjacent rows (vertical).
+        let horizontal = r1 == r2 && c1.abs_diff(c2) == 1;
+        let vertical = c1 == c2 && r1.abs_diff(r2) == 1;
+        if !horizontal && !vertical {
+            return Err(format!(
+                "invalid edge ({},{})-({},{}): endpoints are not adjacent cells",
+                r1, c1, r2, c2
+            ));
+        }
+        if r1 >= h || c1 >= w || r2 >= h || c2 >= w {
+            return Err(format!(
+                "edge out of range ({},{})-({},{}): grid is {}x{}",
+                r1, c1, r2, c2, h, w
+            ));
+        }
+        let edge = if horizontal {
             &mut h_edges[r1][c1.min(c2)]
         } else {
             &mut v_edges[r1.min(r2)][c1]
         };
         edge.is_boundary = ed.is_boundary;
-        edge.constraint = ed.constraint.as_ref().and_then(|c| {
-            EdgeConstraintType::from_str(&c.ctype).map(|t| EdgeConstraint {
-                ctype: t,
+        if let Some(ref c) = ed.constraint {
+            let ctype = EdgeConstraintType::from_str(&c.ctype)
+                .ok_or_else(|| format!("unknown edge constraint type: {}", c.ctype))?;
+            edge.constraint = Some(EdgeConstraint {
+                ctype,
                 value: c.value,
-            })
-        });
+            });
+        }
     }
 
     // Build vertices
@@ -191,9 +219,13 @@ fn build_puzzle(input: &PuzzleJson) -> Puzzle {
     let vw = w.saturating_sub(1);
     let mut vertices = vec![vec![Vertex::default(); vw]; vh];
     for vd in &input.vertices {
-        if vd.row < vh && vd.col < vw {
-            vertices[vd.row][vd.col].watchtower = vd.watchtower;
+        if vd.row >= vh || vd.col >= vw {
+            return Err(format!(
+                "vertex out of range: ({},{}) in {}x{} grid",
+                vd.row, vd.col, h, w
+            ));
         }
+        vertices[vd.row][vd.col].watchtower = vd.watchtower;
     }
 
     // Shape pool
@@ -207,7 +239,14 @@ fn build_puzzle(input: &PuzzleJson) -> Puzzle {
         params: r.params.clone(),
     }).collect();
 
-    Puzzle {
+    // Outer border segments, kept for round-tripping.
+    let outer_boundaries: Vec<[usize; 4]> = input
+        .outer_boundaries
+        .iter()
+        .map(|o| [o.r1, o.c1, o.r2, o.c2])
+        .collect();
+
+    Ok(Puzzle {
         height: h,
         width: w,
         cells,
@@ -216,7 +255,8 @@ fn build_puzzle(input: &PuzzleJson) -> Puzzle {
         vertices,
         rules,
         shape_pool,
-    }
+        outer_boundaries,
+    })
 }
 
 // ── Output formatter ──────────────────────────────────────────────────────────
@@ -274,7 +314,10 @@ fn main() {
         std::process::exit(1);
     });
 
-    let puzzle = build_puzzle(&puzzle_json);
+    let puzzle = build_puzzle(&puzzle_json).unwrap_or_else(|e| {
+        eprintln!("Error building puzzle: {}", e);
+        std::process::exit(1);
+    });
     let solution = solver::solve(&puzzle, 30_000); // 30s timeout
 
     let output = serde_json::to_string(&solution_to_json(&solution)).unwrap();

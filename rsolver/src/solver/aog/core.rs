@@ -917,6 +917,27 @@ impl AoGCore {
             }
         }
 
+        // rose_window: per-type node lists (mirrors main.cpp slash_nodes).
+        if core.rose_type_count > 0 {
+            let mut sn: Vec<Vec<Node>> = vec![Vec::new(); core.rose_type_count];
+            for row in &puzzle.cells {
+                for cell in row {
+                    if cell.row >= h || cell.col >= w || cell.blocked {
+                        continue;
+                    }
+                    if let Some(sym) = cell.symbol.as_ref() {
+                        if let Some(t) = rose_types.iter().position(|x| x == sym) {
+                            sn[t].push(Node {
+                                x: (cell.row + 1) as i32,
+                                y: (cell.col + 1) as i32,
+                            });
+                        }
+                    }
+                }
+            }
+            core.slash_nodes = sn;
+        }
+
         Some(core)
     }
 }

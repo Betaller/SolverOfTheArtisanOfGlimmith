@@ -15,6 +15,10 @@ use super::empty::{dfs_empty_area, empty_area_check, empty_area_size_range, find
 
 // ── Helpers for mark_size filtering ─────────────────────────────────────────
 
+/// Skip the slash-distance prune when the tuple enumeration would be too large
+/// (mirrors dfs.cpp's O(nodes^types) loop, bounded to avoid slowdowns).
+const SLASH_DIST_TUPLE_CAP: usize = 16_384;
+
 #[inline]
 fn filter_size_range(mk: &mut [bool], lower: i32, upper: i32, neighbor_size: i32, larger_side: bool) {
     if larger_side {
@@ -61,6 +65,18 @@ fn place_non_predifined_shape(
 
     let mut L: RefMut<PlaceLevel> = pools.place[index as usize].borrow_mut();
     let mut rose_syms = [0i32; 16];
+
+    // Slash-distance table geometry (mirrors dfs.cpp sd dimensions).
+    let sd_ref_len = if core.rose_type_count > 0 {
+        core.slash_nodes.first().map(|v| v.len()).unwrap_or(0)
+    } else {
+        0
+    };
+    let sd_dim2 = core.rose_type_count + 1;
+    let sd_dim3 = sd_ref_len + 1;
+    let sd_stride2 = sd_dim3;
+    let sd_stride1 = sd_dim2 * sd_dim3;
+    let sd_need = MAX_SHAPE_SIZE * sd_dim2 * sd_dim3;
 
     L.mark_slash = [false; 16];
     L.current_shape_cnt = 0;
@@ -494,6 +510,44 @@ fn place_non_predifined_shape(
                     L.compass_visited_right_cnt[i] += 1;
                 }
             }
+
+            // Closest-slash-node table (sd) — mirrors dfs.cpp slash sd computation.
+            if core.rose_type_count > 0
+                && sd_ref_len > 0
+                && sd_ref_len.saturating_pow(core.rose_type_count as u32) <= SLASH_DIST_TUPLE_CAP
+            {
+                if L.slash_dist_buf.len() < sd_need {
+                    L.slash_dist_buf.resize(sd_need, 0);
+                }
+                let pos = L.current_shape_cnt;
+                for t in 0..core.rose_type_count {
+                    let nodes_t = &core.slash_nodes[t];
+                    let node_len = nodes_t.len();
+                    if node_len == 0 {
+                        continue;
+                    }
+                    for j in 0..sd_ref_len {
+                        let jj = j.min(node_len - 1);
+                        let sd_i = pos * sd_stride1 + t * sd_stride2 + j;
+                        if pos == 0 {
+                            L.slash_dist_buf[sd_i] = 0;
+                            continue;
+                        }
+                        let prev = L.slash_dist_buf[(pos - 1) * sd_stride1 + t * sd_stride2 + j];
+                        L.slash_dist_buf[sd_i] = prev;
+                        let best = prev as usize;
+                        let sn = nodes_t[jj];
+                        let new_d =
+                            (x + L.current_shape[pos].x - sn.x).abs() + (y + L.current_shape[pos].y - sn.y).abs();
+                        let old_d =
+                            (x + L.current_shape[best].x - sn.x).abs() + (y + L.current_shape[best].y - sn.y).abs();
+                        if new_d < old_d {
+                            L.slash_dist_buf[sd_i] = pos as i32;
+                        }
+                    }
+                }
+            }
+
             L.current_shape_cnt += 1;
 
             if (epv & AREA_PALISADE_INDEX_BIT) != 0 {
@@ -575,7 +629,70 @@ fn place_non_predifined_shape(
                 }
             }
 
-            if palisade_fail || rectangle_fail || compass_fail {
+            let mut slash_distance_fail = false;
+            if core.rose_type_count > 0 && sd_ref_len > 0 && L.slash_dist_buf.len() >= sd_need
+                && sd_ref_len.saturating_pow(core.rose_type_count as u32) <= SLASH_DIST_TUPLE_CAP
+            {
+                // Geometric lower bound: the shape must still reach one node of
+                // every unmarked type; if the minimal L1 diameter of the closest
+                // offsets exceeds the remaining cells, prune (dfs.cpp 1260-1306).
+                L.slash_node_indexs = [0; 16];
+                let mut distance_predict: i32 = 0x0fff_ffff;
+                'enum_tuples: loop {
+                    let mut minx = 0i32;
+                    let mut maxx = 0i32;
+                    let mut miny = 0i32;
+                    let mut maxy = 0i32;
+                    for t in 0..core.rose_type_count {
+                        if rose_syms[t] >= 1 {
+                            continue;
+                        }
+                        let nodes_t = &core.slash_nodes[t];
+                        if nodes_t.is_empty() {
+                            continue;
+                        }
+                        let jj = L.slash_node_indexs[t].min(nodes_t.len() - 1);
+                        let best = L.slash_dist_buf
+                            [(L.current_shape_cnt - 1) * sd_stride1 + t * sd_stride2 + jj]
+                            as usize;
+                        let sn = nodes_t[jj];
+                        let _x = x + L.current_shape[best].x - sn.x;
+                        let _y = y + L.current_shape[best].y - sn.y;
+                        minx = minx.min(_x);
+                        maxx = maxx.max(_x);
+                        miny = miny.min(_y);
+                        maxy = maxy.max(_y);
+                    }
+                    distance_predict = distance_predict.min(maxx + maxy - minx - miny);
+
+                    L.slash_node_indexs[0] += 1;
+                    let mut loc = 0usize;
+                    let mut final_flag = false;
+                    loop {
+                        if L.slash_node_indexs[loc] >= sd_ref_len {
+                            L.slash_node_indexs[loc] = 0;
+                            if loc + 1 < core.rose_type_count {
+                                L.slash_node_indexs[loc + 1] += 1;
+                                loc += 1;
+                            } else {
+                                final_flag = true;
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    if final_flag {
+                        break 'enum_tuples;
+                    }
+                }
+                let remain_size = size as i32 - L.current_shape_cnt as i32;
+                if distance_predict > remain_size {
+                    slash_distance_fail = true;
+                }
+            }
+
+            if palisade_fail || rectangle_fail || compass_fail || slash_distance_fail {
                 sp[epx][epy] = AREA_NORMAL;
                 L.current_shape_cnt -= 1;
                 candidates_i += 1;

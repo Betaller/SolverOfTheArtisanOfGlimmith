@@ -70,6 +70,9 @@ fn dfs_empty(x: i32, y: i32, core: &mut AoGCore, sp: &Vec<Vec<u32>>) {
             .area_shape_sizes
             .push(((pv & AREA_SHAPE_SIZE_BIT) >> AREA_SHAPE_SIZE_BIT_SHIFT) as usize);
     }
+    if core.rose_type_count > 0 && (pv & AREA_SYMBOL_BIT) != 0 {
+        core.dfs_ctx.slash_count[symbol_type_idx(pv)] += 1;
+    }
     if (pv & AREA_COMPASS_ENABLE) != 0 {
         core.dfs_ctx.compass_nodes.push(Node { x, y });
         core.dfs_ctx.compass_node_states.push(CompassStates::default());
@@ -300,6 +303,25 @@ pub fn empty_area_check(core: &mut AoGCore, sp: &Vec<Vec<u32>>) -> bool {
                     }
                 }
 
+                // rose_window: every remaining empty area must contain the same
+                // number of each symbol type (mirrors C++ slash_count check).
+                if core.rose_type_count > 0 {
+                    let first = core.dfs_ctx.slash_count[0];
+                    let mut rose_ok = true;
+                    for t in 1..core.rose_type_count {
+                        if core.dfs_ctx.slash_count[t] != first {
+                            rose_ok = false;
+                            break;
+                        }
+                    }
+                    if !rose_ok || first == 0 {
+                        return false;
+                    }
+                    if first == 1 && core.dfs_ctx.empty_block_line_count != 0 {
+                        return false;
+                    }
+                }
+
                 if core.config.shape_size_lower_bound == core.config.shape_size_upper_bound {
                     let lb = core.config.shape_size_lower_bound as usize;
                     if core.dfs_ctx.empty_count % lb != 0 {
@@ -399,8 +421,8 @@ fn _empty_area_shape_count(core: &AoGCore) -> i32 {
     if core.config.one_symbol_per_region && core.dfs_ctx.symbol_count == 1 {
         return 1;
     }
-    if core.slash_check_enable {
-        return core.dfs_ctx.slash_count[1];
+    if core.rose_type_count > 0 {
+        return core.dfs_ctx.slash_count[0];
     }
     0
 }
@@ -555,6 +577,29 @@ fn find_empty_corner_area(core: &AoGCore, sp: &Vec<Vec<u32>>) -> (i32, i32, i32)
             }
             if (core.puzzle[px][py + 1] & LINE_BLOCK) != 0 || core.puzzle[px][py + 2] == AREA_BLOCK {
                 block_line_count += 1;
+            }
+            if core.rose_type_count > 0 && (core.puzzle[px][py] & AREA_SYMBOL_BIT) != 0 {
+                let me = core.puzzle[px][py] & AREA_SLASH_INDEX_BIT;
+                if (core.puzzle[px - 1][py] & LINE_BLOCK) == 0
+                    && (core.puzzle[px - 2][py] & AREA_SLASH_INDEX_BIT) == me
+                {
+                    block_line_count += 1;
+                }
+                if (core.puzzle[px + 1][py] & LINE_BLOCK) == 0
+                    && (core.puzzle[px + 2][py] & AREA_SLASH_INDEX_BIT) == me
+                {
+                    block_line_count += 1;
+                }
+                if (core.puzzle[px][py - 1] & LINE_BLOCK) == 0
+                    && (core.puzzle[px][py - 2] & AREA_SLASH_INDEX_BIT) == me
+                {
+                    block_line_count += 1;
+                }
+                if (core.puzzle[px][py + 1] & LINE_BLOCK) == 0
+                    && (core.puzzle[px][py + 2] & AREA_SLASH_INDEX_BIT) == me
+                {
+                    block_line_count += 1;
+                }
             }
             if block_line_count >= 3 {
                 return (0, i, j);

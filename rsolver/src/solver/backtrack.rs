@@ -337,7 +337,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
         let mut sym_set = std::collections::HashSet::new();
         for r in 0..puzzle.height {
             for c in 0..puzzle.width {
-                if let Some(s) = puzzle.cells[r][c].symbol {
+                if let Some(s) = puzzle.cells[r][c].symbol.clone() {
                     sym_set.insert(s);
                 }
             }
@@ -346,7 +346,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
         for sym in &sym_set {
             for cells in state.region_shapes.values() {
                 let count = cells.iter().filter(|&&[r, c]| {
-                    puzzle.cells[r][c].symbol == Some(*sym)
+                    puzzle.cells[r][c].symbol.as_deref() == Some(sym.as_str())
                 }).count();
                 if count != 1 {
                     return false;

@@ -90,7 +90,7 @@ pub struct Cell {
     pub row: usize,
     pub col: usize,
     pub number: Option<i64>,
-    pub symbol: Option<char>,
+    pub symbol: Option<String>,
     pub blocked: bool,
     pub compass: Option<CompassClue>,
     pub fence_pattern: Option<Shape>,

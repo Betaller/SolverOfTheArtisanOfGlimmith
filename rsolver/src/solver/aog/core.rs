@@ -562,17 +562,17 @@ impl AoGCore {
         if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
             // rose_window is supported natively; continue.
         }
-        let rose_types: Vec<char> = if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
+        let rose_types: Vec<String> = if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
             if let Some(rule) = puzzle.rules.iter().find(|r| r.ctype == "rose_window") {
                 if let Some(types) = rule.params.get("symbol_types").and_then(|v| v.as_array()) {
                     types
                         .iter()
-                        .filter_map(|t| t.as_str().and_then(|s| s.chars().next()))
+                        .filter_map(|t| t.as_str().map(|s| s.to_string()))
                         .collect()
                 } else {
-                    let mut s: Vec<char> = (0..h)
+                    let mut s: Vec<String> = (0..h)
                         .flat_map(|r| (0..w).map(move |c| (r, c)))
-                        .filter_map(|(r, c)| puzzle.cells[r][c].symbol)
+                        .filter_map(|(r, c)| puzzle.cells[r][c].symbol.clone())
                         .collect();
                     s.sort();
                     s.dedup();
@@ -696,10 +696,10 @@ impl AoGCore {
                         v |= palisade_type_from_fence(fp);
                     }
                 }
-                if let Some(sym) = cell.symbol {
+                if let Some(sym) = cell.symbol.as_ref() {
                     v |= AREA_SYMBOL_BIT;
                     if !rose_types.is_empty() {
-                        let idx = rose_types.iter().position(|&c| c == sym).unwrap_or(0);
+                        let idx = rose_types.iter().position(|t| t == sym).unwrap_or(0);
                         v |= ((idx as u32) << AREA_SLASH_INDEX_BIT_SHIFT) & AREA_SLASH_INDEX_BIT;
                     }
                 }
@@ -868,6 +868,12 @@ impl AoGCore {
                     empty_area_cnt += 1;
                 }
             }
+        }
+        // rose_window: every region holds one of each symbol type, so its size
+        // is at least the number of types (mirrors main.cpp slash lower bound).
+        if core.rose_type_count > 0 {
+            core.config.shape_size_lower_bound =
+                core.config.shape_size_lower_bound.max(core.rose_type_count as i32);
         }
         if core.config.predefine_shapes_only {
             let mut lo = usize::MAX;

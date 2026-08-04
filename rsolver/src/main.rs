@@ -148,7 +148,7 @@ fn build_puzzle(input: &PuzzleJson) -> Puzzle {
         c.row = cd.row;
         c.col = cd.col;
         c.number = cd.number;
-        c.symbol = cd.symbol.as_ref().and_then(|s| s.chars().next());
+        c.symbol = cd.symbol.clone();
         c.blocked = cd.blocked;
         c.compass = cd.compass.as_ref().map(|cp| CompassClue {
             up: normalize_compass_value(cp.up),

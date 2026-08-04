@@ -309,17 +309,17 @@ fn region_of(by_rid: &HashMap<usize, Vec<[usize; 2]>>, r: usize, c: usize) -> Op
 /// rose_window: each region contains exactly one of each symbol type.
 fn check_rose_window(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     // Determine symbol types.
-    let types: Vec<char> = if let Some(rule) = puzzle.rules.iter().find(|r| r.ctype == "rose_window") {
+    let types: Vec<String> = if let Some(rule) = puzzle.rules.iter().find(|r| r.ctype == "rose_window") {
         if let Some(arr) = rule.params.get("symbol_types").and_then(|v| v.as_array()) {
             arr.iter()
-                .filter_map(|t| t.as_str().and_then(|s| s.chars().next()))
+                .filter_map(|t| t.as_str().map(|s| s.to_string()))
                 .collect()
         } else {
-            let mut s: Vec<char> = puzzle
+            let mut s: Vec<String> = puzzle
                 .cells
                 .iter()
                 .flatten()
-                .filter_map(|c| c.symbol)
+                .filter_map(|c| c.symbol.clone())
                 .collect();
             s.sort();
             s.dedup();
@@ -337,8 +337,8 @@ fn check_rose_window(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     let mut counts = vec![0usize; types.len()];
     for r in 0..h {
         for c in 0..w {
-            if let Some(sym) = puzzle.cells[r][c].symbol {
-                match types.iter().position(|&t| t == sym) {
+            if let Some(sym) = puzzle.cells[r][c].symbol.as_ref() {
+                match types.iter().position(|t| t == sym) {
                     Some(i) => counts[i] += 1,
                     None => return false,
                 }
@@ -357,8 +357,8 @@ fn check_rose_window(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
         let mut seen = vec![false; types.len()];
         let mut cnt = 0usize;
         for &[r, c] in &reg.cells {
-            if let Some(sym) = puzzle.cells[r][c].symbol {
-                if let Some(i) = types.iter().position(|&t| t == sym) {
+            if let Some(sym) = puzzle.cells[r][c].symbol.as_ref() {
+                if let Some(i) = types.iter().position(|t| t == sym) {
                     if seen[i] {
                         return false; // duplicate symbol in region
                     }

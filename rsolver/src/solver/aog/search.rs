@@ -405,13 +405,26 @@ fn place_non_predifined_shape(
                     }
                 }
                 if !in_current_shape
-                    && (core.config.shape_size_lower_bound > 1 || core.slash_check_enable)
+                    && (core.config.shape_size_lower_bound > 1 || core.rose_type_count > 0)
                 {
                     dfs_empty_area(expand_x, expand_y, core, sp);
                     let max_area_size =
                         core.dfs_ctx.empty_count - core.dfs_ctx.empty_block_line_count;
                     if max_area_size < core.config.shape_size_lower_bound as usize {
                         break;
+                    }
+                    if core.rose_type_count > 0 {
+                        let first = core.dfs_ctx.slash_count[0];
+                        let mut bad = false;
+                        for t in 1..core.rose_type_count {
+                            if (core.dfs_ctx.slash_count[t] - first).abs() > 1 {
+                                bad = true;
+                                break;
+                            }
+                        }
+                        if bad {
+                            break;
+                        }
                     }
                 }
                 continue;

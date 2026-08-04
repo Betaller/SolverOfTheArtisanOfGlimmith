@@ -807,6 +807,9 @@ fn place_non_predifined_shape(
             }
 
             // Push two stack frames: skip this candidate, then expand through it.
+            if L.stack_top + 2 >= MAX_STACK_SIZE {
+                return -1;
+            }
             let st = L.stack_top;
             L.stack_size[st] = current_size;
             L.stack_expand_distance_lb[st] = expand_distance_lb;

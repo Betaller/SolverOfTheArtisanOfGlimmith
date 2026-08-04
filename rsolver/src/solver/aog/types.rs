@@ -46,9 +46,12 @@ pub const SPECIAL_START_COMPASS: u32 = 8;
 pub const SPECIAL_START_LINE_CONSTRAINT: u32 = 9;
 pub const SPECIAL_START_LINE_SIZE_DIFF: u32 = 10;
 
-pub const MAX_SHAPE_SIZE: usize = 100;
+pub const MAX_SHAPE_SIZE: usize = 256;
 pub const MAX_DFS_DEPTH: usize = 100;
 pub const MAX_EXPAND_CANDIDATES: usize = (MAX_SHAPE_SIZE + 2) * 3;
+/// DFS work-stack depth: one frame per shape cell plus slack (dfs.cpp sizes
+/// this array with MAX_SHAPE_SIZE but silently overflows for large regions).
+pub const MAX_STACK_SIZE: usize = MAX_SHAPE_SIZE + 2;
 
 pub const NO_SHAPE_INDEX: u32 = 0xffff_ffff;
 
@@ -237,12 +240,12 @@ pub struct PlaceLevel {
     pub compass_visited_left_cnt: [i32; MAX_SHAPE_SIZE],
     pub compass_visited_right_cnt: [i32; MAX_SHAPE_SIZE],
     pub compass_visited_cnt: usize,
-    pub stack_size: [usize; MAX_SHAPE_SIZE],
-    pub stack_expand_distance_lb: [i32; MAX_SHAPE_SIZE],
-    pub stack_expand_x_lb: [i32; MAX_SHAPE_SIZE],
-    pub stack_expand_y_lb: [i32; MAX_SHAPE_SIZE],
-    pub stack_candidates_i: [usize; MAX_SHAPE_SIZE],
-    pub stack_candidates_size: [usize; MAX_SHAPE_SIZE],
+    pub stack_size: [usize; MAX_STACK_SIZE],
+    pub stack_expand_distance_lb: [i32; MAX_STACK_SIZE],
+    pub stack_expand_x_lb: [i32; MAX_STACK_SIZE],
+    pub stack_expand_y_lb: [i32; MAX_STACK_SIZE],
+    pub stack_candidates_i: [usize; MAX_STACK_SIZE],
+    pub stack_candidates_size: [usize; MAX_STACK_SIZE],
     pub stack_top: usize,
     pub symbol_loc: Option<Node>,
     pub mark_slash: [bool; 16],
@@ -270,12 +273,12 @@ impl PlaceLevel {
             compass_visited_left_cnt: [0; MAX_SHAPE_SIZE],
             compass_visited_right_cnt: [0; MAX_SHAPE_SIZE],
             compass_visited_cnt: 0,
-            stack_size: [0; MAX_SHAPE_SIZE],
-            stack_expand_distance_lb: [0; MAX_SHAPE_SIZE],
-            stack_expand_x_lb: [0; MAX_SHAPE_SIZE],
-            stack_expand_y_lb: [0; MAX_SHAPE_SIZE],
-            stack_candidates_i: [0; MAX_SHAPE_SIZE],
-            stack_candidates_size: [0; MAX_SHAPE_SIZE],
+            stack_size: [0; MAX_STACK_SIZE],
+            stack_expand_distance_lb: [0; MAX_STACK_SIZE],
+            stack_expand_x_lb: [0; MAX_STACK_SIZE],
+            stack_expand_y_lb: [0; MAX_STACK_SIZE],
+            stack_candidates_i: [0; MAX_STACK_SIZE],
+            stack_candidates_size: [0; MAX_STACK_SIZE],
             stack_top: 0,
             symbol_loc: None,
             mark_slash: [false; 16],

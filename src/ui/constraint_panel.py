@@ -34,7 +34,7 @@ RULE_DESCRIPTIONS: dict[str, str] = {
     "differentiation": "相邻区域面积不等",
     "brick": "禁止四边同交于一点",
     "ring": "禁止三边同交于一点",
-    "inequality": "箭头指向面积更小侧",
+    "inequality": "不等号指向面积更小侧（> 左大 · < 右大 · ^ 上大 · v 下大）",
     "difference": "边数字=两侧面积差",
     "watchtower": "顶点数字=相邻区域数",
     "compass": "四方向同区域格数",

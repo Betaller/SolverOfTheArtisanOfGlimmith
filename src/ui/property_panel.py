@@ -345,9 +345,11 @@ class PropertyPanel(QWidget):
         L.addLayout(hrow)
 
         # ── Inequality direction ──
+        # value==1 → 第一端点 (r1,c1) 更大；value!=1 → 第二端点 (r2,c2) 更大。
+        # 符号表达“哪侧更大”：'>' 左大 · '<' 右大 · '^' 上大 · 'v' 下大
         ineq_rev = e.constraint.value == 1 if ca and e.constraint.type == EdgeConstraintType.INEQUALITY else False
         is_vert = e.c1 == e.c2
-        dirs = [("↑上大下小", 0), ("↓下大上小", 1)] if is_vert else [("←左大右小", 0), ("→右大左小", 1)]
+        dirs = [("v下大上小", 0), ("^上大下小", 1)] if is_vert else [("<右大左小", 0), (">左大右小", 1)]
         irow = QHBoxLayout()
         irow.setSpacing(4)
         irow.addWidget(QLabel("不等"))

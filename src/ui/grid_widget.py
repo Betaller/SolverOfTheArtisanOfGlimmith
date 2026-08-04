@@ -947,19 +947,19 @@ class GridWidget(QWidget):
                 painter.drawText(bx, Qt.AlignmentFlag.AlignCenter, "♂")
                 painter.setBrush(Qt.BrushStyle.NoBrush)
             elif ct == EdgeConstraintType.INEQUALITY:
+                # 不等号：value==1 → 第一端点 (r1,c1) 更大；否则第二端点更大。
+                # 用数学不等号直接表达“哪一侧更大”：
+                #   '>' 左侧更大 · '<' 右侧更大 · '^' 上方更大 · 'v' 下方更大
+                # （符号尖始终指向面积更小的一侧，与游戏规则一致）
                 rev = e.constraint.value == 1 if e.constraint is not None else False
                 if e.c1 == e.c2:
-                    if rev:
-                        arrow = "↓" if e.r1 < e.r2 else "↑"
-                    else:
-                        arrow = "↑" if e.r1 < e.r2 else "↓"
+                    # 垂直边：更大侧在 r1 或 r2 端
+                    sym = ("^" if e.r1 < e.r2 else "v") if rev else ("v" if e.r1 < e.r2 else "^")
                 else:
-                    if rev:
-                        arrow = "→" if e.c1 < e.c2 else "←"
-                    else:
-                        arrow = "←" if e.c1 < e.c2 else "→"
+                    # 水平边：更大侧在 c1 或 c2 端
+                    sym = (">" if e.c1 < e.c2 else "<") if rev else ("<" if e.c1 < e.c2 else ">")
                 painter.drawText(QRectF(mx - 14, my - 10, 28, 20),
-                                 Qt.AlignmentFlag.AlignCenter, arrow)
+                                 Qt.AlignmentFlag.AlignCenter, sym)
             elif ct == EdgeConstraintType.DIFFERENCE:
                 val = str(e.constraint.value or "")
                 painter.drawText(QRectF(mx - 14, my - 10, 28, 20),

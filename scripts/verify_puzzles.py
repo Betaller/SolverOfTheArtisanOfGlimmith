@@ -14,6 +14,7 @@ import glob
 import argparse
 import concurrent.futures
 from dataclasses import dataclass, field
+from pathlib import Path
 
 sys.path.insert(0, '.')
 
@@ -89,7 +90,11 @@ def main():
     parser.add_argument("-j", "--jobs", type=int, default=0, help="并行数 (默认 CPU 核心数)")
     args = parser.parse_args()
 
-    files = sorted(glob.glob(f"{args.dir}/**/*.json", recursive=True))
+    # 跳过元数据/索引文件（如 `_index.json`）——它们描述谜题集，不是可解谜题。
+    files = sorted(
+        f for f in glob.glob(f"{args.dir}/**/*.json", recursive=True)
+        if not Path(f).name.startswith("_")
+    )
     if not files:
         print(f"在 {args.dir}/ 下未找到 .json 文件")
         sys.exit(1)

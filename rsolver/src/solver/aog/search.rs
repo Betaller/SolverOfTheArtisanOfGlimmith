@@ -942,8 +942,14 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
                 && sp[nx][ny] != AREA_NORMAL
                 && core.puzzle[nx][ny] != AREA_BLOCK
             {
+                // Mirror the C++ special start (dfs.cpp 1524-1545), which uses the
+                // stored marker value directly (NOT minus one): the check there is
+                // `i == neighbor ± stored`, i.e. one wider than the real difference,
+                // and tightening it to the actual difference pruned valid sizes
+                // (e.g. puzzle 0404's 2/3 split).  check_edge_shape still enforces
+                // the exact difference later, so a looser filter is safe.
                 let diff =
-                    ((line_val & LINE_SIZE_DIFF_BIT) >> LINE_SIZE_DIFF_BIT_SHIFT) as i32 - 1;
+                    ((line_val & LINE_SIZE_DIFF_BIT) >> LINE_SIZE_DIFF_BIT_SHIFT) as i32;
                 let nsize = region_size_at(core, sp, nx, ny) as i32;
                 filter_size_diff_value(
                     &mut mk_size,

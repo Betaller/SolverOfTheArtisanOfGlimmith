@@ -6,6 +6,7 @@ Usage:
     python scripts/convert_archive.py            # convert all Zone1-3 puzzles
     python scripts/convert_archive.py --dry-run  # only report, don't write
 """
+
 from __future__ import annotations
 
 import json
@@ -15,8 +16,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.models.board import CompassClue, Shape
 from src.io.puzzle_codec import dict_to_puzzle
+from src.models.board import CompassClue, Shape
 
 ARCHIVE_PATH = os.path.join("third_party", "archiveofglimmith.github.io", "puzzles.json")
 OUT_ROOT = os.path.join("puzzles", "official")
@@ -42,12 +43,7 @@ def parse_shapes(p: dict) -> dict[int, Shape]:
     result: dict[int, Shape] = {}
     for shape in p.get("shapes", []):
         grid = shape.get("grid", [])
-        cells = {
-            (r, c)
-            for r, row in enumerate(grid)
-            for c, ch in enumerate(row)
-            if ch == "#"
-        }
+        cells = {(r, c) for r, row in enumerate(grid) for c, ch in enumerate(row) if ch == "#"}
         if cells:
             min_r = min(r for r, _ in cells)
             min_c = min(c for _, c in cells)
@@ -62,9 +58,7 @@ def _compass_from_str(s: str) -> CompassClue:
     for m in re.finditer(r"([UDLR])(\d*)", s):
         dir_, digits = m.group(1), m.group(2)
         values[dir_] = int(digits) if digits else -1
-    return CompassClue(
-        up=values["U"], down=values["D"], left=values["L"], right=values["R"]
-    )
+    return CompassClue(up=values["U"], down=values["D"], left=values["L"], right=values["R"])
 
 
 def _archive_partition(p: dict, blocked: set[tuple[int, int]]) -> list[frozenset[tuple[int, int]]]:
@@ -83,7 +77,7 @@ def _archive_partition(p: dict, blocked: set[tuple[int, int]]) -> list[frozenset
             break
         row = lines[2 * r]
         for c in range(W):
-            if row[3 * c + 1:3 * c + 3].strip():
+            if row[3 * c + 1 : 3 * c + 3].strip():
                 edges.add((r - 1, c, r, c))
     for r in range(H):
         if 2 * r + 1 >= len(lines):
@@ -171,9 +165,12 @@ def archive_solution_regions(p: dict) -> list[list[tuple[int, int]]]:
     return [sorted(cells) for cells in part]
 
 
-def _is_rose_window(p: dict, p_symbols: dict[str, int],
-                    blocked: set[tuple[int, int]],
-                    sym_pos: dict[tuple[int, int], str] | None = None) -> list[str] | None:
+def _is_rose_window(
+    p: dict,
+    p_symbols: dict[str, int],
+    blocked: set[tuple[int, int]],
+    sym_pos: dict[tuple[int, int], str] | None = None,
+) -> list[str] | None:
     """Return sorted rose symbol types if the official solution confirms a
     rose-window pattern (N types x M occurrences, M regions each containing
     all N types), else None.
@@ -199,7 +196,7 @@ def _is_rose_window(p: dict, p_symbols: dict[str, int],
         for r in range(H):
             row = (p["puzzle_grid"][2 * r + 1] or "").ljust(3 * W + 1, " ")
             for c in range(W):
-                content = row[3 * c + 1:3 * c + 3]
+                content = row[3 * c + 1 : 3 * c + 3]
                 if content in p_symbols:
                     sym_pos[(r, c)] = content
     for cells in part:
@@ -240,10 +237,10 @@ def _parse_cell_row(row: str, width: int, shape_ids: set[int]):
                     cells.append(row[pos:end])
                     pos = end
                 else:
-                    cells.append(row[pos:pos + 2])
+                    cells.append(row[pos : pos + 2])
                     pos += 2
             else:
-                cells.append(row[pos:pos + 2])
+                cells.append(row[pos : pos + 2])
                 pos += 2
     while len(cells) < width:
         cells.append("  ")
@@ -310,16 +307,27 @@ def _parse_puzzle(p: dict) -> dict:
                 if re.fullmatch(r"\d\d", content):
                     cell["number"] = int(content)
                     has_numbers = True
+                    # Same as shape/fence cells: the number is itself the
+                    # 1-symbol-per-region marker; the raw "05" symbol is
+                    # redundant.
+                    cell.pop("symbol", None)
                 elif re.fullmatch(r"S\d+", content):
                     sid = int(content[1:])
-                    if sid in shapes and not is_spr:
+                    if sid in shapes:
                         cell["shape_pattern"] = _shape_list(shapes[sid])
                         has_shape_pattern = True
+                        # A shape cell is itself the 1-symbol-per-region marker:
+                        # the raw "S1" symbol is redundant once shape_pattern is
+                        # present (all solvers/validators count shape_pattern
+                        # cells as symbols).  Only matters under is_spr.
+                        cell.pop("symbol", None)
                 elif content in FENCE_PATTERNS:
-                    cell["fence_pattern"] = _shape_list(
-                        Shape(cells=FENCE_PATTERNS[content])
-                    )
+                    cell["fence_pattern"] = _shape_list(Shape(cells=FENCE_PATTERNS[content]))
                     has_fence = True
+                    # Same as shape cells: the fence pattern is itself the
+                    # 1-symbol-per-region marker, the raw "F3" symbol is
+                    # redundant (all solvers/validators count fence cells).
+                    cell.pop("symbol", None)
                 elif re.fullmatch(r"P[1-9]", content):
                     p_symbols[content] = p_symbols.get(content, 0) + 1
                     p_symbol_positions[(r, c)] = content
@@ -334,6 +342,9 @@ def _parse_puzzle(p: dict) -> dict:
                         "right": comp.right,
                     }
                     has_compass = True
+                    # Same as shape/fence/number cells: the compass clue is
+                    # itself the 1-symbol-per-region marker.
+                    cell.pop("symbol", None)
             # unknown content: keep cell fillable without clue
 
         for c in range(width + 1):
@@ -347,10 +358,9 @@ def _parse_puzzle(p: dict) -> dict:
     for r in range(height + 1):
         row = lines[2 * r]
         for c in range(width):
-            seg = row[3 * c + 1:3 * c + 3]
+            seg = row[3 * c + 1 : 3 * c + 3]
             if 1 <= r <= height - 1:
-                _apply_edge(edge_map[(r - 1, c, r, c)], seg, cell_map, fillable,
-                            r - 1, c, r, c)
+                _apply_edge(edge_map[(r - 1, c, r, c)], seg, cell_map, fillable, r - 1, c, r, c)
         if 1 <= r <= height - 1:
             for c in range(1, width):
                 ch = row[3 * c] if 3 * c < len(row) else " "
@@ -366,14 +376,11 @@ def _parse_puzzle(p: dict) -> dict:
         else:
             r1, c1, r2, c2 = e["r1"], e["c1"], e["r2"], e["c2"]
             # gap (no glyph) between two fillable cells => forced boundary
-            if (fillable[r1][c1] and fillable[r2][c2]
-                    and not _has_glyph(e)):
+            if fillable[r1][c1] and fillable[r2][c2] and not _has_glyph(e):
                 e["is_boundary"] = True
                 edges.append(e)
 
-    constraint_types = {
-        e["constraint"]["type"] for e in edges if e.get("constraint")
-    }
+    constraint_types = {e["constraint"]["type"] for e in edges if e.get("constraint")}
 
     vertices: list[dict] = []
     vt = cell_map.get("__vertices", {})
@@ -389,10 +396,20 @@ def _parse_puzzle(p: dict) -> dict:
         outer_boundaries.append({"r1": r, "c1": width, "r2": r + 1, "c2": width})
 
     rules = build_rules(
-        p, shapes, has_compass, has_fence, has_numbers, constraint_types,
-        bool(vt), is_spr, has_shape_bank, has_shape_pattern, p_symbols,
+        p,
+        shapes,
+        has_compass,
+        has_fence,
+        has_numbers,
+        constraint_types,
+        bool(vt),
+        is_spr,
+        has_shape_bank,
+        has_shape_pattern,
+        p_symbols,
         rose_types=_is_rose_window(
-            p, p_symbols,
+            p,
+            p_symbols,
             {(r, c) for r in range(height) for c in range(width) if not fillable[r][c]},
             sym_pos=p_symbol_positions,
         ),
@@ -419,8 +436,9 @@ def _has_glyph(e: dict) -> bool:
     return e.get("_glyph", False)
 
 
-def _apply_edge(entry: dict, glyph: str, cell_map: dict, fillable: list,
-                r1: int, c1: int, r2: int, c2: int) -> None:
+def _apply_edge(
+    entry: dict, glyph: str, cell_map: dict, fillable: list, r1: int, c1: int, r2: int, c2: int
+) -> None:
     entry["_glyph"] = glyph != "  " and glyph != " "
     if glyph in ("##", "#"):
         entry["is_boundary"] = True
@@ -443,31 +461,38 @@ def _apply_edge(entry: dict, glyph: str, cell_map: dict, fillable: list,
     elif glyph.isdigit():
         entry["constraint"] = {"type": "difference", "value": int(glyph)}
         entry["is_boundary"] = True
-    elif glyph in ("--", "|"):
-        pass
-    elif glyph == "  " or glyph == " ":
+    elif glyph in ("--", "|") or (glyph == "  " or glyph == " "):
         pass
     else:
         # e.g. a shifted cell char; ignore unknown wall glyph
         pass
 
 
-def build_rules(p: dict, shapes: dict[int, Shape], has_compass: bool,
-                has_fence: bool, has_numbers: bool,
-                constraint_types: set[str], has_watchtower: bool,
-                is_spr: bool, has_shape_bank: bool,
-                has_shape_pattern: bool,
-                p_symbols: dict[str, int] | None = None,
-                rose_types: list[str] | None = None) -> list[dict]:
+def build_rules(
+    p: dict,
+    shapes: dict[int, Shape],
+    has_compass: bool,
+    has_fence: bool,
+    has_numbers: bool,
+    constraint_types: set[str],
+    has_watchtower: bool,
+    is_spr: bool,
+    has_shape_bank: bool,
+    has_shape_pattern: bool,
+    p_symbols: dict[str, int] | None = None,
+    rose_types: list[str] | None = None,
+) -> list[dict]:
     rules: list[dict] = []
 
     if has_shape_bank and shapes:
         bank = p["shape_bank"]
         pool = [shapes[i] for i in bank if i in shapes] or list(shapes.values())
-        rules.append({
-            "type": "shape_pool",
-            "params": {"shapes": [_shape_list(s) for s in pool]},
-        })
+        rules.append(
+            {
+                "type": "shape_pool",
+                "params": {"shapes": [_shape_list(s) for s in pool]},
+            }
+        )
 
     if has_shape_pattern:
         rules.append({"type": "puzzle_piece"})
@@ -523,10 +548,12 @@ def build_rules(p: dict, shapes: dict[int, Shape], has_compass: bool,
     # archive's official solution (N types x M occurrences, M regions each
     # containing all N types) — see _is_rose_window.
     if rose_types:
-        rules.append({
-            "type": "rose_window",
-            "params": {"symbol_types": rose_types},
-        })
+        rules.append(
+            {
+                "type": "rose_window",
+                "params": {"symbol_types": rose_types},
+            }
+        )
 
     return rules
 

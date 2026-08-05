@@ -40,7 +40,6 @@
     {
       "row": 1,
       "col": 2,
-      "symbol": "UDL4R2",
       "compass": {
         "up": -1,
         "down": -1,
@@ -79,7 +78,6 @@
     {
       "row": 2,
       "col": 4,
-      "symbol": "U7D0LR",
       "compass": {
         "up": 7,
         "down": 0,
@@ -98,7 +96,6 @@
     {
       "row": 3,
       "col": 1,
-      "symbol": "UD1L5R",
       "compass": {
         "up": -1,
         "down": 1,
@@ -137,7 +134,6 @@
     {
       "row": 4,
       "col": 3,
-      "symbol": "U3D6LR",
       "compass": {
         "up": 3,
         "down": 6,

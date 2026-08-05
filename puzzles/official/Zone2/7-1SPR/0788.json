@@ -36,7 +36,6 @@
     {
       "row": 1,
       "col": 1,
-      "symbol": "06",
       "number": 6
     },
     {
@@ -58,13 +57,11 @@
     {
       "row": 2,
       "col": 0,
-      "symbol": "06",
       "number": 6
     },
     {
       "row": 2,
       "col": 1,
-      "symbol": "06",
       "number": 6
     },
     {
@@ -86,19 +83,16 @@
     {
       "row": 3,
       "col": 0,
-      "symbol": "06",
       "number": 6
     },
     {
       "row": 3,
       "col": 1,
-      "symbol": "06",
       "number": 6
     },
     {
       "row": 3,
       "col": 2,
-      "symbol": "06",
       "number": 6
     },
     {

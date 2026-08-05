@@ -8,7 +8,6 @@
     {
       "row": 0,
       "col": 0,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -39,7 +38,6 @@
     {
       "row": 0,
       "col": 4,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -74,7 +72,6 @@
     {
       "row": 1,
       "col": 1,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -97,7 +94,6 @@
     {
       "row": 1,
       "col": 3,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -120,7 +116,6 @@
     {
       "row": 1,
       "col": 5,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -151,7 +146,6 @@
     {
       "row": 2,
       "col": 2,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -182,7 +176,6 @@
     {
       "row": 2,
       "col": 6,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -292,7 +285,6 @@
     {
       "row": 6,
       "col": 0,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -323,7 +315,6 @@
     {
       "row": 6,
       "col": 4,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -354,7 +345,6 @@
     {
       "row": 7,
       "col": 1,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -381,7 +371,6 @@
     {
       "row": 7,
       "col": 3,
-      "symbol": "F2",
       "fence_pattern": [
         [
           0,
@@ -404,7 +393,6 @@
     {
       "row": 7,
       "col": 5,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -435,7 +423,6 @@
     {
       "row": 8,
       "col": 2,
-      "symbol": "F2",
       "fence_pattern": [
         [
           0,
@@ -466,7 +453,6 @@
     {
       "row": 8,
       "col": 6,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,

@@ -166,7 +166,6 @@
     {
       "row": 2,
       "col": 7,
-      "symbol": "U6D3L5R",
       "compass": {
         "up": 6,
         "down": 3,
@@ -274,7 +273,6 @@
     {
       "row": 4,
       "col": 2,
-      "symbol": "U9DL0R8",
       "compass": {
         "up": 9,
         "down": -1,
@@ -323,7 +321,6 @@
     {
       "row": 4,
       "col": 11,
-      "symbol": "U4D6L6R",
       "compass": {
         "up": 4,
         "down": 6,
@@ -411,7 +408,6 @@
     {
       "row": 6,
       "col": 1,
-      "symbol": "U1DL0R2",
       "compass": {
         "up": 1,
         "down": -1,
@@ -470,7 +466,6 @@
     {
       "row": 6,
       "col": 12,
-      "symbol": "U4D1LR1",
       "compass": {
         "up": 4,
         "down": 1,
@@ -622,7 +617,6 @@
     {
       "row": 9,
       "col": 2,
-      "symbol": "UD3L7R4",
       "compass": {
         "up": -1,
         "down": 3,
@@ -729,7 +723,6 @@
     {
       "row": 10,
       "col": 10,
-      "symbol": "U5D1LR7",
       "compass": {
         "up": 5,
         "down": 1,
@@ -783,7 +776,6 @@
     {
       "row": 11,
       "col": 7,
-      "symbol": "UD5L1R6",
       "compass": {
         "up": -1,
         "down": 5,
@@ -911,7 +903,6 @@
     {
       "row": 13,
       "col": 6,
-      "symbol": "U12D0LR2",
       "compass": {
         "up": 12,
         "down": 0,

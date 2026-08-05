@@ -32,13 +32,11 @@
     {
       "row": 0,
       "col": 6,
-      "symbol": "02",
       "number": 2
     },
     {
       "row": 1,
       "col": 0,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -48,7 +46,6 @@
     {
       "row": 1,
       "col": 2,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -74,7 +71,6 @@
     {
       "row": 2,
       "col": 1,
-      "symbol": "F2",
       "fence_pattern": [
         [
           0,
@@ -101,7 +97,6 @@
     {
       "row": 2,
       "col": 4,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -151,7 +146,6 @@
     {
       "row": 4,
       "col": 2,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -165,7 +159,6 @@
     {
       "row": 4,
       "col": 5,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -191,7 +184,6 @@
     {
       "row": 5,
       "col": 4,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -201,13 +193,11 @@
     {
       "row": 5,
       "col": 6,
-      "symbol": "02",
       "number": 2
     },
     {
       "row": 6,
       "col": 0,
-      "symbol": "02",
       "number": 2
     },
     {

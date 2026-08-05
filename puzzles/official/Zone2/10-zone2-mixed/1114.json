@@ -8,7 +8,6 @@
     {
       "row": 0,
       "col": 0,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -18,7 +17,6 @@
     {
       "row": 0,
       "col": 2,
-      "symbol": "03",
       "number": 3
     },
     {
@@ -40,7 +38,6 @@
     {
       "row": 0,
       "col": 7,
-      "symbol": "03",
       "number": 3
     },
     {
@@ -50,7 +47,6 @@
     {
       "row": 0,
       "col": 9,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -102,7 +98,6 @@
     {
       "row": 2,
       "col": 1,
-      "symbol": "04",
       "number": 4
     },
     {
@@ -132,7 +127,6 @@
     {
       "row": 2,
       "col": 8,
-      "symbol": "04",
       "number": 4
     },
     {
@@ -162,7 +156,6 @@
     {
       "row": 3,
       "col": 5,
-      "symbol": "04",
       "number": 4
     },
     {
@@ -188,7 +181,6 @@
     {
       "row": 4,
       "col": 1,
-      "symbol": "04",
       "number": 4
     },
     {
@@ -198,7 +190,6 @@
     {
       "row": 4,
       "col": 3,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -212,7 +203,6 @@
     {
       "row": 4,
       "col": 6,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -222,7 +212,6 @@
     {
       "row": 4,
       "col": 8,
-      "symbol": "04",
       "number": 4
     },
     {
@@ -232,7 +221,6 @@
     {
       "row": 5,
       "col": 0,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -270,7 +258,6 @@
     {
       "row": 5,
       "col": 9,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -280,7 +267,6 @@
     {
       "row": 6,
       "col": 1,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -294,13 +280,11 @@
     {
       "row": 6,
       "col": 4,
-      "symbol": "05",
       "number": 5
     },
     {
       "row": 6,
       "col": 5,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -314,7 +298,6 @@
     {
       "row": 6,
       "col": 8,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -377,7 +360,6 @@
     {
       "row": 8,
       "col": 3,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -391,7 +373,6 @@
     {
       "row": 8,
       "col": 6,
-      "symbol": "05",
       "number": 5
     },
     {

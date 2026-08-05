@@ -16,7 +16,6 @@
     {
       "row": 0,
       "col": 2,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -66,7 +65,6 @@
     {
       "row": 1,
       "col": 4,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -89,7 +87,6 @@
     {
       "row": 2,
       "col": 0,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -139,7 +136,6 @@
     {
       "row": 3,
       "col": 2,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -189,7 +185,6 @@
     {
       "row": 4,
       "col": 4,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,

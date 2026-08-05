@@ -28,7 +28,6 @@
     {
       "row": 0,
       "col": 4,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -119,13 +118,11 @@
     {
       "row": 2,
       "col": 2,
-      "symbol": "02",
       "number": 2
     },
     {
       "row": 2,
       "col": 3,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -139,25 +136,21 @@
     {
       "row": 2,
       "col": 6,
-      "symbol": "03",
       "number": 3
     },
     {
       "row": 2,
       "col": 7,
-      "symbol": "03",
       "number": 3
     },
     {
       "row": 2,
       "col": 8,
-      "symbol": "03",
       "number": 3
     },
     {
       "row": 2,
       "col": 9,
-      "symbol": "03",
       "number": 3
     },
     {
@@ -171,7 +164,6 @@
     {
       "row": 3,
       "col": 1,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -185,7 +177,6 @@
     {
       "row": 3,
       "col": 4,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -203,7 +194,6 @@
     {
       "row": 3,
       "col": 8,
-      "symbol": "03",
       "number": 3
     },
     {
@@ -237,7 +227,6 @@
     {
       "row": 4,
       "col": 5,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -264,7 +253,6 @@
     {
       "row": 4,
       "col": 7,
-      "symbol": "03",
       "number": 3
     },
     {
@@ -294,7 +282,6 @@
     {
       "row": 5,
       "col": 3,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -304,7 +291,6 @@
     {
       "row": 5,
       "col": 5,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -355,7 +341,6 @@
     {
       "row": 6,
       "col": 2,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -373,7 +358,6 @@
     {
       "row": 6,
       "col": 6,
-      "symbol": "03",
       "number": 3
     },
     {
@@ -387,7 +371,6 @@
     {
       "row": 6,
       "col": 9,
-      "symbol": "03",
       "number": 3
     },
     {
@@ -401,25 +384,21 @@
     {
       "row": 7,
       "col": 1,
-      "symbol": "02",
       "number": 2
     },
     {
       "row": 7,
       "col": 2,
-      "symbol": "02",
       "number": 2
     },
     {
       "row": 7,
       "col": 3,
-      "symbol": "02",
       "number": 2
     },
     {
       "row": 7,
       "col": 4,
-      "symbol": "02",
       "number": 2
     },
     {
@@ -433,13 +412,11 @@
     {
       "row": 7,
       "col": 7,
-      "symbol": "03",
       "number": 3
     },
     {
       "row": 7,
       "col": 8,
-      "symbol": "03",
       "number": 3
     },
     {
@@ -530,7 +507,6 @@
     {
       "row": 9,
       "col": 6,
-      "symbol": "03",
       "number": 3
     },
     {

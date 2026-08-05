@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from src.models.board import Board, Cell, Edge, EdgeConstraintType, Shape
+
+from src.models.board import Board, Cell, EdgeConstraintType, Shape
 from src.models.puzzle import Puzzle
 from src.solver.shapes import (
-    canonical_key, shapes_equal, match_shape_pool,
-    is_rectangle, shape_key,
+    canonical_key,
+    is_rectangle,
+    match_shape_pool,
+    shapes_equal,
 )
 
 
@@ -35,7 +38,9 @@ def check_region_connectivity(board: Board) -> bool:
             visited.add((r, c))
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 nr, nc = r + dr, c + dc
-                neighbor = board.cell(nr, nc) if 0 <= nr < board.height and 0 <= nc < board.width else None
+                neighbor = (
+                    board.cell(nr, nc) if 0 <= nr < board.height and 0 <= nc < board.width else None
+                )
                 if neighbor is not None and neighbor.region_id == rid and (nr, nc) not in visited:
                     stack.append((nr, nc))
         if len(visited) != len(cells):
@@ -88,7 +93,9 @@ def _rose_M(puzzle: Puzzle, board: Board) -> int:
     symbol_types = _rose_symbol_types(puzzle, board)
     if not symbol_types:
         return 0
-    counts = Counter(c.symbol for c in board.cells() if c.symbol is not None and c.symbol in symbol_types)
+    counts = Counter(
+        c.symbol for c in board.cells() if c.symbol is not None and c.symbol in symbol_types
+    )
     return next(iter(counts.values())) if len(set(counts.values())) == 1 else 0
 
 
@@ -100,27 +107,27 @@ def check_rule_rose_window(puzzle: Puzzle, board: Board) -> bool:
     if not symbol_types:
         return False
     N = len(symbol_types)
-    
+
     symbol_counts: Counter[str] = Counter()
     for c in board.cells():
         if c.symbol is not None:
             if c.symbol not in symbol_types:
                 return False
             symbol_counts[c.symbol] += 1
-    
+
     if len(set(symbol_counts.values())) != 1:
         return False
     M = next(iter(symbol_counts.values()))
-    
+
     regions = get_region_cells(board)
     if len(regions) != M:
         return False
-    
+
     for rid, cells in regions.items():
         region_symbols = {c.symbol for c in cells if c.symbol is not None}
         if region_symbols != set(symbol_types):
             return False
-    
+
     return True
 
 
@@ -248,17 +255,19 @@ def check_rule_fence(puzzle: Puzzle, board: Board) -> bool:
             else:
                 is_boundary = True
             edge_bits.append(is_boundary)
-        
-        fence_shape = Shape(cells=frozenset(
-            (r, c) for r in range(3) for c in range(3) if _fence_bit(edge_bits, r, c)
-        ))
+
+        fence_shape = Shape(
+            cells=frozenset(
+                (r, c) for r in range(3) for c in range(3) if _fence_bit(edge_bits, r, c)
+            )
+        )
         if not shapes_equal(fence_shape, c.fence_pattern):
             return False
     return True
 
 
 def _fence_bit(edge_bits: list[bool], r: int, c: int) -> bool:
-    center = (r == 1 and c == 1)
+    center = r == 1 and c == 1
     if center:
         return True
     if r == 0 and c == 1:
@@ -286,8 +295,22 @@ def check_rule_solitary(puzzle: Puzzle, board: Board) -> bool:
     if not puzzle.has_rule("solitary"):
         return True
     for _, cells in get_region_cells(board).items():
-        symbols = [c.symbol for c in cells if c.symbol is not None]
-        if len(symbols) != 1:
+        # A 1-symbol-per-region puzzle's markers are its clue-bearing cells
+        # (shape / fence / compass / number / symbol), not only cells carrying a
+        # `symbol` field — matches the IndependentValidator and the Rust aog
+        # `area_contain_symbol`.
+        markers = sum(
+            1
+            for c in cells
+            if (
+                c.symbol is not None
+                or c.shape_pattern is not None
+                or c.fence_pattern is not None
+                or c.compass is not None
+                or c.number is not None
+            )
+        )
+        if markers != 1:
             return False
     return True
 
@@ -436,8 +459,9 @@ def check_rule_watchtower(puzzle: Puzzle, board: Board) -> bool:
     return True
 
 
-def _compass_halfplane_count(cell: Cell, dr: int, dc: int,
-                             region_positions: set[tuple[int, int]]) -> int:
+def _compass_halfplane_count(
+    cell: Cell, dr: int, dc: int, region_positions: set[tuple[int, int]]
+) -> int:
     """Count region cells strictly in direction (dr, dc), excluding the cell.
 
     Matches the game's compass rule (see glimmith-solver compassCounts): the
@@ -446,16 +470,10 @@ def _compass_halfplane_count(cell: Cell, dr: int, dc: int,
     """
     r, c = cell.row, cell.col
     count = 0
-    for (rr, cc) in region_positions:
+    for rr, cc in region_positions:
         if rr == r and cc == c:
             continue
-        if dr == -1 and rr < r:
-            count += 1
-        elif dr == 1 and rr > r:
-            count += 1
-        elif dc == -1 and cc < c:
-            count += 1
-        elif dc == 1 and cc > c:
+        if dr == -1 and rr < r or dr == 1 and rr > r or (dc == -1 and cc < c or dc == 1 and cc > c):
             count += 1
     return count
 

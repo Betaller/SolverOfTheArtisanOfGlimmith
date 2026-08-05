@@ -47,7 +47,6 @@
     {
       "row": 0,
       "col": 8,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -177,7 +176,6 @@
     {
       "row": 2,
       "col": 4,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -204,7 +202,6 @@
     {
       "row": 2,
       "col": 8,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -231,7 +228,6 @@
     {
       "row": 2,
       "col": 10,
-      "symbol": "F2",
       "fence_pattern": [
         [
           0,
@@ -327,7 +323,6 @@
     {
       "row": 4,
       "col": 2,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -354,7 +349,6 @@
     {
       "row": 4,
       "col": 4,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -381,7 +375,6 @@
     {
       "row": 4,
       "col": 6,
-      "symbol": "F2",
       "fence_pattern": [
         [
           0,
@@ -412,7 +405,6 @@
     {
       "row": 4,
       "col": 10,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -435,7 +427,6 @@
     {
       "row": 4,
       "col": 12,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -528,7 +519,6 @@
     {
       "row": 6,
       "col": 2,
-      "symbol": "F2",
       "fence_pattern": [
         [
           0,
@@ -559,7 +549,6 @@
     {
       "row": 6,
       "col": 6,
-      "symbol": "F2",
       "fence_pattern": [
         [
           0,
@@ -582,7 +571,6 @@
     {
       "row": 6,
       "col": 8,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -609,7 +597,6 @@
     {
       "row": 6,
       "col": 12,
-      "symbol": "F2",
       "fence_pattern": [
         [
           0,
@@ -710,7 +697,6 @@
     {
       "row": 8,
       "col": 4,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -737,7 +723,6 @@
     {
       "row": 8,
       "col": 6,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -772,7 +757,6 @@
     {
       "row": 8,
       "col": 10,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -799,7 +783,6 @@
     {
       "row": 8,
       "col": 12,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -927,7 +910,6 @@
     {
       "row": 10,
       "col": 8,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,

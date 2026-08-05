@@ -150,7 +150,6 @@
     {
       "row": 2,
       "col": 5,
-      "symbol": "U8DL3R",
       "compass": {
         "up": 8,
         "down": -1,
@@ -207,7 +206,6 @@
     {
       "row": 3,
       "col": 3,
-      "symbol": "UDL3R5",
       "compass": {
         "up": -1,
         "down": -1,
@@ -230,7 +228,6 @@
     {
       "row": 3,
       "col": 7,
-      "symbol": "UDL3R9",
       "compass": {
         "up": -1,
         "down": -1,
@@ -299,7 +296,6 @@
     {
       "row": 4,
       "col": 9,
-      "symbol": "UD2LR3",
       "compass": {
         "up": -1,
         "down": 2,
@@ -332,7 +328,6 @@
     {
       "row": 5,
       "col": 2,
-      "symbol": "U2DL3R",
       "compass": {
         "up": 2,
         "down": -1,
@@ -427,7 +422,6 @@
     {
       "row": 6,
       "col": 10,
-      "symbol": "UDL6R3",
       "compass": {
         "up": -1,
         "down": -1,
@@ -460,7 +454,6 @@
     {
       "row": 7,
       "col": 3,
-      "symbol": "U1DL3R",
       "compass": {
         "up": 1,
         "down": -1,
@@ -529,7 +522,6 @@
     {
       "row": 8,
       "col": 5,
-      "symbol": "UD3LR5",
       "compass": {
         "up": -1,
         "down": 3,
@@ -552,7 +544,6 @@
     {
       "row": 8,
       "col": 9,
-      "symbol": "UD3L3R",
       "compass": {
         "up": -1,
         "down": 3,
@@ -607,7 +598,6 @@
     {
       "row": 9,
       "col": 7,
-      "symbol": "UD3L1R",
       "compass": {
         "up": -1,
         "down": 3,

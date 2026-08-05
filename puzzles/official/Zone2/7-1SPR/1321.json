@@ -56,7 +56,6 @@
     {
       "row": 1,
       "col": 5,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -187,7 +186,6 @@
     {
       "row": 6,
       "col": 0,
-      "symbol": "15",
       "number": 15
     },
     {

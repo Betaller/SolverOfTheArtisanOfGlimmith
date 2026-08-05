@@ -67,7 +67,6 @@
     {
       "row": 2,
       "col": 1,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -118,7 +117,6 @@
     {
       "row": 3,
       "col": 2,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -141,7 +139,6 @@
     {
       "row": 3,
       "col": 3,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -206,7 +203,6 @@
     {
       "row": 5,
       "col": 1,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -233,7 +229,6 @@
     {
       "row": 5,
       "col": 3,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -268,7 +263,6 @@
     {
       "row": 6,
       "col": 1,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -299,7 +293,6 @@
     {
       "row": 6,
       "col": 4,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,

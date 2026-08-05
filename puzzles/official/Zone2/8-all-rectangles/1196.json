@@ -68,7 +68,6 @@
     {
       "row": 1,
       "col": 5,
-      "symbol": "F0",
       "fence_pattern": [
         [
           1,
@@ -103,7 +102,6 @@
     {
       "row": 2,
       "col": 2,
-      "symbol": "F0",
       "fence_pattern": [
         [
           1,
@@ -174,7 +172,6 @@
     {
       "row": 3,
       "col": 8,
-      "symbol": "F0",
       "fence_pattern": [
         [
           1,
@@ -245,7 +242,6 @@
     {
       "row": 5,
       "col": 4,
-      "symbol": "F0",
       "fence_pattern": [
         [
           1,
@@ -280,7 +276,6 @@
     {
       "row": 6,
       "col": 1,
-      "symbol": "F0",
       "fence_pattern": [
         [
           1,
@@ -391,7 +386,6 @@
     {
       "row": 8,
       "col": 7,
-      "symbol": "F0",
       "fence_pattern": [
         [
           1,

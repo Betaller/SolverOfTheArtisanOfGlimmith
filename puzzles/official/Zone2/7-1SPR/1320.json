@@ -80,7 +80,6 @@
     {
       "row": 1,
       "col": 7,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -336,7 +335,6 @@
     {
       "row": 8,
       "col": 0,
-      "symbol": "16",
       "number": 16
     },
     {

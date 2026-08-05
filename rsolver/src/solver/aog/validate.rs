@@ -151,6 +151,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                             || cell.compass.is_some()
                             || cell.number.is_some()
                             || cell.shape_pattern.is_some()
+                            || cell.fence_pattern.is_some()
                         {
                             clues += 1;
                         }

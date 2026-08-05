@@ -64,7 +64,6 @@
     {
       "row": 1,
       "col": 5,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -95,7 +94,6 @@
     {
       "row": 2,
       "col": 1,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -126,7 +124,6 @@
     {
       "row": 2,
       "col": 6,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -161,7 +158,6 @@
     {
       "row": 3,
       "col": 3,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -216,7 +212,6 @@
     {
       "row": 4,
       "col": 5,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -251,7 +246,6 @@
     {
       "row": 5,
       "col": 2,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -282,7 +276,6 @@
     {
       "row": 5,
       "col": 7,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -317,7 +310,6 @@
     {
       "row": 6,
       "col": 4,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,
@@ -356,7 +348,6 @@
     {
       "row": 7,
       "col": 2,
-      "symbol": "F1",
       "fence_pattern": [
         [
           0,

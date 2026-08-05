@@ -12,7 +12,6 @@
     {
       "row": 0,
       "col": 1,
-      "symbol": "03",
       "number": 3
     },
     {
@@ -26,7 +25,6 @@
     {
       "row": 0,
       "col": 4,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -79,7 +77,6 @@
     {
       "row": 2,
       "col": 1,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -106,7 +103,6 @@
     {
       "row": 2,
       "col": 4,
-      "symbol": "04",
       "number": 4
     },
     {
@@ -146,7 +142,6 @@
     {
       "row": 4,
       "col": 1,
-      "symbol": "05",
       "number": 5
     },
     {
@@ -160,7 +155,6 @@
     {
       "row": 4,
       "col": 4,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,

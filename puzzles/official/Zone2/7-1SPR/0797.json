@@ -40,7 +40,6 @@
     {
       "row": 1,
       "col": 2,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -63,7 +62,24 @@
     {
       "row": 1,
       "col": 3,
-      "symbol": "S1"
+      "shape_pattern": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          1
+        ]
+      ]
     },
     {
       "row": 1,
@@ -80,7 +96,20 @@
     {
       "row": 2,
       "col": 1,
-      "symbol": "S2"
+      "shape_pattern": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ]
+      ]
     },
     {
       "row": 2,
@@ -93,7 +122,6 @@
     {
       "row": 2,
       "col": 4,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -124,7 +152,6 @@
     {
       "row": 3,
       "col": 1,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -155,7 +182,24 @@
     {
       "row": 3,
       "col": 4,
-      "symbol": "S3"
+      "shape_pattern": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          1,
+          2
+        ]
+      ]
     },
     {
       "row": 3,
@@ -172,12 +216,32 @@
     {
       "row": 4,
       "col": 2,
-      "symbol": "S4"
+      "shape_pattern": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          2
+        ]
+      ]
     },
     {
       "row": 4,
       "col": 3,
-      "symbol": "F3",
       "fence_pattern": [
         [
           0,
@@ -476,6 +540,9 @@
     }
   ],
   "rules": [
+    {
+      "type": "puzzle_piece"
+    },
     {
       "type": "fence"
     },

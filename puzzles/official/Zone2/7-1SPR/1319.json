@@ -34,7 +34,6 @@
     {
       "row": 1,
       "col": 0,
-      "symbol": "06",
       "number": 6
     },
     {
@@ -52,7 +51,6 @@
     {
       "row": 1,
       "col": 4,
-      "symbol": "F7",
       "fence_pattern": [
         [
           0,
@@ -171,7 +169,6 @@
     {
       "row": 5,
       "col": 4,
-      "symbol": "05",
       "number": 5
     },
     {

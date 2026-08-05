@@ -40,7 +40,6 @@
     {
       "row": 1,
       "col": 1,
-      "symbol": "U2DL2R",
       "compass": {
         "up": 2,
         "down": -1,
@@ -55,7 +54,6 @@
     {
       "row": 1,
       "col": 3,
-      "symbol": "U2DL2R0",
       "compass": {
         "up": 2,
         "down": -1,
@@ -70,7 +68,6 @@
     {
       "row": 1,
       "col": 5,
-      "symbol": "U0DLR3",
       "compass": {
         "up": 0,
         "down": -1,
@@ -117,7 +114,6 @@
     {
       "row": 3,
       "col": 1,
-      "symbol": "U0DL1R",
       "compass": {
         "up": 0,
         "down": -1,
@@ -132,7 +128,6 @@
     {
       "row": 3,
       "col": 3,
-      "symbol": "U0D0L1R1",
       "compass": {
         "up": 0,
         "down": 0,
@@ -147,7 +142,6 @@
     {
       "row": 3,
       "col": 5,
-      "symbol": "UD1LR1",
       "compass": {
         "up": -1,
         "down": 1,
@@ -194,7 +188,6 @@
     {
       "row": 5,
       "col": 1,
-      "symbol": "UD3L1R",
       "compass": {
         "up": -1,
         "down": 3,
@@ -209,7 +202,6 @@
     {
       "row": 5,
       "col": 3,
-      "symbol": "UD4L3R0",
       "compass": {
         "up": -1,
         "down": 4,
@@ -224,7 +216,6 @@
     {
       "row": 5,
       "col": 5,
-      "symbol": "UD0LR2",
       "compass": {
         "up": -1,
         "down": 0,

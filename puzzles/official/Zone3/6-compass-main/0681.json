@@ -67,7 +67,6 @@
     {
       "row": 1,
       "col": 1,
-      "symbol": "U3D1LR1",
       "compass": {
         "up": 3,
         "down": 1,
@@ -82,7 +81,6 @@
     {
       "row": 1,
       "col": 3,
-      "symbol": "U3D6LR",
       "compass": {
         "up": 3,
         "down": 6,
@@ -113,7 +111,6 @@
     {
       "row": 1,
       "col": 9,
-      "symbol": "U2DLR0",
       "compass": {
         "up": 2,
         "down": -1,
@@ -128,7 +125,6 @@
     {
       "row": 1,
       "col": 11,
-      "symbol": "UD0L2R",
       "compass": {
         "up": -1,
         "down": 0,
@@ -202,7 +198,6 @@
     {
       "row": 3,
       "col": 1,
-      "symbol": "U1D3L3R",
       "compass": {
         "up": 1,
         "down": 3,
@@ -217,7 +212,6 @@
     {
       "row": 3,
       "col": 3,
-      "symbol": "UD3L1R3",
       "compass": {
         "up": -1,
         "down": 3,
@@ -251,7 +245,6 @@
     {
       "row": 3,
       "col": 9,
-      "symbol": "U0DL4R2",
       "compass": {
         "up": 0,
         "down": -1,
@@ -266,7 +259,6 @@
     {
       "row": 3,
       "col": 11,
-      "symbol": "U0D4LR2",
       "compass": {
         "up": 0,
         "down": 4,
@@ -577,7 +569,6 @@
     {
       "row": 9,
       "col": 1,
-      "symbol": "UDLR9",
       "compass": {
         "up": -1,
         "down": -1,
@@ -592,7 +583,6 @@
     {
       "row": 9,
       "col": 3,
-      "symbol": "U4D4LR1",
       "compass": {
         "up": 4,
         "down": 4,
@@ -626,7 +616,6 @@
     {
       "row": 9,
       "col": 9,
-      "symbol": "UD2LR2",
       "compass": {
         "up": -1,
         "down": 2,
@@ -641,7 +630,6 @@
     {
       "row": 9,
       "col": 11,
-      "symbol": "U5D1L3R",
       "compass": {
         "up": 5,
         "down": 1,
@@ -715,7 +703,6 @@
     {
       "row": 11,
       "col": 1,
-      "symbol": "UD4LR",
       "compass": {
         "up": -1,
         "down": 4,
@@ -730,7 +717,6 @@
     {
       "row": 11,
       "col": 3,
-      "symbol": "UDL1R9",
       "compass": {
         "up": -1,
         "down": -1,
@@ -761,7 +747,6 @@
     {
       "row": 11,
       "col": 9,
-      "symbol": "UD3LR2",
       "compass": {
         "up": -1,
         "down": 3,
@@ -776,7 +761,6 @@
     {
       "row": 11,
       "col": 11,
-      "symbol": "U3D1LR5",
       "compass": {
         "up": 3,
         "down": 1,

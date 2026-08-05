@@ -25,7 +25,6 @@
     {
       "row": 0,
       "col": 4,
-      "symbol": "UDLR",
       "compass": {
         "up": -1,
         "down": -1,
@@ -53,7 +52,6 @@
     {
       "row": 1,
       "col": 1,
-      "symbol": "UD4L3R",
       "compass": {
         "up": -1,
         "down": 4,
@@ -116,7 +114,6 @@
     {
       "row": 2,
       "col": 7,
-      "symbol": "U0D3LR",
       "compass": {
         "up": 0,
         "down": 3,
@@ -139,7 +136,6 @@
     {
       "row": 3,
       "col": 3,
-      "symbol": "U5DLR",
       "compass": {
         "up": 5,
         "down": -1,
@@ -150,7 +146,6 @@
     {
       "row": 3,
       "col": 4,
-      "symbol": "U5D0LR",
       "compass": {
         "up": 5,
         "down": 0,
@@ -185,7 +180,6 @@
     {
       "row": 4,
       "col": 3,
-      "symbol": "U0D2LR",
       "compass": {
         "up": 0,
         "down": 2,
@@ -196,7 +190,6 @@
     {
       "row": 4,
       "col": 4,
-      "symbol": "UD2LR",
       "compass": {
         "up": -1,
         "down": 2,
@@ -219,7 +212,6 @@
     {
       "row": 5,
       "col": 0,
-      "symbol": "U0D4LR",
       "compass": {
         "up": 0,
         "down": 4,
@@ -282,7 +274,6 @@
     {
       "row": 6,
       "col": 6,
-      "symbol": "U0DLR0",
       "compass": {
         "up": 0,
         "down": -1,
@@ -310,7 +301,6 @@
     {
       "row": 7,
       "col": 3,
-      "symbol": "UDLR",
       "compass": {
         "up": -1,
         "down": -1,

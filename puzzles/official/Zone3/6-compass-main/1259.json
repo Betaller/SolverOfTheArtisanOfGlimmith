@@ -12,7 +12,6 @@
     {
       "row": 0,
       "col": 1,
-      "symbol": "UD2L3R",
       "compass": {
         "up": -1,
         "down": 2,
@@ -91,7 +90,6 @@
     {
       "row": 2,
       "col": 5,
-      "symbol": "UD13L12R",
       "compass": {
         "up": -1,
         "down": 13,
@@ -134,7 +132,6 @@
     {
       "row": 4,
       "col": 0,
-      "symbol": "U11DLR10",
       "compass": {
         "up": 11,
         "down": -1,
@@ -157,7 +154,6 @@
     {
       "row": 4,
       "col": 4,
-      "symbol": "UD4LR5",
       "compass": {
         "up": -1,
         "down": 4,
@@ -180,7 +176,6 @@
     {
       "row": 5,
       "col": 1,
-      "symbol": "U12DLR11",
       "compass": {
         "up": 12,
         "down": -1,

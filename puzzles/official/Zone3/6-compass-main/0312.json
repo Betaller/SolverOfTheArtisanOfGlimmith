@@ -40,7 +40,6 @@
     {
       "row": 1,
       "col": 1,
-      "symbol": "U1D3L4R2",
       "compass": {
         "up": 1,
         "down": 3,
@@ -63,7 +62,6 @@
     {
       "row": 1,
       "col": 5,
-      "symbol": "U6D19L18R5",
       "compass": {
         "up": 6,
         "down": 19,
@@ -118,7 +116,6 @@
     {
       "row": 3,
       "col": 3,
-      "symbol": "U1D3L2R4",
       "compass": {
         "up": 1,
         "down": 3,
@@ -173,7 +170,6 @@
     {
       "row": 5,
       "col": 1,
-      "symbol": "UDL0R",
       "compass": {
         "up": -1,
         "down": -1,
@@ -196,7 +192,6 @@
     {
       "row": 5,
       "col": 5,
-      "symbol": "UDLR0",
       "compass": {
         "up": -1,
         "down": -1,

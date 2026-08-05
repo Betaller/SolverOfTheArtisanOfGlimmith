@@ -404,6 +404,9 @@
   "rules": [
     {
       "type": "compass"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

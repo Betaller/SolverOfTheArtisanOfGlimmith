@@ -689,6 +689,9 @@
       "type": "puzzle_piece"
     },
     {
+      "type": "homogeneous"
+    },
+    {
       "type": "rose_window",
       "params": {
         "symbol_types": [

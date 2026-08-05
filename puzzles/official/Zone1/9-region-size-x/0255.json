@@ -358,6 +358,12 @@
       "params": {
         "area": 9
       }
+    },
+    {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

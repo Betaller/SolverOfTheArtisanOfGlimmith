@@ -442,6 +442,9 @@
   "rules": [
     {
       "type": "difference"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

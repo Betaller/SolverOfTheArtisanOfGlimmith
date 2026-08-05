@@ -292,6 +292,12 @@
   "rules": [
     {
       "type": "non_block"
+    },
+    {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

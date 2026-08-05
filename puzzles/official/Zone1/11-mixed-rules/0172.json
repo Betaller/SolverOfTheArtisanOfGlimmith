@@ -1174,6 +1174,9 @@
   "rules": [
     {
       "type": "puzzle_piece"
+    },
+    {
+      "type": "homogeneous"
     }
   ],
   "shape_pool": [

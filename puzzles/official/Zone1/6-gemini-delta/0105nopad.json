@@ -499,6 +499,9 @@
           ]
         ]
       }
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [

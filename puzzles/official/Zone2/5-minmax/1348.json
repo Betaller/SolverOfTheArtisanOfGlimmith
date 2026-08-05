@@ -274,6 +274,9 @@
     },
     {
       "type": "area"
+    },
+    {
+      "type": "homogeneous"
     }
   ],
   "shape_pool": [],

@@ -356,6 +356,12 @@
       "params": {
         "max": 2
       }
+    },
+    {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

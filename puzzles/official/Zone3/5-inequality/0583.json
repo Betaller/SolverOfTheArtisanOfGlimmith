@@ -275,6 +275,12 @@
     },
     {
       "type": "inequality"
+    },
+    {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

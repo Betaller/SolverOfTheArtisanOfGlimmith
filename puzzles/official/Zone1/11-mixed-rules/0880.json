@@ -883,6 +883,12 @@
   ],
   "rules": [
     {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
+    },
+    {
       "type": "rose_window",
       "params": {
         "symbol_types": [

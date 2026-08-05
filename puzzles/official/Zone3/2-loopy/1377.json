@@ -412,6 +412,12 @@
   "rules": [
     {
       "type": "ring"
+    },
+    {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

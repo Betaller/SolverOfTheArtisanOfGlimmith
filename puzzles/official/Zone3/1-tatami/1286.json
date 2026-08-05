@@ -412,6 +412,9 @@
   "rules": [
     {
       "type": "brick"
+    },
+    {
+      "type": "homogeneous"
     }
   ],
   "shape_pool": [],

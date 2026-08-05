@@ -857,6 +857,9 @@
     },
     {
       "type": "fence"
+    },
+    {
+      "type": "homogeneous"
     }
   ],
   "shape_pool": [],

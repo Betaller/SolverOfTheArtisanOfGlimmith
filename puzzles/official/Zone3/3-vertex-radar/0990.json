@@ -484,6 +484,9 @@
   ],
   "rules": [
     {
+      "type": "homogeneous"
+    },
+    {
       "type": "watchtower"
     }
   ],

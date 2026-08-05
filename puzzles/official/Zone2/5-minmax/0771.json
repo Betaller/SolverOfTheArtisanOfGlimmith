@@ -793,6 +793,12 @@
         "min": 3,
         "max": 5
       }
+    },
+    {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

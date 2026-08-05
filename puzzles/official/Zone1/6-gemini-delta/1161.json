@@ -386,6 +386,12 @@
           ]
         ]
       }
+    },
+    {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [

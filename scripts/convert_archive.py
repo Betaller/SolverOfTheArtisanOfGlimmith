@@ -498,6 +498,14 @@ def build_rules(p: dict, shapes: dict[int, Shape], has_compass: bool,
         rules.append({"type": "inequality"})
     if "difference" in constraint_types:
         rules.append({"type": "difference"})
+    # Gemini (=)/Delta (!) edge clues: the aog solver only enforces edge rules
+    # when the matching rule type is active, and the IndependentValidator only
+    # dispatches _check_edge_constraints for rule types present in the puzzle —
+    # without these rule types both silently skip the edge constraints.
+    if "homogeneous" in constraint_types:
+        rules.append({"type": "homogeneous"})
+    if "heterogeneous" in constraint_types:
+        rules.append({"type": "heterogeneous"})
     if has_watchtower:
         rules.append({"type": "watchtower"})
 

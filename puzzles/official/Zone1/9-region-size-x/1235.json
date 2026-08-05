@@ -761,6 +761,9 @@
       "params": {
         "area": 5
       }
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

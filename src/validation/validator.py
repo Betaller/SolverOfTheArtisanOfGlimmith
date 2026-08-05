@@ -579,7 +579,13 @@ class IndependentValidator:
                     elif c1.region_id == c2.region_id:
                         errors.append(f"预画边界 ({e.r1},{e.c1})-({e.r2},{e.c2}) 两侧同一区域")
 
-        # 4) per-rule checks (implemented independently)
+        # 4) edge constraints (gemini/delta/inequality/difference) live on edges
+        #    and must be enforced regardless of which rule types are declared —
+        #    a puzzle with `=` / `!` edges but no matching rule type otherwise
+        #    silently skips them here and in the aog solver.
+        _check_edge_constraints(puzzle, board, regions, errors)
+
+        # 5) per-rule checks (implemented independently)
         rule_results: dict[str, bool] = {}
         active_rules = {r.type for r in puzzle.rules}
         for rule_type in active_rules:

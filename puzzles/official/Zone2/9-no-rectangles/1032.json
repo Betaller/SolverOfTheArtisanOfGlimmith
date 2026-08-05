@@ -249,6 +249,9 @@
   "rules": [
     {
       "type": "non_block"
+    },
+    {
+      "type": "homogeneous"
     }
   ],
   "shape_pool": [],

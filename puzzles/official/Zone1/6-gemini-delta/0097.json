@@ -363,6 +363,9 @@
           ]
         ]
       }
+    },
+    {
+      "type": "homogeneous"
     }
   ],
   "shape_pool": [

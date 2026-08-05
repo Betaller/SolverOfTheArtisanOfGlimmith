@@ -977,6 +977,12 @@
     },
     {
       "type": "fence"
+    },
+    {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [

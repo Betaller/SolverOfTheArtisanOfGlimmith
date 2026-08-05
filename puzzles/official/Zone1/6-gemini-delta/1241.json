@@ -425,7 +425,14 @@
       "c2": 6
     }
   ],
-  "rules": [],
+  "rules": [
+    {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
+    }
+  ],
   "shape_pool": [],
   "_meta": {
     "archive_id": "1241",

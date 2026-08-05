@@ -601,6 +601,12 @@
       }
     },
     {
+      "type": "homogeneous"
+    },
+    {
+      "type": "heterogeneous"
+    },
+    {
       "type": "watchtower"
     }
   ],

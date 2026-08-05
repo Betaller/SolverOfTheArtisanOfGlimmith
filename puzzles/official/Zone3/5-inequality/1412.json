@@ -259,6 +259,9 @@
     },
     {
       "type": "inequality"
+    },
+    {
+      "type": "homogeneous"
     }
   ],
   "shape_pool": [],

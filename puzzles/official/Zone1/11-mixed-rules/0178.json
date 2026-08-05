@@ -521,6 +521,9 @@
     },
     {
       "type": "puzzle_piece"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [

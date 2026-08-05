@@ -561,6 +561,9 @@
   ],
   "rules": [
     {
+      "type": "homogeneous"
+    },
+    {
       "type": "rose_window",
       "params": {
         "symbol_types": [

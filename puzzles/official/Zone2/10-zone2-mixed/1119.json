@@ -353,6 +353,9 @@
     },
     {
       "type": "fence"
+    },
+    {
+      "type": "heterogeneous"
     }
   ],
   "shape_pool": [],

@@ -121,11 +121,41 @@ def build_shapes(proj: dict) -> list[dict]:
     return result
 
 
-def json_to_ansi_lines(j: dict) -> list[str]:
-    """Rebuild the fixed-width C++ ansi grid from the parsed puzzle JSON.
+def fence_type(fp: list[list[int]]) -> int:
+    """3x3 fence pattern -> C++ F marker (0..4, 7)."""
+    fp = set(tuple(x) for x in fp)
+    n = sum(1 for rc in ((0, 1), (2, 1), (1, 0), (1, 2)) if rc in fp)
+    opp = ((0, 1) in fp and (2, 1) in fp) or ((1, 0) in fp and (1, 2) in fp)
+    if n == 0:
+        return 0
+    if n == 1:
+        return 1
+    if n == 2 and opp:
+        return 2
+    if n == 2:
+        return 7
+    if n == 3:
+        return 3
+    return 4
 
-    node line (even):  j%3==0 -> vertex '+' ; j%3==2 -> vertical edge
-    area line (odd):   j%3==0 -> horizontal edge ; j%3==1,2 -> cell content
+
+def compass_str(cp: dict) -> str:
+    """Compass clue -> C++ U string (up/down/left/right with D/L/R markers)."""
+    parts = ["U"]
+    for attr, marker in (("up", "D"), ("down", "L"), ("left", "R"), ("right", None)):
+        v = cp.get(attr)
+        if v is None or v < 0:
+            parts.append(marker if marker else "")
+        else:
+            parts.append(str(v))
+    return "".join(parts)
+
+
+def json_to_ansi_lines(j: dict, sid_map: dict) -> list[str]:
+    """Rebuild the C++ ansi grid from the parsed puzzle JSON.
+
+    node line (even):  vertex '+' at every 3rd char, vertical edges between
+    area line (odd):   alternating horizontal edge + cell content (2-3+ chars)
     """
     h = j["grid"]["height"]
     w = j["grid"]["width"]
@@ -161,30 +191,43 @@ def json_to_ansi_lines(j: dict) -> list[str]:
             return "  "
         if c.get("number") is not None:
             return str(c["number"]).zfill(2)
+        if c.get("shape_pattern"):  # puzzle_piece -> Sxx (C++ shape index)
+            key = tuple(sorted(tuple(x) for x in c["shape_pattern"]))
+            sid = sid_map.get(key)
+            if sid is not None:
+                return "S%d" % sid
+        if c.get("fence_pattern"):  # fence -> Fx
+            return "F%d" % fence_type(c["fence_pattern"])
+        if c.get("compass"):  # compass -> U...
+            return compass_str(c["compass"])
+        if c.get("symbol"):  # rose / one-symbol -> Px
+            return "P0"  # single-symbol puzzles use P0
         return ".."
 
     lines: list[str] = []
     for i in range(2 * h + 1):
-        row = ["-"] * (3 * w + 1)  # default: LINE_NORMAL edges
         if i % 2 == 0:
+            # node line: fixed positions, every 3rd char is a vertex
+            row = ["-"] * (3 * w + 1)
             for k in range(w + 1):
                 row[k * 3] = "+"
             r = i // 2 - 1
             for c in range(w):
                 if 0 <= r < h - 1:
                     row[c * 3 + 2] = edge_char(v_edge.get((r, c)))
+            lines.append("".join(row))
         else:
+            # area line: variable-length cell content (C++ while-loop parser)
             r = i // 2
+            s = []
             for c in range(w + 1):
                 if c == 0 or c == w:
-                    row[c * 3] = "#"
+                    s.append("#")
                 else:
-                    row[c * 3] = edge_char(h_edge.get((r, c - 1)))
-            for c in range(w):
-                content = cell_content(cells.get((r, c), {}))
-                row[c * 3 + 1] = content[0]
-                row[c * 3 + 2] = content[1] if len(content) > 1 else " "
-        lines.append("".join(row))
+                    s.append(edge_char(h_edge.get((r, c - 1))))
+                if c < w:
+                    s.append(cell_content(cells.get((r, c), {})))
+            lines.append("".join(s))
     return lines
 
 
@@ -204,10 +247,30 @@ def convert(pid: str, archive: dict) -> str:
         ),
     }
     j = ca._parse_puzzle(ap)
-    grid_lines = json_to_ansi_lines(j)
+
+    # puzzle_piece (Sxx) shapes: each distinct shape_pattern becomes a SHAPE
+    # definition; the cell marker references it by id.
+    sid_map: dict = {}
+    piece_shapes: list = []
+    for c in j["cells"]:
+        sp = c.get("shape_pattern")
+        if sp:
+            key = tuple(sorted(tuple(x) for x in sp))
+            if key not in sid_map:
+                sid_map[key] = len(shapes_list) + len(piece_shapes) + 1
+                piece_shapes.append(sp)
+
+    grid_lines = json_to_ansi_lines(j, sid_map)
 
     lines = [f"DIMENSIONS {archive['width']} {archive['height']}"]
     lines.extend(rules_to_headers(proj.get("rules", []), proj.get("shape_pool", [])))
+    # puzzle_piece shape definitions (after the shape_pool SHAPE_BANK block).
+    if piece_shapes:
+        if not shapes_list:
+            lines.append("SHAPE_BANK")
+            lines.append("")
+        for shape in piece_shapes:
+            lines.extend(shape_to_shape_lines(shape))
     lines.append("PUZZLE")
     lines.extend(grid_lines)
     return "\n".join(lines)
@@ -215,7 +278,7 @@ def convert(pid: str, archive: dict) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default="third_party/AoG_Solver/puzzles_ansi")
+    parser.add_argument("--out", default="puzzles_ansi")
     parser.add_argument("--ids", nargs="*", help="only convert these ids (debug)")
     args = parser.parse_args()
 

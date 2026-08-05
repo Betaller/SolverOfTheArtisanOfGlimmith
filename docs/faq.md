@@ -68,6 +68,26 @@
 | `only_rectangles` / `no_rectangles` | `block` / `non_block` |
 | `no_4_way_intersections` / `no_3_way_intersections` | `brick` / `ring` |
 
+### 2.4 官方解（answer 文件）
+
+archive 每个官方题都带 `solution` 字段（紧凑边界网格，stride=3，`#`/`##` 为墙）。
+`scripts/convert_answers.py` 把它解码成区域划分，按谜题布局镜像写入
+`puzzles/official/{zone}-answer/{type}/{id}.json`：
+
+```json
+{
+  "version": "1.0",
+  "grid": {"height": 6, "width": 5},
+  "regions": [[[1, 0], [2, 0], ...], ...],
+  "_meta": {"archive_id": "0008", "archive_type": "1-single-shape", "archive_difficulty": 1}
+}
+```
+
+- 解码与校验逻辑在 `convert_archive.archive_solution_regions`（保证覆盖所有可填格、
+  每区域四连通、不含障碍格），转换脚本与 `convert_archive.py` 共享同一实现。
+- 无官方解的题（0067 / 1130）会被跳过。
+- 官方解是**唯一解**：每个官方题有且只有一个合法解，answer 文件即该题的唯一解。
+
 ### 2.3 经验教训
 
 - **shapes 不一定是全局形状池**：`8-poly`、`10-same-shape-no-touch` 等类型中 `shapes`

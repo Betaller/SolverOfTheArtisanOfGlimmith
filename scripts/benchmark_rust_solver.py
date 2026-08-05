@@ -101,11 +101,13 @@ def main() -> None:
     parser.add_argument("-j", "--jobs", type=int, default=0, help="parallel workers (0 = CPU cores)")
     args = parser.parse_args()
 
-    # Skip metadata/index files (e.g. `_index.json`) — they describe the puzzle
-    # set but are not themselves solvable puzzles.
+    # Skip metadata/index files (e.g. `_index.json`) and official-answer dirs
+    # (`*-answer`) — they describe the puzzle set / official answers, not
+    # solvable puzzles.
     files = sorted(
         f for f in glob.glob(f"{args.dir}/**/*.json", recursive=True)
         if not Path(f).name.startswith("_")
+        and not any(part.endswith("-answer") for part in Path(f).parts)
     )
     if not files:
         print(f"no puzzles found under {args.dir}/")

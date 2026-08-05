@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "grid": {
+    "height": 4,
+    "width": 3
+  },
+  "regions": [
+    [
+      [
+        0,
+        2
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        2
+      ]
+    ],
+    [
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        1
+      ]
+    ],
+    [
+      [
+        2,
+        0
+      ],
+      [
+        3,
+        0
+      ],
+      [
+        3,
+        1
+      ]
+    ],
+    [
+      [
+        3,
+        2
+      ]
+    ]
+  ],
+  "_meta": {
+    "archive_id": "0760",
+    "archive_type": "4-all-regions-different",
+    "archive_difficulty": 1
+  }
+}

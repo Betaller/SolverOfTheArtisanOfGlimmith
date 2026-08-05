@@ -90,10 +90,12 @@ def main():
     parser.add_argument("-j", "--jobs", type=int, default=0, help="并行数 (默认 CPU 核心数)")
     args = parser.parse_args()
 
-    # 跳过元数据/索引文件（如 `_index.json`）——它们描述谜题集，不是可解谜题。
+    # 跳过元数据/索引文件（如 `_index.json`）与官方解 answer 目录（`*-answer`）。
+    # 它们描述谜题集/官方答案，不是可解谜题。
     files = sorted(
         f for f in glob.glob(f"{args.dir}/**/*.json", recursive=True)
         if not Path(f).name.startswith("_")
+        and not any(part.endswith("-answer") for part in Path(f).parts)
     )
     if not files:
         print(f"在 {args.dir}/ 下未找到 .json 文件")

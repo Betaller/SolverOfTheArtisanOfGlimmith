@@ -124,6 +124,53 @@ def _archive_partition(p: dict, blocked: set[tuple[int, int]]) -> list[frozenset
     return [frozenset(cells) for cells in parts.values()]
 
 
+def archive_solution_regions(p: dict) -> list[list[tuple[int, int]]]:
+    """Decode the archive's official ``solution`` into a region partition.
+
+    Returns one list of ``(row, col)`` per region, or ``[]`` when the archive
+    has no official solution for this puzzle (e.g. 0067 / 1130).  The partition
+    is validated: it must cover exactly the fillable cells, each region must be
+    4-connected, and no region may contain a blocked cell.
+    """
+    sol = p.get("solution")
+    if not sol:
+        return []
+    out = _parse_puzzle(p)
+    blocked = {(c["row"], c["col"]) for c in out["cells"] if c.get("blocked")}
+    height, width = out["grid"]["height"], out["grid"]["width"]
+    part = _archive_partition(p, blocked)
+
+    fillable = {(r, c) for r in range(height) for c in range(width) if (r, c) not in blocked}
+    all_cells: set[tuple[int, int]] = set()
+    for cells in part:
+        all_cells.update(cells)
+    if all_cells != fillable:
+        raise ValueError(
+            "official solution does not cover exactly the fillable cells: "
+            f"missing={sorted(fillable - all_cells)[:5]} "
+            f"extra={sorted(all_cells - fillable)[:5]}"
+        )
+
+    for cells in part:
+        if not cells:
+            raise ValueError("official solution contains an empty region")
+        seen: set[tuple[int, int]] = set()
+        stack = [next(iter(cells))]
+        while stack:
+            r, c = stack.pop()
+            if (r, c) in seen:
+                continue
+            seen.add((r, c))
+            for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (r + dr, c + dc)
+                if n in cells and n not in seen:
+                    stack.append(n)
+        if seen != set(cells):
+            raise ValueError("official solution contains a disconnected region")
+
+    return [sorted(cells) for cells in part]
+
+
 def _is_rose_window(p: dict, p_symbols: dict[str, int],
                     blocked: set[tuple[int, int]]) -> list[str] | None:
     """Return sorted rose symbol types if the official solution confirms a

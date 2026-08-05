@@ -341,6 +341,9 @@ class PuzzleBrowser(QWidget):
                 if not any(f.endswith(".json") for f in files):
                     continue
                 rel = os.path.relpath(root, PUZZLE_BASE).replace("\\", "/")
+                # 跳过官方解 answer 目录（`*-answer`），它们不是可解谜题。
+                if any(part.endswith("-answer") for part in rel.split("/")):
+                    continue
                 label = rel if rel != "." else os.path.basename(root)
                 if label not in seen_categories:
                     seen_categories.add(label)

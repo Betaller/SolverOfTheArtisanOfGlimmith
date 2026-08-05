@@ -482,12 +482,38 @@ def _check_ring(puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]],
                 errors: list[str]) -> bool:
     if not puzzle.has_rule("ring"):
         return True
-    for v in board.vertices():
-        count = sum(1 for e in board.edges_surrounding_vertex(v.row, v.col)
-                    if _solution_boundary(board, e.r1, e.c1, e.r2, e.c2))
-        if count == 3:
-            errors.append(f"顶点 ({v.row},{v.col}) 出现 3 路交叉（环纹禁止）")
-            return False
+    # A 3-way junction (T) can form where an internal region boundary meets the
+    # OUTER border, so every grid point must be checked, not just interior
+    # vertices.  Mirrors the C++ check_loopy: at each vertex the 4 incident
+    # segments are counted; the outer border and blocked cells count as
+    # boundaries (except blocked-blocked, which is one empty space).
+    H, W = board.height, board.width
+    BLOCKED = -1
+
+    def val(r: int, c: int) -> int:
+        if 0 <= r < H and 0 <= c < W:
+            cell = board.cell(r, c)
+            if cell.blocked:
+                return BLOCKED
+            rid = cell.region_id
+            return rid if rid is not None else BLOCKED
+        return BLOCKED
+
+    for r in range(H):
+        for c in range(W):
+            if board.cell(r, c).blocked:
+                continue
+            index = val(r, c)
+            for dr, dc in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
+                v0 = val(r + dr, c)
+                v1 = val(r, c + dc)
+                v2 = val(r + dr, c + dc)
+                count = int(v0 != index) + int(v1 != index) \
+                    + int(v2 != v1) + int(v2 != v0)
+                if count == 3:
+                    errors.append(
+                        f"顶点 ({r},{c}) 出现 3 路交叉（环纹禁止）")
+                    return False
     return True
 
 

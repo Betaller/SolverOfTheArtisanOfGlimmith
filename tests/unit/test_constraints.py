@@ -672,33 +672,37 @@ class TestRuleBrick:
 
 class TestRuleRing:
     def test_ring_satisfied(self) -> None:
+        # Closed loop around a center cell — no boundary meets the border, so
+        # no T-junction at any grid point (incl. the outer border).
         puzzle = puzzle_with_rules([Rule.ring()])
-        b = board_with_regions(2, 2, [[1, 1], [2, 2]])
+        b = board_with_regions(3, 3, [
+            [1, 1, 1],
+            [1, 2, 1],
+            [1, 1, 1],
+        ])
         assert check_rule_ring(puzzle, b) is True
 
-    def test_ring_violated_t_shape(self) -> None:
+    def test_ring_violated_internal_t(self) -> None:
+        # Three regions meet at grid point (1,1): top (0,0)-(0,1), bottom
+        # (1,0)-(1,1) and right (0,1)-(1,1) are all boundaries -> count 3.
+        puzzle = puzzle_with_rules([Rule.ring()])
+        b = board_with_regions(3, 3, [
+            [1, 2, 2],
+            [1, 3, 3],
+            [1, 3, 3],
+        ])
+        assert check_rule_ring(puzzle, b) is False
+
+    def test_ring_violated_at_outer_border(self) -> None:
+        # A region boundary that ends on the outer border forms a T with the
+        # border (2 border segments + 1 internal boundary = 3).  The old
+        # implementation only checked interior vertices and missed this.
         puzzle = puzzle_with_rules([Rule.ring()])
         b = board_with_regions(2, 2, [
-            [1, 2],
+            [1, 1],
             [2, 2],
         ])
-        # Vertex (0,0): edges at (0,0)-(0,1) is boundary (1 vs 2)
-        # (0,0)-(1,0) is boundary (1 vs 2)
-        # (0,1)-(1,1) is inside region 2
-        # (1,0)-(1,1) is inside region 2
-        # Count = 2 -> OK
-        # Need a case where count=3
-        pass
-
-    def test_ring_violated_three_boundaries(self) -> None:
-        puzzle = puzzle_with_rules([Rule.ring()])
-        b = board_with_regions(2, 2, [
-            [1, 2],
-            [3, 4],
-        ])
-        # Vertex (0,0): count = 4, not 3 -> OK for ring
-        # A case with exactly 3 boundaries at a vertex...
-        pass
+        assert check_rule_ring(puzzle, b) is False
 
     def test_no_rule_returns_true(self) -> None:
         puzzle = puzzle_with_rules([])

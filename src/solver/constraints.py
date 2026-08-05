@@ -327,9 +327,33 @@ def check_rule_differentiation(puzzle: Puzzle, board: Board) -> bool:
 
 
 def count_boundary_edges_at_vertex(board: Board, vr: int, vc: int) -> int:
+    """Count boundary segments at vertex (vr, vc) (corner of cells (vr,vc),
+    (vr,vc+1), (vr+1,vc), (vr+1,vc+1)).
+
+    Computes boundaries from the assigned region_ids, not ``Edge.is_boundary``
+    (which only reflects pre-drawn boundaries).  Out-of-range neighbours (outer
+    border) and blocked cells count as boundaries, except blocked-blocked which
+    is one empty space (mirrors C++/aog AREA_BLOCK sharing).
+    """
+    H, W = board.height, board.width
+
+    def val(r: int, c: int) -> int | None:
+        if 0 <= r < H and 0 <= c < W:
+            cell = board.cell(r, c)
+            if cell.blocked or not cell.assigned:
+                return None
+            return cell.region_id
+        return None
+
+    a = val(vr, vc)
+    b = val(vr, vc + 1)
+    c2 = val(vr + 1, vc)
+    d = val(vr + 1, vc + 1)
     count = 0
-    for e in board.edges_surrounding_vertex(vr, vc):
-        if e.is_boundary:
+    for x, y in ((a, b), (c2, d), (a, c2), (b, d)):
+        if x is None and y is None:
+            continue
+        if x != y:
             count += 1
     return count
 
@@ -346,9 +370,15 @@ def check_rule_brick(puzzle: Puzzle, board: Board) -> bool:
 def check_rule_ring(puzzle: Puzzle, board: Board) -> bool:
     if not puzzle.has_rule("ring"):
         return True
-    for v in board.vertices():
-        if count_boundary_edges_at_vertex(board, v.row, v.col) == 3:
-            return False
+    # A 3-way junction can form where an internal boundary meets the OUTER
+    # border, so check every geometric grid point (0..H x 0..W) — vertex
+    # (vr,vc) is the corner of cells (vr,vc)..(vr+1,vc+1), i.e. geometric
+    # point (vr+1,vc+1), so iterate vr in -1..H-1.  Mirrors the C++ check_loopy.
+    H, W = board.height, board.width
+    for vr in range(-1, H):
+        for vc in range(-1, W):
+            if count_boundary_edges_at_vertex(board, vr, vc) == 3:
+                return False
     return True
 
 

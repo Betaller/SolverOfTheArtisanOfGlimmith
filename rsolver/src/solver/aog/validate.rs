@@ -285,15 +285,21 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                         if q.iter().any(|&(rr, cc)| puzzle.cells[rr][cc].blocked) {
                             continue;
                         }
-                        if count_boundary_edges_at_vertex(puzzle, &by_rid, r, c) == 4 {
+                        if count_boundary_edges_at_vertex(puzzle, &by_rid, r as i32, c as i32) == 4 {
                             return false;
                         }
                     }
                 }
             }
             "ring" => {
-                for r in 0..h.saturating_sub(1) {
-                    for c in 0..w.saturating_sub(1) {
+                // A 3-way junction can form where an internal boundary meets
+                // the OUTER border, so check every geometric grid point
+                // (0..=h x 0..=w), not just interior vertices.  Vertex (r,c)
+                // is geometric point (r+1,c+1), so r/c go from -1 to h-1/w-1.
+                let hi = h as i32;
+                let wi = w as i32;
+                for r in -1..hi {
+                    for c in -1..wi {
                         if count_boundary_edges_at_vertex(puzzle, &by_rid, r, c) == 3 {
                             return false;
                         }
@@ -651,22 +657,34 @@ fn fence_pattern_shape(bits: [bool; 4]) -> Vec<[usize; 2]> {
 fn count_boundary_edges_at_vertex(
     puzzle: &Puzzle,
     by_rid: &HashMap<usize, Vec<[usize; 2]>>,
-    r: usize,
-    c: usize,
+    r: i32,
+    c: i32,
 ) -> usize {
+    let (h, w) = (puzzle.height as i32, puzzle.width as i32);
+    let cell_region = |a: (i32, i32)| -> Option<usize> {
+        if a.0 < 0 || a.1 < 0 || a.0 >= h || a.1 >= w {
+            return None;
+        }
+        let cell = &puzzle.cells[a.0 as usize][a.1 as usize];
+        if cell.blocked {
+            return None;
+        }
+        region_of(by_rid, a.0 as usize, a.1 as usize)
+    };
     let mut count = 0;
-    // Four edges surrounding vertex (r,c).
-    let mut is_bound = |a: (usize, usize), b: (usize, usize)| -> bool {
-        let ra = region_of(by_rid, a.0, a.1);
-        let rb = region_of(by_rid, b.0, b.1);
+    // Four edges surrounding vertex (r,c): corner of cells
+    // (r,c),(r,c+1),(r+1,c),(r+1,c+1) = geometric grid point (r+1,c+1).
+    let mut is_bound = |a: (i32, i32), b: (i32, i32)| -> bool {
+        let ra = cell_region(a);
+        let rb = cell_region(b);
         match (ra, rb) {
             (Some(x), Some(y)) => x != y,
-            // Both endpoints unassigned = two blocked cells sharing the same
-            // empty space.  They are one entity, not a region boundary — the
-            // C++ check_loopy compares the shared AREA_BLOCK value (equal, so
-            // NOT a boundary).  Counting this edge as a boundary inflated the
-            // junction count near blocked cells and rejected valid ring
-            // solutions (e.g. 0678's 12-region tiling).
+            // Both endpoints unassigned/outside = blocked cells sharing the
+            // same empty space (or the outer border).  They are one entity,
+            // not a region boundary — the C++ check_loopy compares the shared
+            // AREA_BLOCK value (equal, so NOT a boundary).  Counting this edge
+            // as a boundary inflated the junction count near blocked cells and
+            // rejected valid ring solutions (e.g. 0678's 12-region tiling).
             (None, None) => false,
             _ => true,
         }

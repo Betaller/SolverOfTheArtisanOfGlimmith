@@ -52,6 +52,7 @@
 - 新增解出且与官方一致：**C4-1、0277、0213、0213nopad**（原 aog 30s 超时/UNSOLVED）；0833（10×11）时解时不（大网格，候选上限敏感）。
 - 纯 rose 语料 30 题中 28 题 Rust 可解；大网格（0804/1433/1434）仍 UNSOLVED（Python 也解不出，无回归）。
 - **router 仍保留 Python 兜底**：Rust 目前解不出的 3 题仍需 Python——1301（brick+area，Rust backtrack 卡死）、1334/1342（range+rose，Rust rose 在预算内解不出）。等 Rust 补齐这三类、且 Rust-only 全量无回归后再删 Python（软门禁）。
+- Rust-only 全量输出：`results/verify_rust_only_4733f59.txt`（头部标注脚本、commit `4733f59`）。
 
 ## 3. 解 ≠ 官方解（DIFF）分析
 

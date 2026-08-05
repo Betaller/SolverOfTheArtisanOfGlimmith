@@ -40,6 +40,8 @@
 
 **失败均为 UNSOLVED（求解器超时/无解），不再有「接受了非法解」的失败。** 修复前 verify 日志里有 ~190 FAIL，其中大量是 gemini/delta、玫瑰窗、环纹 bug 导致的错误解被接受。
 
+完整原始输出：`results/benchmark_rust_official_33d32c5.txt`（头部标注脚本、commit `33d32c5`、代码状态 `bde3713`+`9a6c965`）。
+
 另：`scan_official_results.jsonl`（仓库根目录）保存了每题的求解结果（区域划分、耗时、规则、校验结果），可复用于后续对比。
 
 ## 3. 解 ≠ 官方解（DIFF）分析

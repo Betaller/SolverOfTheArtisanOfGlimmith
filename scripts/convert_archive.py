@@ -172,10 +172,16 @@ def archive_solution_regions(p: dict) -> list[list[tuple[int, int]]]:
 
 
 def _is_rose_window(p: dict, p_symbols: dict[str, int],
-                    blocked: set[tuple[int, int]]) -> list[str] | None:
+                    blocked: set[tuple[int, int]],
+                    sym_pos: dict[tuple[int, int], str] | None = None) -> list[str] | None:
     """Return sorted rose symbol types if the official solution confirms a
     rose-window pattern (N types x M occurrences, M regions each containing
-    all N types), else None."""
+    all N types), else None.
+
+    ``sym_pos`` must come from the greedy cell parser (_parse_cell_row): reading
+    the raw grid at a fixed 2-char stride is WRONG when a variable-width cell
+    (compass U…, S-shape) precedes a P-cell and shifts its position.
+    """
     if not p_symbols or len(set(p_symbols.values())) != 1:
         return None
     m = next(iter(p_symbols.values()))
@@ -186,15 +192,16 @@ def _is_rose_window(p: dict, p_symbols: dict[str, int],
     part = _archive_partition(p, blocked)
     if len(part) != m:
         return None
-    # rebuild per-cell symbol positions from the grid
-    sym_pos: dict[tuple[int, int], str] = {}
-    W, H = int(p["width"]), int(p["height"])
-    for r in range(H):
-        row = (p["puzzle_grid"][2 * r + 1] or "").ljust(3 * W + 1, " ")
-        for c in range(W):
-            content = row[3 * c + 1:3 * c + 3]
-            if content in p_symbols:
-                sym_pos[(r, c)] = content
+    if sym_pos is None:
+        # fallback: fixed-stride read (only correct without variable-width cells)
+        sym_pos = {}
+        W, H = int(p["width"]), int(p["height"])
+        for r in range(H):
+            row = (p["puzzle_grid"][2 * r + 1] or "").ljust(3 * W + 1, " ")
+            for c in range(W):
+                content = row[3 * c + 1:3 * c + 3]
+                if content in p_symbols:
+                    sym_pos[(r, c)] = content
     for cells in part:
         syms = {sym_pos[pos] for pos in cells if pos in sym_pos}
         if syms != types or len(syms) != len(types):
@@ -281,6 +288,7 @@ def _parse_puzzle(p: dict) -> dict:
     has_numbers = False
     has_shape_pattern = False
     p_symbols: dict[str, int] = {}
+    p_symbol_positions: dict[tuple[int, int], str] = {}
 
     # --- cell rows (odd indices) ---
     for r in range(height):
@@ -314,6 +322,7 @@ def _parse_puzzle(p: dict) -> dict:
                     has_fence = True
                 elif re.fullmatch(r"P[1-9]", content):
                     p_symbols[content] = p_symbols.get(content, 0) + 1
+                    p_symbol_positions[(r, c)] = content
                     if not is_spr:
                         cell["symbol"] = content
                 elif content[0] in "UDLR" and re.fullmatch(r"[UDLR\d]+", content):
@@ -385,6 +394,7 @@ def _parse_puzzle(p: dict) -> dict:
         rose_types=_is_rose_window(
             p, p_symbols,
             {(r, c) for r in range(height) for c in range(width) if not fillable[r][c]},
+            sym_pos=p_symbol_positions,
         ),
     )
 

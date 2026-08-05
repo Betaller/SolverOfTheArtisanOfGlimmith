@@ -31,6 +31,15 @@
 
 > 数字为 2026-08-05 修复后全量扫描（1224/1231 已完成）。每题的完整求解结果见仓库根目录 `scan_official_results.jsonl`。
 
+### 2.1 基准（benchmark，2026-08-05 修复后）
+
+| 工具 | 范围 | 结果 |
+|---|---|---|
+| `scripts/benchmark_rust_solver.py`（Rust 求解器） | puzzles/official 1258 题 | **1040 / 1258 通过**（Zone1 300/312, Zone2 387/438, Zone3 329/481），失败全为 20s 超时 |
+| `scripts/verify_puzzles.py`（完整路由链） | puzzles/official | 跑到 990/1258 被 OOM 中断（862 PASS / 128 FAIL）——回溯 rose-parallel 线程内存泄漏，见 §5 |
+
+**失败均为 UNSOLVED（求解器超时/无解），不再有「接受了非法解」的失败。** 修复前 verify 日志里有 ~190 FAIL，其中大量是 gemini/delta、玫瑰窗、环纹 bug 导致的错误解被接受。
+
 另：`scan_official_results.jsonl`（仓库根目录）保存了每题的求解结果（区域划分、耗时、规则、校验结果），可复用于后续对比。
 
 ## 3. 解 ≠ 官方解（DIFF）分析
@@ -76,9 +85,10 @@ Zone3/7-zone3-mixed/1144
 ## 5. 后续计划
 
 1. **甄别 6 道 watchtower DIFF**：在游戏侧实测；或深挖望塔规则在障碍格/边框附近的语义。
-2. **提升求解能力**：compass+rose、ring 组合的剪枝；8 道卡死题（回溯候选枚举超时）专项。
-3. **回归基准**：每次优化后 `scripts/verify_puzzles.py` + 全量扫描，对照本文件 §2 数字。
-4. **README / 文档同步**：见「软门禁」。
+2. **提升求解能力**：compass+rose、ring 组合的剪枝；卡死题（回溯候选枚举超时）专项。
+3. **修回溯内存泄漏**：`backtrack._solve_rose_parallel` 的守护线程超时后不退出、累积内存，导致 `verify_puzzles.py` 全量跑 OOM（~990/1258）。这是全量回归的阻塞项。
+4. **回归基准**：每次优化后 `scripts/verify_puzzles.py` + 全量扫描，对照本文件 §2 数字。
+5. **README / 文档同步**：见「软门禁」。
 
 ## 6. 软门禁（Soft Gate）
 

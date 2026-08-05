@@ -204,6 +204,44 @@ fn dfs(
             continue;
         }
 
+        // Pre-drawn boundary: (r,c) must not be separated from any cell already
+        // in `rid` by a boundary edge.  (Reaching the region through one free
+        // neighbour is not enough — the region could also touch (r,c) across a
+        // drawn edge elsewhere.)
+        let boundary_conflict = neighbor_positions(r, c, h, w).iter().any(|&(nr, nc)| {
+            state.cell_to_region.get(&(nr, nc)) == Some(&rid)
+                && !grid::is_adjacent_free(puzzle, r, c, nr, nc)
+        });
+        if boundary_conflict {
+            continue;
+        }
+
+        // area-number rule: after adding (r,c) the region's area must not exceed
+        // any numbered cell's value inside it (prunes early; leaf check enforces
+        // exact equality).
+        let new_area = region_area + 1;
+        let mut area_clue_ok = true;
+        if let Some(n) = cell.number {
+            if new_area > n as usize {
+                area_clue_ok = false;
+            }
+        }
+        if area_clue_ok {
+            if let Some(shape) = state.region_shapes.get(&rid) {
+                for &[rr, cc] in shape {
+                    if let Some(n) = puzzle.cells[rr][cc].number {
+                        if new_area > n as usize {
+                            area_clue_ok = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if !area_clue_ok {
+            continue;
+        }
+
         // Merge check: ensure assignment won't cause two regions to merge
         if !check_merge_ok(puzzle, r, c, rid, &state.cell_to_region) {
             continue;
@@ -400,6 +438,104 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
                         }
                         // For cells outside explicit constraints, just check area is sufficient
                         _ = (n, s, e, w);
+                    }
+                }
+            }
+        }
+    }
+
+    // area rule: every numbered cell must lie in a region of exactly that size.
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width {
+            if let Some(n) = puzzle.cells[r][c].number {
+                if let Some(&rid) = state.cell_to_region.get(&(r, c)) {
+                    if let Some(shape) = state.region_shapes.get(&rid) {
+                        if shape.len() != n as usize {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // difference edges: |area(a) - area(b)| == value for each drawn difference edge.
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width.saturating_sub(1) {
+            if let Some(ec) = &puzzle.h_edges[r][c].constraint {
+                if ec.ctype == EdgeConstraintType::Difference {
+                    if let (Some(&ra), Some(&rb)) = (
+                        state.cell_to_region.get(&(r, c)),
+                        state.cell_to_region.get(&(r, c + 1)),
+                    ) {
+                        let sa = state.region_shapes.get(&ra).map(|s| s.len()).unwrap_or(0);
+                        let sb = state.region_shapes.get(&rb).map(|s| s.len()).unwrap_or(0);
+                        if sa.abs_diff(sb) != ec.value.unwrap_or(0) as usize {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for r in 0..puzzle.height.saturating_sub(1) {
+        for c in 0..puzzle.width {
+            if let Some(ec) = &puzzle.v_edges[r][c].constraint {
+                if ec.ctype == EdgeConstraintType::Difference {
+                    if let (Some(&ra), Some(&rb)) = (
+                        state.cell_to_region.get(&(r, c)),
+                        state.cell_to_region.get(&(r + 1, c)),
+                    ) {
+                        let sa = state.region_shapes.get(&ra).map(|s| s.len()).unwrap_or(0);
+                        let sb = state.region_shapes.get(&rb).map(|s| s.len()).unwrap_or(0);
+                        if sa.abs_diff(sb) != ec.value.unwrap_or(0) as usize {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // inequality edges: value==1 → first endpoint region larger; else second.
+    let check_ineq = |sa: usize, sb: usize, rev: bool| -> bool {
+        if rev {
+            sa > sb
+        } else {
+            sa < sb
+        }
+    };
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width.saturating_sub(1) {
+            if let Some(ec) = &puzzle.h_edges[r][c].constraint {
+                if ec.ctype == EdgeConstraintType::Inequality {
+                    if let (Some(&ra), Some(&rb)) = (
+                        state.cell_to_region.get(&(r, c)),
+                        state.cell_to_region.get(&(r, c + 1)),
+                    ) {
+                        let sa = state.region_shapes.get(&ra).map(|s| s.len()).unwrap_or(0);
+                        let sb = state.region_shapes.get(&rb).map(|s| s.len()).unwrap_or(0);
+                        if !check_ineq(sa, sb, ec.value == Some(1)) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for r in 0..puzzle.height.saturating_sub(1) {
+        for c in 0..puzzle.width {
+            if let Some(ec) = &puzzle.v_edges[r][c].constraint {
+                if ec.ctype == EdgeConstraintType::Inequality {
+                    if let (Some(&ra), Some(&rb)) = (
+                        state.cell_to_region.get(&(r, c)),
+                        state.cell_to_region.get(&(r + 1, c)),
+                    ) {
+                        let sa = state.region_shapes.get(&ra).map(|s| s.len()).unwrap_or(0);
+                        let sb = state.region_shapes.get(&rb).map(|s| s.len()).unwrap_or(0);
+                        if !check_ineq(sa, sb, ec.value == Some(1)) {
+                            return false;
+                        }
                     }
                 }
             }

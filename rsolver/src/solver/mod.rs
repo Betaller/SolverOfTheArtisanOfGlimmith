@@ -58,12 +58,18 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     if has_shape_pool || has_area_clues || has_compass_clues {
         // Try piece-based solver first
         if let Some(regions) = pieces::solve_pieces(puzzle, &start, timeout_ms) {
+            if std::env::var("AOG_DEBUG").is_ok() {
+                eprintln!("solver=pieces regions={}", regions.len());
+            }
             return build_solution(regions, &start, puzzle);
         }
     }
 
     // Fallback: backtracking solver
     if let Some(regions) = backtrack::solve_backtrack(puzzle, &start, timeout_ms) {
+        if std::env::var("AOG_DEBUG").is_ok() {
+            eprintln!("solver=backtrack regions={}", regions.len());
+        }
         return build_solution(regions, &start, puzzle);
     }
 
@@ -93,6 +99,12 @@ fn regions_respect_boundaries(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
             if puzzle.h_edges[r][c].is_boundary {
                 if let (Some(&a), Some(&b)) = (rid.get(&(r, c)), rid.get(&(r, c + 1))) {
                     if a == b {
+                        if std::env::var("AOG_DEBUG").is_ok() {
+                            eprintln!(
+                                "boundary-violate h ({},{})-({},{}) same region {}",
+                                r, c, r, c + 1, a
+                            );
+                        }
                         return false;
                     }
                 }
@@ -104,6 +116,12 @@ fn regions_respect_boundaries(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
             if puzzle.v_edges[r][c].is_boundary {
                 if let (Some(&a), Some(&b)) = (rid.get(&(r, c)), rid.get(&(r + 1, c))) {
                     if a == b {
+                        if std::env::var("AOG_DEBUG").is_ok() {
+                            eprintln!(
+                                "boundary-violate v ({},{})-({},{}) same region {}",
+                                r, c, r + 1, c, a
+                            );
+                        }
                         return false;
                     }
                 }

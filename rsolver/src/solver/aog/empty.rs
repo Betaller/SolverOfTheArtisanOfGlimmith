@@ -713,6 +713,11 @@ fn find_empty_line_equal_area(core: &AoGCore, sp: &Vec<Vec<u32>>) -> (i32, i32, 
     find_empty_line_constraint_generic(core, sp, |lv| (lv & LINE_EQUAL) != 0)
 }
 
+// Kept (unused) to mirror the C++ reference: dfs.cpp still *calls* this finder in
+// find_special_start_area but discards its result (a missing `ret` refresh), so the
+// LINE_SIZE_DIFF special start never fires there.  See the note in
+// find_special_start_area.  This function documents what C++ computes-and-throws-away.
+#[allow(dead_code)]
 fn find_empty_line_size_diff_area(core: &AoGCore, sp: &Vec<Vec<u32>>) -> (i32, i32, i32) {
     find_empty_line_constraint_generic(core, sp, |lv| (lv & LINE_SIZE_DIFF_BIT) != 0)
 }
@@ -722,9 +727,32 @@ fn find_empty_line_larger_or_smaller_area(core: &AoGCore, sp: &Vec<Vec<u32>>) ->
 }
 
 fn find_empty_line_constraint_area(core: &AoGCore, sp: &Vec<Vec<u32>>) -> (i32, i32, i32) {
-    find_empty_line_constraint_generic(core, sp, |lv| {
-        (lv & (LINE_EQUAL | LINE_LARGER | LINE_SMALLER | LINE_DIFFERENT | LINE_SIZE_DIFF_BIT)) != 0
-    })
+    // Mirror dfs.cpp find_empty_line_constraint_area (lines 684-704): unlike the
+    // line_equal / line_size_diff / larger_or_smaller finders, this one does NOT
+    // require the neighbor across the constraint edge to be placed already.  It
+    // fires on the first empty cell with any adjacent constraint edge.  The old
+    // implementation reused find_empty_line_constraint_generic (which requires a
+    // placed neighbor), so on an empty board it returned -1 and the search fell
+    // through to the corner special start — diverging from the C++ search order
+    // (e.g. puzzle 0404: C++ starts at LINE_CONSTRAINT (1,0), Rust started at
+    // corner (0,6) and never reached a solution).
+    for i in 1..=core.n_row as i32 {
+        for j in 1..=core.n_col as i32 {
+            let px = to_puzzle_x(i) as usize;
+            let py = to_puzzle_y(j) as usize;
+            if core.puzzle[px][py] == AREA_BLOCK || sp[px][py] != AREA_NORMAL {
+                continue;
+            }
+            for (lx, ly) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let line_val = core.puzzle[(px as i32 + lx) as usize][(py as i32 + ly) as usize];
+                if (line_val & (LINE_EQUAL | LINE_LARGER | LINE_SMALLER | LINE_DIFFERENT | LINE_SIZE_DIFF_BIT)) != 0
+                {
+                    return (0, i, j);
+                }
+            }
+        }
+    }
+    (-1, -1, -1)
 }
 
 fn find_empty_area(core: &AoGCore, sp: &Vec<Vec<u32>>) -> (i32, i32, i32) {
@@ -755,11 +783,14 @@ pub fn find_special_start_area(core: &mut AoGCore, sp: &Vec<Vec<u32>>) -> (u32, 
         special_start_type = SPECIAL_START_LINE_SAME;
         ret = ret_data.0;
     }
-    if ret == -1 {
-        ret_data = find_empty_line_size_diff_area(core, sp);
-        special_start_type = SPECIAL_START_LINE_SIZE_DIFF;
-        ret = ret_data.0;
-    }
+    // NOTE: The C++ reference (dfs.cpp find_special_start_area, lines 748-756)
+    // calls find_empty_line_size_diff_area but NEVER refreshes `ret` afterwards,
+    // so its result is immediately overwritten by find_empty_line_larger_or_smaller_area.
+    // The SPECIAL_START_LINE_SIZE_DIFF special start is therefore dead code in C++
+    // and never fires.  The old Rust port faithfully exposed it, which made the
+    // search pick LINE_SIZE_DIFF where C++ falls through to LINE_CONSTRAINT —
+    // and its (marker-width) size filter pruned valid solutions (puzzle 0404's
+    // 2/3 split at cell (1,1)).  Skip it to match the C++ search order exactly.
     if ret == -1 {
         ret_data = find_empty_line_larger_or_smaller_area(core, sp);
         special_start_type = SPECIAL_START_LINE_SMALLER_OR_LARGER;

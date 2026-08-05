@@ -661,6 +661,13 @@ fn count_boundary_edges_at_vertex(
         let rb = region_of(by_rid, b.0, b.1);
         match (ra, rb) {
             (Some(x), Some(y)) => x != y,
+            // Both endpoints unassigned = two blocked cells sharing the same
+            // empty space.  They are one entity, not a region boundary — the
+            // C++ check_loopy compares the shared AREA_BLOCK value (equal, so
+            // NOT a boundary).  Counting this edge as a boundary inflated the
+            // junction count near blocked cells and rejected valid ring
+            // solutions (e.g. 0678's 12-region tiling).
+            (None, None) => false,
             _ => true,
         }
     };

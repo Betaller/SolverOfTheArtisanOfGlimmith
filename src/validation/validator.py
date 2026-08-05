@@ -132,9 +132,15 @@ def _is_connected(region: list[Cell]) -> bool:
 
 
 def _solution_boundary(board: Board, r1: int, c1: int, r2: int, c2: int) -> bool:
-    """True if the edge between two cells is a region boundary in the answer."""
+    """True if the edge between two cells is a region boundary in the answer.
+
+    两个 blocked 格共享同一空格（同 C++ 的 AREA_BLOCK 值），不构成区域边界——
+    否则环纹检查会错误拒绝 blocked 格附近的合法解（如 0678 的官方解）。
+    """
     c1c = board.cell(r1, c1)
     c2c = board.cell(r2, c2)
+    if c1c.blocked and c2c.blocked:
+        return False
     if c1c.blocked or c2c.blocked:
         return True
     return c1c.region_id != c2c.region_id

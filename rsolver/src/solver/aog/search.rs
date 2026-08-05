@@ -962,38 +962,53 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
         }
     }
 
-    let n_shapes = core.shapes.len();
-    for i in 0..n_shapes {
-        if ret == SPECIAL_START_DEFAULT && mk_skip[i] {
+    // Dynamic loop bound, mirroring the C++ reference (`for i = 0; i < shapes.size()`):
+    // a deeper dfs may call shapes_insert while we iterate, and those newly added
+    // shapes must ALSO be tried here (e.g. puzzle 0404's vertical domino for the
+    // (2,0) corner is only added during the subtree of the size-1 placement).
+    // Freezing the bound (as a `for i in 0..n_shapes`) made the search miss
+    // regions that the C++ solver explores, so it never found the solution.
+    let mut i = 0usize;
+    while i < core.shapes.len() {
+        let cur = i;
+        i += 1;
+        // Shapes added during a deeper dfs grow the library beyond the size
+        // mk_skip was resized to at this dfs's entry.  The C++ reference uses a
+        // fixed-capacity array (mark_skip_shape[MARK_SKIP_CAP]); grow lazily to
+        // match, defaulting new entries to not-skipped.
+        if cur >= mk_skip.len() {
+            mk_skip.resize(cur + 1, false);
+        }
+        if ret == SPECIAL_START_DEFAULT && mk_skip[cur] {
             continue;
         }
         if core.config.all_shapes_different
             && core
                 .all_shapes_different_check_shape_index_pool
-                .contains(&core.shapes[i].shape_index)
+                .contains(&core.shapes[cur].shape_index)
         {
             continue;
         }
         if core.config.all_shapes_same
             && core.all_shapes_same_check_shape_index != -1
-            && core.shapes[i].shape_index != core.all_shapes_same_check_shape_index as u32
+            && core.shapes[cur].shape_index != core.all_shapes_same_check_shape_index as u32
         {
             continue;
         }
-        let sz = core.shapes[i].nodes.len() as i32;
+        let sz = core.shapes[cur].nodes.len() as i32;
         if sz < shape_size_lower_bound || sz > shape_size_upper_bound {
             continue;
         }
-        if !mk_size[core.shapes[i].nodes.len()] {
+        if !mk_size[core.shapes[cur].nodes.len()] {
             continue;
         }
 
-        for p in 0..core.shapes[i].nodes.len() {
+        for p in 0..core.shapes[cur].nodes.len() {
             if ret == SPECIAL_START_DEFAULT && p != 0 {
                 break;
             }
-            let start_x = core.shapes[i].nodes[p].x;
-            let start_y = core.shapes[i].nodes[p].y;
+            let start_x = core.shapes[cur].nodes[p].x;
+            let start_y = core.shapes[cur].nodes[p].y;
 
             // ── Type 1 check ──
             let mut fail = false;
@@ -1001,9 +1016,9 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
             let mut rose_marks = [0i32; 16];
             compass_visited_cnt = 0;
             let mut error_node: Option<Node> = None;
-            for j in 0..core.shapes[i].nodes.len() {
-                let new_x = x + core.shapes[i].nodes[j].x - start_x;
-                let new_y = y + core.shapes[i].nodes[j].y - start_y;
+            for j in 0..core.shapes[cur].nodes.len() {
+                let new_x = x + core.shapes[cur].nodes[j].x - start_x;
+                let new_y = y + core.shapes[cur].nodes[j].y - start_y;
                 if new_x < 1 || new_x > n_row || new_y < 1 || new_y > n_col {
                     fail = true;
                     break;
@@ -1013,12 +1028,12 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
                 let pval = core.puzzle[pxn][pyn];
                 if pval == AREA_BLOCK {
                     fail = true;
-                    error_node = Some(core.shapes[i].nodes[j]);
+                    error_node = Some(core.shapes[cur].nodes[j]);
                     break;
                 }
                 if sp[pxn][pyn] != AREA_NORMAL {
                     fail = true;
-                    error_node = Some(core.shapes[i].nodes[j]);
+                    error_node = Some(core.shapes[cur].nodes[j]);
                     break;
                 }
                 if core.rose_type_count > 0 && (pval & AREA_SYMBOL_BIT) != 0 {
@@ -1031,14 +1046,14 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
                 }
                 if (pval & AREA_SHAPE_INDEX_BIT) != 0 {
                     let target_index = (pval & AREA_SHAPE_INDEX_BIT) >> AREA_SHAPE_INDEX_BIT_SHIFT;
-                    if target_index != core.shapes[i].shape_index {
+                    if target_index != core.shapes[cur].shape_index {
                         fail = true;
                         break;
                     }
                 }
                 if (pval & AREA_SHAPE_SIZE_BIT) != 0 {
                     let target_size = (pval & AREA_SHAPE_SIZE_BIT) >> AREA_SHAPE_SIZE_BIT_SHIFT;
-                    if target_size != core.shapes[i].nodes.len() as u32 {
+                    if target_size != core.shapes[cur].nodes.len() as u32 {
                         fail = true;
                         break;
                     }
@@ -1091,9 +1106,9 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
                 let cpx = to_puzzle_x(c.x) as usize;
                 let cpy = to_puzzle_y(c.y) as usize;
                 let mut states = CompassStates::default();
-                for k in 0..core.shapes[i].nodes.len() {
-                    let new_x = x + core.shapes[i].nodes[k].x - start_x;
-                    let new_y = y + core.shapes[i].nodes[k].y - start_y;
+                for k in 0..core.shapes[cur].nodes.len() {
+                    let new_x = x + core.shapes[cur].nodes[k].x - start_x;
+                    let new_y = y + core.shapes[cur].nodes[k].y - start_y;
                     if new_x < c.x {
                         states.up += 1;
                     }
@@ -1139,12 +1154,12 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
             // ── Type 2 check: place cells ──
             let mut l = 0usize;
             let mut fail2 = false;
-            while l < core.shapes[i].nodes.len() {
-                let new_x = x + core.shapes[i].nodes[l].x - start_x;
-                let new_y = y + core.shapes[i].nodes[l].y - start_y;
+            while l < core.shapes[cur].nodes.len() {
+                let new_x = x + core.shapes[cur].nodes[l].x - start_x;
+                let new_y = y + core.shapes[cur].nodes[l].y - start_y;
                 let pxn = to_puzzle_x(new_x) as usize;
                 let pyn = to_puzzle_y(new_y) as usize;
-                sp[pxn][pyn] = index | (core.shapes[i].shape_index << SOLVE_AREA_SHAPE_INDEX_BIT_SHIFT);
+                sp[pxn][pyn] = index | (core.shapes[cur].shape_index << SOLVE_AREA_SHAPE_INDEX_BIT_SHIFT);
                 if !check_edge(pxn as i32, pyn as i32, core, sp) {
                     fail2 = true;
                     break;
@@ -1169,8 +1184,8 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
             }
             if fail2 {
                 for j in 0..=l {
-                    let new_x = x + core.shapes[i].nodes[j].x - start_x;
-                    let new_y = y + core.shapes[i].nodes[j].y - start_y;
+                    let new_x = x + core.shapes[cur].nodes[j].x - start_x;
+                    let new_y = y + core.shapes[cur].nodes[j].y - start_y;
                     sp[to_puzzle_x(new_x) as usize][to_puzzle_y(new_y) as usize] = AREA_NORMAL;
                 }
                 continue;
@@ -1178,9 +1193,9 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
 
             // ── Type 3 check ──
             let mut fail3 = false;
-            for j in 0..core.shapes[i].nodes.len() {
-                let new_x = x + core.shapes[i].nodes[j].x - start_x;
-                let new_y = y + core.shapes[i].nodes[j].y - start_y;
+            for j in 0..core.shapes[cur].nodes.len() {
+                let new_x = x + core.shapes[cur].nodes[j].x - start_x;
+                let new_y = y + core.shapes[cur].nodes[j].y - start_y;
                 let pxn = to_puzzle_x(new_x) as usize;
                 let pyn = to_puzzle_y(new_y) as usize;
                 if (core.puzzle[pxn][pyn] & AREA_PALISADE_INDEX_BIT) != 0
@@ -1207,9 +1222,9 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
                 }
             }
             if fail3 {
-                for j in 0..core.shapes[i].nodes.len() {
-                    let new_x = x + core.shapes[i].nodes[j].x - start_x;
-                    let new_y = y + core.shapes[i].nodes[j].y - start_y;
+                for j in 0..core.shapes[cur].nodes.len() {
+                    let new_x = x + core.shapes[cur].nodes[j].x - start_x;
+                    let new_y = y + core.shapes[cur].nodes[j].y - start_y;
                     sp[to_puzzle_x(new_x) as usize][to_puzzle_y(new_y) as usize] = AREA_NORMAL;
                 }
                 continue;
@@ -1217,9 +1232,9 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
 
             // ── Type 4 check ──
             if !empty_area_check(core, sp) {
-                for j in 0..core.shapes[i].nodes.len() {
-                    let new_x = x + core.shapes[i].nodes[j].x - start_x;
-                    let new_y = y + core.shapes[i].nodes[j].y - start_y;
+                for j in 0..core.shapes[cur].nodes.len() {
+                    let new_x = x + core.shapes[cur].nodes[j].x - start_x;
+                    let new_y = y + core.shapes[cur].nodes[j].y - start_y;
                     sp[to_puzzle_x(new_x) as usize][to_puzzle_y(new_y) as usize] = AREA_NORMAL;
                 }
                 continue;
@@ -1228,12 +1243,12 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
             // ── DFS ──
             let mut first_shape_flag = false;
             if core.config.all_shapes_same && core.all_shapes_same_check_shape_index == -1 {
-                core.all_shapes_same_check_shape_index = core.shapes[i].shape_index as i32;
+                core.all_shapes_same_check_shape_index = core.shapes[cur].shape_index as i32;
                 first_shape_flag = true;
             }
             if core.config.all_shapes_different {
                 core.all_shapes_different_check_shape_index_pool
-                    .insert(core.shapes[i].shape_index);
+                    .insert(core.shapes[cur].shape_index);
             }
 
             let dfs_ret = dfs(index + 1, core, sp, pools);
@@ -1246,11 +1261,11 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
             }
             if core.config.all_shapes_different {
                 core.all_shapes_different_check_shape_index_pool
-                    .remove(&core.shapes[i].shape_index);
+                    .remove(&core.shapes[cur].shape_index);
             }
-            for j in 0..core.shapes[i].nodes.len() {
-                let new_x = x + core.shapes[i].nodes[j].x - start_x;
-                let new_y = y + core.shapes[i].nodes[j].y - start_y;
+            for j in 0..core.shapes[cur].nodes.len() {
+                let new_x = x + core.shapes[cur].nodes[j].x - start_x;
+                let new_y = y + core.shapes[cur].nodes[j].y - start_y;
                 sp[to_puzzle_x(new_x) as usize][to_puzzle_y(new_y) as usize] = AREA_NORMAL;
             }
         }

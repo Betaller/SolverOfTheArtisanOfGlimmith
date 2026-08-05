@@ -26,7 +26,7 @@ pub fn check_rule(rule: &Rule, puzzle: &Puzzle, regions: &[RegionInfo]) -> bool 
         "watchtower" => true,
         "compass" => true,
         "puzzle_piece" => true,
-        "shape_pool" => true,
+        "shape_pool" => check_shape_pool(puzzle, regions),
         "rose_window" => true,
         _ => true,
     }
@@ -40,6 +40,90 @@ pub fn check_all(puzzle: &Puzzle, rules: &[Rule], regions: &[RegionInfo]) -> Has
         }
     }
     passed
+}
+
+/// shape_pool: every region must be (dihedrally) congruent to one of the pool shapes.
+fn check_shape_pool(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
+    // Collect from both the top-level array and the `shape_pool` rule params,
+    // matching aog::core::collect_pool_shapes (some puzzles keep the pool only
+    // in the rule params, e.g. A1-5 / C1-3).
+    let mut pool: Vec<Vec<[usize; 2]>> = puzzle.shape_pool.clone();
+    for rule in &puzzle.rules {
+        if rule.ctype != "shape_pool" {
+            continue;
+        }
+        if let Some(shapes) = rule.params.get("shapes").and_then(|v| v.as_array()) {
+            for s in shapes {
+                let cells: Vec<[usize; 2]> = s
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|xy| {
+                                let cc = xy.as_array()?;
+                                if cc.len() < 2 {
+                                    return None;
+                                }
+                                let r = cc[0].as_i64()?;
+                                let c = cc[1].as_i64()?;
+                                Some([r.max(0) as usize, c.max(0) as usize])
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !cells.is_empty() {
+                    pool.push(cells);
+                }
+            }
+        }
+    }
+    if pool.is_empty() {
+        return false;
+    }
+    let pool_keys: HashSet<String> = pool.iter().map(|s| dihedral_key(s)).collect();
+    regions.iter().all(|reg| pool_keys.contains(&dihedral_key(&reg.cells)))
+}
+
+/// Canonical dihedral shape key: the lexicographically smallest of the 8
+/// rotations/reflections, origin-normalized.  Mirrors the aog validate.rs
+/// helper so both solvers agree on shape equivalence.
+fn dihedral_key(cells: &[[usize; 2]]) -> String {
+    let signed: Vec<(isize, isize)> = cells
+        .iter()
+        .map(|&[r, c]| (r as isize, c as isize))
+        .collect();
+    let mut best: Option<String> = None;
+    for &rot in &[0, 1, 2, 3] {
+        for &refl in &[false, true] {
+            let mut t: Vec<(isize, isize)> = signed
+                .iter()
+                .map(|&(r, c)| {
+                    let (mut rr, mut cc) = (r, c);
+                    if refl {
+                        cc = -cc;
+                    }
+                    for _ in 0..rot {
+                        (rr, cc) = (-cc, rr);
+                    }
+                    (rr, cc)
+                })
+                .collect();
+            let min_r = t.iter().map(|x| x.0).min().unwrap_or(0);
+            let min_c = t.iter().map(|x| x.1).min().unwrap_or(0);
+            for p in &mut t {
+                p.0 -= min_r;
+                p.1 -= min_c;
+            }
+            t.sort();
+            let key = t
+                .iter()
+                .map(|&(r, c)| format!("({},{})", r, c))
+                .collect::<String>();
+            if best.as_ref().map_or(true, |b| &key < b) {
+                best = Some(key);
+            }
+        }
+    }
+    best.unwrap_or_default()
 }
 
 /// area: every cell carrying a number clue must belong to a region of exactly

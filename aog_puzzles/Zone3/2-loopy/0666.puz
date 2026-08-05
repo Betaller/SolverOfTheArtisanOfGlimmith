@@ -1,0 +1,21 @@
+VERSION 1
+PUZZLE_VERSION 2
+DIFFICULTY 1
+NO_3_WAY_INTERSECTIONS
+DIMENSIONS 3 3
+PUZZLE
++--+--+--+
+|..|..|..|
++--+##+--+
+|..|..|..|
++--+--+--+
+|..|..|..|
++--+--+--+
+SOLUTION
++##+##+##+
+#        #
++  +##+  +
+#  #  #  #
++  +##+  +
+#        #
++##+##+##+

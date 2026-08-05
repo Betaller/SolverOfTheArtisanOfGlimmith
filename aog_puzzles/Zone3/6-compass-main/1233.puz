@@ -1,0 +1,25 @@
+VERSION 1
+PUZZLE_VERSION 2
+DIFFICULTY 1
+ADJACENT_SIZES_DIFFERENT
+DIMENSIONS 4 4
+PUZZLE
++--+--+--+--+
+|UD0L0R|UD0L0R|..|..|
++--+--+--+--+
+|UD0L0R|..|UD0L0R|..|
++--+--+--+--+
+|UD0L0R|..|..|UD0L0R|
++--+--+--+--+
+|..|UD0L0R|..|UD0L0R|
++--+--+--+--+
+SOLUTION
++##+##+##+##+
+#  #        #
++##+##+##+##+
+#     #  #  #
++##+##+##+  +
+#        #  #
++##+##+##+##+
+#  #     #  #
++##+##+##+##+

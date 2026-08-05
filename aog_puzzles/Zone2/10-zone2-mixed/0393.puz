@@ -1,0 +1,22 @@
+VERSION 1
+PUZZLE_VERSION 2
+DIFFICULTY 2
+NO_RECTANGLES
+AREA_AT_MOST 4
+DIMENSIONS 4 3
+PUZZLE
++--+--+--+--+
+|..|..|..|..|
++--+--+--+--+
+|..|..|..|..|
++--+--+--+--+
+   |..|  |..|
+   +--+  +--+
+SOLUTION
++##+##+##+##+
+#     #     #
++  +##+##+  +
+#  #     #  #
++##+  +##+  +
+   #  #  #  #
+   +##+  +##+

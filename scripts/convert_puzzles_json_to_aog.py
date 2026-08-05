@@ -1,311 +1,249 @@
-"""Convert official puzzles from the archive (puzzles.json) to C++ AoG_Solver ansi input.
+"""Convert official puzzles from the archive (puzzles.json) to C++ AoG_Solver .puz files.
 
-The archive (third_party/archiveofglimmith.github.io/puzzles.json) holds the raw
-official grid text (puzzle_grid) plus the official solution for every puzzle, but
-not the rule/shape-pool metadata.  That lives in `puzzles/official/**/*.json`.
-This script merges the two:
+The archive (third_party/archiveofglimmith.github.io/puzzles.json) stores every official
+puzzle in the game's native ASCII layout: ``puzzle_grid`` (the puzzle) and ``solution``
+(its official region-boundary answer).  The C++ solver in third_party/AoG_Solver reads
+``.puz`` files whose ``PUZZLE`` / ``SOLUTION`` sections are exactly those grids, with each
+line padded to ``3*width+1`` characters — the archive trims trailing whitespace, the game
+and its ``.puz`` files keep it.
 
-  * puzzle_grid        -> C++ PUZZLE grid (already in AoG ansi layout, 22 chars/row)
-  * puzzle rules       -> C++ header directives (SHAPE_BANK / ALL_SHAPES_SAME / ...)
-  * puzzle shape_pool  -> C++ SHAPE definitions
+This script rebuilds the ``aog_puzzles/`` directory that the C++ solver's ``batch_run.sh``
+needs.  It lives in the main repo (not inside the third_party submodule) so the .puz files
+are tracked by the project:
 
-Output: `third_party/AoG_Solver/puzzles_ansi/{zone}/{id}.ansi`
+    aog_puzzles/<zone>/<type>/<id>.puz
+
+The header directives consumed by the C++ ``main()`` are derived straight from the archive
+metadata:
+
+  * ``shapes`` / ``shape_bank``  -> ``SHAPE`` definitions + ``SHAPE_BANK <n>``
+  * rule flags                  -> ``ADJACENT_SHAPES_DIFFERENT`` / ``ALL_SHAPES_SAME`` / ...
+  * ``area_equals`` / ``area_at_least`` / ``area_at_most``
+                                -> ``AREA_EQUALS`` / ``AREA_AT_LEAST`` / ``AREA_AT_MOST``
+
+The grid itself is passed through verbatim (only trailing-padded), never re-encoded:
+compass cells (``UDLR``…), fence (``F0``-``F7``), radar digits at vertices, slash packs
+(``P1``-``P4``), difference counts, inequality symbols, and pre-drawn ``##`` boundaries all
+already use the byte-level encoding the C++ parser expects.
+
+Output: aog_puzzles/{zone}/{type}/{id}.puz
 Usage:
-    python scripts/convert_puzzles_json_to_aog.py [--out third_party/AoG_Solver/puzzles_ansi]
+    python scripts/convert_puzzles_json_to_aog.py [--out aog_puzzles]
+    python scripts/convert_puzzles_json_to_aog.py --ids 0008 0079   # debug a subset
 """
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
-import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import scripts.convert_archive as ca  # noqa: E402
+ARCHIVE_JSON = os.path.join("third_party", "archiveofglimmith.github.io", "puzzles.json")
 
-ARCHIVE_JSON = "third_party/archiveofglimmith.github.io/puzzles.json"
+# Archive boolean flag -> C++ header directive.
+RULE_FLAGS: list[tuple[str, str]] = [
+    ("adjacent_shapes_different", "ADJACENT_SHAPES_DIFFERENT"),
+    ("adjacent_sizes_different", "ADJACENT_SIZES_DIFFERENT"),
+    ("all_shapes_different", "ALL_SHAPES_DIFFERENT"),
+    ("all_shapes_same", "ALL_SHAPES_SAME"),
+    ("no_3_way_intersections", "NO_3_WAY_INTERSECTIONS"),
+    ("no_4_way_intersections", "NO_4_WAY_INTERSECTIONS"),
+    ("no_rectangles", "NO_RECTANGLES"),
+    ("one_symbol_per_region", "ONE_SYMBOL_PER_REGION"),
+    ("only_rectangles", "ONLY_RECTANGLES"),
+]
 
-
-def shape_to_shape_lines(cells: list[list[int]]) -> list[str]:
-    """Shape (relative cells) -> C++ `SHAPE <name> <nrow>` + nrow lines of # / space."""
-    cells = sorted(tuple(c) for c in cells)
-    min_r = min(r for r, _ in cells)
-    min_c = min(c for _, c in cells)
-    norm = sorted((r - min_r, c - min_c) for r, c in cells)
-    max_r = max(r for r, _ in norm)
-    max_c = max(c for _, c in norm)
-    size = max(max_r, max_c) + 1
-    grid = [[" "] * size for _ in range(size)]
-    for r, c in norm:
-        grid[r][c] = "#"
-    lines = [f"SHAPE s{size} {size}"]
-    lines.extend("".join(row) for row in grid)
-    return lines
-
-
-def rules_to_headers(rules: list[dict], shape_pool: list[list[list[int]]]) -> list[str]:
-    headers: list[str] = []
-    for r in rules:
-        t = r.get("type")
-        if t == "shape_pool":
-            headers.append("SHAPE_BANK")
-            # The C++ main reads SHAPE_BANK then consumes the *next* line via
-            # getline; without a blank line here the following SHAPE directive
-            # would be swallowed and the shape catalog would stay empty.
-            headers.append("")
-            for shape in shape_pool:
-                headers.extend(shape_to_shape_lines(shape))
-        elif t == "precise":
-            area = r.get("params", {}).get("area")
-            if area is not None:
-                headers.append(f"AREA_EQUALS {area}")
-        elif t == "range":
-            p = r.get("params", {})
-            if "min" in p:
-                headers.append(f"AREA_AT_LEAST {p['min']}")
-            if "max" in p:
-                headers.append(f"AREA_AT_MOST {p['max']}")
-        elif t == "block":
-            headers.append("ONLY_RECTANGLES")
-        elif t == "non_block":
-            headers.append("NO_RECTANGLES")
-        elif t == "same":
-            headers.append("ALL_SHAPES_SAME")
-        elif t == "different":
-            headers.append("ALL_SHAPES_DIFFERENT")
-        elif t == "differentiation":
-            headers.append("ADJACENT_SIZES_DIFFERENT")
-        elif t == "mixed":
-            headers.append("ADJACENT_SHAPES_DIFFERENT")
-        elif t == "solitary":
-            headers.append("ONE_SYMBOL_PER_REGION")
-        elif t == "brick":
-            headers.append("NO_4_WAY_INTERSECTIONS")
-        elif t == "ring":
-            headers.append("NO_3_WAY_INTERSECTIONS")
-        # fence / compass / watchtower / area / inequality / difference /
-        # rose_window / puzzle_piece are encoded inside the grid, not as headers.
-    return headers
+# Archive area-bound field -> C++ directive taking a value.
+AREA_BOUNDS: list[tuple[str, str]] = [
+    ("area_equals", "AREA_EQUALS"),
+    ("area_at_least", "AREA_AT_LEAST"),
+    ("area_at_most", "AREA_AT_MOST"),
+]
 
 
-def build_index() -> dict[str, dict]:
-    """id -> official puzzle dict (puzzle_grid, width, height, solution, zone, type)."""
-    idx: dict[str, dict] = {}
-    for p in json.load(open(ARCHIVE_JSON)):
-        idx[str(p["id"])] = p
-    return idx
+def _compass_end(j: int, line: str) -> int:
+    """Replicate the C++ compass-cell parsing to find where the cell ends.
+
+    The C++ read_puzzle() walks the four directions starting at the 'U', advancing
+    a cursor per direction; chars past the line end read as '\\0'.  This mirrors that
+    exactly so the returned index matches what the solver computes.
+    """
+    n = len(line)
+
+    def g(i: int) -> str:
+        return line[i] if i < n else "\0"
+
+    ci = j
+    # up: marker 'D'
+    if g(ci + 1) != "D" and g(ci + 2) != "D":
+        ci += 2
+    elif g(ci + 1) != "D":
+        ci += 1
+    ci += 1
+    # down: marker 'L'
+    if g(ci + 1) != "L" and g(ci + 2) != "L":
+        ci += 2
+    elif g(ci + 1) != "L":
+        ci += 1
+    ci += 1
+    # left: marker 'R'
+    if g(ci + 1) != "R" and g(ci + 2) != "R":
+        ci += 2
+    elif g(ci + 1) != "R":
+        ci += 1
+    ci += 1
+    # right: trailing digits
+    if g(ci + 1).isdigit() and g(ci + 2).isdigit():
+        ci += 2
+    elif g(ci + 1).isdigit():
+        ci += 1
+    ci += 1
+    return ci
 
 
-def find_project_json(pid: str) -> dict | None:
-    for f in glob.glob(f"puzzles/official/**/{pid}.json", recursive=True):
-        return json.load(open(f))
-    return None
+def _area_line_min_width(line: str, w: int) -> int:
+    """Minimum width an area line needs so the C++ parser never reads past it.
+
+    The parser starts at size = 3*w+1 and grows it by (cell_len - 2) per compass cell
+    (and +1 per 3-char S cell).  A trimmed archive line is shorter than the final size,
+    which makes read_puzzle() read past the string end (garbage, or a crash — e.g. the
+    two 6-compass segfaults).  Node lines are fixed at 3*w+1; only area lines grow.
+    """
+    size = 3 * w + 1
+    j = 0
+    next_status = 0  # 0 = line char, 1 = area cell
+    n = len(line)
+    while j < size:
+        if next_status == 0:
+            j += 1
+            next_status = 1
+        else:
+            if j < n and line[j] == "S" and j + 2 < n and line[j + 2].isdigit():
+                j += 3
+                size += 1
+            elif j < n and line[j] == "U":
+                end = _compass_end(j, line)
+                size += end - j - 2
+                j = end
+            else:
+                j += 2
+            next_status = 0
+    return size
 
 
-def build_shapes(proj: dict) -> list[dict]:
-    """shape_pool -> list of {'id','grid'} for the C++ SHAPE directives."""
-    result: list[dict] = []
-    for i, s in enumerate(proj.get("shape_pool", [])):
-        cells = {(r, c) for r, c in s}
-        if not cells:
-            continue
-        min_r = min(r for r, _ in cells)
-        min_c = min(c for _, c in cells)
-        norm = sorted((r - min_r, c - min_c) for r, c in cells)
-        size = max(max(r for r, _ in norm), max(c for _, c in norm)) + 1
-        grid = [[" "] * size for _ in range(size)]
-        for r, c in norm:
-            grid[r][c] = "#"
-        result.append({"id": i + 1, "grid": ["".join(row) for row in grid]})
+def _pad_grid_lines(rows: list[str], w: int) -> list[str]:
+    """Pad each grid line so the C++ parser stays within bounds.
+
+    Node lines (even index) are read at fixed offsets 0,3,6,... and need 3*w+1 chars.
+    Area lines (odd index) grow as the parser walks compass/S cells, so pad each to its
+    own computed minimum width.  Longer lines (compass content) are never truncated.
+    """
+    min_node = 3 * w + 1
+    result = []
+    for i, ln in enumerate(rows):
+        if i % 2 == 0:
+            need = min_node
+        else:
+            need = _area_line_min_width(ln, w)
+        result.append(ln if len(ln) >= need else ln.ljust(need))
     return result
 
 
-def fence_type(fp: list[list[int]]) -> int:
-    """3x3 fence pattern -> C++ F marker (0..4, 7)."""
-    fp = set(tuple(x) for x in fp)
-    n = sum(1 for rc in ((0, 1), (2, 1), (1, 0), (1, 2)) if rc in fp)
-    opp = ((0, 1) in fp and (2, 1) in fp) or ((1, 0) in fp and (1, 2) in fp)
-    if n == 0:
-        return 0
-    if n == 1:
-        return 1
-    if n == 2 and opp:
-        return 2
-    if n == 2:
-        return 7
-    if n == 3:
-        return 3
-    return 4
-
-
-def compass_str(cp: dict) -> str:
-    """Compass clue -> C++ U string (up/down/left/right with D/L/R markers)."""
-    parts = ["U"]
-    for attr, marker in (("up", "D"), ("down", "L"), ("left", "R"), ("right", None)):
-        v = cp.get(attr)
-        if v is None or v < 0:
-            parts.append(marker if marker else "")
-        else:
-            parts.append(str(v))
-    return "".join(parts)
-
-
-def json_to_ansi_lines(j: dict, sid_map: dict) -> list[str]:
-    """Rebuild the C++ ansi grid from the parsed puzzle JSON.
-
-    node line (even):  vertex '+' at every 3rd char, vertical edges between
-    area line (odd):   alternating horizontal edge + cell content (2-3+ chars)
-    """
-    h = j["grid"]["height"]
-    w = j["grid"]["width"]
-    h_edge: dict = {}
-    v_edge: dict = {}
-    for e in j["edges"]:
-        r1, c1, r2, c2 = e["r1"], e["c1"], e["r2"], e["c2"]
-        if r1 == r2:
-            h_edge[(r1, min(c1, c2))] = e
-        else:
-            v_edge[(min(r1, r2), c1)] = e
-    cells = {(c["row"], c["col"]): c for c in j["cells"]}
-
-    def edge_char(e: dict | None) -> str:
-        if e is None:
-            return "-"
-        if e.get("constraint"):
-            ct = e["constraint"]["type"]
-            val = e["constraint"].get("value")
-            if ct == "difference":
-                return str(val or 0)
-            if ct == "heterogeneous":
-                return "!"
-            if ct == "homogeneous":
-                return "="
-            if ct == "inequality":
-                # value==1 -> first endpoint larger -> '>' (left larger in C++)
-                return ">" if val == 1 else "<"
-        return "#" if e.get("is_boundary") else "-"
-
-    def cell_content(c: dict) -> str:
-        if c.get("blocked"):
-            return "  "
-        if c.get("number") is not None:
-            return str(c["number"]).zfill(2)
-        if c.get("shape_pattern"):  # puzzle_piece -> Sxx (C++ shape index)
-            key = tuple(sorted(tuple(x) for x in c["shape_pattern"]))
-            sid = sid_map.get(key)
-            if sid is not None:
-                return "S%d" % sid
-        if c.get("fence_pattern"):  # fence -> Fx
-            return "F%d" % fence_type(c["fence_pattern"])
-        if c.get("compass"):  # compass -> U...
-            return compass_str(c["compass"])
-        if c.get("symbol"):  # rose / one-symbol -> Px
-            return "P0"  # single-symbol puzzles use P0
-        return ".."
-
+def build_puz(p: dict) -> str:
+    """Render one archive puzzle dict as a complete .puz file (text)."""
+    w, h = int(p["width"]), int(p["height"])
     lines: list[str] = []
-    for i in range(2 * h + 1):
-        if i % 2 == 0:
-            # node line: fixed positions, every 3rd char is a vertex
-            row = ["-"] * (3 * w + 1)
-            for k in range(w + 1):
-                row[k * 3] = "+"
-            r = i // 2 - 1
-            for c in range(w):
-                if 0 <= r < h - 1:
-                    row[c * 3 + 2] = edge_char(v_edge.get((r, c)))
-            lines.append("".join(row))
-        else:
-            # area line: variable-length cell content (C++ while-loop parser)
-            r = i // 2
-            s = []
-            for c in range(w + 1):
-                if c == 0 or c == w:
-                    s.append("#")
-                else:
-                    s.append(edge_char(h_edge.get((r, c - 1))))
-                if c < w:
-                    s.append(cell_content(cells.get((r, c), {})))
-            lines.append("".join(s))
-    return lines
 
+    # Optional headers, all skipped by the C++ parser.
+    lines.append("VERSION 1")
+    lines.append("PUZZLE_VERSION 2")
+    lines.append("DIFFICULTY %s" % p["difficulty"])
 
-def convert(pid: str, archive: dict) -> str:
-    proj = find_project_json(pid)
-    if proj is None:
-        raise FileNotFoundError(f"no puzzles/official JSON for {pid}")
-    shapes_list = build_shapes(proj)
-    ap = {
-        "width": archive["width"],
-        "height": archive["height"],
-        "puzzle_grid": archive["puzzle_grid"],
-        "shapes": shapes_list,
-        "shape_bank": [s["id"] for s in shapes_list] if shapes_list else None,
-        "one_symbol_per_region": any(
-            r.get("type") == "solitary" for r in proj.get("rules", [])
-        ),
-    }
-    j = ca._parse_puzzle(ap)
+    # Shape definitions: the C++ assigns indices 1..n by insertion order, and the
+    # archive's S1/S2 cell markers reference those ids, so emit in id order.
+    # The archive stores each shape grid with trailing spaces trimmed; the C++
+    # SHAPE parser sizes the shape as max(last-row length, n_rows), so an
+    # un-padded last row silently drops cells.  Pad every row to the max width.
+    for shape in p.get("shapes", []):
+        grid = shape["grid"]
+        pad = max((len(r) for r in grid), default=0)
+        lines.append("SHAPE %s %d" % (shape["id"], len(grid)))
+        lines.extend(r.ljust(pad) for r in grid)
+    if p.get("shape_bank"):
+        # Enables 'predefined shapes only' in the solver.  The count must sit on the
+        # same line (main() consumes the rest of it with getline).
+        lines.append("SHAPE_BANK %d" % len(p["shape_bank"]))
 
-    # puzzle_piece (Sxx) shapes: each distinct shape_pattern becomes a SHAPE
-    # definition; the cell marker references it by id.
-    sid_map: dict = {}
-    piece_shapes: list = []
-    for c in j["cells"]:
-        sp = c.get("shape_pattern")
-        if sp:
-            key = tuple(sorted(tuple(x) for x in sp))
-            if key not in sid_map:
-                sid_map[key] = len(shapes_list) + len(piece_shapes) + 1
-                piece_shapes.append(sp)
+    # Rule / area-bound directives.
+    for key, directive in RULE_FLAGS:
+        if p.get(key):
+            lines.append(directive)
+    for key, directive in AREA_BOUNDS:
+        if p.get(key) is not None:
+            lines.append("%s %s" % (directive, p[key]))
 
-    grid_lines = json_to_ansi_lines(j, sid_map)
+    lines.append("DIMENSIONS %d %d" % (w, h))
 
-    lines = [f"DIMENSIONS {archive['width']} {archive['height']}"]
-    lines.extend(rules_to_headers(proj.get("rules", []), proj.get("shape_pool", [])))
-    # puzzle_piece shape definitions (after the shape_pool SHAPE_BANK block).
-    if piece_shapes:
-        if not shapes_list:
-            lines.append("SHAPE_BANK")
-            lines.append("")
-        for shape in piece_shapes:
-            lines.extend(shape_to_shape_lines(shape))
+    # Grid sections: pad each line with trailing spaces (the archive trims them).
+    # Node lines need 3*width+1 chars; area lines may need more because compass/S
+    # cells widen them in the C++ parser.  Solutions are fixed-width boundary
+    # renderings, so 3*width+1 is enough.  Longer lines are never truncated.
+    grid_width = 3 * w + 1
     lines.append("PUZZLE")
-    lines.extend(grid_lines)
-    return "\n".join(lines)
+    lines.extend(_pad_grid_lines(p["puzzle_grid"], w))
+    lines.append("SOLUTION")
+    for ln in p["solution"]:
+        lines.append(ln if len(ln) >= grid_width else ln.ljust(grid_width))
+
+    return "\n".join(lines) + "\n"
+
+
+def load_archive() -> dict[str, dict]:
+    """id -> archive puzzle dict."""
+    return {str(p["id"]): p for p in json.load(open(ARCHIVE_JSON))}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default="puzzles_ansi")
+    parser.add_argument(
+        "--out",
+        default="aog_puzzles",
+        help="output root (default: aog_puzzles)",
+    )
     parser.add_argument("--ids", nargs="*", help="only convert these ids (debug)")
     args = parser.parse_args()
 
-    archive = build_index()
+    archive = load_archive()
     if args.ids:
         items = [(i, archive[i]) for i in args.ids if i in archive]
     else:
         items = sorted(archive.items())
 
     converted = 0
-    skipped: list[str] = []
     for pid, p in items:
-        try:
-            ansi = convert(pid, p)
-        except FileNotFoundError:
-            skipped.append(pid)
-            continue
-        zone = p["zone"]
-        out_dir = os.path.join(args.out, zone)
+        if not p["zone"] or not p["zone"].startswith("Zone"):
+            continue  # skip the non-game 'Puzzles'/'Data' entries
+        out_dir = os.path.join(args.out, p["zone"], p["type"])
         os.makedirs(out_dir, exist_ok=True)
-        with open(os.path.join(out_dir, f"{pid}.ansi"), "w", encoding="utf-8") as f:
-            f.write(ansi + "\n")
+        dest = os.path.join(out_dir, f"{pid}.puz")
+        text = build_puz(p)
+        if not p.get("solution"):
+            # The archive has no official solution for this puzzle (0067, 1130);
+            # keep a SOLUTION baked by fix_puz_solutions.py if one already exists,
+            # otherwise the next batch_run would report it 'wrong'.
+            existing_sol = None
+            try:
+                _head, _sep, existing_sol = open(dest, encoding="utf-8").read().partition("\nSOLUTION\n")
+            except FileNotFoundError:
+                pass
+            if existing_sol and existing_sol.strip():
+                text = text.split("\nSOLUTION\n", 1)[0] + "\nSOLUTION\n" + existing_sol
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write(text)
         converted += 1
 
-    print(f"转换 {converted} 个谜题, 跳过 {len(skipped)} (无 puzzles/official JSON)")
-    if skipped:
-        print("跳过示例:", skipped[:10])
+    print(f"转换 {converted} 个谜题 -> {os.path.abspath(args.out)}")
+    if not args.ids:
+        print("运行验证: cd third_party/AoG_Solver && ./batch_run.sh ../aog_puzzles/Zone1")
 
 
 if __name__ == "__main__":

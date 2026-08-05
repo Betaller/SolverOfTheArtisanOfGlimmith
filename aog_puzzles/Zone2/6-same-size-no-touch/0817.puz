@@ -1,0 +1,21 @@
+VERSION 1
+PUZZLE_VERSION 2
+DIFFICULTY 2
+ADJACENT_SIZES_DIFFERENT
+DIMENSIONS 4 3
+PUZZLE
++--+--+--+--+
+|..|P1|..|P1|
++--+--+--+--+
+|P1|..|P1|P1|
++--+--+--+--+
+|..|P1|P1|..|
++--+--+--+--+
+SOLUTION
++##+##+##+##+
+#     #  #  #
++##+##+  +##+
+#  #     #  #
++##+##+##+  +
+#     #  #  #
++##+##+##+##+

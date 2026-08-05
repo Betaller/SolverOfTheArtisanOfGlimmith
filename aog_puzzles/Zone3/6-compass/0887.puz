@@ -1,0 +1,16 @@
+VERSION 1
+PUZZLE_VERSION 2
+DIFFICULTY 1
+DIMENSIONS 4 2
+PUZZLE
+   +--+--+   
+   |..|..|   
++--+--+--+--+
+|UDLR1|..|..|UDL2R|
++--+--+--+--+
+SOLUTION
+   +##+##+   
+   #  #  #   
++##+##+  +##+
+#     #     #
++##+##+##+##+

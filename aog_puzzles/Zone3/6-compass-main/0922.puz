@@ -1,0 +1,28 @@
+VERSION 1
+PUZZLE_VERSION 2
+DIFFICULTY 3
+DIMENSIONS 5 5
+PUZZLE
++--+--+--+--+--+
+|UDLR3|UDLR1|UD1LR|UDL2R|UDL3R|
++--+--+--+--+--+
+|U1DLR|U1DLR|U3DLR|U0DLR|UD3LR|
++--+--+--+--+--+
+|UD4LR|U2DLR|U2DLR|UD1LR|U2DLR|
++--+--+--+--+--+
+|UDLR3|U3DLR|U3DLR|U1DLR|U3DLR|
++--+--+--+--+--+
+|UD0LR|UDL1R|U6DLR|UD0LR|UDL1R|
++--+--+--+--+--+
+SOLUTION
++##+##+##+##+##+
+#  #  #        #
++  +  +  +##+##+
+#  #  #  #     #
++  +  +##+##+  +
+#  #     #  #  #
++  +##+##+  +  +
+#        #  #  #
++##+##+  +##+  +
+#     #  #  #  #
++##+##+##+##+##+

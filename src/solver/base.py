@@ -140,6 +140,11 @@ def default_router() -> SolverRouter:
     from src.solver.backtrack import BacktrackSolver
     from src.solver.rust_solver import RustSolver
 
+    # Rust first (aog → pieces → backtrack, plus the rose-window solver ported
+    # from Python).  The Python solvers stay as a fallback for the few puzzles
+    # Rust cannot solve yet (e.g. brick+area backtrack 1301, range+rose
+    # 1334/1342); they can be removed once Rust covers those and a full-corpus
+    # Rust-only verification shows no regression.
     return SolverRouter([
         RustSolver(),
         ExactCoverSolver(),

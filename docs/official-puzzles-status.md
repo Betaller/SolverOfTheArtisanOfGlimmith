@@ -44,6 +44,15 @@
 
 另：`scan_official_results.jsonl`（仓库根目录）保存了每题的求解结果（区域划分、耗时、规则、校验结果），可复用于后续对比。
 
+### 2.2 rose 求解器下沉到 Rust（2026-08-05）
+
+把 Python rose 求解器（`region_match.py` + `rose_growth.py`）移植进 Rust（`rsolver/src/solver/rose/`），使 Rust 二进制能解 aog 解不出的**无尺寸约束纯 rose** 题。设计文档：`docs/重构/rose-solver-rust-port.md`。
+
+- Rust-only `verify_puzzles.py`（puzzles/official，1258 题）：**1048 / 1258 通过**（较 rose 移植前 rust-only 基准 1040 提升 8 题）。
+- 新增解出且与官方一致：**C4-1、0277、0213、0213nopad**（原 aog 30s 超时/UNSOLVED）；0833（10×11）时解时不（大网格，候选上限敏感）。
+- 纯 rose 语料 30 题中 28 题 Rust 可解；大网格（0804/1433/1434）仍 UNSOLVED（Python 也解不出，无回归）。
+- **router 仍保留 Python 兜底**：Rust 目前解不出的 3 题仍需 Python——1301（brick+area，Rust backtrack 卡死）、1334/1342（range+rose，Rust rose 在预算内解不出）。等 Rust 补齐这三类、且 Rust-only 全量无回归后再删 Python（软门禁）。
+
 ## 3. 解 ≠ 官方解（DIFF）分析
 
 **仅剩 6 道，全为 watchtower 规则**：

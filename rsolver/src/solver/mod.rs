@@ -3,6 +3,7 @@
 pub mod aog;
 pub mod backtrack;
 pub mod pieces;
+pub mod rose;
 
 use crate::types::*;
 use std::collections::HashMap;
@@ -32,11 +33,34 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // gives the subprocess enough wall-clock (3×) for all three to run.
 
     // 0. AoG DFS solver first: direct port of the C++ reference solver.
+    // For pure rose_window puzzles aog solves most in <1s but can hang for the
+    // full budget on "no size constraint" ones — give it a short budget, then
+    // hand the rest to the rose solver.
+    let rose_capable = is_rose_capable(puzzle);
+    let aog_budget = if rose_capable {
+        AOG_ROSE_BUDGET_MS.min(timeout_ms)
+    } else {
+        timeout_ms
+    };
     if !puzzle.rules.is_empty() {
-        let deadline = start + std::time::Duration::from_millis(timeout_ms);
+        let deadline = start + std::time::Duration::from_millis(aog_budget);
         if let Some(regions) = aog::solve_aog(puzzle, deadline) {
             return build_solution_trusted(regions, &start, puzzle);
         }
+
+        // NEW: pure rose_window puzzles aog couldn't solve quickly → rose solver.
+        if rose_capable {
+            let elapsed = start.elapsed().as_millis() as u64;
+            let rose_ms = timeout_ms
+                .saturating_sub(elapsed)
+                .min(ROSE_TIMEOUT_MS);
+            if rose_ms > 0 {
+                if let Some(regions) = rose::solve_rose(puzzle, &start, rose_ms) {
+                    return build_solution(regions, &start, puzzle);
+                }
+            }
+        }
+
         if std::env::var("AOG_ONLY").is_ok() {
             let elapsed = start.elapsed().as_millis() as u64;
             return Solution {
@@ -170,6 +194,20 @@ fn build_solution_trusted(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Pu
         rule_results,
     }
 }
+
+/// True for puzzles the rose solver can attempt — mirrors Python
+/// `RoseSolver.supports` (rose_window present, and neither `same` nor
+/// `different`).  region_match itself bails on shape_pool/puzzle_piece.
+fn is_rose_capable(puzzle: &Puzzle) -> bool {
+    let has_rose = puzzle.rules.iter().any(|r| r.ctype == "rose_window");
+    if !has_rose {
+        return false;
+    }
+    !puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "different")
+}
+
+const AOG_ROSE_BUDGET_MS: u64 = 5_000;
+const ROSE_TIMEOUT_MS: u64 = 10_000;
 
 fn has_area_number_clues(puzzle: &Puzzle) -> bool {
     for r in 0..puzzle.height {

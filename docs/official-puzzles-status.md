@@ -87,7 +87,7 @@ Zone3/7-zone3-mixed/1144
 | 规则组合 | 未解数 | 原因推测 |
 |---|---|---|
 | compass + solitary | 13 | compass 搜索空间大 |
-| rose_window（纯） | 6 | 玫瑰窗区域匹配 |
+| rose_window（纯） | ~2 | 玫瑰窗区域匹配；rose 移植后 0277/0213/0213nopad 已解，剩大网格 0804/1433/1434（见 §2.2） |
 | inequality | 6 | 面积不等约束难传播 |
 | compass + rose_window | 6 | 双强规则组合 |
 | rose_window + same / ring / watchtower | 13 | 组合剪枝不足 |

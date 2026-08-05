@@ -1,8 +1,26 @@
 //! Rule constraint checkers for puzzle validation.
 //! Each function checks one rule against a completed set of regions.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use crate::types::*;
+
+/// True if the cells form a solid rectangle (any aspect ratio / size).
+pub fn is_rectangle(cells: &[[usize; 2]]) -> bool {
+    if cells.is_empty() {
+        return false;
+    }
+    let mut min_r = usize::MAX;
+    let mut max_r = 0usize;
+    let mut min_c = usize::MAX;
+    let mut max_c = 0usize;
+    for &[r, c] in cells {
+        min_r = min_r.min(r);
+        max_r = max_r.max(r);
+        min_c = min_c.min(c);
+        max_c = max_c.max(c);
+    }
+    cells.len() == (max_r - min_r + 1) * (max_c - min_c + 1)
+}
 
 pub fn check_rule(rule: &Rule, puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     match rule.ctype.as_str() {
@@ -15,10 +33,10 @@ pub fn check_rule(rule: &Rule, puzzle: &Puzzle, regions: &[RegionInfo]) -> bool 
         "precise" => check_precise(regions, rule),
         "range" => check_range(regions, rule),
         "fence" => true,
-        "solitary" => check_solitary(regions),
+        "solitary" => check_solitary(puzzle, regions),
         "block" => check_block(regions),
         "non_block" => check_nonblock(regions),
-        "differentiation" => check_differentiation(regions),
+        "differentiation" => check_differentiation(puzzle, regions),
         "brick" => true,
         "ring" => true,
         "inequality" => true,
@@ -142,18 +160,18 @@ fn check_area(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     true
 }
 
-/// same: all regions have the same area.
+/// same: all regions share one shape.
 fn check_same(regions: &[RegionInfo]) -> bool {
     if regions.len() < 2 {
         return true;
     }
-    let a = regions[0].area;
-    regions.iter().all(|r| r.area == a)
+    let first = &regions[0].shape;
+    regions.iter().all(|r| &r.shape == first)
 }
 
-/// different: all regions have different areas.
+/// different: all region shapes are distinct.
 fn check_different(regions: &[RegionInfo]) -> bool {
-    let set: HashSet<usize> = regions.iter().map(|r| r.area).collect();
+    let set: HashSet<&Shape> = regions.iter().map(|r| &r.shape).collect();
     set.len() == regions.len()
 }
 
@@ -195,29 +213,76 @@ fn check_range(regions: &[RegionInfo], rule: &Rule) -> bool {
     })
 }
 
-/// solitary: every region has exactly 1 cell.
-fn check_solitary(regions: &[RegionInfo]) -> bool {
-    regions.iter().all(|r| r.area == 1)
+/// solitary: every region has exactly one clue-bearing cell.
+fn check_solitary(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
+    for reg in regions {
+        let mut clues = 0usize;
+        for &[r, c] in &reg.cells {
+            let cell = &puzzle.cells[r][c];
+            if cell.symbol.is_some()
+                || cell.compass.is_some()
+                || cell.number.is_some()
+                || cell.shape_pattern.is_some()
+                || cell.fence_pattern.is_some()
+            {
+                clues += 1;
+            }
+        }
+        if clues != 1 {
+            return false;
+        }
+    }
+    true
 }
 
-/// block: every region is a 2x2 square.
+/// block: every region is a solid rectangle.
 fn check_block(regions: &[RegionInfo]) -> bool {
-    let block: Shape = vec![[0, 0], [0, 1], [1, 0], [1, 1]];
-    regions.iter().all(|r| r.shape == block)
+    regions.iter().all(|r| is_rectangle(&r.cells))
 }
 
-/// non_block: not all regions are 2x2 squares.
+/// non_block: no region is a rectangle.
 fn check_nonblock(regions: &[RegionInfo]) -> bool {
-    !check_block(regions)
+    regions.iter().all(|r| !is_rectangle(&r.cells))
 }
 
-/// differentiation: all regions have different shapes.
-fn check_differentiation(regions: &[RegionInfo]) -> bool {
+/// differentiation: adjacent regions (sharing an edge) have different areas.
+fn check_differentiation(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     if regions.len() < 2 {
         return true;
     }
-    let shapes: HashSet<&Shape> = regions.iter().map(|r| &r.shape).collect();
-    shapes.len() == regions.len()
+    let mut cell_to_rid: HashMap<(usize, usize), usize> = HashMap::new();
+    for reg in regions {
+        for &[r, c] in &reg.cells {
+            cell_to_rid.insert((r, c), reg.region_id);
+        }
+    }
+    let area_of = |rid: usize| -> usize {
+        regions.iter().find(|r| r.region_id == rid).map(|r| r.area).unwrap_or(0)
+    };
+    let mut seen: HashSet<(usize, usize)> = HashSet::new();
+    for reg in regions {
+        for &[r, c] in &reg.cells {
+            for (dr, dc) in [(1i64, 0i64), (0, 1i64)] {
+                let nr = r as i64 + dr;
+                let nc = c as i64 + dc;
+                if nr >= 0 && nr < puzzle.height as i64 && nc >= 0 && nc < puzzle.width as i64 {
+                    if let Some(&other) = cell_to_rid.get(&(nr as usize, nc as usize)) {
+                        if other != reg.region_id {
+                            let key = if reg.region_id < other {
+                                (reg.region_id, other)
+                            } else {
+                                (other, reg.region_id)
+                            };
+                            if seen.insert(key) && area_of(reg.region_id) == area_of(other) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    true
 }
 
 // Stubs for edge/vertex/cell-based rules (require board state, not just regions):
@@ -249,18 +314,28 @@ mod tests {
 
     #[test]
     fn test_check_same() {
-        let regions = vec![r(vec![[0, 0]], 3), r(vec![[0, 0]], 3), r(vec![[0, 0]], 3)];
+        // same shape → ok; different shape → fail (shape semantics, not area).
+        let regions = vec![r(vec![[0, 0], [0, 1]], 2), r(vec![[0, 0], [0, 1]], 2)];
         assert!(check_same(&regions));
-        let regions = vec![r(vec![[0, 0]], 3), r(vec![[0, 0]], 4)];
+        let regions = vec![r(vec![[0, 0]], 1), r(vec![[0, 0], [0, 1]], 2)];
         assert!(!check_same(&regions));
     }
 
     #[test]
     fn test_check_different() {
-        let regions = vec![r(vec![[0, 0]], 3), r(vec![[0, 0]], 4), r(vec![[0, 0]], 5)];
+        // distinct shapes → ok; duplicated shape → fail (shape semantics, not area).
+        let regions = vec![r(vec![[0, 0]], 1), r(vec![[0, 0], [0, 1]], 2)];
         assert!(check_different(&regions));
-        let regions = vec![r(vec![[0, 0]], 3), r(vec![[0, 0]], 3)];
+        let regions = vec![r(vec![[0, 0]], 1), r(vec![[0, 0]], 1)];
         assert!(!check_different(&regions));
+    }
+
+    #[test]
+    fn test_is_rectangle() {
+        assert!(is_rectangle(&[[0, 0], [0, 1], [1, 0], [1, 1]]));
+        assert!(is_rectangle(&[[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2]])); // 2x3
+        assert!(!is_rectangle(&[[0, 0], [0, 1], [1, 0]])); // L triomino
+        assert!(!is_rectangle(&[]));
     }
 
     #[test]

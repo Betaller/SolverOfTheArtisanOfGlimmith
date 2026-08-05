@@ -54,20 +54,28 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Optio
     }
     dlx.set_deadline(deadline);
 
-    dlx.search(0);
-
-    if dlx.solution_rows.is_empty() {
-        return None;
-    }
-
-    // Validate each solution with edge constraints and watchtowers
-    for row_ids in &dlx.solution_rows {
-        if let Some(regions) = reconstruct_and_validate(&placements, row_ids, &ctx) {
-            return Some(regions);
+    // Search, validating every complete tiling against the global rules
+    // (edge constraints, watchtowers, and — via `constraints::check_all` — the
+    // region-level rules like block / different / differentiation / solitary).
+    // Keep searching until a valid tiling is found or the deadline expires.
+    // This lets a block puzzle (routed here through a synthesized rectangle
+    // pool) land on a *valid* rectangle partition instead of the first
+    // (usually trivial all-1×1) one.
+    let mut result: Option<Vec<RegionInfo>> = None;
+    let mut partial: Vec<usize> = Vec::new();
+    let mut row_check = |_partial: &[usize]| true;
+    let mut on_solution = |row_ids: &[usize]| {
+        match reconstruct_and_validate(puzzle, &placements, row_ids, &ctx) {
+            Some(regions) => {
+                result = Some(regions);
+                true // stop the search
+            }
+            None => false, // keep looking
         }
-    }
+    };
+    dlx.search_with_check(0, &mut partial, &mut row_check, &mut on_solution);
 
-    None
+    result
 }
 
 fn has_clues(puzzle: &Puzzle) -> bool {
@@ -134,8 +142,9 @@ fn compute_eff_area_bounds(puzzle: &Puzzle, h: usize, w: usize) -> (usize, usize
                     max_a = max_a.min(v as usize);
                 }
             }
-            "solitary" => { min_a = 1; max_a = 1; }
-            "block" => { min_a = 4; max_a = 4; }
+            // NOTE: `block` (rectangles of any size) and `solitary` (one clue
+            // cell per region) do NOT constrain area — previously forced to
+            // 4..4 / 1..1, which made pieces unable to place valid regions.
             _ => {}
         }
     }
@@ -573,6 +582,7 @@ fn is_precut(puzzle: &Puzzle, r1: usize, c1: usize, r2: usize, c2: usize) -> boo
 }
 
 fn reconstruct_and_validate(
+    puzzle: &Puzzle,
     placements: &[Placement],
     row_ids: &[usize],
     ctx: &SolveContext,
@@ -643,6 +653,14 @@ fn reconstruct_and_validate(
             matched_shape_name: None,
         }
     }).collect();
+
+    // Region-level rules (block / different / differentiation / solitary /
+    // non_block / shape_pool ...).  Edge/vertex rules (inequality, difference,
+    // watchtower, compass, rose_window) are handled above or by the router.
+    let rule_results = crate::constraints::check_all(puzzle, &puzzle.rules, &regions);
+    if !puzzle.rules.iter().all(|r| rule_results.contains(&r.ctype)) {
+        return None;
+    }
 
     Some(regions)
 }

@@ -7,12 +7,13 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
+import concurrent.futures
+import glob
 import json
 import sys
 import time
-import glob
-import argparse
-import concurrent.futures
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,11 +84,48 @@ def test_one(args: tuple[str, float, bool]) -> PuzzleResult:
         return PuzzleResult(name, False, 0, 0, False, str(e))
 
 
+def _path_meta(path: str) -> dict:
+    """Extract zone/type/id from an official puzzle path, else dir + basename."""
+    parts = path.replace('\\', '/').split('/')
+    name = parts[-1]
+    if len(parts) >= 5 and parts[-4] == 'official':
+        return {'zone': parts[-3], 'type': parts[-2], 'id': name[:-5]}
+    return {'zone': parts[-2] if len(parts) >= 3 else '', 'type': '', 'id': name[:-5]}
+
+
+def _record(path: str, r: PuzzleResult) -> dict:
+    """Serialize one result as a JSONL record close to ``scan_official_results.jsonl``."""
+    meta = _path_meta(path)
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+        grid, rules = data.get('grid'), data.get('rules', [])
+    except Exception:
+        grid, rules = None, []
+    return {
+        'file': path,
+        'zone': meta['zone'],
+        'type': meta['type'],
+        'id': meta['id'],
+        'grid': grid,
+        'rules': rules,
+        'status': 'PASS' if r.solved and r.validated else 'FAIL',
+        'solved': r.solved,
+        'validated': r.validated,
+        'elapsed_ms': r.elapsed_ms,
+        'steps': r.steps,
+        'solver_used': r.solver_used,
+        'error': r.error,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="验证所有谜题都能正常求解")
     parser.add_argument("--dir", default="puzzles", help="谜题目录 (默认 puzzles)")
     parser.add_argument("--timeout", type=float, default=30, help="每题超时秒数")
     parser.add_argument("-j", "--jobs", type=int, default=0, help="并行数 (默认 CPU 核心数)")
+    parser.add_argument("--rules", help="只验证包含该规则的谜题 (如 block)")
+    parser.add_argument("--out", help="把每题结果追加写入该 JSONL 文件")
     args = parser.parse_args()
 
     # 跳过元数据/索引文件（如 `_index.json`）与官方解 answer 目录（`*-answer`）。
@@ -97,6 +135,20 @@ def main():
         if not Path(f).name.startswith("_")
         and not any(part.endswith("-answer") for part in Path(f).parts)
     )
+    if args.rules:
+        kept = []
+        for f in files:
+            try:
+                with open(f, encoding='utf-8') as fh:
+                    data = json.load(fh)
+                if any(r.get('type') == args.rules for r in data.get('rules', [])):
+                    kept.append(f)
+            except Exception:
+                continue
+        files = kept
+        if not files:
+            print(f"在 {args.dir}/ 下未找到含规则 '{args.rules}' 的谜题")
+            sys.exit(1)
     if not files:
         print(f"在 {args.dir}/ 下未找到 .json 文件")
         sys.exit(1)
@@ -107,11 +159,13 @@ def main():
 
     print(f"共 {total} 个谜题，并行 {'CPU核数' if args.jobs<=0 else args.jobs} 线程\n")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs or None) as pool:
+    out_ctx = open(args.out, 'a', encoding='utf-8') if args.out else nullcontext()  # noqa: SIM115
+    with (
+        out_ctx as out_fh,
+        concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs or None) as pool,
+    ):
         fut_map = {pool.submit(test_one, (f, args.timeout, True)): f for f in files}
-        done = 0
-        for fut in concurrent.futures.as_completed(fut_map):
-            done += 1
+        for done, fut in enumerate(concurrent.futures.as_completed(fut_map), 1):
             r = fut.result()
             status = "PASS" if r.solved and r.validated else "FAIL"
             if r.solved and r.validated:
@@ -122,6 +176,8 @@ def main():
                   f"via={r.solver_used or '-':<12} "
                   f"steps={r.steps:<6} time={r.elapsed_ms:>5}ms"
                   f"{'  ' + r.error if r.error else ''}")
+            if out_fh is not None:
+                out_fh.write(json.dumps(_record(fut_map[fut], r), ensure_ascii=False) + "\n")
 
     print(f"\n结果: {passed}/{total} 通过")
     if failed:

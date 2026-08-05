@@ -7,13 +7,16 @@ use crate::grid;
 use crate::types::*;
 
 /// DFS backtracking with constraints. Returns regions if solved.
-pub fn solve_backtrack(puzzle: &Puzzle, start: &Instant, timeout_ms: u64) -> Option<Vec<RegionInfo>> {
+pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Option<Vec<RegionInfo>> {
     let fillable = grid::fillable_cells(puzzle);
     if fillable.is_empty() {
         return Some(Vec::new());
     }
 
-    let deadline = *start + std::time::Duration::from_millis(timeout_ms);
+    // Budget relative to this solver's own start (the caller passes an equal
+    // share), not the original solve() start, so backtrack gets its slice even
+    // when AoG / pieces consumed theirs.
+    let deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
     let area_bounds = compute_area_bounds(puzzle);
 
     let mut state = BacktrackState {
@@ -73,14 +76,11 @@ fn compute_area_bounds(puzzle: &Puzzle) -> AreaBounds {
                     max_a = max_a.min(v as usize);
                 }
             }
-            "solitary" => {
-                min_a = 1;
-                max_a = 1;
-            }
-            "block" => {
-                min_a = 4;
-                max_a = 4;
-            }
+            // NOTE: `block` (regions must be solid rectangles of any size) and
+            // `solitary` (one clue cell per region) do NOT constrain area, so they
+            // are intentionally absent here.  A previous version forced block→4..4
+            // and solitary→1..1, which made backtrack structurally unable to solve
+            // any block puzzle whose regions aren't all 2×2 / size-1.
             _ => {}
         }
     }
@@ -562,6 +562,81 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
                 }).count();
                 if count != 1 {
                     return false;
+                }
+            }
+        }
+    }
+
+    // block / non_block: every region must (not) be a solid rectangle.
+    let has_block = puzzle.rules.iter().any(|r| r.ctype == "block");
+    let has_non_block = puzzle.rules.iter().any(|r| r.ctype == "non_block");
+    if has_block || has_non_block {
+        for shape in state.region_shapes.values() {
+            let rect = crate::constraints::is_rectangle(shape);
+            if (has_block && !rect) || (has_non_block && rect) {
+                return false;
+            }
+        }
+    }
+
+    // different: all region shapes distinct.
+    if puzzle.rules.iter().any(|r| r.ctype == "different") {
+        let mut keys: HashSet<String> = HashSet::new();
+        for shape in state.region_shapes.values() {
+            let mut norm = shape.clone();
+            normalize(&mut norm);
+            if !keys.insert(canonical_key(&norm)) {
+                return false;
+            }
+        }
+    }
+
+    // solitary: each region has exactly one clue-bearing cell.
+    if puzzle.rules.iter().any(|r| r.ctype == "solitary") {
+        for shape in state.region_shapes.values() {
+            let mut clues = 0usize;
+            for &[r, c] in shape {
+                let cell = &puzzle.cells[r][c];
+                if cell.symbol.is_some()
+                    || cell.compass.is_some()
+                    || cell.number.is_some()
+                    || cell.shape_pattern.is_some()
+                    || cell.fence_pattern.is_some()
+                {
+                    clues += 1;
+                }
+            }
+            if clues != 1 {
+                return false;
+            }
+        }
+    }
+
+    // differentiation: adjacent regions (sharing an edge) have different areas.
+    if puzzle.rules.iter().any(|r| r.ctype == "differentiation") {
+        let mut cell_to_rid: HashMap<(usize, usize), usize> = HashMap::new();
+        for (&rid, shape) in &state.region_shapes {
+            for &[r, c] in shape {
+                cell_to_rid.insert((r, c), rid);
+            }
+        }
+        let area_of = |rid: usize| state.region_shapes.get(&rid).map(|s| s.len()).unwrap_or(0);
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        for (&rid, shape) in &state.region_shapes {
+            for &[r, c] in shape {
+                for (dr, dc) in [(1i64, 0i64), (0, 1i64)] {
+                    let nr = r as i64 + dr;
+                    let nc = c as i64 + dc;
+                    if nr >= 0 && nr < puzzle.height as i64 && nc >= 0 && nc < puzzle.width as i64 {
+                        if let Some(&other) = cell_to_rid.get(&(nr as usize, nc as usize)) {
+                            if other != rid {
+                                let key = if rid < other { (rid, other) } else { (other, rid) };
+                                if seen.insert(key) && area_of(rid) == area_of(other) {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

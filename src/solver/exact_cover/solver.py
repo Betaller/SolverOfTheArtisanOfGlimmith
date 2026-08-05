@@ -29,9 +29,10 @@ class ExactCoverSolver(Solver):
         if puzzle.has_rule("block"):
             h, w = puzzle.height, puzzle.width
             est = sum((h - rh + 1) * (w - rw + 1) for rh in range(1, h + 1) for rw in range(1, w + 1))
-            if puzzle.has_rule("precise") or puzzle.has_rule("range"):
+            if (puzzle.has_rule("precise") or puzzle.has_rule("range")
+                    or puzzle.has_rule("area")):
                 return est <= 20000
-            return est <= 5000
+            return est <= 12000
         targets = _collect_target_sizes(puzzle)
         if targets:
             return max(targets) <= 12

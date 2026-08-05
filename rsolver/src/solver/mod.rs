@@ -27,9 +27,12 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         };
     }
 
+    // `timeout_ms` is a UNIT budget: each of aog / pieces / backtrack gets the
+    // full timeout as its own deadline (not a share of it).  The Python side
+    // gives the subprocess enough wall-clock (3×) for all three to run.
+
     // 0. AoG DFS solver first: direct port of the C++ reference solver.
     if !puzzle.rules.is_empty() {
-        eprintln!("aog: solve() calling solve_aog, rules={}", puzzle.rules.len());
         let deadline = start + std::time::Duration::from_millis(timeout_ms);
         if let Some(regions) = aog::solve_aog(puzzle, deadline) {
             return build_solution_trusted(regions, &start, puzzle);

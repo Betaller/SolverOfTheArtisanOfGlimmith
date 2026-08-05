@@ -202,30 +202,31 @@ impl DancingLinks {
     }
 
     /// Search with an incremental validation callback.
-    /// `row_check` is called after each row selection with the current partial solution (row IDs).
-    /// If `row_check` returns false, the branch is pruned.
+    /// `row_check` is called after each row selection with the current partial
+    /// solution (row IDs); returning false prunes the branch.  `on_solution` is
+    /// called at each complete solution; returning true stops the whole search.
+    /// Returns true if a solution that stopped the search was found.
     pub fn search_with_check(
         &mut self,
         depth: usize,
         partial: &mut Vec<usize>,
         row_check: &mut dyn FnMut(&[usize]) -> bool,
         on_solution: &mut dyn FnMut(&[usize]) -> bool,
-    ) {
+    ) -> bool {
         if let Some(d) = self.deadline {
             if Instant::now() >= d {
-                return;
+                return false;
             }
         }
         self.search_count += 1;
 
         if self.nodes[0].right == 0 {
-            on_solution(partial);
-            return;
+            return on_solution(partial);
         }
 
         let col = match self.choose_column() {
             Some(c) => c,
-            None => return,
+            None => return false,
         };
 
         self.cover(col);
@@ -245,7 +246,11 @@ impl DancingLinks {
                         j = self.nodes[j].right;
                     }
 
-                    self.search_with_check(depth + 1, partial, row_check, on_solution);
+                    if self.search_with_check(depth + 1, partial, row_check, on_solution) {
+                        // Stop propagates up; matrix state is left mid-search
+                        // (callers do not reuse the DLX object after this).
+                        return true;
+                    }
 
                     // Uncover
                     j = self.nodes[r].left;
@@ -260,5 +265,6 @@ impl DancingLinks {
             r = self.nodes[r].down;
         }
         self.uncover(col);
+        false
     }
 }

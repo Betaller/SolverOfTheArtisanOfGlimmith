@@ -59,8 +59,6 @@ class SolverRouter:
               puzzle_name: str | None = None) -> Solution:
         self._attempts = []
         start = time.monotonic()
-        remaining = timeout
-        pending = len(self._solvers)
 
         label = puzzle_name or (
             f"{puzzle.height}x{puzzle.width} "
@@ -71,8 +69,10 @@ class SolverRouter:
             if not solver.supports(puzzle):
                 continue
 
-            budget = max(1.0, remaining / max(1, pending))
-            pending -= 1
+            # `timeout` is a UNIT budget: every solver part (rust aog / pieces /
+            # backtrack, exact_cover, rose, ...) gets the full timeout as its
+            # own deadline, not a share of it.
+            budget = timeout
             t0 = time.monotonic()
 
             try:
@@ -85,10 +85,6 @@ class SolverRouter:
                         elapsed_ms=elapsed, steps=sol.steps_taken,
                         error=self._last_verify_error,
                     ))
-                    spent = time.monotonic() - start
-                    remaining = timeout - spent
-                    if remaining <= 0:
-                        break
                     continue
                 self._attempts.append(SolverAttempt(
                     solver_name=solver.name, solved=sol.solved,
@@ -104,11 +100,6 @@ class SolverRouter:
                     elapsed_ms=int((time.monotonic() - t0) * 1000),
                     steps=0, error=str(e),
                 ))
-
-            spent = time.monotonic() - start
-            remaining = timeout - spent
-            if remaining <= 0:
-                break
 
         return Solution(
             solved=False,

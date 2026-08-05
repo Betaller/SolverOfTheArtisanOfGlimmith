@@ -99,6 +99,37 @@ src/solver/
 总计            64    48    (75%)
 ```
 
+## C++ AoG 官方谜题库 (`aog_puzzles/`)
+
+`aog_puzzles/` 存放从官方存档 `third_party/archiveofglimmith.github.io/puzzles.json`
+生成的 **C++ AoG_Solver `.puz` 格式**谜题（1231 个，`aog_puzzles/<zone>/<type>/<id>.puz`），
+可直接用于参考求解器 `third_party/AoG_Solver` 的批量验证：
+
+```bash
+python scripts/convert_puzzles_json_to_aog.py   # 重新生成到 aog_puzzles/
+cd third_party/AoG_Solver && ./batch_run.sh ../aog_puzzles/Zone1   # 批量求解验证
+```
+
+**生成逻辑**：archive 的 `puzzle_grid` / `solution` 本身就是游戏原生的 .puz 网格，只是每行
+尾随空格被裁剪。转换器逐行补齐到 C++ 解析器所需的宽度：
+
+- 节点行补齐到 `3*width+1` 字符；
+- 区域行按解析器 `size` 增长规则补齐（罗盘 `U...` 单元格会撑宽行，裁剪的行会导致越界
+  读取甚至段错误，旧脚本的 6-compass 谜题即因此崩溃）；
+- `SHAPE` 每行补齐到最大宽度（C++ 按「最后一行长度」取尺寸，行宽不均会丢格子）。
+
+**验证工作流**：
+
+```bash
+python scripts/compare_batch_ansi.py --ref third_party/AoG_Solver/Zone1.ansi \
+    --new <batch_run输出>     # 对比谜题路径与状态 (correct/timeout/...)
+python scripts/fix_puz_solutions.py --zone Zone1 --batch <batch_run输出> \
+    --root aog_puzzles        # 固化缺失/多解谜题的 SOLUTION (如 0067)
+```
+
+验证结果与官方 batch 日志对比：**Zone1 312/312、Zone2 438/438、Zone3 479-481/481**
+完全一致（残余差异均为 10s 超时边界的机器计时抖动，谜题解均与官方解一致）。
+
 ## 参考项目
 
 | 仓库 | 语言 | 借鉴 |

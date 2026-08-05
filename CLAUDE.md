@@ -68,7 +68,18 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 - `puzzles/` — JSON corpus: `official/` (zones A/B/C/Zone1-3), `reference/` (converted from other formats), `user/`, `aiGen/`. `data/polyominoes.json` supplies polyomino data.
 - `scripts/` — conversion (`convert_aog_batch.py`, `convert_archive.py`), generation (`gen_ai_puzzles.py`, `generate_polyominoes.py`), benchmarking (`benchmark.py`, `bench_quick.py`).
 - `third_party/` — git submodules holding reference solvers used as porting/validation sources (C++ AoG_Solver, Rust aog, JS glimmith-solver, Python TAGSolver, TS shape-helper). Not part of the build.
-- `docs/` — architecture, development, testing, and rules guides (in Chinese).
+- `docs/` — architecture, development, testing, and rules guides (in Chinese). `docs/official-puzzles-status.md` tracks the official-corpus solve status / DIFF / UNSOLVED analysis.
+
+## 文档软门禁（Soft Gate）
+
+官方题准则：**官方解是唯一解**。对求解器 / 转换脚本 / 规则校验器 / 规则语义的**任何优化**，合入前必须：
+
+1. 更新 `docs/official-puzzles-status.md`（进度数字、DIFF/UNSOLVED 变化、结论）。
+2. 同步涉及的其他文档（`faq.md` / `rules-guide.md` / `architecture.md` 等）。
+3. 若影响外部可观察行为，同步 `README.md`。
+4. 跑通 `pytest`、`cargo test` 与相关 `verify_puzzles.py` 片段，把结果记入该文档。
+
+不满足即视为未完成。全量扫描方式与脚本见该文档 §2。
 
 ## Testing
 

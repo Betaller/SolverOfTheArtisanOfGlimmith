@@ -1034,3 +1034,274 @@
 [1034/1034] FAIL Zone3  0926.json               40000ms  timeout
 [1035/1035] FAIL Zone3  0930d-real.json         35031ms  No solution found
 [1036/1036] PASS Zone3  0895.json                   2ms
+[1037/1037] PASS Zone3  0896.json                   3ms
+[1038/1038] PASS Zone3  0265.json               25633ms
+[1039/1039] FAIL Zone3  1400.json               30026ms  No solution found
+[1040/1040] PASS Zone3  0900.json                  21ms
+[1041/1041] FAIL Zone3  0152.json               30051ms  No solution found
+[1042/1042] PASS Zone3  0902.json                   2ms
+[1043/1043] FAIL Zone3  0586.json               30031ms  Solution found but fails rule validation
+[1044/1044] FAIL Zone3  0846.json               30071ms  No solution found
+[1045/1045] FAIL Zone3  0894.json               30021ms  No solution found
+[1046/1046] PASS Zone3  0907.json                   9ms
+[1047/1047] FAIL Zone3  0262.json               40000ms  timeout
+[1048/1048] FAIL Zone3  0898fix2.json           30002ms  No solution found
+[1049/1049] PASS Zone3  0910.json                 859ms
+[1050/1050] PASS Zone3  0911.json                 858ms
+[1051/1051] PASS Zone3  0904.json               13920ms
+[1052/1052] PASS Zone3  1208.json                   5ms
+[1053/1053] PASS Zone3  1209.json                   1ms
+[1054/1054] PASS Zone3  1210.json                 112ms
+[1055/1055] PASS Zone3  0905.json               12527ms
+[1056/1056] PASS Zone3  0908v2.json             10333ms
+[1057/1057] PASS Zone3  1398.json                  13ms
+[1058/1058] PASS Zone3  1399.json                   2ms
+[1059/1059] PASS Zone3  1397a.json                649ms
+[1060/1060] PASS Zone3  1408.json                   2ms
+[1061/1061] PASS Zone3  1409.json                  54ms
+[1062/1062] PASS Zone3  1410.json                   2ms
+[1063/1063] FAIL Zone3  0901.json               30131ms  No solution found
+[1064/1064] PASS Zone3  1412.json                  74ms
+[1065/1065] FAIL Zone3  0903.json               30041ms  No solution found
+[1066/1066] PASS Zone3  1414.json                   2ms
+[1067/1067] PASS Zone3  0034.json                  41ms
+[1068/1068] PASS Zone3  0078.json                  52ms
+[1069/1069] PASS Zone3  0083.json                 115ms
+[1070/1070] PASS Zone3  0094.json                   2ms
+[1071/1071] PASS Zone3  0104.json                   2ms
+[1072/1072] PASS Zone3  0242.json                  97ms
+[1073/1073] PASS Zone3  1413.json                3084ms
+[1074/1074] PASS Zone3  0373.json                4559ms
+[1075/1075] FAIL Zone3  0899.json               40000ms  timeout
+[1076/1076] PASS Zone3  0387.json                  12ms
+[1077/1077] FAIL Zone3  0912.json               30011ms  No solution found
+[1078/1078] FAIL Zone3  1207b.json              30125ms  No solution found
+[1079/1079] PASS Zone3  0477.json                   2ms
+[1080/1080] PASS Zone3  0500.json                   5ms
+[1081/1081] PASS Zone3  0617.json                   2ms
+[1082/1082] FAIL Zone3  1382.json               30034ms  No solution found
+[1083/1083] FAIL Zone3  1411.json               30029ms  No solution found
+[1084/1084] PASS Zone3  0633.json                  14ms
+[1085/1085] FAIL Zone3  1407a.json              30408ms  No solution found
+[1086/1086] FAIL Zone3  0312.json               40000ms  timeout
+[1087/1087] FAIL Zone3  0374.json               40000ms  timeout
+[1088/1088] FAIL Zone3  0445.json               40000ms  timeout
+[1089/1089] PASS Zone3  0698.json                   3ms
+[1090/1090] PASS Zone3  0922.json                   1ms
+[1091/1091] FAIL Zone3  0469.json               40000ms  timeout
+[1092/1092] FAIL Zone3  0619.json               40000ms  timeout
+[1093/1093] PASS Zone3  1016.json                4310ms
+[1094/1094] PASS Zone3  1061.json                   1ms
+[1095/1095] PASS Zone3  1062b.json                  3ms
+[1096/1096] FAIL Zone3  0620.json               40000ms  timeout
+[1097/1097] PASS Zone3  1071.json                   3ms
+[1098/1098] PASS Zone3  1072.json                   4ms
+[1099/1099] FAIL Zone3  0634.json               40000ms  timeout
+[1100/1100] PASS Zone3  1076.json                   2ms
+[1101/1101] FAIL Zone3  0681.json               40000ms  timeout
+[1102/1102] PASS Zone3  1077.json                2525ms
+[1103/1103] PASS Zone3  0685.json               23681ms
+[1104/1104] FAIL Zone3  0683.json               40000ms  timeout
+[1105/1105] PASS Zone3  1081.json                   1ms
+[1106/1106] PASS Zone3  1082.json                3744ms
+[1107/1107] PASS Zone3  1083.json                   2ms
+[1108/1108] PASS Zone3  1084.json                  20ms
+[1109/1109] PASS Zone3  1086.json                2121ms
+[1110/1110] PASS Zone3  1087.json                 107ms
+[1111/1111] FAIL Zone3  1017.json               40000ms  timeout
+[1112/1112] FAIL Zone3  1060.json               40000ms  timeout
+[1113/1113] PASS Zone3  1094.json                   3ms
+[1114/1114] FAIL Zone3  1067.json               40000ms  timeout
+[1115/1115] PASS Zone3  1105.json                 607ms
+[1116/1116] PASS Zone3  1231.json                   2ms
+[1117/1117] PASS Zone3  1232.json                   1ms
+[1118/1118] PASS Zone3  1233.json                   1ms
+[1119/1119] PASS Zone3  1234.json                   7ms
+[1120/1120] PASS Zone3  1104.json                3256ms
+[1121/1121] PASS Zone3  1257.json                   2ms
+[1122/1122] FAIL Zone3  1074.json               40000ms  timeout
+[1123/1123] FAIL Zone3  1078.json               40000ms  timeout
+[1124/1124] FAIL Zone3  1079.json               40000ms  timeout
+[1125/1125] PASS Zone3  1372.json                   3ms
+[1126/1126] FAIL Zone3  1080.json               40000ms  timeout
+[1127/1127] PASS Zone3  1387.json                 101ms
+[1128/1128] PASS Zone3  1388.json                   5ms
+[1129/1129] PASS Zone3  1389.json                  79ms
+[1130/1130] PASS Zone3  1390.json                   1ms
+[1131/1131] PASS Zone3  1391.json                  16ms
+[1132/1132] FAIL Zone3  1386.json               12811ms  No solution found
+[1133/1133] FAIL Zone3  1403.json                3933ms  No solution found
+[1134/1134] PASS Zone3  0299.json                   3ms
+[1135/1135] PASS Zone3  0389.json                   2ms
+[1136/1136] PASS Zone3  0468.json                   1ms
+[1137/1137] PASS Zone3  0495.json                   2ms
+[1138/1138] PASS Zone3  0513.json                   3ms
+[1139/1139] PASS Zone3  0517.json                  96ms
+[1140/1140] PASS Zone3  0518.json                   1ms
+[1141/1141] PASS Zone3  0521.json                   1ms
+[1142/1142] PASS Zone3  0523.json                   1ms
+[1143/1143] PASS Zone3  0524.json                   1ms
+[1144/1144] PASS Zone3  0525.json                 729ms
+[1145/1145] PASS Zone3  0627.json                   1ms
+[1146/1146] PASS Zone3  0684.json                1277ms
+[1147/1147] PASS Zone3  0711.json                   4ms
+[1148/1148] PASS Zone3  0712.json                   1ms
+[1149/1149] PASS Zone3  0714.json                   1ms
+[1150/1150] PASS Zone3  0715.json                   1ms
+[1151/1151] PASS Zone3  0716.json                   1ms
+[1152/1152] PASS Zone3  0717.json                  54ms
+[1153/1153] PASS Zone3  0718.json                   1ms
+[1154/1154] PASS Zone3  0719.json                   1ms
+[1155/1155] PASS Zone3  0720.json                   3ms
+[1156/1156] PASS Zone3  0721.json                   2ms
+[1157/1157] PASS Zone3  0722.json                   3ms
+[1158/1158] PASS Zone3  0724.json                   1ms
+[1159/1159] PASS Zone3  0726.json                   1ms
+[1160/1160] PASS Zone3  0767.json                   1ms
+[1161/1161] PASS Zone3  0885.json                   1ms
+[1162/1162] PASS Zone3  0886.json                   1ms
+[1163/1163] PASS Zone3  0887.json                   1ms
+[1164/1164] PASS Zone3  0888.json                   1ms
+[1165/1165] PASS Zone3  0889.json                   1ms
+[1166/1166] PASS Zone3  1394.json                  59ms
+[1167/1167] FAIL Zone3  1092.json               40000ms  timeout
+[1168/1168] FAIL Zone3  1093.json               40000ms  timeout
+[1169/1169] PASS Zone3  1152.json                 444ms
+[1170/1170] PASS Zone3  1152v1.json               480ms
+[1171/1171] FAIL Zone3  1246.json               40000ms  timeout
+[1172/1172] FAIL Zone3  1258.json               40000ms  timeout
+[1173/1173] FAIL Zone3  0417.json                3198ms  No solution found
+[1174/1174] FAIL Zone3  1259.json               40000ms  timeout
+[1175/1175] FAIL Zone3  1260.json               40000ms  timeout
+[1176/1176] PASS Zone3  0616.json                   8ms
+[1177/1177] FAIL Zone3  1402.json               40000ms  timeout
+[1178/1178] FAIL Zone3  1395b.json              40000ms  timeout
+[1179/1179] FAIL Zone3  0418.json               31699ms  No solution found
+[1180/1180] FAIL Zone3  0421.json               30014ms  No solution found
+[1181/1181] PASS Zone3  0632.json                   7ms
+[1182/1182] FAIL Zone3  0492.json               30052ms  No solution found
+[1183/1183] FAIL Zone3  1130.json               40000ms  timeout
+[1184/1184] FAIL Zone3  0493.json               30482ms  No solution found
+[1185/1185] PASS Zone3  0654.json                  19ms
+[1186/1186] FAIL Zone3  0621.json               30016ms  No solution found
+[1187/1187] PASS Zone3  0676.json                1068ms
+[1188/1188] FAIL Zone3  0655.json                7480ms  No solution found
+[1189/1189] FAIL Zone3  0697.json                3271ms  No solution found
+[1190/1190] FAIL Zone3  0776.json                3248ms  No solution found
+[1191/1191] PASS Zone3  1090.json                1173ms
+[1192/1192] PASS Zone3  1102.json                  59ms
+[1193/1193] FAIL Zone3  0629.json               33893ms  exit -9: 
+[1194/1194] PASS Zone3  1106.json                9564ms
+[1195/1195] FAIL Zone3  0638.json               31096ms  No solution found
+[1196/1196] FAIL Zone3  0637.json               31151ms  No solution found
+[1197/1197] PASS Zone3  1111.json                  70ms
+[1198/1198] FAIL Zone3  0651.json               30931ms  No solution found
+[1199/1199] FAIL Zone3  0630.json               39636ms  No solution found
+[1200/1200] FAIL Zone3  0679.json               30051ms  No solution found
+[1201/1201] FAIL Zone3  0631.json               40000ms  timeout
+[1202/1202] FAIL Zone3  1107.json               40000ms  timeout
+[1203/1203] FAIL Zone3  1132.json               30051ms  No solution found
+[1204/1204] PASS Zone3  1139.json                  19ms
+[1205/1205] FAIL Zone3  1133.json               30013ms  No solution found
+[1206/1206] FAIL Zone3  1137.json                3220ms  No solution found
+[1207/1207] PASS Zone3  1142.json                2822ms
+[1208/1208] PASS Zone3  1143.json                   1ms
+[1209/1209] FAIL Zone3  1110.json               38676ms  exit -9: 
+[1210/1210] PASS Zone3  1145.json                   6ms
+[1211/1211] PASS Zone3  1144.json                4622ms
+[1212/1212] FAIL Zone3  1131.json               40000ms  timeout
+[1213/1213] PASS Zone3  1148.json                 754ms
+[1214/1214] PASS Zone3  1247.json                 129ms
+[1215/1215] FAIL Zone3  1134.json               40000ms  timeout
+[1216/1216] FAIL Zone3  1135.json               40000ms  timeout
+[1217/1217] PASS Zone3  1405.json                2320ms
+[1218/1218] PASS Zone3  0125.json                   3ms
+[1219/1219] PASS Zone3  0154.json                   2ms
+[1220/1220] PASS Zone3  0164.json                  21ms
+[1221/1221] FAIL Zone3  1136.json               40000ms  timeout
+[1222/1222] PASS Zone3  0208.json                 293ms
+[1223/1223] PASS Zone3  0268.json                  87ms
+[1224/1224] PASS Zone3  0233.json                3151ms
+[1225/1225] PASS Zone3  0537.json                 221ms
+[1226/1226] FAIL Zone3  1140fix.json            30008ms  No solution found
+[1227/1227] PASS Zone3  0646.json                  12ms
+[1228/1228] PASS Zone3  0652.json                 369ms
+[1229/1229] PASS Zone3  0653.json                  71ms
+[1230/1230] FAIL Zone3  1406.json               14967ms  No solution found
+[1231/1231] FAIL Zone3  1141.json               30004ms  No solution found
+[1232/1232] FAIL Zone3  1146.json               30002ms  No solution found
+[1233/1233] FAIL Zone3  1147.json               30407ms  No solution found
+[1234/1234] PASS Zone3  0897fix.json               22ms
+[1235/1235] FAIL Zone3  1392.json               40000ms  timeout
+[1236/1236] PASS Zone3  0937.json                 228ms
+[1237/1237] PASS Zone3  0941.json                   3ms
+[1238/1238] PASS Zone3  0825.json               15899ms
+[1239/1239] PASS Zone3  0988.json                  68ms
+[1240/1240] FAIL Zone3  0446.json               40000ms  timeout
+[1241/1241] PASS Zone3  1073.json                  83ms
+[1242/1242] FAIL Zone3  0975a.json               8222ms  No solution found
+[1243/1243] FAIL Zone3  0618.json               40000ms  timeout
+[1244/1244] FAIL Zone3  0932.json               30003ms  No solution found
+[1245/1245] FAIL Zone3  0680.json               40000ms  timeout
+[1246/1246] FAIL Zone3  0682.json               40000ms  timeout
+[1247/1247] PASS Zone3  1151.json                  56ms
+[1248/1248] FAIL Zone3  0703.json               40000ms  timeout
+[1249/1249] FAIL Zone3  1149a.json               3415ms  No solution found
+[1250/1250] FAIL Zone3  1150fix.json             3317ms  No solution found
+[1251/1251] PASS Zone3  1446.json                1206ms
+[1252/1252] FAIL Zone3  1004.json               40000ms  timeout
+[1253/1253] FAIL Zone3  1085a.json              40000ms  timeout
+[1254/1254] FAIL Zone3  1109.json               40000ms  timeout
+[1255/1255] FAIL Zone3  1138.json               40000ms  timeout
+[1256/1256] FAIL Zone3  1248.json               40000ms  timeout
+[1257/1257] FAIL Zone3  1249.json               40000ms  timeout
+[1258/1258] FAIL Zone3  1322.json               40000ms  timeout
+
+结果: 1052/1258 通过
+  A: 11 / 11
+  B: 11 / 11
+  C: 4 / 5
+  Zone1: 299 / 312
+  Zone2: 396 / 438
+  Zone3: 331 / 481
+失败:
+  1270.json: No solution found
+  0882.json: exit -9: 
+  C4-2.json: timeout
+  1435.json: timeout
+  0732.json: timeout
+  1098.json: timeout
+  1099.json: timeout
+  1100.json: timeout
+  0213.json: timeout
+  0213nopad.json: timeout
+  0223.json: timeout
+  0804.json: timeout
+  1433.json: timeout
+  1434.json: timeout
+  0742.json: timeout
+  1183.json: No solution found
+  0745.json: timeout
+  0401.json: Solution found but fails rule validation
+  0308.json: timeout
+  0437.json: Solution found but fails rule validation
+  0878v2.json: timeout
+  0879.json: timeout
+  0439.json: Solution found but fails rule validation
+  0390.json: timeout
+  0459.json: Solution found but fails rule validation
+  0709.json: timeout
+  1011a.json: Solution found but fails rule validation
+  1019.json: timeout
+  0382.json: timeout
+  0383.json: timeout
+  0763.json: timeout
+  0960.json: timeout
+  0317.json: timeout
+  0325.json: timeout
+  0341.json: timeout
+  1340.json: timeout
+  1370.json: timeout
+  0289.json: timeout
+  0770.json: timeout
+  1351.json: timeout

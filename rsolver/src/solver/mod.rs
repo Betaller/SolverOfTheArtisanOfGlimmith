@@ -40,6 +40,13 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     let aog_budget = if rose_capable {
         AOG_ROSE_BUDGET_MS.min(timeout_ms)
     } else {
+        // Non-rose puzzles get the full unit budget.  A flat 1s cap (previous
+        // session's AOG_BUDGET_CAP_MS) regressed ~65 puzzles that aog solves in
+        // 1-25s but then hands off to pieces/backtrack, which can't solve them.
+        // The aog search is bounded by its deadline thanks to the hot-loop
+        // checks (search.rs Fix B/C), so it stops at `timeout_ms` instead of
+        // burning the whole subprocess budget; pieces/backtrack still get their
+        // own full unit budget afterwards.
         timeout_ms
     };
     if !puzzle.rules.is_empty() {

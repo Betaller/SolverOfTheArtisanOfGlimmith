@@ -29,6 +29,10 @@ struct SolveContext {
 }
 
 const MAX_COMPASS_PLACEMENTS: usize = 2000;
+/// Area-number targets above this are left to the backtracker: enumerating all
+/// connected polyominoes of a large size explodes (e.g. area 48 on 1301).  This
+/// matches the Python ExactCoverSolver threshold (max(targets) <= 12).
+const MAX_AREA_TARGET: usize = 12;
 
 pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Option<Vec<RegionInfo>> {
     let deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
@@ -250,6 +254,10 @@ fn generate_all_placements(puzzle: &Puzzle, ctx: &SolveContext) -> Vec<Placement
             if let Some(area) = puzzle.cells[r][c].number {
                 let target = area as usize;
                 if target < ctx.eff_min_area || target > ctx.eff_max_area {
+                    continue;
+                }
+                if target > MAX_AREA_TARGET {
+                    // Too large for DLX candidate generation — leave to backtrack.
                     continue;
                 }
                 let mut results = Vec::new();

@@ -969,7 +969,15 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
     // Freezing the bound (as a `for i in 0..n_shapes`) made the search miss
     // regions that the C++ solver explores, so it never found the solution.
     let mut i = 0usize;
+    // Deadline check inside the shape loop: each shape can run an expensive
+    // placement (Type4 = whole-board empty_area_check, O(n²) + flood fill), so
+    // without this a frame burns through every shape after its deadline.
+    let mut shapes_seen: u32 = 0;
     while i < core.shapes.len() {
+        shapes_seen += 1;
+        if shapes_seen % 256 == 0 && Instant::now() >= core.deadline {
+            return -1;
+        }
         let cur = i;
         i += 1;
         // Shapes added during a deeper dfs grow the library beyond the size
@@ -1291,6 +1299,11 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
     };
 
     for size in shape_size_lower_bound.max(0)..=shape_size_upper_bound {
+        // Each size may spend thousands of `place` steps before its own 4096-step
+        // deadline check; bound the whole size sweep against the frame deadline.
+        if Instant::now() >= core.deadline {
+            return -1;
+        }
         if !mk_size[size as usize] {
             continue;
         }

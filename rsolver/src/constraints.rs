@@ -27,7 +27,7 @@ pub fn check_rule(rule: &Rule, puzzle: &Puzzle, regions: &[RegionInfo]) -> bool 
         "area" => check_area(puzzle, regions),
         "same" => check_same(regions),
         "different" => check_different(regions),
-        "mixed" => check_mixed(regions),
+        "mixed" => check_mixed(puzzle, regions),
         "heterogeneous" => check_heterogeneous(regions),
         "homogeneous" => check_homogeneous(regions),
         "precise" => check_precise(regions, rule),
@@ -104,7 +104,7 @@ fn check_shape_pool(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
 /// Canonical dihedral shape key: the lexicographically smallest of the 8
 /// rotations/reflections, origin-normalized.  Mirrors the aog validate.rs
 /// helper so both solvers agree on shape equivalence.
-fn dihedral_key(cells: &[[usize; 2]]) -> String {
+pub(crate) fn dihedral_key(cells: &[[usize; 2]]) -> String {
     let signed: Vec<(isize, isize)> = cells
         .iter()
         .map(|&[r, c]| (r as isize, c as isize))
@@ -160,27 +160,73 @@ fn check_area(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     true
 }
 
-/// same: all regions share one shape.
+/// same: all regions are dihedrally congruent (mirrors Python
+/// `check_rule_same` / aog::validate "same").
 fn check_same(regions: &[RegionInfo]) -> bool {
-    if regions.len() < 2 {
-        return true;
+    let mut keys: HashSet<String> = HashSet::new();
+    for reg in regions {
+        keys.insert(dihedral_key(&reg.shape));
     }
-    let first = &regions[0].shape;
-    regions.iter().all(|r| &r.shape == first)
+    keys.len() <= 1
 }
 
-/// different: all region shapes are distinct.
+/// different: all region shapes are dihedrally distinct (mirrors Python
+/// `check_rule_different` / aog::validate "different").  A raw-shape
+/// comparison missed rotation/reflection duplicates and accepted wrong
+/// solutions (e.g. 1114's P-pentomino groups).
 fn check_different(regions: &[RegionInfo]) -> bool {
-    let set: HashSet<&Shape> = regions.iter().map(|r| &r.shape).collect();
-    set.len() == regions.len()
+    let mut keys: HashSet<String> = HashSet::new();
+    for reg in regions {
+        if !keys.insert(dihedral_key(&reg.shape)) {
+            return false;
+        }
+    }
+    true
 }
 
-/// mixed: not all regions have the same area.
-fn check_mixed(regions: &[RegionInfo]) -> bool {
+/// mixed: every pair of ADJACENT regions has dihedrally different shapes
+/// (mirrors Python `check_rule_mixed` / aog::validate "mixed" — NOT the
+/// global "not all same shape" that this function previously implemented).
+fn check_mixed(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     if regions.len() < 2 {
         return true;
     }
-    !check_same(regions)
+    let key_of = |rid: usize| -> Option<String> {
+        regions
+            .iter()
+            .find(|r| r.region_id == rid)
+            .map(|r| dihedral_key(&r.shape))
+    };
+    let mut cell_to_rid: HashMap<(usize, usize), usize> = HashMap::new();
+    for reg in regions {
+        for &[r, c] in &reg.cells {
+            cell_to_rid.insert((r, c), reg.region_id);
+        }
+    }
+    let mut seen: HashSet<(usize, usize)> = HashSet::new();
+    for reg in regions {
+        for &[r, c] in &reg.cells {
+            for (dr, dc) in [(1i64, 0i64), (0, 1i64)] {
+                let nr = r as i64 + dr;
+                let nc = c as i64 + dc;
+                if nr >= 0 && nr < puzzle.height as i64 && nc >= 0 && nc < puzzle.width as i64 {
+                    if let Some(&other) = cell_to_rid.get(&(nr as usize, nc as usize)) {
+                        if other != reg.region_id {
+                            let key = if reg.region_id < other {
+                                (reg.region_id, other)
+                            } else {
+                                (other, reg.region_id)
+                            };
+                            if seen.insert(key) && key_of(reg.region_id) == key_of(other) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    true
 }
 
 /// heterogeneous: not all regions have the same shape.

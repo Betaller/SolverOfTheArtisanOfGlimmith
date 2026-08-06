@@ -22,7 +22,7 @@
 
 ## 2. 状态：`BacktrackState`
 
-`backtrack.rs:39-53`：
+`backtrack.rs:55-70`：
 
 ```rust
 struct BacktrackState {
@@ -33,12 +33,19 @@ struct BacktrackState {
     deadline: Instant,
     area_bounds: AreaBounds,                         // 面积上下界
     watchtowers: Vec<(Vec<[usize;2]>, usize)>,       // 望塔：四格 + 目标值
+    // ── area 线索专用（无 area 规则时零开销）──
+    fillable: Vec<(usize,usize)>,                    // 行优先可填格列表
+    cell_index: Vec<Vec<usize>>,                     // 格 → 行优先序号（blocked=MAX）
+    undecided_count: usize,                          // 尚未分配的可填格数
+    region_clue: HashMap<usize,usize>,               // rid → 区内心带数字的目标面积
+    frontier: HashMap<usize, HashMap<(usize,usize),usize>>, // rid → {邻接未定格: 邻接数}
+    has_area_rule: bool,                             // 门控：无 area 规则全跳过
 }
 ```
 
 ### 2.1 面积上下界 `compute_area_bounds`
 
-`backtrack.rs:55-100`：
+`backtrack.rs:78-123`：
 
 ```
 初始 (1, 总数)
@@ -52,51 +59,91 @@ for 每格罗盘:
 
 > 注释特别说明：`block` 和 `solitary` **不**参与面积上下界——历史上曾把 block 强设
 > 成 4..4、solitary 设成 1..1，结果任何非 2×2 / 非单格的块题在结构上就不可解了。
-> 这是修过的坑（`backtrack.rs:79-84`）。
+> 这是修过的坑（`backtrack.rs:102-107`）。
 
 ### 2.2 望塔收集 `collect_watchtowers`
 
-把每个有效望塔（1..=4）变成 `(四格列表, 目标值)`（`backtrack.rs:102-119`）。
+把每个有效望塔（1..=4）变成 `(四格列表, 目标值)`（`backtrack.rs:125-142`）。
 
 ---
 
 ## 3. 主搜索：`dfs`
 
-`backtrack.rs:125-281`。对 `fillable` 列表（行优先）逐格处理：
+`backtrack.rs:148-303`。核心变化是 **`pick_next_cell` 动态选格**（替代旧版固定行优先
+`fillable[idx]`）：
 
 ```
-dfs(idx):
-  ① idx 到头 → check_global_constraints 叶子校验
-  ② 该格已被分配 / 是 blocked → 跳到下一格
-  ③ 收集四周已分配且「无分界线隔开」的相邻区域号 valid_rids
-  ④ 尝试加入每个相邻区域 rid：
+dfs(state):
+  ① undecided_count == 0 → check_global_constraints 叶子校验
+  ② check_area_lower_bounds（见 3.2）
+  ③ (r,c) = pick_next_cell(state)     # 见 3.1
+  ④ 收集四周已分配且「无分界线隔开」的相邻区域号 valid_rids
+  ⑤ 尝试加入每个相邻区域 rid：
         - 面积上限：region 已满 max_area → 跳过
         - 预画边界冲突：若某邻居属于 rid 但被边界隔开 → 跳过
-        - 面积数字：加完后 area 不能超过区内任何数字 → 否则跳过
+        - 面积数字：加完后 area 不能超过区内任何数字；且区内不能有两个
+          不同目标面积的数字格（线索冲突）→ 否则跳过
         - check_merge_ok：不能把两个不同区域“缝合”到一起
-        - 写入 → 增量检查 watchtowers + ring/brick → 递归
-        - 失败 → 撤销
-  ⑤ 开新区域：
-        把该格作为新区域 1 号格
-        增量检查 → 递归
-        失败 → 撤销
+        - 写入 → 维护 frontier（frontier_assign）→ 增量检查
+          watchtowers + ring/brick → 递归
+        - 失败 → 撤销（frontier_unassign）
+  ⑥ 开新区域：把该格作为新区域 1 号格，同上 → 递归 / 撤销
 ```
 
-### 3.1 关键增量检查
+### 3.1 动态选格 `pick_next_cell`（area 剪枝核心）
 
-**`check_merge_ok`**（`backtrack.rs:284-302`）：加入 (r,c) 到 rid 后，若 (r,c) 的某邻居
-属于**另一个**区域且之间无分界线，则两个区域会连通合并——不允许。
+`backtrack.rs:311-341`。解决 1301 这类 **brick+area** 题的结构性死结：
 
-**`check_watchtowers_ok`**（`backtrack.rs:305-320`）：任何望塔顶点接触的区域数
+> 1301（8×9，49 可填格，10 个 48 线索）用固定行优先解不出：`(0,3)` 是第 0 个可填格、
+> `(1,1)` 是第 4 个，而 `(1,1)` 的所有连接格都在它之后。dfs 走到 `(1,1)` 时 48 区域还
+> 长不到它旁边 → `(1,1)` 被迫开新区域 → 需要两个 48 区域（96 格 > 49 格）→ 行优先下
+> **永远判 UNSAT**。官方解 = 10 个 48 线索全在同一 48 格区域 + 1 个单点。
+
+选格规则：
+- **优先长「未达目标面积」的线索区域**：遍历 `region_clue`，对每个 `area < n` 的区域，
+  从其 `frontier`（邻接的未定格，引用计数）里挑行优先序号最小的格。
+- 无 area 规则（`has_area_rule=false`）或没有可长的线索区域 → 退化回行优先最小未定格。
+
+这样 48 区域从 `(0,3)` 出发按连通性 greedy 生长，`(1,1)` 先被吃掉再被处理，绕开死结。
+
+### 3.2 面积下限剪枝 `check_area_lower_bounds`
+
+`backtrack.rs:345-367`。两个子检查：
+
+- **密封**：`frontier[rid]` 空 → 面积已定格，`area != n` 剪。
+- **容量**：`area[rid] + undecided_count < n` 剪——剩余未定格全塞给它也不够。
+  对 1301 等价于「48 区域之外最多留 1 格」，搜索从天文数字塌缩成「枚举哪 1 格做单点」。
+
+`frontier_assign` / `frontier_unassign`（`backtrack.rs:370-442`）维护引用计数保证
+undo 正确；`has_area_rule` 为 false 时全部是 no-op（无 area 规则零开销）。
+
+### 3.3 关键增量检查
+
+**~~`check_merge_ok`~~（已删除）**：旧逻辑「加入 (r,c) 到 rid 后，若 (r,c) 的某邻居属于
+另一个区域且之间无分界线 → 拒绝」，本意是防止两个区域被缝合，但**过度保守**——相邻区域
+本就合法共享边界。它把 1301 官方解的构造（单点 (6,7) 紧挨区域 0 的 (6,8)，(6,8) 加进
+区域 0 时会触及区域 1）整支剪掉，导致回溯找不到官方解。删除后 1301/0957 均由 backtrack
+解出；最终正确性由叶子校验 + `build_solution` 的 `check_all` + router 的
+`IndependentValidator` 三层兜底。
+
+**`check_watchtowers_ok`**（`backtrack.rs:466-481`）：任何望塔顶点接触的区域数
 **不能超过**目标值（部分填时取“已填格去重计数”）。
 
-**`check_vertex_ring_ok`**（`backtrack.rs:343-373`）：新增格 (r,c) 后，检查它四角的
+**`check_vertex_ring_ok`**（`backtrack.rs:516-552`）：新增格 (r,c) 后，检查它四角的
 顶点：若 4 格已全填（或被 blocked 占掉），统计该顶点 4 条边的边界数——
 `ring` 规则禁 3、`brick` 规则禁 4。
 
-> `vertex_boundary_count`（`backtrack.rs:324-338`）统计时：blocked 相邻按“边界”计；
-> 两格若未分配也按边界计（保守），所以 `check_vertex_ring_ok` 要求 4 格**全确定**
-> 才触发——避免误剪。
+> **blocked 格语义（修复，1301 关键）**：`vertex_boundary_count`（`backtrack.rs:489-514`）
+> 把 blocked 格当作**空区**（`None`），**blocked-blocked 相邻不算边界**（两个空区是
+> 同一 AREA_BLOCK 值），但 **blocked-区域 相邻算边界**。这是正确语义（镜像 C++
+> `check_tatami` / 游戏 glimmith-solver）：
+> - 旧版把 blocked 相邻**全按边界计** → 棋盘角落（3 blocked + 1 区域）假报 bc=4，
+>   提前误剪解不出 1301；
+> - 修复过程中曾误加「顶点有 blocked 就跳过 brick」→ **放过真 4 路交叉**：1 blocked +
+>   3 个不同区域的顶点**确实是 4 路交叉**（brick 禁止），于是 1301 的孪生解
+>   （单点 (7,6)，顶点 (6,5) 处 1 blocked + R0/R0/R1）被误判合法，解出与官方
+>   (6,7) 不同的错解。删掉跳过、`vertex_boundary_count` 的 None/Some 规则直接给出
+>   正确度数后，1301 唯一解 = 官方解。ring 检查同用该计数。
 
 ---
 
@@ -132,31 +179,34 @@ dfs(idx):
                 solve_backtrack
                      │
                      ▼
-      compute_area_bounds + collect_watchtowers
+      compute_area_bounds + collect_watchtowers + cell_index
                      │
                      ▼
-      dfs(0)  （逐格分配区域号）
+      dfs(state)  （undecided_count 驱动）
+                     │
+                     ▼
+      check_area_lower_bounds ──剪──► false
+                     │
+                     ▼
+      pick_next_cell（优先长线索区域 frontier，否则行优先）
                      │
    ┌─────────────────┼──────────────────────┐
    ▼                 ▼                      ▼
- 该格已分配/阻塞   加入已有相邻区域         开新区域
-   │                │                      │
-   │         ┌──────┴────────┐             │
-   │         ▼               ▼             ▼
+ 加入已有相邻区域   开新区域               （叶子）
+   │                │                       │
+   │         ┌──────┴────────┐              ▼
+   │         ▼               ▼      check_global_constraints
    │   面积上限检查      check_merge_ok
    │   预画边界冲突        （不缝合两个区）
-   │   面积数字剪枝
+   │   面积数字/线索冲突剪枝
    │         │
    │         ▼
-   │   watchtowers_ok + ring/brick_ok
+   │   frontier_assign + watchtowers_ok + ring/brick_ok
    │         │
    │         ▼
-   │   dfs(idx+1) ──失败──► 撤销，试下一个
+   │   dfs(state) ──失败──► 撤销（frontier_unassign），试下一个
    │
-   └─── idx 到头
-              │
-              ▼
-      check_global_constraints（叶子全套）
+   └─── undecided_count == 0
               │
               ▼
         build_regions → RegionInfo
@@ -169,17 +219,20 @@ dfs(idx):
 | 主题 | 位置 |
 |---|---|
 | `solve_backtrack` | `backtrack.rs:10` |
-| `BacktrackState` | `backtrack.rs:39` |
-| `compute_area_bounds` | `backtrack.rs:55` |
-| `collect_watchtowers` | `backtrack.rs:102` |
-| `dfs` 主循环 | `backtrack.rs:125` |
-| `check_merge_ok` | `backtrack.rs:284` |
-| `check_watchtowers_ok` | `backtrack.rs:305` |
-| `vertex_boundary_count` | `backtrack.rs:324` |
-| `check_vertex_ring_ok` | `backtrack.rs:343` |
-| `check_ring_ok` | `backtrack.rs:376` |
-| `check_global_constraints` | `backtrack.rs:394` |
-| `build_regions` | `backtrack.rs:664` |
+| `BacktrackState` | `backtrack.rs:55` |
+| `compute_area_bounds` | `backtrack.rs:78` |
+| `collect_watchtowers` | `backtrack.rs:125` |
+| `dfs` 主循环 | `backtrack.rs:148` |
+| `pick_next_cell` | `backtrack.rs:311` |
+| `check_area_lower_bounds` | `backtrack.rs:345` |
+| `frontier_assign` / `frontier_unassign` | `backtrack.rs:370` / `405` |
+| `check_merge_ok` | `backtrack.rs:445` |
+| `check_watchtowers_ok` | `backtrack.rs:466` |
+| `vertex_boundary_count` | `backtrack.rs:489` |
+| `check_vertex_ring_ok` | `backtrack.rs:516` |
+| `check_ring_ok` | `backtrack.rs:554` |
+| `check_global_constraints` | `backtrack.rs:576` |
+| `build_regions` | `backtrack.rs:846` |
 
 ---
 

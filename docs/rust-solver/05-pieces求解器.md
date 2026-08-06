@@ -107,6 +107,10 @@ generate_polyominoes(puzzle, sr, sc, size)
 （`is_precut`）。
 
 > 面积数字会限定区域大小，所以这里生成的候选**天然满足 area 规则**。
+>
+> **面积目标上限 `MAX_AREA_TARGET = 12`**（`pieces.rs:33-36`）：面积目标 > 12 时
+> 跳过 DLX 候选生成、留给 backtrack——枚举大面积的连通多连块会爆炸（如 1301 的
+> 面积 48）。阈值与 Python `ExactCoverSolver` 一致（`max(targets) <= 12`）。
 
 ### 4.3 罗盘候选
 

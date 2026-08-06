@@ -19,6 +19,15 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
     let deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
     let area_bounds = compute_area_bounds(puzzle);
 
+    // Row-major index of every fillable cell (blocked = usize::MAX).
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let mut cell_index = vec![vec![usize::MAX; w]; h];
+    for (i, &(r, c)) in fillable.iter().enumerate() {
+        cell_index[r][c] = i;
+    }
+    let has_area_rule = puzzle.rules.iter().any(|r| r.ctype == "area");
+
     let mut state = BacktrackState {
         cell_to_region: HashMap::new(),
         region_shapes: HashMap::new(),
@@ -27,9 +36,16 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
         deadline,
         area_bounds,
         watchtowers: collect_watchtowers(puzzle),
+        fillable: fillable.clone(),
+        cell_index,
+        undecided_count: fillable.len(),
+        region_clue: HashMap::new(),
+        frontier: HashMap::new(),
+        has_area_rule,
     };
 
-    if dfs(puzzle, &fillable, 0, &mut state) {
+    if std::env::var("AOG_DEBUG").is_ok() { eprintln!("backtrack: start undecided={}", state.undecided_count); }
+    if dfs(puzzle, &mut state) {
         Some(build_regions(&state))
     } else {
         None
@@ -44,6 +60,13 @@ struct BacktrackState {
     deadline: Instant,
     area_bounds: AreaBounds,
     watchtowers: Vec<(Vec<[usize; 2]>, usize)>,
+    // Area-clue machinery (zero overhead when the puzzle has no `area` rule).
+    fillable: Vec<(usize, usize)>,
+    cell_index: Vec<Vec<usize>>,
+    undecided_count: usize,
+    region_clue: HashMap<usize, usize>, // rid -> required area from a numbered cell inside
+    frontier: HashMap<usize, HashMap<(usize, usize), usize>>, // rid -> {undecided cell : adjacency count}
+    has_area_rule: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -122,13 +145,8 @@ fn timed_out(state: &BacktrackState) -> bool {
     Instant::now() >= state.deadline
 }
 
-fn dfs(
-    puzzle: &Puzzle,
-    fillable: &[(usize, usize)],
-    idx: usize,
-    state: &mut BacktrackState,
-) -> bool {
-    if idx >= fillable.len() {
+fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
+    if state.undecided_count == 0 {
         return check_global_constraints(puzzle, state);
     }
 
@@ -137,17 +155,13 @@ fn dfs(
         return false;
     }
 
-    let (r, c) = fillable[idx];
-
-    if state.cell_to_region.contains_key(&(r, c)) {
-        return dfs(puzzle, fillable, idx + 1, state);
+    // Area lower bound: each clue-region must be able to reach its target size.
+    if !check_area_lower_bounds(state) {
+        return false;
     }
 
+    let (r, c) = pick_next_cell(puzzle, state);
     let cell = &puzzle.cells[r][c];
-    if cell.blocked {
-        return dfs(puzzle, fillable, idx + 1, state);
-    }
-
     let h = puzzle.height;
     let w = puzzle.width;
 
@@ -155,59 +169,42 @@ fn dfs(
     let mut rid_set: HashSet<usize> = HashSet::new();
     let mut valid_rids: Vec<usize> = Vec::new();
 
-    // left
     if c > 0 {
         if let Some(&rid) = state.cell_to_region.get(&(r, c - 1)) {
-            if grid::is_adjacent_free(puzzle, r, c, r, c - 1) {
-                if rid_set.insert(rid) {
-                    valid_rids.push(rid);
-                }
+            if grid::is_adjacent_free(puzzle, r, c, r, c - 1) && rid_set.insert(rid) {
+                valid_rids.push(rid);
             }
         }
     }
-    // right
     if c + 1 < w {
         if let Some(&rid) = state.cell_to_region.get(&(r, c + 1)) {
-            if grid::is_adjacent_free(puzzle, r, c, r, c + 1) {
-                if rid_set.insert(rid) {
-                    valid_rids.push(rid);
-                }
+            if grid::is_adjacent_free(puzzle, r, c, r, c + 1) && rid_set.insert(rid) {
+                valid_rids.push(rid);
             }
         }
     }
-    // up
     if r > 0 {
         if let Some(&rid) = state.cell_to_region.get(&(r - 1, c)) {
-            if grid::is_adjacent_free(puzzle, r, c, r - 1, c) {
-                if rid_set.insert(rid) {
-                    valid_rids.push(rid);
-                }
+            if grid::is_adjacent_free(puzzle, r, c, r - 1, c) && rid_set.insert(rid) {
+                valid_rids.push(rid);
             }
         }
     }
-    // down
     if r + 1 < h {
         if let Some(&rid) = state.cell_to_region.get(&(r + 1, c)) {
-            if grid::is_adjacent_free(puzzle, r, c, r + 1, c) {
-                if rid_set.insert(rid) {
-                    valid_rids.push(rid);
-                }
+            if grid::is_adjacent_free(puzzle, r, c, r + 1, c) && rid_set.insert(rid) {
+                valid_rids.push(rid);
             }
         }
     }
 
     // Try assigning to each adjacent region
     for &rid in &valid_rids {
-        // Area check: prevent region from exceeding max_area
         let region_area = state.region_shapes.get(&rid).map(|s| s.len()).unwrap_or(0);
         if region_area >= state.area_bounds.max_area {
             continue;
         }
 
-        // Pre-drawn boundary: (r,c) must not be separated from any cell already
-        // in `rid` by a boundary edge.  (Reaching the region through one free
-        // neighbour is not enough — the region could also touch (r,c) across a
-        // drawn edge elsewhere.)
         let boundary_conflict = neighbor_positions(r, c, h, w).iter().any(|&(nr, nc)| {
             state.cell_to_region.get(&(nr, nc)) == Some(&rid)
                 && !grid::is_adjacent_free(puzzle, r, c, nr, nc)
@@ -216,14 +213,18 @@ fn dfs(
             continue;
         }
 
-        // area-number rule: after adding (r,c) the region's area must not exceed
-        // any numbered cell's value inside it (prunes early; leaf check enforces
-        // exact equality).
+        // area-number upper bound + clue conflict (a region can't hold two
+        // numbered cells with different targets).
         let new_area = region_area + 1;
         let mut area_clue_ok = true;
+        let prev_clue = state.region_clue.get(&rid).copied();
         if let Some(n) = cell.number {
             if new_area > n as usize {
                 area_clue_ok = false;
+            } else if let Some(m) = prev_clue {
+                if m != n as usize {
+                    area_clue_ok = false;
+                }
             }
         }
         if area_clue_ok {
@@ -242,23 +243,39 @@ fn dfs(
             continue;
         }
 
-        // Merge check: ensure assignment won't cause two regions to merge
-        if !check_merge_ok(puzzle, r, c, rid, &state.cell_to_region) {
-            continue;
-        }
+        // No check_merge_ok here: the old guard rejected a cell joining a region
+        // whenever it touched any other region with a free edge — but adjacent
+        // regions legitimately share boundaries, so that blocked valid solutions
+        // (e.g. 1301's official singleton-(6,7) tiling).  The final validators
+        // (check_global_constraints / check_all / router IndependentValidator)
+        // still reject any wrong answer.
 
         state.cell_to_region.insert((r, c), rid);
         state.region_shapes.get_mut(&rid).unwrap().push([r, c]);
+        state.undecided_count -= 1;
+        frontier_assign(state, r, c, rid);
+        if let Some(n) = cell.number {
+            state.region_clue.insert(rid, n as usize);
+        }
 
-        // Incremental watchtower + ring check
         if check_watchtowers_ok(state) && check_vertex_ring_ok(puzzle, r, c, state) {
-            if dfs(puzzle, fillable, idx + 1, state) {
+            if dfs(puzzle, state) {
                 return true;
             }
         }
 
         state.cell_to_region.remove(&(r, c));
         state.region_shapes.get_mut(&rid).unwrap().pop();
+        state.undecided_count += 1;
+        frontier_unassign(state, r, c, rid);
+        match prev_clue {
+            Some(m) => {
+                state.region_clue.insert(rid, m);
+            }
+            None => {
+                state.region_clue.remove(&rid);
+            }
+        }
     }
 
     // Start a new region
@@ -266,39 +283,165 @@ fn dfs(
     state.next_region_id += 1;
     state.cell_to_region.insert((r, c), new_rid);
     state.region_shapes.insert(new_rid, vec![[r, c]]);
+    state.undecided_count -= 1;
+    frontier_assign(state, r, c, new_rid);
+    if let Some(n) = cell.number {
+        state.region_clue.insert(new_rid, n as usize);
+    }
 
     if check_watchtowers_ok(state) && check_vertex_ring_ok(puzzle, r, c, state) {
-        if dfs(puzzle, fillable, idx + 1, state) {
+        if dfs(puzzle, state) {
             return true;
         }
     }
 
     state.cell_to_region.remove(&(r, c));
     state.region_shapes.remove(&new_rid);
+    state.undecided_count += 1;
+    frontier_unassign(state, r, c, new_rid);
+    state.region_clue.remove(&new_rid);
     state.next_region_id -= 1;
 
     false
 }
 
-/// Check that adding (r,c) to region `rid` won't merge two different regions.
-fn check_merge_ok(
-    puzzle: &Puzzle,
-    r: usize,
-    c: usize,
-    target_rid: usize,
-    assigned: &HashMap<(usize, usize), usize>,
-) -> bool {
-    let h = puzzle.height;
-    let w = puzzle.width;
+fn is_undecided(state: &BacktrackState, r: usize, c: usize) -> bool {
+    state.cell_index[r][c] != usize::MAX && !state.cell_to_region.contains_key(&(r, c))
+}
 
-    for (nr, nc) in neighbor_positions(r, c, h, w) {
-        if let Some(&nrid) = assigned.get(&(nr, nc)) {
-            if nrid != target_rid && grid::is_adjacent_free(puzzle, r, c, nr, nc) {
+/// Pick the next cell: grow an under-target clue-region first (its frontier,
+/// smallest row-major index), else the smallest row-major undecided cell.
+fn pick_next_cell(puzzle: &Puzzle, state: &BacktrackState) -> (usize, usize) {
+    if state.has_area_rule {
+        let mut best: Option<(usize, usize)> = None;
+        let mut best_idx = usize::MAX;
+        for (&rid, &n) in &state.region_clue {
+            let area = state.region_shapes.get(&rid).map(|s| s.len()).unwrap_or(0);
+            if area < n {
+                if let Some(fr) = state.frontier.get(&rid) {
+                    for &cell in fr.keys() {
+                        if is_undecided(state, cell.0, cell.1) {
+                            let i = state.cell_index[cell.0][cell.1];
+                            if i < best_idx {
+                                best_idx = i;
+                                best = Some(cell);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(cell) = best {
+            return cell;
+        }
+    }
+    for &cell in &state.fillable {
+        if !state.cell_to_region.contains_key(&cell) {
+            return cell;
+        }
+    }
+    unreachable!("undecided_count > 0 but no undecided cell")
+}
+
+/// Each clue-region must reach its target area: sealed regions (empty frontier)
+/// are final, and total capacity must suffice.
+fn check_area_lower_bounds(state: &BacktrackState) -> bool {
+    if !state.has_area_rule {
+        return true;
+    }
+    for (&rid, &n) in &state.region_clue {
+        let area = state.region_shapes.get(&rid).map(|s| s.len()).unwrap_or(0);
+        if let Some(fr) = state.frontier.get(&rid) {
+            if fr.is_empty() && area != n {
+                if std::env::var("AOG_DEBUG").is_ok() {
+                    eprintln!("  LB: sealed rid={} area={} n={}", rid, area, n);
+                }
                 return false;
             }
         }
+        if area + state.undecided_count < n {
+            if std::env::var("AOG_DEBUG").is_ok() {
+                eprintln!("  LB: capacity rid={} area={} undecided={} n={}", rid, area, state.undecided_count, n);
+            }
+            return false;
+        }
     }
     true
+}
+
+/// Mark (r,c) as assigned to `rid`, updating frontiers (no-op without area rule).
+fn frontier_assign(state: &mut BacktrackState, r: usize, c: usize, rid: usize) {
+    if !state.has_area_rule {
+        return;
+    }
+    if let Some(fr) = state.frontier.get_mut(&rid) {
+        fr.remove(&(r, c));
+    }
+    for (dr, dc) in [(1i64, 0i64), (-1, 0), (0, 1i64), (0, -1i64)] {
+        let nr = r as i64 + dr;
+        let nc = c as i64 + dc;
+        if nr < 0 || nc < 0 {
+            continue;
+        }
+        let (nru, ncu) = (nr as usize, nc as usize);
+        if nru >= state.cell_index.len() || ncu >= state.cell_index[0].len() {
+            continue;
+        }
+        if is_undecided(state, nru, ncu) {
+            *state.frontier.entry(rid).or_default().entry((nru, ncu)).or_insert(0) += 1;
+        } else if let Some(&nrid) = state.cell_to_region.get(&(nru, ncu)) {
+            if nrid != rid {
+                if let Some(fr) = state.frontier.get_mut(&nrid) {
+                    if let Some(cnt) = fr.get_mut(&(r, c)) {
+                        *cnt -= 1;
+                        if *cnt == 0 {
+                            fr.remove(&(r, c));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Undo frontier_assign for (r,c) leaving region `rid`.
+fn frontier_unassign(state: &mut BacktrackState, r: usize, c: usize, rid: usize) {
+    if !state.has_area_rule {
+        return;
+    }
+    for (dr, dc) in [(1i64, 0i64), (-1, 0), (0, 1i64), (0, -1i64)] {
+        let nr = r as i64 + dr;
+        let nc = c as i64 + dc;
+        if nr < 0 || nc < 0 {
+            continue;
+        }
+        let (nru, ncu) = (nr as usize, nc as usize);
+        if nru >= state.cell_index.len() || ncu >= state.cell_index[0].len() {
+            continue;
+        }
+        if is_undecided(state, nru, ncu) {
+            if let Some(fr) = state.frontier.get_mut(&rid) {
+                if let Some(cnt) = fr.get_mut(&(nru, ncu)) {
+                    *cnt -= 1;
+                    if *cnt == 0 {
+                        fr.remove(&(nru, ncu));
+                    }
+                }
+            }
+        } else if let Some(&nrid) = state.cell_to_region.get(&(nru, ncu)) {
+            if nrid != rid {
+                *state.frontier.entry(nrid).or_default().entry((r, c)).or_insert(0) += 1;
+            }
+        }
+    }
+    // Re-insert (r,c) into rid's frontier if still adjacent to rid.
+    let count = neighbor_positions(r, c, state.cell_index.len(), state.cell_index[0].len())
+        .iter()
+        .filter(|&&(nr, nc)| state.cell_to_region.get(&(nr, nc)) == Some(&rid))
+        .count();
+    if count > 0 {
+        state.frontier.entry(rid).or_default().insert((r, c), count);
+    }
 }
 
 /// Incremental watchtower check: no vertex should already have more distinct regions than its target.
@@ -321,14 +464,26 @@ fn check_watchtowers_ok(state: &BacktrackState) -> bool {
 
 /// Number of solution boundaries around the interior vertex (r,c) (the corner
 /// shared by cells (r,c), (r+1,c), (r,c+1), (r+1,c+1)).
+///
+/// Blocked cells are empty space, not regions: a blocked-blocked edge is one
+/// shared AREA_BLOCK value (NOT a boundary), mirroring the authoritative
+/// `aog::validate::count_boundary_edges_at_vertex` and the C++ check_tatami.
 fn vertex_boundary_count(puzzle: &Puzzle, state: &BacktrackState, r: usize, c: usize) -> usize {
     let is_bound = |a: (usize, usize), b: (usize, usize)| -> bool {
-        if puzzle.cells[a.0][a.1].blocked || puzzle.cells[b.0][b.1].blocked {
-            return true;
-        }
-        match (state.cell_to_region.get(&a), state.cell_to_region.get(&b)) {
+        let ra = if puzzle.cells[a.0][a.1].blocked {
+            None
+        } else {
+            state.cell_to_region.get(&a).copied()
+        };
+        let rb = if puzzle.cells[b.0][b.1].blocked {
+            None
+        } else {
+            state.cell_to_region.get(&b).copied()
+        };
+        match (ra, rb) {
             (Some(x), Some(y)) => x != y,
-            _ => true, // unassigned counts as a boundary
+            (None, None) => false, // blocked-blocked = same empty space / outer border
+            _ => true, // one side a region, the other empty space / outer border
         }
     };
     is_bound((r, c), (r + 1, c)) as usize
@@ -365,6 +520,11 @@ fn check_vertex_ring_ok(puzzle: &Puzzle, r: usize, c: usize, state: &BacktrackSt
             continue;
         }
         let bc = vertex_boundary_count(puzzle, state, vr as usize, vc as usize);
+        // brick: 4-way junction — blocked cells count as a distinct value
+        // (their edges are border segments, mirroring C++ check_tatami and the
+        // game's glimmith-solver).  A vertex with one blocked + 3 regions IS a
+        // 4-way.  vertex_boundary_count already treats blocked-blocked as no
+        // boundary, so no skip is needed here.
         if (has_ring && bc == 3) || (has_brick && bc == 4) {
             return false;
         }
@@ -579,13 +739,12 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
         }
     }
 
-    // different: all region shapes distinct.
+    // different: all region shapes dihedrally distinct (raw normalize+canonical
+    // key missed rotation/reflection duplicates; use the dihedral key).
     if puzzle.rules.iter().any(|r| r.ctype == "different") {
         let mut keys: HashSet<String> = HashSet::new();
         for shape in state.region_shapes.values() {
-            let mut norm = shape.clone();
-            normalize(&mut norm);
-            if !keys.insert(canonical_key(&norm)) {
+            if !keys.insert(crate::constraints::dihedral_key(shape)) {
                 return false;
             }
         }

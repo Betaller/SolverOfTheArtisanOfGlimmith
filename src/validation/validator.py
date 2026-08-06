@@ -492,11 +492,11 @@ def _check_brick(
     if not puzzle.has_rule("brick"):
         return True
     for v in board.vertices():
-        # 4 路交叉 = 4 个**区域**在顶点相会。顶点周围若有 blocked（空格），
-        # 空格不是区域，不可能构成 4 路交叉——跳过（与 C++ check_tatami 一致，
-        # 后者把所有 blocked 视为同一个非区域值，永远不会计数为不同区域）。
-        if any(c.blocked for c in board.cells_surrounding_vertex(v.row, v.col)):
-            continue
+        # 4 路交叉：顶点 4 条边全是分界线。blocked（空格）边也算分界线——
+        # blocked 与任何区域都不同，但 blocked-blocked 同属一个空区不算边界
+        # （与 C++ check_tatami / 游戏 glimmith-solver 一致）。所以**不能**因
+        # 顶点旁有 blocked 就跳过：1 blocked + 3 个不同区域 = 4 路交叉
+        # （如 1301 的孪生解 (7,6)）。
         count = sum(
             1
             for e in board.edges_surrounding_vertex(v.row, v.col)

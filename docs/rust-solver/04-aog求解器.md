@@ -147,7 +147,12 @@ dfs(index):
   ④ 对 size 在可行域内：
        a. 若起手点带面积数字 → 只允许该 size
        b. 若起手点邻接不等号/差值边且邻居已放 → 用邻居尺寸过滤 mk_size
+       c. **每次 size 迭代先查 deadline**（Fix C）——一个 size 的
+          place 可能跑几千步，整段 size 循环会被此检查框住
   ⑤ 遍历形状目录 shapes[cur]：
+       **每 256 个 shape 查一次 deadline**（Fix B）——单个 shape 的
+       Type4 empty_area_check 是整板 O(n²)+洪泛，没有此检查会在超时后
+       把剩余 shape 全走一遍
        Type1 检查：平移到 (x,y) 后所有格是否在界内、未占、不冲突
        Type2 检查：逐格写 sp，检查边/边约束/相邻异形/异面积
        Type3 检查：围栏、望塔、T字/十字交点
@@ -158,6 +163,13 @@ dfs(index):
        现场生长形状（自由多连块）
   ⑦ 都不行 → 返回 -1
 ```
+
+> **热路径 deadline 检查（Fix B/C）**：C++ 参考求解器没有任何超时机制；Rust 移植
+> 新增的 deadline 检查原先只在 `dfs` 入口（`search.rs:843`）和 `place` 栈循环每 4096 步
+> （`search.rs:113`）。上一版 1s 预算封顶把 aog 硬性限死，反而丢掉大量 aog 在 1-25s
+> 能解的题（全量回归从 1047 掉到 983，65 道新 FAIL）。现改为：aog 拿完整 `timeout_ms`
+> 预算，靠 Fix B/C 让它**在 deadline 处精确停住**——既保住 aog 的长尾解题能力，
+> 又不会像旧版那样越过 deadline 烧光整个子进程预算。
 
 ### 4.1 空区尺寸可行域 `mk_size`
 

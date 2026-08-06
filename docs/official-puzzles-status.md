@@ -36,6 +36,20 @@
 - 提升类型：**range+rose**（带区域尺寸约束的玫瑰窗）——1334/1342 由 30s FAIL → **<1s 解出**（见第二部分对应条目）。
 - 注：Zone3 -1 为 aog 预算下调后某题的计时/非确定性波动（rose 兜底仍未解）。
 
+### 2026-08-06 · brick 回溯短板闭合（本会话）
+- **result**：`/tmp/bench_final3.log`（`scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 40 -j 8`）
+- **1052 / 1258 通过**，较上一基准（1047）**+5**，**0 个真实新增失败**。
+
+  | Zone | 通过 | 未解 | 变化 |
+  |---|---|---|---|
+  | A/B/C | 26 / 27 | 1 | 0 |
+  | Zone1 | 301 / 312 | 11 | +1 |
+  | Zone2 | 395 / 438 | 43 | +2 |
+  | Zone3 | 330 / 481 | 151 | +2 |
+
+- 新解出：**1301**（brick+area，backtrack ≈30s=aog 30s 预算+回溯秒级）、**0957**（brick+block+rose，≈1.9s）、0732 / 0710 / 0795 / 0265 / 1382。两个 Rust-only 缺口（1301/0957）全部闭合。
+- 注：0957 在全量并行下偶发 exit -9（rose 内存压力，solo ≈1.9s）；0985 全量并行下 40s 超时（solo ≈16s）——均为**负载波动**非回归。基准用 `--timeout 40` 是为了容纳 1301 的 30s aog 预算。
+
 ---
 
 ## 第二部分：变更内容
@@ -78,16 +92,34 @@
 - **修复**：`rose::region_size_bounds()`（解析 range/precise 全局区域尺寸界）+ region_match 按 `[min,max]` 过滤候选、组合 `min_val=max(min,N)`。1342 组合 1265 万 → **1 个**，1334 → 6 个。`AOG_ROSE_BUDGET_MS` 5s→3s（aog 解 <1s 纯 rose 后，硬题快速交 rose）。
 - **结果**：Rust-only 基准 1047/1258（rose 前 1040）。0 个 rose 专属差距；剩余 2 个 Rust-only 缺口（0957 brick+block+rose、1301 brick+area）为 **brick 回溯短板**（非 rose），router Python 兜底覆盖，实际无回归。
 
+### 2026-08-06 · brick 回溯短板修复 + 砖纹规则语义修正 + 形状规则语义修复 + aog 预算回退（本会话）
+针对 1301 / 0957 两个 **brick 回溯短板** 与全量回归中发现的规则校验漏洞，一组联动修复：
+
+1. **backtrack area 剪枝落地**（§3.1 设计）：`pick_next_cell` 动态连通优先生长线索区域 + `check_area_lower_bounds` 密封/容量剪枝 + frontier 引用计数。行优先的死结（`(0,3)` 先于 `(1,1)` 被处理导致 48 区域长不到它旁边）被绕开。
+2. **砖纹（brick）规则语义修正——两处方向相反的 bug**：
+   - 旧 `vertex_boundary_count` 把 **blocked 相邻全按边界计** → 棋盘角落（3 blocked + 1 区域）假报 4 路交叉，回溯提前误剪；
+   - 修复中一度把「顶点有 blocked 就跳过 brick」→ **放过真 4 路交叉**（1 blocked + 3 个不同区域 = 4 路交叉），于是 1301 出现**孪生解**（单点 (7,6) 被误判合法，官方是 (6,7)）。
+   - **最终正确语义**（镜像 C++ `check_tatami` / glimmith-solver）：blocked 当空区、**blocked-blocked 不算边界、blocked-区域算边界、不跳过 blocked 顶点**。同步修复 `validate.rs`、`IndependentValidator._check_brick`、backtrack。
+   - **结果**：1301 唯一解 = 官方解 (6,7)。
+3. **删除 `check_merge_ok`**（backtrack 过度保守剪枝）：「加入格若触及别的区域就拒绝」把 1301 官方解构造（单点 (6,7) 紧挨区域 0）整支剪掉 → 回溯找不到官方解。删除后 **1301 与 0957 均由 Rust backtrack 解出**（0957 ≈1.9s；1301 约 30s = aog 30s 预算 + backtrack 秒级）。正确性由叶子校验 + `check_all` + `IndependentValidator` 三层兜底。
+4. **形状规则语义修复**：`constraints.rs` 的 `check_same`/`check_different` 用原始 `shape` Vec 比较 → 改为 `dihedral_key` 规范键；`check_mixed` 由 `!check_same`（全局近似）改为「相邻区域形状不同」正确语义（镜像 validate.rs / Python）。backtrack 叶子 `different` 检查同步修复。**结果**：修复 1114 等 `different` 题被旋转/翻转重复形状误放行的问题（`IndependentValidator` 一直能拦，Rust-only 之前会接受错解）。
+5. **aog 预算回退**：全量回归发现上一版 `AOG_BUDGET_CAP_MS = 1s` 把 aog 硬性限死，**65 道 aog 在 1-25s 能解的题全部转 FAIL**（1047 → 983）。移除 1s 封顶、aog 拿回完整 `timeout_ms`；配合热路径 deadline 检查（Fix B/C：shape 循环每 256 查、size 循环每次查），aog 在 deadline 处**精确停住**而非烧光预算。
+
+- **验证**：`cargo test` 9 通过；`pytest` 387 通过；全量 Rust-only 基准 **1052/1258**（0 真实回归，见第一部分最新条目）；router 实测 1301（≈30s）/0957（≈1.9s）均 `rust(ok)`，不再依赖 Python 兜底。
+
 ---
 
 ## 附录
 
-### A. 当前 DIFF（解 ≠ 官方解）—— 6 道，全为 watchtower
+### A. 当前 DIFF（解 ≠ 官方解）
+1. **watchtower DIFF —— 6 道**
 ```
 Zone3/3-vertex-radar/0543  0544  0662  0663  0800
 Zone3/7-zone3-mixed/1144
 ```
 双重验证：官方解与求解器解**均**通过全部建模规则（望塔值 0 违例）。已对照 aog `check_radar` 语义确认 watchtower 建模正确。按当前规则**确实存在多个合法解**，属「官方解是其中一解」的候选。待办：游戏侧实测，或核查望塔规则在障碍格/边框的语义。
+
+> 曾把 1301 误列入「孪生解」，实为 **brick 规则语义 bug**：`validate.rs` / `IndependentValidator` / backtrack 对含 blocked 的顶点跳过 brick 检查，放过 1 blocked + 3 区域的真 4 路交叉，导致单点 `(7,6)` 的错解被判合法。修复砖纹语义后 1301 唯一解 = 官方解 `(6,7)`（2026-08-06，见第二部分）。
 
 ### B. 当前 UNSOLVED 分析（求解器解不出，非错解）
 按类型（近似）：Zone3/7-zone3-mixed 33、Zone3/2-loopy 31、Zone3/6-compass-main 29、Zone3/5-inequality 19、Zone3/3-vertex-radar 18、Zone3/8-endgame 18、Zone3/4-difference 15、其余 Zone1/Zone2 散布。
@@ -95,7 +127,8 @@ Zone3/7-zone3-mixed/1144
 **根因**：求解器能力限制（compass/rose/ring 强规则组合搜索空间大、剪枝不足），**不是校验或转换问题**。
 
 ### C. 后续计划
-1. 修 Rust **brick 回溯短板**（0957/1301，或借 Python 兜底）；补齐后做 Rust-only 全量回归再删 Python 求解器。
+0. **评估 Python 求解器去留**：Rust-only 全量回归通过后，确认 Python 求解器（exact_cover/rose/backtrack 及其导入、测试、文档）是否不再需要；确认则清理相关代码与文档（`default_router` 改 Rust-only、删文件、修导入、同步 `architecture.md` / `docs/重构` / `CLAUDE.md`）。
+1. ~~修 Rust **brick 回溯短板**（0957/1301）~~ **已完成（2026-08-06）**：砖纹语义修正 + 删除 `check_merge_ok` + area 剪枝，1301/0957 均由 Rust 解出。下一步可做 **Rust-only 全量回归**（router 只走 RustSolver 验证全部官方题），通过后再评估删 Python 求解器（与 C.0 衔接）。
 2. 修回溯内存泄漏（`backtrack._solve_rose_parallel` 守护线程不退出，全量 verify OOM / 1004 300s 不收敛）——全量回归阻塞项。
 3. 甄别 6 道 watchtower DIFF（游戏侧实测 or 望塔规则深挖）。
 4. compass / ring 组合剪枝；0446（DLX 形状去重）、1109（compass 专项）、1004（rose+watchtower）。

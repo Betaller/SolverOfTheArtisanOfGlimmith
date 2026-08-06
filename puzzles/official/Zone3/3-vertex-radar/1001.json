@@ -360,34 +360,24 @@
   "edges": [],
   "vertices": [
     {
-      "row": 2,
-      "col": 5,
+      "row": 3,
+      "col": 6,
       "watchtower": 3
     },
     {
-      "row": 2,
-      "col": 6,
-      "watchtower": 2
-    },
-    {
-      "row": 3,
-      "col": 4,
-      "watchtower": 1
-    },
-    {
       "row": 3,
       "col": 7,
       "watchtower": 2
     },
     {
       "row": 4,
-      "col": 4,
-      "watchtower": 2
+      "col": 5,
+      "watchtower": 1
     },
     {
       "row": 4,
-      "col": 7,
-      "watchtower": 1
+      "col": 8,
+      "watchtower": 2
     },
     {
       "row": 5,
@@ -396,7 +386,17 @@
     },
     {
       "row": 5,
+      "col": 8,
+      "watchtower": 1
+    },
+    {
+      "row": 6,
       "col": 6,
+      "watchtower": 2
+    },
+    {
+      "row": 6,
+      "col": 7,
       "watchtower": 3
     }
   ],

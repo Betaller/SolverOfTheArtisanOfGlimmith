@@ -64,6 +64,14 @@
 - **回归**：40 抽样 PASS 题 + 10 ring/compass PASS 题 **0 回归**；`cargo test` 6 通过、`pytest` 290 通过。
 - **benchmark 脚本**：`verify_puzzles.py` / `benchmark_rust_solver.py` 新增「解 vs 官方题解」比对（`matches_official`，DIFF 即失败）。
 
+### 2026-08-06 · 边界望塔修复（watchtower 顶点绝对坐标约定）
+- **result**：`results/20260806_watchtower-verify.txt`（watchtower 专项 verify）+ `results/20260806_final_verify.txt`（全量 verify）
+- **改动**：用户报告 0800/0543 官方题与 JSON 有差异。根因：官方题在**外边界顶点**上有望塔，但**转换器**（`convert_archive.py` 只收集内部行/列）与**模型**（Rust `io.rs` 顶点数组 `(h-1)×(w-1)`，`build_puzzle` 拒绝边界坐标）双双丢弃。
+  - 顶点约定改为**绝对网格坐标** `(0..=h × 0..=w)`：`rsolver` io.rs / validate.rs / backtrack.rs / pieces.rs / aog core.rs 雷达编码（`2r+2, 2c+2`）；Python board.py / validator.py / UI grid_widget.py（绘制与点击映射去 `±1` 偏移）。
+  - 转换器收集全部边界望塔；85 个 watchtower 谜题 JSON 以 `puzzles.json` 为权威源迁移 vertices。
+- **效果**：**watchtower DIFF 全部消除（0 DIFF）**。6 道（0543/0544/0662/0663/0800/1144）解出且与官方解一致；0985 加约束后 30s 超时（FAIL 但不再出错误解）。50 PASS / 35 FAIL（35 个失败全部为基线既有失败，**0 回归**）。
+- **验证**：`cargo test` 6 通过；`pytest` 全绿；watchtower 专项 verify 0 DIFF；6/7 DIFF 题解出官方解。
+
 ---
 
 ## 第二部分：变更内容
@@ -239,17 +247,49 @@
   （`matches_official_answer`），结果字段 `matches_official`（True/False/None），
   False（解合法但 ≠ 官方唯一解）标记 **DIFF** 并计入失败。
 
+### 2026-08-06 · 边界望塔缺失修复（顶点绝对坐标约定）
+- **背景**：用户报告 0800/0543 官方题与 JSON 有差异——官方题在**外边界顶点**上也有
+  望塔限制，JSON 缺失。经调研：14 个 watchtower 谜题有边界望塔，**6 个 watchtower
+  DIFF 题（0543/0544/0662/0663/0800/1144）全在其中**。此前被误判为「多解/规则理解」。
+- **根因（转换 + 模型双层 bug）**：
+  1. `scripts/convert_archive.py` 只在 `1 ≤ r ≤ height-1`、`1 ≤ c ≤ width-1` 收集望塔，
+     丢弃上下左右四条边界的望塔。
+  2. Rust `io.rs` 顶点数组是 `(h-1)×(w-1)`（仅内部顶点），`build_puzzle` 对边界坐标
+     `return Err("vertex out of range")`——模型根本不能表示边界顶点。
+- **修复**：
+  1. **顶点约定改为绝对网格坐标** `(0..=h × 0..=w)`：`rsolver/src/io.rs`（数组 `(h+1)×(w+1)`、
+     接受边界坐标）、`solver/validate.rs` / `backtrack.rs` / `pieces.rs`（watchtower 统计
+     在界非阻塞周围格）、`solver/aog/core.rs`（雷达编码 `(2r+2, 2c+2)`，原 `2r+4`）、
+     `src/models/board.py`（`_build_vertices` / `cells_surrounding_vertex` /
+     `edges_surrounding_vertex`）、`src/validation/validator.py`、`src/ui/grid_widget.py`
+     （绘制与点击映射去掉 `±1` 偏移）。
+  2. **转换器** `scripts/convert_archive.py`：收集 `0..=height × 0..=width` 全部望塔，
+     绝对坐标 `(r,c)`。
+  3. **迁移 85 个 watchtower 谜题 JSON**：以 `third_party/archiveofglimmith.github.io/
+     puzzles.json` 为权威源（游戏解析约定：顶点行角点 `3c`，行补齐 `3W+2`），覆写
+     `vertices` 字段（内部顶点重索引 + 边界新增）。
+- **验证**：watchtower 专项 verify **50 PASS / 35 FAIL / 0 DIFF**（35 FAIL 全部为基线既有
+  失败，**0 回归**）；6 道 DIFF 题经 router 解出且与官方解一致；0985（原 DIFF）加约束后
+  30s 超时（不再出错误解）；官方解对 0985 完整约束通过。`cargo test` 6 通过、`pytest` 全绿。
+
 ---
 
 ## 附录
 
 ### A. 当前 DIFF（解 ≠ 官方解）
-1. **watchtower DIFF —— 6 道**
+1. ~~**watchtower DIFF —— 6 道**~~ **已解决（2026-08-06）**
 ```
 Zone3/3-vertex-radar/0543  0544  0662  0663  0800
 Zone3/7-zone3-mixed/1144
 ```
-双重验证：官方解与求解器解**均**通过全部建模规则（望塔值 0 违例）。已对照 aog `check_radar` 语义确认 watchtower 建模正确。按当前规则**确实存在多个合法解**，属「官方解是其中一解」的候选。待办：游戏侧实测，或核查望塔规则在障碍格/边框的语义。
+**根因**：官方题在**外边界顶点**上也有望塔，但转换器（`convert_archive.py` 只收集内部
+行/列）与模型（顶点数组是内部 `(h-1)×(w-1)`，`build_puzzle` 拒绝边界坐标）**双双丢弃
+边界望塔** → 盘面约束不足 → 求解器解出非官方解。**修复**：顶点约定改为**绝对网格坐标**
+（`0..=h × 0..=w`，含边界角点），转换器收集全部边界望塔，85 个 watchtower 谜题 JSON
+迁移。6 道 + 0985 全部不再产生「合法但 ≠ 官方」的解（6 道解出官方解；0985 加约束后
+搜索变难，30s 超时——仍是 FAIL 但**不再是错误解**）。详见第二部分对应条目。
+
+> 曾把 1301 误列入「孪生解」，实为 **brick 规则语义 bug**：`validate.rs` / `IndependentValidator` / backtrack 对含 blocked 的顶点跳过 brick 检查，放过 1 blocked + 3 区域的真 4 路交叉，导致单点 `(7,6)` 的错解被判合法。修复砖纹语义后 1301 唯一解 = 官方解 `(6,7)`（2026-08-06，见第二部分）。
 
 > 曾把 1301 误列入「孪生解」，实为 **brick 规则语义 bug**：`validate.rs` / `IndependentValidator` / backtrack 对含 blocked 的顶点跳过 brick 检查，放过 1 blocked + 3 区域的真 4 路交叉，导致单点 `(7,6)` 的错解被判合法。修复砖纹语义后 1301 唯一解 = 官方解 `(6,7)`（2026-08-06，见第二部分）。
 
@@ -262,7 +302,8 @@ Zone3/7-zone3-mixed/1144
 0. ~~**评估 Python 求解器去留**~~ **已完成（2026-08-06）**：评估证明 Python 求解器对官方语料无解出价值（历史仅解 5 道且现全由 Rust 解出；206 道失败题定向扫描 Python 0 命中）。已删 Python 求解算法、`default_router` 改 Rust-only、保留 constraints/shapes 共享层与 IndependentValidator，测试与文档同步（见第二部分 C.0 条目）。
 1. ~~修 Rust **brick 回溯短板**（0957/1301）~~ **已完成（2026-08-06）**：砖纹语义修正 + 删除 `check_merge_ok` + area 剪枝，1301/0957 均由 Rust 解出。下一步可做 **Rust-only 全量回归**（router 只走 RustSolver 验证全部官方题），通过后再评估删 Python 求解器（与 C.0 衔接）。
 2. 修回溯内存泄漏（`backtrack._solve_rose_parallel` 守护线程不退出，全量 verify OOM / 1004 300s 不收敛）——全量回归阻塞项。
-3. 甄别 6 道 watchtower DIFF（游戏侧实测 or 望塔规则深挖）。
+3. ~~甄别 6 道 watchtower DIFF~~ **已完成（2026-08-06）**：边界望塔缺失（转换+模型 bug）
+   已修复，见第二部分。
 4. compass / ring 组合剪枝；0446（DLX 形状去重）、1109（compass 专项）、1004（rose+watchtower）。
 5. 每次优化后重跑全量扫描刷新「第一部分」数字。
 

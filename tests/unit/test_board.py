@@ -65,11 +65,12 @@ class TestBoardConstruction:
 
     def test_vertices_count_4x4(self) -> None:
         b = Board(4, 4)
-        assert len(b.vertices()) == 9
+        # absolute grid corners: (4+1)×(4+1)
+        assert len(b.vertices()) == 25
 
     def test_vertices_count_2x2(self) -> None:
         b = Board(2, 2)
-        assert len(b.vertices()) == 1
+        assert len(b.vertices()) == 9
 
     def test_vertices_count_1xN(self) -> None:
         # minimum valid: 2x2, so 1xN is not valid
@@ -288,7 +289,7 @@ class TestBoardAccess:
     def test_vertices_list(self) -> None:
         b = Board(3, 3)
         vertices = b.vertices()
-        assert len(vertices) == 4
+        assert len(vertices) == 16
 
     def test_neighbors_center(self) -> None:
         b = Board(3, 3)
@@ -359,7 +360,8 @@ class TestBoardAccess:
 
     def test_cells_surrounding_vertex(self) -> None:
         b = Board(3, 3)
-        cells = b.cells_surrounding_vertex(1, 1)
+        # absolute grid corner (2,2) is the corner of cells (1,1)..(2,2)
+        cells = b.cells_surrounding_vertex(2, 2)
         assert len(cells) == 4
         positions = {(c.row, c.col) for c in cells}
         assert positions == {(1, 1), (1, 2), (2, 1), (2, 2)}

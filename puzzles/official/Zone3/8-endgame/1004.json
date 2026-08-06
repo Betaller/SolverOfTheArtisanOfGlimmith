@@ -754,64 +754,54 @@
   "edges": [],
   "vertices": [
     {
-      "row": 0,
-      "col": 3,
+      "row": 1,
+      "col": 4,
       "watchtower": 2
     },
     {
-      "row": 0,
+      "row": 1,
+      "col": 7,
+      "watchtower": 2
+    },
+    {
+      "row": 2,
+      "col": 4,
+      "watchtower": 2
+    },
+    {
+      "row": 2,
       "col": 6,
       "watchtower": 2
     },
     {
-      "row": 1,
-      "col": 3,
-      "watchtower": 2
-    },
-    {
-      "row": 1,
-      "col": 5,
-      "watchtower": 2
-    },
-    {
-      "row": 1,
-      "col": 9,
-      "watchtower": 3
-    },
-    {
       "row": 2,
-      "col": 9,
+      "col": 10,
       "watchtower": 3
     },
     {
       "row": 3,
-      "col": 1,
+      "col": 10,
+      "watchtower": 3
+    },
+    {
+      "row": 4,
+      "col": 2,
       "watchtower": 2
-    },
-    {
-      "row": 4,
-      "col": 0,
-      "watchtower": 3
-    },
-    {
-      "row": 4,
-      "col": 5,
-      "watchtower": 3
     },
     {
       "row": 5,
-      "col": 0,
-      "watchtower": 2
+      "col": 1,
+      "watchtower": 3
     },
     {
       "row": 5,
       "col": 6,
-      "watchtower": 2
+      "watchtower": 3
     },
     {
-      "row": 5,
-      "col": 10,
-      "watchtower": 4
+      "row": 6,
+      "col": 1,
+      "watchtower": 2
     },
     {
       "row": 6,
@@ -820,57 +810,67 @@
     },
     {
       "row": 6,
+      "col": 11,
+      "watchtower": 4
+    },
+    {
+      "row": 7,
       "col": 8,
       "watchtower": 2
     },
     {
-      "row": 6,
+      "row": 7,
+      "col": 9,
+      "watchtower": 2
+    },
+    {
+      "row": 7,
+      "col": 11,
+      "watchtower": 3
+    },
+    {
+      "row": 8,
+      "col": 7,
+      "watchtower": 2
+    },
+    {
+      "row": 9,
+      "col": 1,
+      "watchtower": 2
+    },
+    {
+      "row": 9,
+      "col": 6,
+      "watchtower": 2
+    },
+    {
+      "row": 9,
+      "col": 12,
+      "watchtower": 2
+    },
+    {
+      "row": 11,
+      "col": 3,
+      "watchtower": 3
+    },
+    {
+      "row": 11,
       "col": 10,
       "watchtower": 3
     },
     {
-      "row": 7,
+      "row": 12,
+      "col": 3,
+      "watchtower": 2
+    },
+    {
+      "row": 12,
       "col": 6,
-      "watchtower": 2
-    },
-    {
-      "row": 8,
-      "col": 0,
-      "watchtower": 2
-    },
-    {
-      "row": 8,
-      "col": 5,
-      "watchtower": 2
-    },
-    {
-      "row": 8,
-      "col": 11,
-      "watchtower": 2
-    },
-    {
-      "row": 10,
-      "col": 2,
       "watchtower": 3
     },
     {
-      "row": 10,
-      "col": 9,
-      "watchtower": 3
-    },
-    {
-      "row": 11,
-      "col": 2,
-      "watchtower": 2
-    },
-    {
-      "row": 11,
-      "col": 5,
-      "watchtower": 3
-    },
-    {
-      "row": 11,
-      "col": 6,
+      "row": 12,
+      "col": 7,
       "watchtower": 3
     }
   ],

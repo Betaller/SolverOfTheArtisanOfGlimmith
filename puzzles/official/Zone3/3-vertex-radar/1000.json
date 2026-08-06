@@ -599,98 +599,98 @@
   "edges": [],
   "vertices": [
     {
-      "row": 0,
-      "col": 2,
-      "watchtower": 1
-    },
-    {
-      "row": 0,
-      "col": 4,
-      "watchtower": 1
-    },
-    {
-      "row": 0,
-      "col": 6,
-      "watchtower": 1
-    },
-    {
-      "row": 2,
-      "col": 1,
-      "watchtower": 1
-    },
-    {
-      "row": 2,
+      "row": 1,
       "col": 3,
       "watchtower": 1
     },
     {
-      "row": 2,
+      "row": 1,
       "col": 5,
       "watchtower": 1
     },
     {
-      "row": 2,
+      "row": 1,
       "col": 7,
       "watchtower": 1
     },
     {
-      "row": 4,
-      "col": 0,
-      "watchtower": 1
-    },
-    {
-      "row": 4,
+      "row": 3,
       "col": 2,
       "watchtower": 1
     },
     {
-      "row": 4,
+      "row": 3,
       "col": 4,
       "watchtower": 1
     },
     {
-      "row": 4,
+      "row": 3,
       "col": 6,
       "watchtower": 1
     },
     {
-      "row": 4,
+      "row": 3,
       "col": 8,
       "watchtower": 1
     },
     {
-      "row": 6,
+      "row": 5,
       "col": 1,
       "watchtower": 1
     },
     {
-      "row": 6,
+      "row": 5,
       "col": 3,
       "watchtower": 1
     },
     {
-      "row": 6,
+      "row": 5,
       "col": 5,
       "watchtower": 1
     },
     {
-      "row": 6,
+      "row": 5,
       "col": 7,
       "watchtower": 1
     },
     {
-      "row": 8,
+      "row": 5,
+      "col": 9,
+      "watchtower": 1
+    },
+    {
+      "row": 7,
       "col": 2,
       "watchtower": 1
     },
     {
-      "row": 8,
+      "row": 7,
       "col": 4,
       "watchtower": 1
     },
     {
-      "row": 8,
+      "row": 7,
       "col": 6,
+      "watchtower": 1
+    },
+    {
+      "row": 7,
+      "col": 8,
+      "watchtower": 1
+    },
+    {
+      "row": 9,
+      "col": 3,
+      "watchtower": 1
+    },
+    {
+      "row": 9,
+      "col": 5,
+      "watchtower": 1
+    },
+    {
+      "row": 9,
+      "col": 7,
       "watchtower": 1
     }
   ],

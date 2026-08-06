@@ -324,43 +324,43 @@
   "edges": [],
   "vertices": [
     {
-      "row": 0,
-      "col": 3,
-      "watchtower": 2
-    },
-    {
       "row": 1,
-      "col": 1,
+      "col": 4,
       "watchtower": 2
     },
     {
       "row": 2,
-      "col": 4,
+      "col": 2,
       "watchtower": 2
     },
     {
       "row": 3,
-      "col": 0,
-      "watchtower": 2
-    },
-    {
-      "row": 4,
       "col": 5,
       "watchtower": 2
     },
     {
-      "row": 5,
+      "row": 4,
       "col": 1,
       "watchtower": 2
     },
     {
+      "row": 5,
+      "col": 6,
+      "watchtower": 2
+    },
+    {
       "row": 6,
-      "col": 4,
+      "col": 2,
       "watchtower": 2
     },
     {
       "row": 7,
-      "col": 2,
+      "col": 5,
+      "watchtower": 2
+    },
+    {
+      "row": 8,
+      "col": 3,
       "watchtower": 2
     }
   ],

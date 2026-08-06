@@ -260,12 +260,22 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                 }
             }
             "watchtower" => {
-                for r in 0..h.saturating_sub(1) {
-                    for c in 0..w.saturating_sub(1) {
+                // Vertex (r,c) is the ABSOLUTE grid corner (r in 0..=h,
+                // c in 0..=w, border corners included).  The cells touching it
+                // are the in-bounds ones of {(r-1,c-1),(r-1,c),(r,c-1),(r,c)}.
+                // A border corner is touched by 2 (edge) or 1 (grid corner)
+                // cells; blocked cells add no region (not in by_rid).
+                for r in 0..=h {
+                    for c in 0..=w {
                         if let Some(val) = puzzle.vertices[r][c].watchtower {
                             let mut distinct = HashSet::new();
-                            for (dr, dc) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
-                                if let Some(rid) = region_of(&by_rid, r + dr, c + dc) {
+                            for (dr, dc) in [(-1i64, -1i64), (-1, 0), (0, -1), (0, 0)] {
+                                let nr = r as i64 + dr;
+                                let nc = c as i64 + dc;
+                                if nr < 0 || nc < 0 || nr >= h as i64 || nc >= w as i64 {
+                                    continue;
+                                }
+                                if let Some(rid) = region_of(&by_rid, nr as usize, nc as usize) {
                                     distinct.insert(rid);
                                 }
                             }

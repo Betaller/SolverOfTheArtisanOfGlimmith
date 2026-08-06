@@ -125,8 +125,10 @@ class Board:
                 self._edges.append(Edge(r1=r, c1=c, r2=r + 1, c2=c))
 
     def _build_vertices(self) -> None:
-        for r in range(self.height - 1):
-            for c in range(self.width - 1):
+        # Vertex (r,c) = ABSOLUTE grid corner (r in 0..=height, c in 0..=width),
+        # border corners included.
+        for r in range(self.height + 1):
+            for c in range(self.width + 1):
                 self._vertices.append(Vertex(row=r, col=c))
 
     def cell(self, r: int, c: int) -> Cell:
@@ -171,19 +173,26 @@ class Board:
         return None
 
     def cells_surrounding_vertex(self, vr: int, vc: int) -> list[Cell]:
-        return [
-            self._cells[vr][vc],
-            self._cells[vr][vc + 1],
-            self._cells[vr + 1][vc],
-            self._cells[vr + 1][vc + 1],
-        ]
+        # Absolute grid corner (vr,vc): touched by the in-bounds cells of
+        # {(vr-1,vc-1),(vr-1,vc),(vr,vc-1),(vr,vc)}.  Border corners are touched
+        # by 2 (edge) or 1 (grid corner) cells.
+        result: list[Cell] = []
+        for dr, dc in [(-1, -1), (-1, 0), (0, -1), (0, 0)]:
+            nr, nc = vr + dr, vc + dc
+            if 0 <= nr < self.height and 0 <= nc < self.width:
+                result.append(self._cells[nr][nc])
+        return result
 
     def edges_surrounding_vertex(self, vr: int, vc: int) -> list[Edge]:
+        # Absolute grid corner (vr,vc): the 4 incident edges are the ones with
+        # this corner as an endpoint — the segments separating the cells around
+        # the corner.  Border corners have fewer incident edges (edge_between
+        # returns None for out-of-grid cell pairs).
         edges: list[Edge] = []
-        top = self.edge_between(vr, vc, vr, vc + 1)
-        bottom = self.edge_between(vr + 1, vc, vr + 1, vc + 1)
-        left = self.edge_between(vr, vc, vr + 1, vc)
-        right = self.edge_between(vr, vc + 1, vr + 1, vc + 1)
+        top = self.edge_between(vr - 1, vc - 1, vr - 1, vc)
+        bottom = self.edge_between(vr, vc - 1, vr, vc)
+        left = self.edge_between(vr - 1, vc - 1, vr, vc - 1)
+        right = self.edge_between(vr - 1, vc, vr, vc)
         for e in [top, bottom, left, right]:
             if e is not None:
                 edges.append(e)

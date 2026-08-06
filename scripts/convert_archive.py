@@ -361,12 +361,15 @@ def _parse_puzzle(p: dict) -> dict:
             seg = row[3 * c + 1 : 3 * c + 3]
             if 1 <= r <= height - 1:
                 _apply_edge(edge_map[(r - 1, c, r, c)], seg, cell_map, fillable, r - 1, c, r, c)
-        if 1 <= r <= height - 1:
-            for c in range(1, width):
-                ch = row[3 * c] if 3 * c < len(row) else " "
-                if ch.isdigit():
-                    cell_map.setdefault("__vertices", {})
-                    cell_map["__vertices"][(r - 1, c - 1)] = int(ch)
+        # Watchtowers (radar) at EVERY wall corner (0..=height × 0..=width),
+        # including the outer border.  Corner char sits at 3*c (game stride);
+        # rows with a leading indent read ' ' at grid columns outside the
+        # playable shape (blocked), so those corners simply carry no radar.
+        for c in range(width + 1):
+            ch = row[3 * c] if 3 * c < len(row) else " "
+            if ch.isdigit():
+                cell_map.setdefault("__vertices", {})
+                cell_map["__vertices"][(r, c)] = int(ch)
 
     # --- collect edges ---
     edges: list[dict] = []

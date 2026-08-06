@@ -205,12 +205,14 @@ fn build_puzzle(input: &PuzzleJson) -> Result<Puzzle, String> {
         }
     }
 
-    // Build vertices
-    let vh = h.saturating_sub(1);
-    let vw = w.saturating_sub(1);
+    // Build vertices.  Vertex (r,c) is the ABSOLUTE grid corner at (r,c):
+    // r in 0..=h, c in 0..=w (border corners included).  A border corner is
+    // touched by fewer than 4 cells (2 on an edge, 1 on a grid corner).
+    let vh = h + 1;
+    let vw = w + 1;
     let mut vertices = vec![vec![Vertex::default(); vw]; vh];
     for vd in &input.vertices {
-        if vd.row >= vh || vd.col >= vw {
+        if vd.row > h || vd.col > w {
             return Err(format!(
                 "vertex out of range: ({},{}) in {}x{} grid",
                 vd.row, vd.col, h, w

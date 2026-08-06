@@ -131,12 +131,28 @@ fn collect_watchtower_data(puzzle: &Puzzle) -> Vec<(Vec<[usize; 2]>, usize)> {
     let h = puzzle.height;
     let w = puzzle.width;
     let mut result = Vec::new();
-    for r in 0..h.saturating_sub(1) {
-        for c in 0..w.saturating_sub(1) {
+    // Vertex (r,c) = ABSOLUTE grid corner (r in 0..=h, c in 0..=w).  Cells
+    // touching it: in-bounds, non-blocked members of {(r-1,c-1),(r-1,c),
+    // (r,c-1),(r,c)}.  Border corners are touched by 2 (edge) / 1 (corner).
+    for r in 0..=h {
+        for c in 0..=w {
             if let Some(val) = puzzle.vertices[r][c].watchtower {
                 let v = val as usize;
                 if v >= 1 && v <= 4 {
-                    result.push((vec![[r, c], [r, c + 1], [r + 1, c], [r + 1, c + 1]], v));
+                    let mut cells = Vec::new();
+                    for (dr, dc) in [(-1i64, -1i64), (-1, 0), (0, -1), (0, 0)] {
+                        let nr = r as i64 + dr;
+                        let nc = c as i64 + dc;
+                        if nr < 0 || nc < 0 || nr >= h as i64 || nc >= w as i64 {
+                            continue;
+                        }
+                        let nr = nr as usize;
+                        let nc = nc as usize;
+                        if !puzzle.cells[nr][nc].blocked {
+                            cells.push([nr, nc]);
+                        }
+                    }
+                    result.push((cells, v));
                 }
             }
         }

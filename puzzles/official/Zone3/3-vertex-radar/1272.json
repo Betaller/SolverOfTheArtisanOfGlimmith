@@ -74,17 +74,22 @@
   "vertices": [
     {
       "row": 0,
-      "col": 1,
-      "watchtower": 2
+      "col": 2,
+      "watchtower": 1
     },
     {
       "row": 1,
-      "col": 1,
-      "watchtower": 3
+      "col": 2,
+      "watchtower": 2
     },
     {
       "row": 2,
-      "col": 1,
+      "col": 2,
+      "watchtower": 3
+    },
+    {
+      "row": 3,
+      "col": 2,
       "watchtower": 4
     }
   ],

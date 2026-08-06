@@ -274,24 +274,19 @@
   ],
   "vertices": [
     {
-      "row": 0,
-      "col": 0,
-      "watchtower": 1
-    },
-    {
       "row": 1,
       "col": 1,
-      "watchtower": 4
-    },
-    {
-      "row": 1,
-      "col": 3,
-      "watchtower": 2
+      "watchtower": 1
     },
     {
       "row": 2,
       "col": 2,
-      "watchtower": 3
+      "watchtower": 4
+    },
+    {
+      "row": 2,
+      "col": 4,
+      "watchtower": 2
     },
     {
       "row": 3,
@@ -301,7 +296,7 @@
     {
       "row": 3,
       "col": 3,
-      "watchtower": 2
+      "watchtower": 3
     },
     {
       "row": 4,
@@ -309,18 +304,33 @@
       "watchtower": 2
     },
     {
-      "row": 5,
-      "col": 0,
-      "watchtower": 3
+      "row": 4,
+      "col": 4,
+      "watchtower": 2
     },
     {
       "row": 5,
       "col": 2,
-      "watchtower": 4
+      "watchtower": 2
+    },
+    {
+      "row": 5,
+      "col": 5,
+      "watchtower": 1
+    },
+    {
+      "row": 6,
+      "col": 1,
+      "watchtower": 3
     },
     {
       "row": 6,
       "col": 3,
+      "watchtower": 4
+    },
+    {
+      "row": 7,
+      "col": 4,
       "watchtower": 2
     }
   ],

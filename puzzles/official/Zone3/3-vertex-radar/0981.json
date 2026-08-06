@@ -153,28 +153,28 @@
   "edges": [],
   "vertices": [
     {
-      "row": 0,
-      "col": 1,
+      "row": 1,
+      "col": 2,
       "watchtower": 3
     },
     {
-      "row": 0,
+      "row": 1,
+      "col": 4,
+      "watchtower": 2
+    },
+    {
+      "row": 3,
       "col": 3,
       "watchtower": 2
     },
     {
-      "row": 2,
+      "row": 5,
       "col": 2,
-      "watchtower": 2
-    },
-    {
-      "row": 4,
-      "col": 1,
       "watchtower": 4
     },
     {
-      "row": 4,
-      "col": 3,
+      "row": 5,
+      "col": 4,
       "watchtower": 3
     }
   ],

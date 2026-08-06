@@ -351,93 +351,103 @@
   "edges": [],
   "vertices": [
     {
-      "row": 0,
-      "col": 6,
-      "watchtower": 2
-    },
-    {
-      "row": 1,
-      "col": 0,
-      "watchtower": 1
-    },
-    {
       "row": 1,
       "col": 7,
-      "watchtower": 3
-    },
-    {
-      "row": 2,
-      "col": 0,
       "watchtower": 2
     },
     {
       "row": 2,
       "col": 1,
+      "watchtower": 1
+    },
+    {
+      "row": 2,
+      "col": 8,
+      "watchtower": 3
+    },
+    {
+      "row": 2,
+      "col": 10,
+      "watchtower": 1
+    },
+    {
+      "row": 3,
+      "col": 1,
+      "watchtower": 2
+    },
+    {
+      "row": 3,
+      "col": 2,
       "watchtower": 4
     },
     {
-      "row": 2,
-      "col": 2,
-      "watchtower": 2
-    },
-    {
-      "row": 2,
-      "col": 8,
-      "watchtower": 3
-    },
-    {
       "row": 3,
-      "col": 0,
+      "col": 3,
       "watchtower": 2
     },
     {
       "row": 3,
-      "col": 2,
-      "watchtower": 3
-    },
-    {
-      "row": 3,
-      "col": 6,
-      "watchtower": 1
-    },
-    {
-      "row": 3,
-      "col": 8,
+      "col": 9,
       "watchtower": 3
     },
     {
       "row": 4,
-      "col": 0,
-      "watchtower": 1
-    },
-    {
-      "row": 4,
-      "col": 6,
-      "watchtower": 2
-    },
-    {
-      "row": 4,
-      "col": 7,
-      "watchtower": 3
-    },
-    {
-      "row": 4,
-      "col": 8,
-      "watchtower": 2
-    },
-    {
-      "row": 5,
       "col": 1,
       "watchtower": 2
     },
     {
+      "row": 4,
+      "col": 3,
+      "watchtower": 3
+    },
+    {
+      "row": 4,
+      "col": 7,
+      "watchtower": 1
+    },
+    {
+      "row": 4,
+      "col": 9,
+      "watchtower": 3
+    },
+    {
+      "row": 5,
+      "col": 1,
+      "watchtower": 1
+    },
+    {
+      "row": 5,
+      "col": 7,
+      "watchtower": 2
+    },
+    {
       "row": 5,
       "col": 8,
-      "watchtower": 1
+      "watchtower": 3
+    },
+    {
+      "row": 5,
+      "col": 9,
+      "watchtower": 2
+    },
+    {
+      "row": 6,
+      "col": 0,
+      "watchtower": 2
     },
     {
       "row": 6,
       "col": 2,
+      "watchtower": 2
+    },
+    {
+      "row": 6,
+      "col": 9,
+      "watchtower": 1
+    },
+    {
+      "row": 7,
+      "col": 3,
       "watchtower": 2
     }
   ],

@@ -453,7 +453,7 @@ class GridWidget(QWidget):
                     self.update()
                 return
             if vertex is not None:
-                vr, vc = vertex[0] - 1, vertex[1] - 1
+                vr, vc = vertex[0], vertex[1]
                 self._vertex_context_menu(pos, vr, vc)
             elif edge is not None:
                 self._edge_context_menu(pos, *edge)
@@ -491,8 +491,8 @@ class GridWidget(QWidget):
 
         if self._mode == self.MODE_WATCHTOWER:
             if vertex is not None:
-                # Map grid vertex position → Board vertex (offset by -1)
-                vr, vc = vertex[0] - 1, vertex[1] - 1
+                # Board vertex coords == absolute grid corner coords.
+                vr, vc = vertex[0], vertex[1]
                 v = self.board.vertex_at(vr, vc)
                 if v is not None:
                     val = self._current_number
@@ -553,7 +553,7 @@ class GridWidget(QWidget):
                 self._selected_vertex = vertex
                 self._selected_cell = None
                 self._selected_edge = None
-                self.vertex_clicked.emit(vertex[0] - 1, vertex[1] - 1)
+                self.vertex_clicked.emit(vertex[0], vertex[1])
             elif edge is not None:
                 self._selected_edge = edge
                 self._selected_cell = None
@@ -968,8 +968,9 @@ class GridWidget(QWidget):
     def _draw_vertices(self, painter: QPainter) -> None:
         for v in self.board.vertices():
             if v.watchtower is not None:
-                x = self._padding + (v.col + 1) * self._cell_size
-                y = self._padding + (v.row + 1) * self._cell_size
+                # Vertex (r,c) is the ABSOLUTE grid corner (0..=h × 0..=w).
+                x = self._padding + v.col * self._cell_size
+                y = self._padding + v.row * self._cell_size
                 r = self._cell_size / 5
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(QColor(_ui_theme.colors.watchtower_bg)))

@@ -707,14 +707,9 @@
   ],
   "vertices": [
     {
-      "row": 0,
-      "col": 4,
-      "watchtower": 3
-    },
-    {
       "row": 1,
-      "col": 6,
-      "watchtower": 2
+      "col": 5,
+      "watchtower": 3
     },
     {
       "row": 2,
@@ -723,32 +718,37 @@
     },
     {
       "row": 3,
-      "col": 6,
-      "watchtower": 3
+      "col": 8,
+      "watchtower": 2
     },
     {
       "row": 4,
-      "col": 6,
+      "col": 7,
       "watchtower": 3
     },
     {
       "row": 5,
-      "col": 5,
-      "watchtower": 4
+      "col": 7,
+      "watchtower": 3
     },
     {
       "row": 6,
-      "col": 4,
+      "col": 6,
+      "watchtower": 4
+    },
+    {
+      "row": 7,
+      "col": 5,
       "watchtower": 1
     },
     {
-      "row": 8,
-      "col": 4,
+      "row": 9,
+      "col": 5,
       "watchtower": 1
     },
     {
-      "row": 12,
-      "col": 4,
+      "row": 13,
+      "col": 5,
       "watchtower": 4
     }
   ],

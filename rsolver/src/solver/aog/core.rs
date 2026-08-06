@@ -689,21 +689,18 @@ impl AoGCore {
             }
         }
 
-        // Vertices (watchtowers / radar).
+        // Vertices (watchtowers / radar).  Vertex (r,c) is the ABSOLUTE grid
+        // corner at (r,c) — r in 0..=h, c in 0..=w, border corners included.
+        // In the padded grid a grid corner (r,c) sits at (2r+2, 2c+2): a cell
+        // (r,c) sits at (2r+3, 2c+3), so its top-left corner is (2r+2, 2c+2).
+        // Border corners (r=0/h, c=0/w) are valid padded positions (>= 2).
         if use_watchtower {
-            for r in 0..h.saturating_sub(1) {
-                for c in 0..w.saturating_sub(1) {
+            for r in 0..=h {
+                for c in 0..=w {
                     if let Some(val) = puzzle.vertices[r][c].watchtower {
                         if val >= 1 && val <= 4 {
-                            // Python `vertex(r,c)` is the shared corner of cells
-                            // (r,c),(r,c+1),(r+1,c),(r+1,c+1), i.e. the bottom-right
-                            // corner of cell (r,c).  In the padded grid a cell (r,c)
-                            // sits at (2r+3, 2c+3), so its bottom-right corner vertex
-                            // is (2r+4, 2c+4).  (2r+2, 2c+2) would be the top-left
-                            // corner of the same cell — a one-cell offset bug that
-                            // broke watchtower puzzles.)
-                            let px = 2 * r + 4;
-                            let py = 2 * c + 4;
+                            let px = 2 * r + 2;
+                            let py = 2 * c + 2;
                             puzzle_grid[px][py] |= (val as u32) << VERTEX_RADAR_BIT_SHIFT;
                         }
                     }

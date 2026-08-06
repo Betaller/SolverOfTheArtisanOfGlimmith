@@ -829,25 +829,25 @@ class TestRuleWatchtower:
     def test_watchtower_satisfied(self) -> None:
         puzzle = puzzle_with_rules([Rule.watchtower()])
         b = board_with_regions(2, 2, [[1, 1], [2, 2]])
-        v = b.vertex_at(0, 0)
+        v = b.vertex_at(1, 1)
         assert v is not None
         v.watchtower = 2
-        # Cells surrounding (0,0): (0,0)=1, (0,1)=1, (1,0)=2, (1,1)=2 -> 2 distinct regions
+        # Cells surrounding (1,1): (0,0)=1, (0,1)=1, (1,0)=2, (1,1)=2 -> 2 distinct regions
         assert check_rule_watchtower(puzzle, b) is True
 
     def test_watchtower_fails(self) -> None:
         puzzle = puzzle_with_rules([Rule.watchtower()])
         b = board_with_regions(2, 2, [[1, 1], [1, 2]])
-        v = b.vertex_at(0, 0)
+        v = b.vertex_at(1, 1)
         assert v is not None
         v.watchtower = 2
-        # Cells surrounding (0,0): (0,0)=1, (0,1)=1, (1,0)=1, (1,1)=2 -> 2 distinct regions
+        # Cells surrounding (1,1): (0,0)=1, (0,1)=1, (1,0)=1, (1,1)=2 -> 2 distinct regions
         assert check_rule_watchtower(puzzle, b) is True
 
     def test_watchtower_fails_three_expected(self) -> None:
         puzzle = puzzle_with_rules([Rule.watchtower()])
         b = board_with_regions(2, 2, [[1, 1], [2, 2]])
-        v = b.vertex_at(0, 0)
+        v = b.vertex_at(1, 1)
         assert v is not None
         v.watchtower = 3
         # Only 2 distinct regions -> fails
@@ -866,7 +866,7 @@ class TestRuleWatchtower:
     def test_watchtower_all_four_regions(self) -> None:
         puzzle = puzzle_with_rules([Rule.watchtower()])
         b = board_with_regions(2, 2, [[1, 2], [3, 4]])
-        v = b.vertex_at(0, 0)
+        v = b.vertex_at(1, 1)
         assert v is not None
         v.watchtower = 4
         assert check_rule_watchtower(puzzle, b) is True
@@ -877,7 +877,7 @@ class TestRuleWatchtower:
         b.cell(0, 0).region_id = 1
         b.cell(0, 1).region_id = 2
         # (1,0) and (1,1) are unassigned
-        v = b.vertex_at(0, 0)
+        v = b.vertex_at(1, 1)
         assert v is not None
         v.watchtower = 2
         # Only 2 cells assigned with region_id in the 4 -> {1, 2} -> 2 distinct

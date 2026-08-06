@@ -154,7 +154,7 @@ class Puzzle:
     grid_width: int
     cells: list[Cell]              # 每个单元格
     edges: list[Edge]              # 内部相邻边
-    vertices: list[Vertex]         # 四格交汇点
+    vertices: list[Vertex]         # 网格绝对角点（含外边界）
     rules: list[Rule]              # 启用的规则列表
     shape_pool: list[Shape]        # 形状池
 
@@ -180,8 +180,9 @@ class Solution:
   - 垂直边框: (r, c) 与 (r+1, c) 之间, 范围 r∈[0,H-2], c∈[0,W-1]
 
 顶点 (Vertex):
-  - 四格交汇点: (r+0.5, c+0.5) → 用虚拟坐标 (vr, vc) 表示
-  - 范围 vr∈[0,H-1], vc∈[0,W-1] 表示 (vr, vc)、(vr, vc+1)、(vr+1, vc)、(vr+1, vc+1) 四格交汇
+  - 网格角点: (r, c) 表示网格绝对角点 (r∈[0,H], c∈[0,W], **含外边界**)
+  - 角点 (r,c) 接触的单元格 = 在界的 {(r-1,c-1),(r-1,c),(r,c-1),(r,c)}（内部 4 格、边 2 格、角 1 格）
+  - (2026-08-06 变更：原为「四格交汇点 (vr,vc)，范围 vr∈[0,H-1]」，无法表示边界望塔)
 ```
 
 ---

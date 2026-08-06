@@ -270,27 +270,22 @@
   "edges": [],
   "vertices": [
     {
-      "row": 0,
+      "row": 1,
+      "col": 4,
+      "watchtower": 2
+    },
+    {
+      "row": 2,
       "col": 3,
       "watchtower": 2
     },
     {
-      "row": 1,
-      "col": 2,
-      "watchtower": 2
-    },
-    {
-      "row": 1,
-      "col": 6,
+      "row": 2,
+      "col": 7,
       "watchtower": 3
     },
     {
-      "row": 2,
-      "col": 3,
-      "watchtower": 2
-    },
-    {
-      "row": 2,
+      "row": 3,
       "col": 4,
       "watchtower": 2
     },
@@ -301,33 +296,48 @@
     },
     {
       "row": 3,
+      "col": 8,
+      "watchtower": 1
+    },
+    {
+      "row": 4,
       "col": 6,
       "watchtower": 2
     },
     {
       "row": 4,
-      "col": 2,
+      "col": 7,
       "watchtower": 2
     },
     {
       "row": 5,
-      "col": 4,
-      "watchtower": 3
-    },
-    {
-      "row": 5,
-      "col": 5,
+      "col": 3,
       "watchtower": 2
     },
     {
       "row": 6,
-      "col": 0,
+      "col": 5,
+      "watchtower": 3
+    },
+    {
+      "row": 6,
+      "col": 6,
+      "watchtower": 2
+    },
+    {
+      "row": 7,
+      "col": 1,
       "watchtower": 1
     },
     {
-      "row": 6,
-      "col": 5,
+      "row": 7,
+      "col": 6,
       "watchtower": 3
+    },
+    {
+      "row": 8,
+      "col": 4,
+      "watchtower": 2
     }
   ],
   "outer_boundaries": [

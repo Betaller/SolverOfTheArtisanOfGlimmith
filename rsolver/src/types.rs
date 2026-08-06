@@ -129,7 +129,9 @@ pub struct Puzzle {
     pub h_edges: Vec<Vec<Edge>>,
     /// Vertical edges [r][c] between (r,c) and (r+1,c)
     pub v_edges: Vec<Vec<Edge>>,
-    /// Internal vertices at (r,c) for cell corners
+    /// Vertices at absolute grid corners (r,c): r in 0..=height, c in 0..=width
+    /// (border corners included).  A corner (r,c) is touched by the in-bounds
+    /// cells {(r-1,c-1),(r-1,c),(r,c-1),(r,c)}.
     pub vertices: Vec<Vec<Vertex>>,
     pub rules: Vec<Rule>,
     pub shape_pool: Vec<Shape>,

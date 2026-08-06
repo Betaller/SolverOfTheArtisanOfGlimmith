@@ -121,7 +121,7 @@ rsolver/src/               Rust 求解器
 - 官方解是**唯一解**是准则；历史上的「求解器解 ≠ 官方解」绝大多数是转换/校验 bug，已修复
   （gemini/delta 边约束、玫瑰窗检测、环纹边框 T 型、brick/形状规则语义等）。
 - 当前 Rust-only 全量基准 **1052/1258 通过**（最新 commit `dfadfe3`），详细数字与 zone 分布
-  见该文档；6 道 watchtower DIFF 待甄别。
+  见该文档；6 道 watchtower DIFF 已于 2026-08-06 修复（边界望塔缺失，见该文档附录 A）。
 - **软门禁**：对求解器 / 转换 / 校验 / 规则语义的每次优化，提交前必须更新该文档（进度 +
   变更各追加一条）、同步相关文档、跑通测试，并把基准结果随提交入库
   （`results/YYYYMMDD_<short-sha>.txt`）。详见该文档附录 D 与 `CLAUDE.md`。

@@ -859,8 +859,9 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
     }
 
     let mut compass_visited = [Node::default(); MAX_SHAPE_SIZE];
+    // Initialized at its first (re)assignment in the shape-placement loop;
+    // declared here to mirror the C++ `int compass_visited_cnt;`.
     let mut compass_visited_cnt;
-    compass_visited_cnt = 0;
 
     let mut mk_size = pools.mark_size[index as usize].borrow_mut();
     mk_size.clear();

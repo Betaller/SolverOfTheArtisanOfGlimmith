@@ -20,10 +20,8 @@ struct DlxNode {
 #[derive(Debug)]
 pub struct DancingLinks {
     nodes: Vec<DlxNode>,
-    header_count: usize,
     pub search_count: u64,
     deadline: Option<Instant>,
-    pub solution_rows: Vec<Vec<usize>>,
 }
 
 impl DancingLinks {
@@ -49,10 +47,8 @@ impl DancingLinks {
         }
         Self {
             nodes,
-            header_count: col_count,
             search_count: 0,
             deadline: None,
-            solution_rows: Vec::new(),
         }
     }
 
@@ -151,54 +147,6 @@ impl DancingLinks {
             c = self.nodes[c].right;
         }
         best
-    }
-
-    /// Find one solution. Returns true if found.
-    pub fn search(&mut self, depth: usize) -> bool {
-        if let Some(d) = self.deadline {
-            if Instant::now() >= d {
-                return false;
-            }
-        }
-        self.search_count += 1;
-
-        if self.nodes[0].right == 0 {
-            return true;
-        }
-
-        let col = match self.choose_column() {
-            Some(c) => c,
-            None => return false,
-        };
-
-        self.cover(col);
-        let c_node = col + 1;
-        let mut r = self.nodes[c_node].down;
-        while r != c_node {
-            // Cover all columns in this row
-            let mut j = self.nodes[r].right;
-            while j != r {
-                self.cover(self.nodes[j].col - 1);
-                j = self.nodes[j].right;
-            }
-
-            if self.search(depth + 1) {
-                if let Some(rid) = self.nodes[r].row_id {
-                    self.solution_rows.push(vec![rid]);
-                }
-                return true;
-            }
-
-            // Uncover
-            j = self.nodes[r].left;
-            while j != r {
-                self.uncover(self.nodes[j].col - 1);
-                j = self.nodes[j].left;
-            }
-            r = self.nodes[r].down;
-        }
-        self.uncover(col);
-        false
     }
 
     /// Search with an incremental validation callback.

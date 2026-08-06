@@ -18,8 +18,6 @@ pub struct AoGCore {
     pub puzzle_compass_down: Vec<Vec<i32>>,
     pub puzzle_compass_left: Vec<Vec<i32>>,
     pub puzzle_compass_right: Vec<Vec<i32>>,
-    pub slash_check_enable: bool,
-    pub slash_check_slash_cnt: usize,
     pub slash_nodes: Vec<Vec<Node>>, // 1-indexed: [0] unused
     pub shape_size_nodes: Vec<Node>,
     pub all_shapes_same_check_shape_index: i32,
@@ -31,7 +29,6 @@ pub struct AoGCore {
     pub next_shape_index: u32,
     pub dfs_ctx: DfsContext,
     pub deadline: Instant,
-    pub dbg_steps: u64,
     /// rose_window: number of distinct symbol types (0 = not rose_window).
     pub rose_type_count: usize,
 }
@@ -567,7 +564,6 @@ impl AoGCore {
             }
         }
 
-        let has_shape_pool = !puzzle.shape_pool.is_empty();
         // Only enforce clues whose rule is present.
         let active: HashSet<&str> = puzzle.rules.iter().map(|r| r.ctype.as_str()).collect();
         // predefine_shapes_only only when a `shape_pool` RULE requires every
@@ -668,7 +664,7 @@ impl AoGCore {
                 }
                 if let Some(ref ec) = e.constraint {
                     if use_edge_rules {
-                        lv = apply_line_constraint(lv, ec, true, false);
+                        lv = apply_line_constraint(lv, ec, true);
                     }
                 }
                 puzzle_grid[px][py] = lv;
@@ -686,7 +682,7 @@ impl AoGCore {
                 }
                 if let Some(ref ec) = e.constraint {
                     if use_edge_rules {
-                        lv = apply_line_constraint(lv, ec, true, true);
+                        lv = apply_line_constraint(lv, ec, true);
                     }
                 }
                 puzzle_grid[px][py] = lv;
@@ -724,8 +720,6 @@ impl AoGCore {
             puzzle_compass_down: compass_down,
             puzzle_compass_left: compass_left,
             puzzle_compass_right: compass_right,
-            slash_check_enable: false,
-            slash_check_slash_cnt: 0,
             slash_nodes: Vec::new(),
             shape_size_nodes: Vec::new(),
             all_shapes_same_check_shape_index: -1,
@@ -737,7 +731,6 @@ impl AoGCore {
             next_shape_index: 1,
             dfs_ctx: DfsContext::new(h, w),
             deadline,
-            dbg_steps: 0,
             rose_type_count: rose_types.len(),
         };
 
@@ -897,8 +890,7 @@ impl AoGCore {
     }
 }
 
-fn apply_line_constraint(mut lv: u32, ec: &EdgeConstraint, cell1_first: bool, vertical: bool) -> u32 {
-    let _ = vertical;
+fn apply_line_constraint(mut lv: u32, ec: &EdgeConstraint, cell1_first: bool) -> u32 {
     match ec.ctype {
         EdgeConstraintType::Heterogeneous => lv |= LINE_DIFFERENT,
         EdgeConstraintType::Homogeneous => lv |= LINE_EQUAL,
@@ -943,8 +935,6 @@ mod tests {
             puzzle_compass_down: vec![vec![-1; 13]; 13],
             puzzle_compass_left: vec![vec![-1; 13]; 13],
             puzzle_compass_right: vec![vec![-1; 13]; 13],
-            slash_check_enable: false,
-            slash_check_slash_cnt: 0,
             slash_nodes: Vec::new(),
             shape_size_nodes: Vec::new(),
             all_shapes_same_check_shape_index: -1,
@@ -956,7 +946,6 @@ mod tests {
             next_shape_index: 1,
             dfs_ctx: crate::solver::aog::types::DfsContext::new(4, 4),
             deadline,
-            dbg_steps: 0,
             rose_type_count: 0,
         }
     }

@@ -42,33 +42,3 @@ pub fn transforms(shape: &Shape) -> Vec<Vec<[isize; 2]>> {
     }
     result
 }
-
-/// Generate all free polyominoes up to `max_size` cells.
-pub fn generate_polyominoes(max_size: usize) -> Vec<Shape> {
-    let mut all: Vec<Shape> = vec![vec![[0, 0]]]; // size 1
-    for size in 2..=max_size {
-        let mut seen: std::collections::HashSet<Shape> = std::collections::HashSet::new();
-        for shape in &all {
-            if shape.len() != size - 1 {
-                continue;
-            }
-            for &[r, c] in shape {
-                for (dr, dc) in [(-1_isize, 0), (1, 0), (0, -1), (0, 1)] {
-                    let nr = (r as isize + dr) as usize;
-                    let nc = (c as isize + dc) as usize;
-                    if shape.contains(&[nr, nc]) {
-                        continue;
-                    }
-                    let mut new = shape.clone();
-                    new.push([nr, nc]);
-                    crate::types::normalize(&mut new);
-                    seen.insert(new);
-                }
-            }
-        }
-        for s in seen {
-            all.push(s);
-        }
-    }
-    all
-}

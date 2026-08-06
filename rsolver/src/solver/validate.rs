@@ -255,7 +255,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                 }
             }
             "heterogeneous" | "homogeneous" | "inequality" | "difference" => {
-                if !check_edge_constraints(puzzle, regions, &by_rid) {
+                if !check_edge_constraints(puzzle, &by_rid) {
                     return false;
                 }
             }
@@ -461,7 +461,6 @@ fn adjacent_pairs_satisfy(
 
 fn check_edge_constraints(
     puzzle: &Puzzle,
-    regions: &[RegionInfo],
     by_rid: &HashMap<usize, Vec<[usize; 2]>>,
 ) -> bool {
     let area_of = |rid: usize| by_rid.get(&rid).map(|c| c.len());
@@ -604,7 +603,7 @@ fn count_boundary_edges_at_vertex(
     let mut count = 0;
     // Four edges surrounding vertex (r,c): corner of cells
     // (r,c),(r,c+1),(r+1,c),(r+1,c+1) = geometric grid point (r+1,c+1).
-    let mut is_bound = |a: (i32, i32), b: (i32, i32)| -> bool {
+    let is_bound = |a: (i32, i32), b: (i32, i32)| -> bool {
         let ra = cell_region(a);
         let rb = cell_region(b);
         match (ra, rb) {

@@ -167,6 +167,25 @@
   **301/312**（与基准一致，**0 回归**）。定向：1301（brick+area，backtrack ≈30s）、0957
   （brick+block+rose ≈1.8s）、C4-1（rose ≈3.1s）、A1-1（shape_pool 3ms）均正常解出。
 
+### 2026-08-06 · P2/P3 清理：死代码移除 + Cell 求解状态分离（本会话）
+
+纯清理，**无行为变化**（编译期确认移除项均 0 调用）。
+1. **死代码移除**（#6）：`apply_line_constraint` 的 `vertical` 参数（调用点恒传
+   `cell1_first=true`）；`grid::unassigned_cells` / `connected_components`、
+   `polyomino::generate_polyominoes`、`aog::core::dbg_steps`、`Dlx::search` +
+   `solution_rows` + `header_count`、`CellSet::set_from`、`PreBoundaries::len`；
+   `types::Direction` 枚举与 `CompassClue::get`；`pick_next_cell` 未用的 `puzzle`
+   参数、`check_edge_constraints` 未用的 `regions` 参数、`has_shape_pool` 重复声明、
+   `slash_check_enable`/`slash_check_slash_cnt`（只写不读）。`Solution.steps_taken`
+   **保留**（JSON 兼容）并标注废弃。`main.rs` 文档字符串修正（`--parse` 未实现）。
+2. **Cell 求解状态分离**（#8）：删除 `Cell.region_id`（求解路径死字段，16B/格）与
+   `assigned()`；依赖它的 `unassigned_cells` 已随 #6 移除。Cell ~192B → ~176B。
+   Python `board.py` 的 `Cell.region_id` 是独立模型（Board 重建用），不受影响。
+
+- **验证**：`cargo test` 9 通过；`pytest` 290 通过；Zone1 `verify_puzzles.py --timeout 25 -j 8`
+  300/312（11 个基线失败 + 0213/0213nopad 这对大 rose 同轮双双超时——负载波动，单跑各
+  ~2.5s 解出，**非回归**）。构建警告从 ~20 降到 2（`is_subset` 测试辅助、`L` C++ 镜像命名）。
+
 ---
 
 ## 附录

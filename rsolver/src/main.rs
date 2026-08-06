@@ -1,7 +1,10 @@
 //! rsolver — puzzle solver for "The Artisan of Glimmith".
 //!
 //! Reads puzzle JSON from stdin, writes solution JSON to stdout.
-//! Usage: rsolver [--parse] {file}
+//! Usage: rsolver [{file}] [--batch]
+//!   - `rsolver` / `rsolver {file}` : solve one puzzle (single JSON in, solution out).
+//!   - `rsolver --batch`            : read one puzzle JSON per line from stdin, write
+//!                                    one solution JSON per line to stdout.
 
 mod constraints;
 mod dlx;

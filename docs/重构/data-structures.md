@@ -106,11 +106,15 @@
 | `compass` | `Option<CompassClue>` | 64 | CompassClue=4×Option<i64>;内部 tag 提供了 niche,Option 不额外膨胀 |
 | `fence_pattern` | `Option<Shape>` | 24 | Shape=Vec=24B |
 | `shape_pattern` | `Option<Shape>` | 24 | 同上 |
-| `region_id` | `Option<usize>` | 16 | **求解路径死字段**(见下) |
+| `region_id` | `Option<usize>` | 16 | **求解路径死字段→已于 2026-08-06 删除**(见下) |
 
 16×16 = 256 格 × 192B ≈ **48KB/每 Puzzle 实例**,与文档原始"~50KB"估算一致(但逐字段归因修正:symbol/shape 是 24B 非 32B,`Option<i64>` 是反直觉的 16B)。
 
 **关键发现:`Cell.region_id` 是 Rust 求解路径的死字段(16B/格)**。全仓 grep `region_id` 显示,唯一读取 `Cell::assigned()`(`types.rs:117`)的 `grid::unassigned_cells`(`grid.rs:15-26`)**从未被任何求解器调用**;backtrack 用自己的 `state.cell_to_region`(`backtrack.rs:37`),pieces 用 `cell_to_idx`,aog 用 u32 位域。这比"线索与状态分离"的直觉更硬——**这 16B 可直接从 Cell 删除**。
+
+> **已落地(2026-08-06,rsolver #6/#8)**:`region_id` 字段与 `assigned()` 方法已删除;
+> 依赖它的 `grid::unassigned_cells`/`connected_components` 一并移除。Cell 由 192B → 176B,
+> 求解归属状态全部落在各求解器自有的结构里(backtrack 扁平数组 / aog 位域 / pieces 下标 / rose region_of)。
 
 ### 5.2 `Vec<Vec<Cell>>` 两层间接(`types.rs:154`)
 

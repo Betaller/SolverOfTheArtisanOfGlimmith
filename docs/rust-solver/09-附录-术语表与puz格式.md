@@ -232,17 +232,17 @@ python scripts/verify_puzzles.py --dir puzzles/official/A --timeout 30
 
 | 文件 | 行数 | 文档 |
 |---|---|---|
-| `solver/aog/search.rs` | 1332 | 04 |
-| `solver/aog/core.rs` | 1004 | 04 |
+| `solver/aog/search.rs` | 1333 | 04 |
+| `solver/aog/core.rs` | 993 | 04 |
 | `solver/aog/empty.rs` | 829 | 04 |
-| `solver/validate.rs` | 635 | 08 |
+| `solver/validate.rs` | 634 | 08 |
 | `solver/pieces.rs` | 634 | 05 |
-| `solver/backtrack.rs` | 801 | 06 |
+| `solver/backtrack.rs` | 811 | 06 |
 | `solver/rose/region_match.rs` | 574 | 07 |
 | `solver/rose/rose_growth.rs` | 584 | 07 |
 | `shapes.rs` | 184 | 02 / 08 |
 | `constraints.rs` | 336 | 08 |
-| `main.rs` | 327 | 01 |
+| `main.rs` | 331 | 01 |
 | `dlx.rs` | 270 | 05 |
 | `types.rs` | 221 | 02 |
 | `solver/mod.rs` | 238 | 01 |

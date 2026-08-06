@@ -1,15 +1,5 @@
 use std::collections::HashMap;
 
-// ── Directions ────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
 // ── Compass clue ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default)]
@@ -18,17 +8,6 @@ pub struct CompassClue {
     pub down: Option<i64>,
     pub left: Option<i64>,
     pub right: Option<i64>,
-}
-
-impl CompassClue {
-    pub fn get(&self, d: Direction) -> Option<i64> {
-        match d {
-            Direction::Up => self.up,
-            Direction::Down => self.down,
-            Direction::Left => self.left,
-            Direction::Right => self.right,
-        }
-    }
 }
 
 // ── Shape ─────────────────────────────────────────────────────────────────────
@@ -95,7 +74,6 @@ pub struct Cell {
     pub compass: Option<CompassClue>,
     pub fence_pattern: Option<Shape>,
     pub shape_pattern: Option<Shape>,
-    pub region_id: Option<usize>,
 }
 
 impl Cell {
@@ -109,12 +87,7 @@ impl Cell {
             compass: None,
             fence_pattern: None,
             shape_pattern: None,
-            region_id: None,
         }
-    }
-
-    pub fn assigned(&self) -> bool {
-        self.region_id.is_some()
     }
 
     pub fn fillable(&self) -> bool {
@@ -161,8 +134,9 @@ pub struct Puzzle {
     pub rules: Vec<Rule>,
     pub shape_pool: Vec<Shape>,
     /// Outer border segments [r1, c1, r2, c2] that are explicitly recorded in
-    /// the puzzle JSON. Kept for round-tripping; the outer border is always a
-    /// region boundary in every solver.
+    /// the puzzle JSON. Kept for round-tripping (parsed from input, never read
+    /// by the solvers — the outer border is always a region boundary).
+    #[allow(dead_code)]
     pub outer_boundaries: Vec<[usize; 4]>,
 }
 
@@ -181,6 +155,8 @@ pub struct RegionInfo {
 #[derive(Debug, Clone)]
 pub struct Solution {
     pub solved: bool,
+    /// Always 0.  Kept for JSON protocol compatibility (Python reads it with a
+    /// `0` default and the UI displays it); the Rust solver never counts steps.
     pub steps_taken: u64,
     pub elapsed_ms: u64,
     pub error_message: Option<String>,

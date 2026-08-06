@@ -125,7 +125,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         return false;
     }
 
-    let (r, c) = pick_next_cell(puzzle, state);
+    let (r, c) = pick_next_cell(state);
     let cell = &puzzle.cells[r][c];
     let h = puzzle.height;
     let w = puzzle.width;
@@ -277,7 +277,7 @@ fn is_undecided(state: &BacktrackState, r: usize, c: usize) -> bool {
 
 /// Pick the next cell: grow an under-target clue-region first (its frontier,
 /// smallest row-major index), else the smallest row-major undecided cell.
-fn pick_next_cell(puzzle: &Puzzle, state: &BacktrackState) -> (usize, usize) {
+fn pick_next_cell(state: &BacktrackState) -> (usize, usize) {
     if state.has_area_rule {
         let mut best: Option<(usize, usize)> = None;
         let mut best_idx = usize::MAX;

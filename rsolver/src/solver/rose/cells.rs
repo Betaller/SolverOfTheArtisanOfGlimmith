@@ -55,12 +55,6 @@ impl CellSet {
         }
     }
 
-    pub fn set_from(&mut self, other: &Self) {
-        for (a, b) in self.words.iter_mut().zip(&other.words) {
-            *a = *b;
-        }
-    }
-
     pub fn len(&self) -> usize {
         self.words.iter().map(|w| w.count_ones() as usize).sum()
     }
@@ -139,10 +133,6 @@ impl PreBoundaries {
                 (k & 0xff) as usize,
             ]
         })
-    }
-
-    pub fn len(&self) -> usize {
-        self.set.len()
     }
 }
 

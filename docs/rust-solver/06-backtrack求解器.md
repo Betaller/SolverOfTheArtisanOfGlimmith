@@ -2,7 +2,7 @@
 
 > 阅读对象：想理解“兜底求解器”的人。
 > 前置：01（路由）、02（模型）。
-> 代码：`solver/backtrack.rs`（683 行）。
+> 代码：`solver/backtrack.rs`（811 行）。
 
 ---
 
@@ -22,13 +22,14 @@
 
 ## 2. 状态：`BacktrackState`
 
-`backtrack.rs:55-70`：
+`backtrack.rs:56-74`：
 
 ```rust
 struct BacktrackState {
-    cell_to_region: HashMap<(usize,usize), usize>,   // 格 → 区域号
-    region_shapes:  HashMap<usize, Vec<[usize;2]>>,  // 区域号 → 格子列表
-    next_region_id: usize,                           // 新区域编号
+    cell_to_region: Vec<Option<usize>>,              // 行优先扁平数组：格 → 区域号
+    region_shapes:  Vec<Vec<[usize;2]>>,             // 区域号(=下标) → 格子列表
+    next_region_id: usize,                           // 新区域编号（恒为区域列表长度）
+    width: usize,                                    // 盘面宽（扁平数组 stride）
     steps: u64,                                      // 步数（超时用）
     deadline: Instant,
     area_bounds: AreaBounds,                         // 面积上下界
@@ -42,6 +43,11 @@ struct BacktrackState {
     has_area_rule: bool,                             // 门控：无 area 规则全跳过
 }
 ```
+
+> **扁平数组化（2026-08-06）**：`cell_to_region` 原为 `HashMap<(usize,usize),usize>`，
+> 因格子坐标确定、`next_region_id` 严格 0..n 递增，改 `Vec<Option<usize>>`（`r*width+c`
+> 索引）与 `Vec<Vec<[usize;2]>>`（区域号即下标，`push`/`pop` 维护）。`frontier` / `region_clue`
+> 保持 HashMap（area 门控，转换收益低）。
 
 ### 2.1 面积上下界 `compute_area_bounds`
 
@@ -64,13 +70,13 @@ for 每格罗盘:
 
 ### 2.2 望塔收集 `collect_watchtowers`
 
-把每个有效望塔（1..=4）变成 `(四格列表, 目标值)`（`backtrack.rs:125-142`）。
+把每个有效望塔（1..=4）变成 `(四格列表, 目标值)`（`backtrack.rs:90-107`）。
 
 ---
 
 ## 3. 主搜索：`dfs`
 
-`backtrack.rs:148-303`。核心变化是 **`pick_next_cell` 动态选格**（替代旧版固定行优先
+`backtrack.rs:113-278`。核心变化是 **`pick_next_cell` 动态选格**（替代旧版固定行优先
 `fillable[idx]`）：
 
 ```
@@ -93,7 +99,7 @@ dfs(state):
 
 ### 3.1 动态选格 `pick_next_cell`（area 剪枝核心）
 
-`backtrack.rs:311-341`。解决 1301 这类 **brick+area** 题的结构性死结：
+`backtrack.rs:280-312`。解决 1301 这类 **brick+area** 题的结构性死结：
 
 > 1301（8×9，49 可填格，10 个 48 线索）用固定行优先解不出：`(0,3)` 是第 0 个可填格、
 > `(1,1)` 是第 4 个，而 `(1,1)` 的所有连接格都在它之后。dfs 走到 `(1,1)` 时 48 区域还
@@ -109,13 +115,13 @@ dfs(state):
 
 ### 3.2 面积下限剪枝 `check_area_lower_bounds`
 
-`backtrack.rs:345-367`。两个子检查：
+`backtrack.rs:314-337`。两个子检查：
 
 - **密封**：`frontier[rid]` 空 → 面积已定格，`area != n` 剪。
 - **容量**：`area[rid] + undecided_count < n` 剪——剩余未定格全塞给它也不够。
   对 1301 等价于「48 区域之外最多留 1 格」，搜索从天文数字塌缩成「枚举哪 1 格做单点」。
 
-`frontier_assign` / `frontier_unassign`（`backtrack.rs:370-442`）维护引用计数保证
+`frontier_assign` / `frontier_unassign`（`backtrack.rs:339-412`）维护引用计数保证
 undo 正确；`has_area_rule` 为 false 时全部是 no-op（无 area 规则零开销）。
 
 ### 3.3 关键增量检查
@@ -127,14 +133,14 @@ undo 正确；`has_area_rule` 为 false 时全部是 no-op（无 area 规则零�
 解出；最终正确性由叶子校验 + `build_solution` 的 `check_all` + router 的
 `IndependentValidator` 三层兜底。
 
-**`check_watchtowers_ok`**（`backtrack.rs:466-481`）：任何望塔顶点接触的区域数
+**`check_watchtowers_ok`**（`backtrack.rs:414-435`）：任何望塔顶点接触的区域数
 **不能超过**目标值（部分填时取“已填格去重计数”）。
 
-**`check_vertex_ring_ok`**（`backtrack.rs:516-552`）：新增格 (r,c) 后，检查它四角的
+**`check_vertex_ring_ok`**（`backtrack.rs:464-500`）：新增格 (r,c) 后，检查它四角的
 顶点：若 4 格已全填（或被 blocked 占掉），统计该顶点 4 条边的边界数——
 `ring` 规则禁 3、`brick` 规则禁 4。
 
-> **blocked 格语义（修复，1301 关键）**：`vertex_boundary_count`（`backtrack.rs:489-514`）
+> **blocked 格语义（修复，1301 关键）**：`vertex_boundary_count`（`backtrack.rs:437-462`）
 > 把 blocked 格当作**空区**（`None`），**blocked-blocked 相邻不算边界**（两个空区是
 > 同一 AREA_BLOCK 值），但 **blocked-区域 相邻算边界**。这是正确语义（镜像 C++
 > `check_tatami` / 游戏 glimmith-solver）：
@@ -150,12 +156,12 @@ undo 正确；`has_area_rule` 为 false 时全部是 no-op（无 area 规则零�
 
 ## 4. 叶子校验：`check_global_constraints`
 
-`backtrack.rs:394-646`。所有格填完后做全套最终校验：
+`backtrack.rs:520-764`。所有格填完后做全套最终校验：
 
 | 检查 | 规则 |
 |---|---|
 | `check_watchtowers_ok` | 望塔（增量版已防超，这里再查“恰好”） |
-| `check_ring_ok` | ring（全顶点扫描，`backtrack.rs:376-391`） |
+| `check_ring_ok` | ring（全顶点扫描，`backtrack.rs:502-518`） |
 | 望塔恰好计数 | 四格全确定时 distinct 数 == target |
 | min_area | 每区面积 ≥ 下界 |
 | 罗盘 | 每罗盘格所在区大小 ≥ 计数和 |
@@ -220,20 +226,19 @@ undo 正确；`has_area_rule` 为 false 时全部是 no-op（无 area 规则零�
 | 主题 | 位置 |
 |---|---|
 | `solve_backtrack` | `backtrack.rs:10` |
-| `BacktrackState` | `backtrack.rs:55` |
-| `compute_area_bounds` | `backtrack.rs:78` |
-| `collect_watchtowers` | `backtrack.rs:125` |
-| `dfs` 主循环 | `backtrack.rs:148` |
-| `pick_next_cell` | `backtrack.rs:311` |
-| `check_area_lower_bounds` | `backtrack.rs:345` |
-| `frontier_assign` / `frontier_unassign` | `backtrack.rs:370` / `405` |
-| `check_merge_ok` | `backtrack.rs:445` |
-| `check_watchtowers_ok` | `backtrack.rs:466` |
-| `vertex_boundary_count` | `backtrack.rs:489` |
-| `check_vertex_ring_ok` | `backtrack.rs:516` |
-| `check_ring_ok` | `backtrack.rs:554` |
-| `check_global_constraints` | `backtrack.rs:576` |
-| `build_regions` | `backtrack.rs:846` |
+| `BacktrackState` | `backtrack.rs:56` |
+| `compute_area_bounds`（薄包装 → `shapes::area_bounds`） | `backtrack.rs:84` |
+| `collect_watchtowers` | `backtrack.rs:90` |
+| `dfs` 主循环 | `backtrack.rs:113` |
+| `pick_next_cell` | `backtrack.rs:280` |
+| `check_area_lower_bounds` | `backtrack.rs:314` |
+| `frontier_assign` / `frontier_unassign` | `backtrack.rs:339` / `374` |
+| `check_watchtowers_ok` | `backtrack.rs:414` |
+| `vertex_boundary_count` | `backtrack.rs:437` |
+| `check_vertex_ring_ok` | `backtrack.rs:464` |
+| `check_ring_ok` | `backtrack.rs:502` |
+| `check_global_constraints` | `backtrack.rs:520` |
+| `build_regions` | `backtrack.rs:789` |
 
 ---
 

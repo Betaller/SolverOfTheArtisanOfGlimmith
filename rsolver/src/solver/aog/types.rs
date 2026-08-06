@@ -1,6 +1,6 @@
 //! Constants and shared data types for the AoG-style DFS solver.
 
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 
 // ── Constants (from defines.h) ───────────────────────────────────────────────
 
@@ -291,24 +291,39 @@ impl PlaceLevel {
 pub struct Pools {
     pub mark_skip: Vec<RefCell<Vec<bool>>>,
     pub mark_size: Vec<RefCell<Vec<bool>>>,
-    pub place: Vec<RefCell<PlaceLevel>>,
+    /// Per-Depth-First-Search-depth place level, lazily allocated on first touch.
+    /// Each `PlaceLevel` is ~33 KB of fixed-size arrays, so allocating all
+    /// `MAX_DFS_DEPTH` (100) levels eagerly costs ~3.3 MB resident even for a
+    /// tiny board; the `Option` defers that until a depth is actually reached.
+    pub place: Vec<RefCell<Option<PlaceLevel>>>,
 }
 
 impl Pools {
     pub fn new(depth: usize) -> Self {
-        let mut mark_skip = Vec::new();
-        let mut mark_size = Vec::new();
-        let mut place = Vec::new();
+        let mut mark_skip = Vec::with_capacity(depth);
+        let mut mark_size = Vec::with_capacity(depth);
+        let mut place = Vec::with_capacity(depth);
         for _ in 0..depth {
             mark_skip.push(RefCell::new(Vec::new()));
             mark_size.push(RefCell::new(Vec::new()));
-            place.push(RefCell::new(PlaceLevel::new()));
+            place.push(RefCell::new(None));
         }
         Self {
             mark_skip,
             mark_size,
             place,
         }
+    }
+
+    /// Borrow the `PlaceLevel` for DFS depth `i`, allocating it on first use.
+    ///
+    /// Each level is borrowed by exactly one live frame at a time (frames use
+    /// distinct indices), so the `RefCell`s never conflict — the same invariant
+    /// the eager version relied on.
+    pub fn place_level(&self, i: usize) -> RefMut<'_, PlaceLevel> {
+        RefMut::map(self.place[i].borrow_mut(), |opt| {
+            opt.get_or_insert_with(PlaceLevel::new)
+        })
     }
 }
 

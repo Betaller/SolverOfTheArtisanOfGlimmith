@@ -29,9 +29,10 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
     let has_area_rule = puzzle.rules.iter().any(|r| r.ctype == "area");
 
     let mut state = BacktrackState {
-        cell_to_region: HashMap::new(),
-        region_shapes: HashMap::new(),
+        cell_to_region: vec![None; h * w],
+        region_shapes: Vec::new(),
         next_region_id: 0,
+        width: w,
         steps: 0,
         deadline,
         area_bounds,
@@ -53,9 +54,14 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
 }
 
 struct BacktrackState {
-    cell_to_region: HashMap<(usize, usize), usize>,
-    region_shapes: HashMap<usize, Vec<[usize; 2]>>,
+    /// Flat row-major cell → region id (index `r*w+c`); unassigned / blocked = None.
+    cell_to_region: Vec<Option<usize>>,
+    /// Region id → cell list; region ids are a contiguous 0..n prefix, so the
+    /// region id is the Vec index (new regions are pushed, undone regions popped).
+    region_shapes: Vec<Vec<[usize; 2]>>,
     next_region_id: usize,
+    /// Grid width (stride for `cell_to_region` row-major indexing).
+    width: usize,
     steps: u64,
     deadline: Instant,
     area_bounds: AreaBounds,
@@ -129,28 +135,28 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
     let mut valid_rids: Vec<usize> = Vec::new();
 
     if c > 0 {
-        if let Some(&rid) = state.cell_to_region.get(&(r, c - 1)) {
+        if let Some(rid) = state.cell_to_region[r * w + (c - 1)] {
             if grid::is_adjacent_free(puzzle, r, c, r, c - 1) && rid_set.insert(rid) {
                 valid_rids.push(rid);
             }
         }
     }
     if c + 1 < w {
-        if let Some(&rid) = state.cell_to_region.get(&(r, c + 1)) {
+        if let Some(rid) = state.cell_to_region[r * w + (c + 1)] {
             if grid::is_adjacent_free(puzzle, r, c, r, c + 1) && rid_set.insert(rid) {
                 valid_rids.push(rid);
             }
         }
     }
     if r > 0 {
-        if let Some(&rid) = state.cell_to_region.get(&(r - 1, c)) {
+        if let Some(rid) = state.cell_to_region[(r - 1) * w + c] {
             if grid::is_adjacent_free(puzzle, r, c, r - 1, c) && rid_set.insert(rid) {
                 valid_rids.push(rid);
             }
         }
     }
     if r + 1 < h {
-        if let Some(&rid) = state.cell_to_region.get(&(r + 1, c)) {
+        if let Some(rid) = state.cell_to_region[(r + 1) * w + c] {
             if grid::is_adjacent_free(puzzle, r, c, r + 1, c) && rid_set.insert(rid) {
                 valid_rids.push(rid);
             }
@@ -159,13 +165,13 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
 
     // Try assigning to each adjacent region
     for &rid in &valid_rids {
-        let region_area = state.region_shapes.get(&rid).map(|s| s.len()).unwrap_or(0);
+        let region_area = state.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
         if region_area >= state.area_bounds.max_area {
             continue;
         }
 
         let boundary_conflict = neighbor_positions(r, c, h, w).iter().any(|&(nr, nc)| {
-            state.cell_to_region.get(&(nr, nc)) == Some(&rid)
+            state.cell_to_region[nr * w + nc] == Some(rid)
                 && !grid::is_adjacent_free(puzzle, r, c, nr, nc)
         });
         if boundary_conflict {
@@ -187,7 +193,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
             }
         }
         if area_clue_ok {
-            if let Some(shape) = state.region_shapes.get(&rid) {
+            if let Some(shape) = state.region_shapes.get(rid) {
                 for &[rr, cc] in shape {
                     if let Some(n) = puzzle.cells[rr][cc].number {
                         if new_area > n as usize {
@@ -209,8 +215,8 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         // (check_global_constraints / check_all / router IndependentValidator)
         // still reject any wrong answer.
 
-        state.cell_to_region.insert((r, c), rid);
-        state.region_shapes.get_mut(&rid).unwrap().push([r, c]);
+        state.cell_to_region[r * w + c] = Some(rid);
+        state.region_shapes[rid].push([r, c]);
         state.undecided_count -= 1;
         frontier_assign(state, r, c, rid);
         if let Some(n) = cell.number {
@@ -223,8 +229,8 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
             }
         }
 
-        state.cell_to_region.remove(&(r, c));
-        state.region_shapes.get_mut(&rid).unwrap().pop();
+        state.cell_to_region[r * w + c] = None;
+        state.region_shapes[rid].pop();
         state.undecided_count += 1;
         frontier_unassign(state, r, c, rid);
         match prev_clue {
@@ -237,11 +243,12 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         }
     }
 
-    // Start a new region
+    // Start a new region (its id is the next contiguous index, so a push keeps
+    // `region_shapes` indexed by region id; unwinding pops it back off).
     let new_rid = state.next_region_id;
     state.next_region_id += 1;
-    state.cell_to_region.insert((r, c), new_rid);
-    state.region_shapes.insert(new_rid, vec![[r, c]]);
+    state.cell_to_region[r * w + c] = Some(new_rid);
+    state.region_shapes.push(vec![[r, c]]);
     state.undecided_count -= 1;
     frontier_assign(state, r, c, new_rid);
     if let Some(n) = cell.number {
@@ -254,8 +261,8 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         }
     }
 
-    state.cell_to_region.remove(&(r, c));
-    state.region_shapes.remove(&new_rid);
+    state.cell_to_region[r * w + c] = None;
+    state.region_shapes.pop();
     state.undecided_count += 1;
     frontier_unassign(state, r, c, new_rid);
     state.region_clue.remove(&new_rid);
@@ -265,7 +272,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
 }
 
 fn is_undecided(state: &BacktrackState, r: usize, c: usize) -> bool {
-    state.cell_index[r][c] != usize::MAX && !state.cell_to_region.contains_key(&(r, c))
+    state.cell_index[r][c] != usize::MAX && state.cell_to_region[r * state.width + c].is_none()
 }
 
 /// Pick the next cell: grow an under-target clue-region first (its frontier,
@@ -275,7 +282,7 @@ fn pick_next_cell(puzzle: &Puzzle, state: &BacktrackState) -> (usize, usize) {
         let mut best: Option<(usize, usize)> = None;
         let mut best_idx = usize::MAX;
         for (&rid, &n) in &state.region_clue {
-            let area = state.region_shapes.get(&rid).map(|s| s.len()).unwrap_or(0);
+            let area = state.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
             if area < n {
                 if let Some(fr) = state.frontier.get(&rid) {
                     for &cell in fr.keys() {
@@ -295,7 +302,7 @@ fn pick_next_cell(puzzle: &Puzzle, state: &BacktrackState) -> (usize, usize) {
         }
     }
     for &cell in &state.fillable {
-        if !state.cell_to_region.contains_key(&cell) {
+        if state.cell_to_region[cell.0 * state.width + cell.1].is_none() {
             return cell;
         }
     }
@@ -309,7 +316,7 @@ fn check_area_lower_bounds(state: &BacktrackState) -> bool {
         return true;
     }
     for (&rid, &n) in &state.region_clue {
-        let area = state.region_shapes.get(&rid).map(|s| s.len()).unwrap_or(0);
+        let area = state.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
         if let Some(fr) = state.frontier.get(&rid) {
             if fr.is_empty() && area != n {
                 if std::env::var("AOG_DEBUG").is_ok() {
@@ -348,7 +355,7 @@ fn frontier_assign(state: &mut BacktrackState, r: usize, c: usize, rid: usize) {
         }
         if is_undecided(state, nru, ncu) {
             *state.frontier.entry(rid).or_default().entry((nru, ncu)).or_insert(0) += 1;
-        } else if let Some(&nrid) = state.cell_to_region.get(&(nru, ncu)) {
+        } else if let Some(nrid) = state.cell_to_region[nru * state.width + ncu] {
             if nrid != rid {
                 if let Some(fr) = state.frontier.get_mut(&nrid) {
                     if let Some(cnt) = fr.get_mut(&(r, c)) {
@@ -387,7 +394,7 @@ fn frontier_unassign(state: &mut BacktrackState, r: usize, c: usize, rid: usize)
                     }
                 }
             }
-        } else if let Some(&nrid) = state.cell_to_region.get(&(nru, ncu)) {
+        } else if let Some(nrid) = state.cell_to_region[nru * state.width + ncu] {
             if nrid != rid {
                 *state.frontier.entry(nrid).or_default().entry((r, c)).or_insert(0) += 1;
             }
@@ -396,7 +403,7 @@ fn frontier_unassign(state: &mut BacktrackState, r: usize, c: usize, rid: usize)
     // Re-insert (r,c) into rid's frontier if still adjacent to rid.
     let count = neighbor_positions(r, c, state.cell_index.len(), state.cell_index[0].len())
         .iter()
-        .filter(|&&(nr, nc)| state.cell_to_region.get(&(nr, nc)) == Some(&rid))
+        .filter(|&&(nr, nc)| state.cell_to_region[nr * state.width + nc] == Some(rid))
         .count();
     if count > 0 {
         state.frontier.entry(rid).or_default().insert((r, c), count);
@@ -408,7 +415,7 @@ fn check_watchtowers_ok(state: &BacktrackState) -> bool {
     for &(ref cells, target) in &state.watchtowers {
         let mut pieces = Vec::new();
         for &[r, c] in cells {
-            if let Some(&p) = state.cell_to_region.get(&(r, c)) {
+            if let Some(p) = state.cell_to_region[r * state.width + c] {
                 if !pieces.contains(&p) {
                     pieces.push(p);
                 }
@@ -432,12 +439,12 @@ fn vertex_boundary_count(puzzle: &Puzzle, state: &BacktrackState, r: usize, c: u
         let ra = if puzzle.cells[a.0][a.1].blocked {
             None
         } else {
-            state.cell_to_region.get(&a).copied()
+            state.cell_to_region[a.0 * state.width + a.1]
         };
         let rb = if puzzle.cells[b.0][b.1].blocked {
             None
         } else {
-            state.cell_to_region.get(&b).copied()
+            state.cell_to_region[b.0 * state.width + b.1]
         };
         match (ra, rb) {
             (Some(x), Some(y)) => x != y,
@@ -473,7 +480,7 @@ fn check_vertex_ring_ok(puzzle: &Puzzle, r: usize, c: usize, state: &BacktrackSt
         }
         let cells = [(vr, vc), (vr + 1, vc), (vr, vc + 1), (vr + 1, vc + 1)];
         if !cells.iter().all(|&(a, b)| {
-            state.cell_to_region.contains_key(&(a as usize, b as usize))
+            state.cell_to_region[a as usize * state.width + b as usize].is_some()
                 || puzzle.cells[a as usize][b as usize].blocked
         }) {
             continue;
@@ -523,7 +530,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
         let mut pieces = Vec::new();
         let mut all_assigned = true;
         for &[r, c] in cells {
-            if let Some(&p) = state.cell_to_region.get(&(r, c)) {
+            if let Some(p) = state.cell_to_region[r * state.width + c] {
                 if !pieces.contains(&p) {
                     pieces.push(p);
                 }
@@ -537,7 +544,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     }
 
     // Check min_area constraint
-    for shape in state.region_shapes.values() {
+    for shape in &state.region_shapes {
         if shape.len() < state.area_bounds.min_area {
             return false;
         }
@@ -547,8 +554,8 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     for r in 0..puzzle.height {
         for c in 0..puzzle.width {
             if let Some(ref comp) = puzzle.cells[r][c].compass {
-                if let Some(&rid) = state.cell_to_region.get(&(r, c)) {
-                    if let Some(cells) = state.region_shapes.get(&rid) {
+                if let Some(rid) = state.cell_to_region[r * state.width + c] {
+                    if let Some(cells) = state.region_shapes.get(rid) {
                         let (n, s, e, w) = count_directions(cells, r, c);
                         let total = 1 + comp.up.unwrap_or(0) + comp.down.unwrap_or(0)
                             + comp.left.unwrap_or(0) + comp.right.unwrap_or(0);
@@ -567,8 +574,8 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     for r in 0..puzzle.height {
         for c in 0..puzzle.width {
             if let Some(n) = puzzle.cells[r][c].number {
-                if let Some(&rid) = state.cell_to_region.get(&(r, c)) {
-                    if let Some(shape) = state.region_shapes.get(&rid) {
+                if let Some(rid) = state.cell_to_region[r * state.width + c] {
+                    if let Some(shape) = state.region_shapes.get(rid) {
                         if shape.len() != n as usize {
                             return false;
                         }
@@ -583,12 +590,12 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
         for c in 0..puzzle.width.saturating_sub(1) {
             if let Some(ec) = &puzzle.h_edges[r][c].constraint {
                 if ec.ctype == EdgeConstraintType::Difference {
-                    if let (Some(&ra), Some(&rb)) = (
-                        state.cell_to_region.get(&(r, c)),
-                        state.cell_to_region.get(&(r, c + 1)),
+                    if let (Some(ra), Some(rb)) = (
+                        state.cell_to_region[r * state.width + c],
+                        state.cell_to_region[r * state.width + (c + 1)],
                     ) {
-                        let sa = state.region_shapes.get(&ra).map(|s| s.len()).unwrap_or(0);
-                        let sb = state.region_shapes.get(&rb).map(|s| s.len()).unwrap_or(0);
+                        let sa = state.region_shapes.get(ra).map(|s| s.len()).unwrap_or(0);
+                        let sb = state.region_shapes.get(rb).map(|s| s.len()).unwrap_or(0);
                         if sa.abs_diff(sb) != ec.value.unwrap_or(0) as usize {
                             return false;
                         }
@@ -601,12 +608,12 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
         for c in 0..puzzle.width {
             if let Some(ec) = &puzzle.v_edges[r][c].constraint {
                 if ec.ctype == EdgeConstraintType::Difference {
-                    if let (Some(&ra), Some(&rb)) = (
-                        state.cell_to_region.get(&(r, c)),
-                        state.cell_to_region.get(&(r + 1, c)),
+                    if let (Some(ra), Some(rb)) = (
+                        state.cell_to_region[r * state.width + c],
+                        state.cell_to_region[(r + 1) * state.width + c],
                     ) {
-                        let sa = state.region_shapes.get(&ra).map(|s| s.len()).unwrap_or(0);
-                        let sb = state.region_shapes.get(&rb).map(|s| s.len()).unwrap_or(0);
+                        let sa = state.region_shapes.get(ra).map(|s| s.len()).unwrap_or(0);
+                        let sb = state.region_shapes.get(rb).map(|s| s.len()).unwrap_or(0);
                         if sa.abs_diff(sb) != ec.value.unwrap_or(0) as usize {
                             return false;
                         }
@@ -628,12 +635,12 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
         for c in 0..puzzle.width.saturating_sub(1) {
             if let Some(ec) = &puzzle.h_edges[r][c].constraint {
                 if ec.ctype == EdgeConstraintType::Inequality {
-                    if let (Some(&ra), Some(&rb)) = (
-                        state.cell_to_region.get(&(r, c)),
-                        state.cell_to_region.get(&(r, c + 1)),
+                    if let (Some(ra), Some(rb)) = (
+                        state.cell_to_region[r * state.width + c],
+                        state.cell_to_region[r * state.width + (c + 1)],
                     ) {
-                        let sa = state.region_shapes.get(&ra).map(|s| s.len()).unwrap_or(0);
-                        let sb = state.region_shapes.get(&rb).map(|s| s.len()).unwrap_or(0);
+                        let sa = state.region_shapes.get(ra).map(|s| s.len()).unwrap_or(0);
+                        let sb = state.region_shapes.get(rb).map(|s| s.len()).unwrap_or(0);
                         if !check_ineq(sa, sb, ec.value == Some(1)) {
                             return false;
                         }
@@ -646,12 +653,12 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
         for c in 0..puzzle.width {
             if let Some(ec) = &puzzle.v_edges[r][c].constraint {
                 if ec.ctype == EdgeConstraintType::Inequality {
-                    if let (Some(&ra), Some(&rb)) = (
-                        state.cell_to_region.get(&(r, c)),
-                        state.cell_to_region.get(&(r + 1, c)),
+                    if let (Some(ra), Some(rb)) = (
+                        state.cell_to_region[r * state.width + c],
+                        state.cell_to_region[(r + 1) * state.width + c],
                     ) {
-                        let sa = state.region_shapes.get(&ra).map(|s| s.len()).unwrap_or(0);
-                        let sb = state.region_shapes.get(&rb).map(|s| s.len()).unwrap_or(0);
+                        let sa = state.region_shapes.get(ra).map(|s| s.len()).unwrap_or(0);
+                        let sb = state.region_shapes.get(rb).map(|s| s.len()).unwrap_or(0);
                         if !check_ineq(sa, sb, ec.value == Some(1)) {
                             return false;
                         }
@@ -675,7 +682,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
         }
         // Each symbol must appear exactly once per region
         for sym in &sym_set {
-            for cells in state.region_shapes.values() {
+            for cells in &state.region_shapes {
                 let count = cells.iter().filter(|&&[r, c]| {
                     puzzle.cells[r][c].symbol.as_deref() == Some(sym.as_str())
                 }).count();
@@ -690,7 +697,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     let has_block = puzzle.rules.iter().any(|r| r.ctype == "block");
     let has_non_block = puzzle.rules.iter().any(|r| r.ctype == "non_block");
     if has_block || has_non_block {
-        for shape in state.region_shapes.values() {
+        for shape in &state.region_shapes {
             let rect = crate::shapes::is_rectangle(shape);
             if (has_block && !rect) || (has_non_block && rect) {
                 return false;
@@ -702,7 +709,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     // key missed rotation/reflection duplicates; use the dihedral key).
     if puzzle.rules.iter().any(|r| r.ctype == "different") {
         let mut keys: HashSet<String> = HashSet::new();
-        for shape in state.region_shapes.values() {
+        for shape in &state.region_shapes {
             if !keys.insert(crate::shapes::dihedral_key(shape)) {
                 return false;
             }
@@ -711,7 +718,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
 
     // solitary: each region has exactly one clue-bearing cell.
     if puzzle.rules.iter().any(|r| r.ctype == "solitary") {
-        for shape in state.region_shapes.values() {
+        for shape in &state.region_shapes {
             let mut clues = 0usize;
             for &[r, c] in shape {
                 let cell = &puzzle.cells[r][c];
@@ -733,14 +740,14 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     // differentiation: adjacent regions (sharing an edge) have different areas.
     if puzzle.rules.iter().any(|r| r.ctype == "differentiation") {
         let mut cell_to_rid: HashMap<(usize, usize), usize> = HashMap::new();
-        for (&rid, shape) in &state.region_shapes {
+        for (rid, shape) in state.region_shapes.iter().enumerate() {
             for &[r, c] in shape {
                 cell_to_rid.insert((r, c), rid);
             }
         }
-        let area_of = |rid: usize| state.region_shapes.get(&rid).map(|s| s.len()).unwrap_or(0);
+        let area_of = |rid: usize| state.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
         let mut seen: HashSet<(usize, usize)> = HashSet::new();
-        for (&rid, shape) in &state.region_shapes {
+        for (rid, shape) in state.region_shapes.iter().enumerate() {
             for &[r, c] in shape {
                 for (dr, dc) in [(1i64, 0i64), (0, 1i64)] {
                     let nr = r as i64 + dr;
@@ -783,7 +790,8 @@ fn build_regions(state: &BacktrackState) -> Vec<RegionInfo> {
     let mut regions: Vec<_> = state
         .region_shapes
         .iter()
-        .map(|(&rid, shape)| {
+        .enumerate()
+        .map(|(rid, shape)| {
             let mut norm = shape.clone();
             normalize(&mut norm);
             RegionInfo {
@@ -796,6 +804,8 @@ fn build_regions(state: &BacktrackState) -> Vec<RegionInfo> {
             }
         })
         .collect();
+    // Region ids are a contiguous 0..n prefix, so this is already id-ordered;
+    // keep the sort as a defensive no-op.
     regions.sort_by_key(|r| r.region_id);
     regions
 }

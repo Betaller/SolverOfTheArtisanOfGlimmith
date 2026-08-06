@@ -82,7 +82,7 @@ pub struct AoGCore {
 > 所以同一形状的不同朝向在目录里是**同一个索引**——这正是“旋转和镜像视为同一形状”
 > 的落地方式。
 
-### 2.3 `PlaceLevel`（每层搜索的工作区，`aog/types.rs:224-289`）
+### 2.3 `PlaceLevel`（每层搜索的工作区，`aog/types.rs:225-289`）
 
 ```
 每个 DFS 深度 index 一个独立的 PlaceLevel：
@@ -99,6 +99,11 @@ pub struct AoGCore {
 ```
 
 用 `RefCell`（`Pools`）包起来，保证不相交的层级可独立借用。
+
+> **惰性分配（2026-08-06）**：`Pools::new` 的 `place` 是 `Vec<RefCell<Option<PlaceLevel>>>`
+> 初始全 `None`，`Pools::place_level(i)`（`aog/types.rs:323`）用 `RefMut::map` +
+> `get_or_insert_with` 在首次触达该深度时才建 `PlaceLevel`。此前一次性预分配 100 层
+> （~33KB × 100 ≈ 常驻 3.3MB），小盘也如此；惰性后 A1-1 峰值 RSS 5.6→2.3MB。
 
 ### 2.4 `DfsContext`（空区分析状态，`aog/types.rs:186-220`）
 
@@ -124,7 +129,7 @@ solve_aog(puzzle, deadline)
 │
 ├─ AoGCore::build(puzzle, deadline)      # 编码位域网格、注册形状目录
 ├─ core.make_solve_puzzle()              # sp = 全 LINE_BLOCK，内部 AREA_NORMAL/BLOCK
-├─ Pools::new(MAX_DFS_DEPTH)             # 预分配 100 层工作区
+├─ Pools::new(MAX_DFS_DEPTH)             # 占位 100 层，PlaceLevel 按深度惰性分配
 ├─ search::dfs(1, &mut core, &mut sp, &pools)    # 从深度 1 开始搜
 │     │
 │     └─ 返回 -1？ → 无解；否则 → extract_regions
@@ -417,7 +422,8 @@ distance_predict > 剩余格数
 | `AoGCore` 定义 | `aog/core.rs:12` |
 | `compute_digest` | `aog/core.rs:97` |
 | `shapes_search` / `shapes_insert` | `aog/core.rs:131, 168` |
-| `PlaceLevel` / `Pools` 定义 | `aog/types.rs:224, 291` |
+| `PlaceLevel` / `Pools` 定义（惰性） | `aog/types.rs:225, 291` |
+| `Pools::place_level` 惰性取层 | `aog/types.rs:323` |
 | `dfs` 主递归 | `search.rs:839` |
 | `place_non_predifined_shape` | `search.rs:51` |
 | `find_special_start_area` | `empty.rs:771` |

@@ -149,6 +149,24 @@
 - 注：0213 / 0213nopad（大 rose）在 -j8 负载下偶发互换超时（本轮 0213 超时、上轮 0213nopad
   超时），单跑各 ~2.5s 解出——与已知 0833 / 0882 同类负载波动，非回归。
 
+### 2026-08-06 · P1 性能/内存：backtrack 扁平数组 + Pools 惰性分配（本会话）
+
+纯性能/内存优化，**求解行为不变**（同 DFS 逻辑）。
+1. **backtrack 状态扁平数组**（#3）：`cell_to_region` `HashMap<(usize,usize),usize>` →
+   `Vec<Option<usize>>`（`r*width+c` 索引）；`region_shapes` `HashMap<usize,Vec>` →
+   `Vec<Vec<[usize;2]>>`（区域号严格 0..n 递增、回退递减，`push`/`pop` 维护）。`frontier` /
+   `region_clue` 保持 HashMap（area 门控）。`BacktrackState` 加 `width` stride 字段。
+2. **边界尊重检查扁平数组**（#4）：`regions_respect_boundaries`（`mod.rs:125`）的
+   `HashMap<(usize,usize),usize>` → `Vec<Option<usize>>` 直接索引。
+3. **aog Pools 惰性分配**（#5）：`Pools.place` `Vec<RefCell<PlaceLevel>>` →
+   `Vec<RefCell<Option<PlaceLevel>>>`，`Pools::place_level(i)`（`RefMut::map` +
+   `get_or_insert_with`）按 DFS 深度惰性建层。**峰值 RSS 实测**（`results/20260806_pools-lazy-rss.txt`）：
+   A1-1 **5.6→2.3MB**、C1-3 **5.7→2.9MB**、C4-1 **11.7→9.0MB**（此前 100 层 × ~33KB 常驻 ~3.3MB）。
+
+- **验证**：`cargo test` 9 通过；`pytest` 290 通过；Zone1 `verify_puzzles.py --timeout 25 -j 8`
+  **301/312**（与基准一致，**0 回归**）。定向：1301（brick+area，backtrack ≈30s）、0957
+  （brick+block+rose ≈1.8s）、C4-1（rose ≈3.1s）、A1-1（shape_pool 3ms）均正常解出。
+
 ---
 
 ## 附录

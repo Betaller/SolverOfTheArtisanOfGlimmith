@@ -63,7 +63,7 @@ fn place_non_predifined_shape(
         return -1;
     }
 
-    let mut L: RefMut<PlaceLevel> = pools.place[index as usize].borrow_mut();
+    let mut L: RefMut<PlaceLevel> = pools.place_level(index as usize);
     let mut rose_syms = [0i32; 16];
 
     // Slash-distance table geometry (mirrors dfs.cpp sd dimensions).

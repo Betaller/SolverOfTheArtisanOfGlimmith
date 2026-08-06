@@ -56,6 +56,14 @@
 - 11 道失败：0882 exit -9（8 并行内存压力，非回归）；0223/1435 Rust 返回错解被 IndependentValidator 拦截（历史 Python 亦未解出）；其余为已知超时/UNSOLVED（0804/1433/1434 大 rose 等）。
 - 测试：`pytest` 290 通过、`cargo test` 9 通过（详见第二部分 C.0 条目）。
 
+### 2026-08-06 · 删除 constraints.rs stub（fence/compass/ring 信任缺口修复）
+- **result**：`results/20260806_82c9132_verify-full.txt`（1295 题全量 verify 基线，228 失败，其中 **30 题「答案未通过独立验证」**——围栏/罗盘/环纹/玫瑰窗错误解）
+- **改动**：删除 `rsolver/src/constraints.rs`（9 条恒 `true` 的 stub：fence / compass / ring / brick / inequality / difference / watchtower / puzzle_piece / rose_window），`build_solution`（rose/pieces/backtrack 验收）与 pieces 改用 `solver/validate::validate` 全量复查（与 aog 出口 / rose 验收同一闸门）。
+- **效果**：30 题「答案未通过独立验证」现改为 Rust 内**诚实拒绝**（「fails rule validation」/「No solution found」），不再上报错误解。这些题仍 FAIL（求解器解不出，非错解），但「错误答案逃过 Rust 复查」的信任缺口关闭。
+- **官方解一致性**：36/36 抽样解出的官方题与 `*-answer` 官方解**完全一致**，0 个「合法但不同」。
+- **回归**：40 抽样 PASS 题 + 10 ring/compass PASS 题 **0 回归**；`cargo test` 6 通过、`pytest` 290 通过。
+- **benchmark 脚本**：`verify_puzzles.py` / `benchmark_rust_solver.py` 新增「解 vs 官方题解」比对（`matches_official`，DIFF 即失败）。
+
 ---
 
 ## 第二部分：变更内容
@@ -208,6 +216,28 @@
   **精确验证请用默认 `--batch 1`**；`--batch N` 适用于良性集合的吞吐扫描（快题实测
   提速 ~5×，spawn 开销 ~1ms/题 → ~1.3s/1258 题）。批量模式交付子进程复用架构
   （`--batch` 协议 + `io.rs`），不改变任何求解结果。
+
+### 2026-08-06 · 删除 constraints.rs，build_solution 改用 validate.rs 全量复查
+- **背景**：2026-08-06 全量 verify 暴露 **30 题「答案未通过独立验证」**，全部涉及
+  fence / compass / ring / rose_window 等规则。根因：`constraints.rs` 的 9 条规则是
+  恒 `true` 的 stub——aog 对 ring+fence+rose 等组合题预算内解不出时，backtrack/pieces
+  产出的错误解通过 stub 被标 solved，只被 Python Router 的 IndependentValidator 拦下
+  → 判 FAIL。30/30 官方解通过 Python 验证器（非谜题/转换/规则理解问题，纯求解器代码问题）。
+- **改动**：
+  1. 删除 `rsolver/src/constraints.rs`（含 4 个单元测试；`is_rectangle` 测试移入 `shapes.rs`）。
+  2. `solver/mod.rs` 的 `build_solution` 与 `solver/pieces.rs` 改用
+     `crate::solver::validate::validate`（与 aog 出口 / rose 验收同一闸门，覆盖全 22 规则）
+     做全量复查。
+  3. 消除 `check_heterogeneous`/`check_homogeneous` 的语义分歧：旧 `constraints.rs` 是
+     区域级全局检查，validate.rs / Python 是**边级**（只查带 `==`/`!` 标记的边）——现在
+     唯一语义是 validate.rs 的边级。
+- **验证**：`cargo test` 6 通过（4 constraints 测试删 + 1 shapes `is_rectangle` 加）；
+  `pytest` 290 通过；40 抽样 PASS 题 + 10 ring/compass PASS 题 **0 回归**；
+  36 抽样解出的官方题与 `*-answer` 官方解一致（0 DIFF）。
+- **benchmark 脚本官方解验证**：`verify_puzzles.py` / `benchmark_rust_solver.py` 对每个
+  解出的官方题比对 `*-answer` 官方解分区——新增 `src/validation/official_answer.py`
+  （`matches_official_answer`），结果字段 `matches_official`（True/False/None），
+  False（解合法但 ≠ 官方唯一解）标记 **DIFF** 并计入失败。
 
 ---
 

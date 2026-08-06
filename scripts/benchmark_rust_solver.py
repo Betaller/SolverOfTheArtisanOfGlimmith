@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, ".")
 
 from src.io.puzzle_codec import dict_to_puzzle
+from src.validation.official_answer import matches_official_answer
 from src.validation.validator import IndependentValidator, solution_to_board
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -40,8 +41,10 @@ def _find_binary() -> Path:
     raise FileNotFoundError("rsolver binary not built. Run: cd rsolver && cargo build --release")
 
 
-def _solve_one_line(out: dict, puzzle, ms: int) -> dict:
-    """Validate one solved puzzle against the independent validator."""
+def _solve_one_line(out: dict, puzzle, ms: int, path: str | None = None) -> dict:
+    """Validate one solved puzzle against the independent validator, and (when
+    ``path`` names an official puzzle with an answer file) compare the region
+    partition against the official unique solution."""
     from types import SimpleNamespace
     regions = []
     for rd in out.get("regions", []):
@@ -54,8 +57,11 @@ def _solve_one_line(out: dict, puzzle, ms: int) -> dict:
     sol = SimpleNamespace(board=None, regions=regions, rule_results={})
     board = solution_to_board(puzzle, sol)
     result = IndependentValidator().validate(puzzle, board)
-    return {"solved": result.solved, "validated": result.solved, "ms": ms,
-            "error": "; ".join(result.errors[:3]) if not result.solved else None}
+    r = {"solved": result.solved, "validated": result.solved, "ms": ms,
+         "error": "; ".join(result.errors[:3]) if not result.solved else None}
+    if result.solved and path is not None:
+        r["matches_official"] = matches_official_answer(path, [reg.cells for reg in regions])
+    return r
 
 
 def test_batch(paths: list[str], timeout: float) -> list[tuple[str, dict]]:
@@ -112,7 +118,7 @@ def test_batch(paths: list[str], timeout: float) -> list[tuple[str, dict]]:
                     except json.JSONDecodeError:
                         out = {"solved": False}
                     if out.get("solved"):
-                        r = _solve_one_line(out, puzzle, out.get("elapsed_ms", 0))
+                        r = _solve_one_line(out, puzzle, out.get("elapsed_ms", 0), path)
                         results.append((path, {"name": name, **r}))
                         continue
                 results.append((path, {"name": name, "solved": False, "validated": False,
@@ -144,7 +150,7 @@ def test_batch(paths: list[str], timeout: float) -> list[tuple[str, dict]]:
                                        "ms": wall_ms,
                                        "error": out.get("error_message", "no solution")[:300]}))
                 continue
-            r = _solve_one_line(out, puzzle, out.get("elapsed_ms", wall_ms))
+            r = _solve_one_line(out, puzzle, out.get("elapsed_ms", wall_ms), path)
             r = {"name": name, **r}
             results.append((path, r))
     return results
@@ -200,8 +206,11 @@ def test_one(path: str, timeout: float) -> dict:
     sol = SimpleNamespace(board=None, regions=regions, rule_results={})
     board = solution_to_board(puzzle, sol)
     result = IndependentValidator().validate(puzzle, board)
-    return {"name": name, "solved": result.solved, "validated": result.solved, "ms": ms,
-            "error": "; ".join(result.errors[:3]) if not result.solved else None}
+    r = {"name": name, "solved": result.solved, "validated": result.solved, "ms": ms,
+         "error": "; ".join(result.errors[:3]) if not result.solved else None}
+    if result.solved:
+        r["matches_official"] = matches_official_answer(path, [reg.cells for reg in regions])
+    return r
 
 
 def main() -> None:
@@ -236,13 +245,18 @@ def main() -> None:
         zone = rel[0] if len(rel) > 1 else "?"
         z = by_zone.get(zone, (0, 0))
         by_zone[zone] = (z[0] + 1, z[1] + (1 if r["solved"] else 0))
-        if r["solved"]:
+        # solved & validated but partition ≠ official unique solution → DIFF
+        diff = r.get("solved") and r.get("matches_official") is False
+        status = "DIFF" if diff else ("PASS" if r.get("solved") else "FAIL")
+        if diff:
+            r["error"] = (r.get("error") or "") + " 解与官方题解不一致"
+            failed.append(r)
+        elif r.get("solved"):
             passed += 1
         else:
             failed.append(r)
-        print(f"[{total:>3}/{total}] {'PASS' if r['solved'] else 'FAIL'} "
-              f"{zone:<6} {r['name']:<22} {r['ms']:>6}ms"
-              f"{'  ' + str(r['error']) if r['error'] else ''}")
+        print(f"[{total:>3}/{total}] {status} {zone:<6} {r['name']:<22} {r['ms']:>6}ms"
+              f"{'  ' + str(r['error']) if r.get('error') else ''}")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs or None) as pool:
         done = 0

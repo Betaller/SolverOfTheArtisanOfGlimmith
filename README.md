@@ -11,7 +11,12 @@ cd rsolver && cargo build --release   # 构建 Rust 求解器（默认路由必�
 python src/app.py                     # Qt UI (PySide6)
 python -m pytest tests/ -x --tb=short # 全量测试 (~290 个)
 python scripts/verify_puzzles.py      # 验证全部谜题 (每题 30s 超时)
+python scripts/benchmark_rust_solver.py  # 官方题基准（每题 20s 超时）
 ```
+
+> `verify_puzzles.py` / `benchmark_rust_solver.py` 会对每个解出的**官方题**额外比对
+> `*-answer` 目录的**官方唯一解**：解合法但与官方解分区不同会标记 `DIFF` 并计入失败
+> （官方解唯一性准则）。非官方谜题（reference / user / aiGen）无官方解，跳过该比对。
 
 > `default_router()` 会急切构造 `RustSolver`，因此运行 app 与 `verify_puzzles.py` 之前必须先 `cargo build --release`（二进制在 `rsolver/target/release/rsolver`）。
 

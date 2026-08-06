@@ -158,7 +158,7 @@ struct BacktrackState {
 
 **注意陷阱**:
 - 4 处回滚 continue 点(250-251 之后、254、270 的失败)必须逐一保留 pop/None 复位,是机械改动中最易漏的点。
-- **backtrack.rs 目前没有单测**(`#[cfg(test)]` 只在 `aog/core.rs` 与 `constraints.rs`),`cargo test` 跑不通该路径。建议 P0 一并补 3-5 个 backtrack 单测(区域划分/望塔/环砖/边界),否则回归只能靠 Python 侧 `verify_puzzles.py`。
+- **backtrack.rs 目前没有单测**(`#[cfg(test)]` 只在 `aog/core.rs`;`constraints.rs` 已删 2026-08-06),`cargo test` 跑不通该路径。建议 P0 一并补 3-5 个 backtrack 单测(区域划分/望塔/环砖/边界),否则回归只能靠 Python 侧 `verify_puzzles.py`。
 
 **预期收益**:消除每格哈希 + 望塔/环砖检查去重。真实但**天花板有限**——backtrack 是 `solver/mod.rs:30-74` 调度链的最后兜底,多数谜题走不到。故评级"中收益"而非"高收益"。
 **验证**:`cd rsolver && cargo test`(新增单测)+ `scripts/verify_puzzles.py` 全量回归。

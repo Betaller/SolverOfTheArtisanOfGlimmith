@@ -35,13 +35,17 @@
 
 同一逻辑在多处各写了一份，是不一致 bug 的温床。
 
-| 逻辑 | 重复位置 | 建议落点 |
+> **已完成（2026-08-06）**：5 处逻辑全部收敛到 `shapes.rs`。下表「重复位置」的
+> 行号是**收敛前**的（`constraints.rs` 已于 2026-08-06 删除，其逻辑并入
+> `solver/validate.rs`；`aog/validate.rs` → `solver/validate.rs`）。
+
+| 逻辑 | 重复位置（收敛前） | 唯一实现（现） |
 |---|---|---|
-| `dihedral_key`（8 朝向规范键） | `constraints.rs:107` 与 `aog/validate.rs:395` | 收敛到 `types.rs` 或新 `shapes.rs` |
-| `is_rectangle` | `constraints.rs:8` 与 `aog/validate.rs:460` | 同上 |
-| 形状池收集（顶层数组 + rule params 双来源） | `aog/core.rs:489` 与 `constraints.rs:64` | 同上 |
-| 面积上下界计算 | `pieces.rs:125`、`backtrack.rs:55`、`rose/mod.rs:99` | 同上 |
-| rose 符号类型收集 | `rose/mod.rs:20`、`aog/core.rs:566`、`validate.rs:329` | 同上 |
+| `dihedral_key`（8 朝向规范键） | `constraints.rs:107` 与 `aog/validate.rs:395` | `shapes.rs:32` |
+| `is_rectangle` | `constraints.rs:8` 与 `aog/validate.rs:460` | `shapes.rs:12` |
+| 形状池收集（顶层数组 + rule params 双来源） | `aog/core.rs:489` 与 `constraints.rs:64` | `shapes.rs:75` |
+| 面积上下界计算 | `pieces.rs:125`、`backtrack.rs:55`、`rose/mod.rs:99` | `shapes.rs:115` |
+| rose 符号类型收集 | `rose/mod.rs:20`、`aog/core.rs:566`、`validate.rs:329` | `shapes.rs:160` |
 
 > 注意点：`check_mixed` 当前用 `!check_same` 实现（`constraints.rs:179`），而 `validate.rs`
 > 的 mixed 是真正的「相邻异形」语义——收敛时须统一语义，别把宽松实现带过去。
@@ -132,5 +136,6 @@
 | 2026-08-06 | P2 #6 死代码清理 | 移除 `apply_line_constraint` 的 `vertical` 参数、`grid::unassigned_cells`/`connected_components`、`polyomino::generate_polyominoes`、aog `dbg_steps`/`slash_check_*`/重复 `has_shape_pool`、`Dlx::search`/`solution_rows`/`header_count`、`CellSet::set_from`/`PreBoundaries::len`、`types::Direction`/`CompassClue::get`、未用参数（`pick_next_cell` puzzle、`check_edge_constraints` regions）；`Solution.steps_taken` 保留兼容并标注废弃；`main.rs` 文档字符串修正。 |
 | 2026-08-06 | P2 #7 批量模式（子进程复用） | rsolver `--batch`（多行 JSON 逐行进出）+ IO 移出 main.rs（新 `io.rs`）+ `RustSolver.solve_batch`（每题独立预算，`select`+`os.read` 分块读，超时只截断该题与后续）+ `verify_puzzles.py`/`benchmark_rust_solver.py` `--batch N`。**局限**：某题超出内部 30s 预算（大 rose runaway）会连带同批后续题超时，精确验证用 `--batch 1`；快题吞吐 ~6×。见 `01`、README。 |
 | 2026-08-06 | P3 #8 `Cell` 结构体拆分（求解状态分离） | 删除 `Cell.region_id`（求解路径死字段，16B）与 `assigned()`（唯一使用者 `grid::unassigned_cells` 已随 #6 移除）；求解归属状态落在各求解器自有结构。Cell ~192B → ~176B。Python `board.py` 的 `Cell.region_id` 是独立模型，不受影响。见 `02`、`docs/重构/data-structures.md`。 |
+| 2026-08-06 | 全量 verify 围栏/罗盘失败根因修复（新增，非清单项） | 全量 verify 暴露 30 题「答案未通过独立验证」（全为 fence/compass/ring/rose 相关）。根因：`constraints.rs` 9 条规则为恒 `true` 的 stub。**删除 `constraints.rs`**，`build_solution`/pieces 改用 `solver/validate::validate` 全量复查。30 题改为 Rust 内诚实拒绝（仍 FAIL 但不再上报错误解）。0 回归，36/36 抽样解与官方解一致。`verify_puzzles.py`/`benchmark_rust_solver.py` 新增官方解比对（`matches_official`，DIFF 即失败）。见 `08`、`docs/official-puzzles-status.md` 第一部分/第二部分、`results/20260806_82c9132_verify-full.txt`。 |
 
 （每完成一项在此登记，并更新顶部总览的状态列。）

@@ -241,7 +241,7 @@ python scripts/verify_puzzles.py --dir puzzles/official/A --timeout 30
 | `solver/rose/region_match.rs` | 574 | 07 |
 | `solver/rose/rose_growth.rs` | 584 | 07 |
 | `shapes.rs` | 184 | 02 / 08 |
-| `constraints.rs` | 336 | 08 |
+| ~~`constraints.rs`~~（已删 2026-08-06，逻辑并入 `solver/validate.rs`） | — | 08 |
 | `main.rs` | 92 | 01 |
 | `io.rs` | 296 | 01 |
 | `dlx.rs` | 270 | 05 |

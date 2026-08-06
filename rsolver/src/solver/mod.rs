@@ -174,16 +174,34 @@ fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle) ->
     if !regions_respect_boundaries(puzzle, &regions) {
         return Solution::unsolved("Solution found but crosses a pre-drawn boundary");
     }
-    let rule_results = crate::constraints::check_all(puzzle, &puzzle.rules, &regions);
-    let solved = puzzle.rules.iter().all(|r| rule_results.contains(&r.ctype));
-
+    // Full independent re-validation via `validate.rs` — the same acceptance
+    // gate aog and rose already use.  It covers all 22 rule types (including
+    // fence / compass / ring / rose_window, which `constraints.rs` used to
+    // stub out with unconditional `true`), so a fallback solver can no longer
+    // smuggle a rule-violating answer past the Rust check.  The router's
+    // Python IndependentValidator stays as the outer gate.
+    if !crate::solver::validate::validate(puzzle, &regions) {
+        return Solution {
+            solved: false,
+            steps_taken: 0,
+            elapsed_ms: elapsed,
+            error_message: Some("Solution found but fails rule validation".into()),
+            regions,
+            rule_results: HashMap::new(),
+        };
+    }
+    let rule_results: HashMap<String, bool> = puzzle
+        .rules
+        .iter()
+        .map(|r| (r.ctype.clone(), true))
+        .collect();
     Solution {
-        solved,
+        solved: true,
         steps_taken: 0,
         elapsed_ms: elapsed,
-        error_message: if solved { None } else { Some("Solution found but fails rule validation".into()) },
+        error_message: None,
         regions,
-        rule_results: rule_results.into_iter().map(|k| (k, true)).collect(),
+        rule_results,
     }
 }
 

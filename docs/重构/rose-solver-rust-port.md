@@ -28,7 +28,7 @@
 | aog 尊重 deadline（`aog/search.rs:844` 每层递归检查 `Instant::now() >= core.deadline`） | 代码确认 |
 | aog 已能 <750ms 解约 30 道纯 rose 题——**分发不能回归这些** | `scan_official_results.jsonl` 纯 rose MATCH 行 elapsed 均 <750ms |
 | Rust `solver/validate.rs` 是**完整独立校验器**（含真正的 `check_rose_window` `validate.rs:327-380`），可复用于 rose 解验收门 | 代码确认 |
-| Rust `constraints.rs` 对 rose/fence/brick/ring/inequality/difference/watchtower/compass/puzzle_piece 是 **stub（返回 true）**，不可作验收门 | `constraints.rs:35-49` |
+| Rust `constraints.rs`（已删 2026-08-06）曾对 rose/fence/brick/ring/inequality/difference/watchtower/compass/puzzle_piece 是 **stub（返回 true）**，不可作验收门 | 原 `constraints.rs:35-49`（逻辑并入 `solver/validate.rs`） |
 | 未解纯 rose 集：0277（Python rose 可解）、0213、0213nopad、0804、0833、1433、1434、0881g | `scan_official_results.jsonl` UNSOLVED 行 |
 
 ## 3. 模块结构
@@ -163,7 +163,7 @@ fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<Regi
 | 多符号 `in_same` / 链式修复易错 | 机械移植 + `aog::validate` 验收兜底（`rose_growth.py:149-198, 254-265`） |
 | MATCH→DIFF 回归（~30 道 aog 已解纯 rose） | 分发"aog 先赢短预算"，语料回归确认 |
 | 大网格纯 rose（0213/0833/1433/1434/0804）仍超时 | 可接受（aog 本就失败，无回归）；后续可放宽 `ROSE_TIMEOUT_MS` |
-| `build_solution` 的 constraints stub | 安全——先用 `solver::validate` 验收，不走 trusted |
+| `build_solution` 的 constraints stub（constraints.rs 已删 2026-08-06） | 安全——`build_solution` 改用 `solver::validate` 验收，不走 trusted |
 
 ---
 *最近更新：2026-08-05（方案批准，待实施）*

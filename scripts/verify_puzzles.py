@@ -21,6 +21,7 @@ sys.path.insert(0, '.')
 
 from src.io.puzzle_codec import dict_to_puzzle
 from src.solver.base import default_router
+from src.validation.official_answer import matches_official_answer
 from src.validation.validator import IndependentValidator, solution_to_board
 
 
@@ -34,6 +35,9 @@ class PuzzleResult:
     error: str | None = None
     solver_used: str | None = None
     attempts: list[str] = field(default_factory=list)
+    # True = partition equals the official answer; False = valid but different;
+    # None = no official answer file (reference / user / aiGen puzzles).
+    matches_official: bool | None = None
 
 
 def test_batch(args: tuple[list[str], float]) -> list[tuple[str, PuzzleResult]]:
@@ -72,10 +76,15 @@ def test_batch(args: tuple[list[str], float]) -> list[tuple[str, PuzzleResult]]:
                 continue
             board = solution_to_board(puzzle, solution)
             val = IndependentValidator().validate(puzzle, board)
+            if not val.solved:
+                results.append((path, PuzzleResult(
+                    name, True, solution.steps_taken, solution.elapsed_ms,
+                    False, "; ".join(val.errors[:3]), 'rust', ['rust(ok)'])))
+                continue
+            matches = matches_official_answer(path, [r.cells for r in solution.regions])
             results.append((path, PuzzleResult(
                 name, True, solution.steps_taken, solution.elapsed_ms,
-                val.solved, "; ".join(val.errors[:3]) if not val.solved else None,
-                'rust', ['rust(ok)'])))
+                True, None, 'rust', ['rust(ok)'], matches_official=matches)))
     except Exception as e:
         for path in paths:
             name = path.replace('\\', '/').split('/')[-1]
@@ -124,9 +133,13 @@ def test_one(args: tuple[str, float, bool]) -> PuzzleResult:
         # independent re-verification (decoupled from solver rule checks)
         board = solution_to_board(puzzle, solution)
         val = IndependentValidator().validate(puzzle, board)
-        return PuzzleResult(name, True, solution.steps_taken, t_ms, val.solved,
-                            "; ".join(val.errors[:3]) if not val.solved else None,
-                            solver_used, attempts)
+        if not val.solved:
+            return PuzzleResult(name, True, solution.steps_taken, t_ms, False,
+                                "; ".join(val.errors[:3]), solver_used, attempts)
+        # official unique solution must match (None = no answer file)
+        matches = matches_official_answer(path, [r.cells for r in solution.regions])
+        return PuzzleResult(name, True, solution.steps_taken, t_ms, True,
+                            None, solver_used, attempts, matches_official=matches)
     except Exception as e:
         return PuzzleResult(name, False, 0, 0, False, str(e))
 
@@ -159,6 +172,7 @@ def _record(path: str, r: PuzzleResult) -> dict:
         'status': 'PASS' if r.solved and r.validated else 'FAIL',
         'solved': r.solved,
         'validated': r.validated,
+        'matches_official': r.matches_official,
         'elapsed_ms': r.elapsed_ms,
         'steps': r.steps,
         'solver_used': r.solver_used,
@@ -215,8 +229,13 @@ def main():
     ):
         def emit(path: str, r: PuzzleResult, done: int) -> None:
             nonlocal passed
-            status = "PASS" if r.solved and r.validated else "FAIL"
-            if r.solved and r.validated:
+            # solved & validated but partition ≠ official unique solution → DIFF
+            diff = r.solved and r.validated and r.matches_official is False
+            status = "DIFF" if diff else ("PASS" if r.solved and r.validated else "FAIL")
+            if diff:
+                r.error = (r.error or "") + " 解与官方题解不一致"
+                failed.append(r)
+            elif r.solved and r.validated:
                 passed += 1
             else:
                 failed.append(r)

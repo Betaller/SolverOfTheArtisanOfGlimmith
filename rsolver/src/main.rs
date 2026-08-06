@@ -9,7 +9,6 @@
 //! The JSON model, puzzle building and serialization live in [`io`]; this entry
 //! point only reads stdin/argv and writes stdout.
 
-mod constraints;
 mod dlx;
 mod grid;
 mod io;

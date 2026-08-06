@@ -130,7 +130,7 @@ undo 正确；`has_area_rule` 为 false 时全部是 no-op（无 area 规则零�
 另一个区域且之间无分界线 → 拒绝」，本意是防止两个区域被缝合，但**过度保守**——相邻区域
 本就合法共享边界。它把 1301 官方解的构造（单点 (6,7) 紧挨区域 0 的 (6,8)，(6,8) 加进
 区域 0 时会触及区域 1）整支剪掉，导致回溯找不到官方解。删除后 1301/0957 均由 backtrack
-解出；最终正确性由叶子校验 + `build_solution` 的 `check_all` + router 的
+解出；最终正确性由叶子校验 + `build_solution` 的 `validate::validate` + router 的
 `IndependentValidator` 三层兜底。
 
 **`check_watchtowers_ok`**（`backtrack.rs:414-435`）：任何望塔顶点接触的区域数
@@ -176,7 +176,7 @@ undo 正确；`has_area_rule` 为 false 时全部是 no-op（无 area 规则零�
 
 > 注意：`homogeneous` / `heterogeneous`（双子/异生边约束）**不在这里**——它依赖
 > 区域形状，backtrack 的叶子检查不含形状比较；这类题的兜底实际上交给
-> `build_solution` 里的 `constraints::check_all` 复查（见 01 / 03）。
+> `build_solution` 里的 `solver/validate::validate` 复查（见 01 / 03）。
 
 ---
 

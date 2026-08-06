@@ -202,12 +202,12 @@ reconstruct_and_validate(puzzle, placements, row_ids, ctx)
 │     gemini     → 两侧形状相同
 ├─ 望塔：每望塔顶点接触的不同区域数 == target
 ├─ 组装 RegionInfo
-└─ constraints::check_all(puzzle, rules, regions)  # 块/相异/差异化/独居/形状池……
+└─ validate::validate(puzzle, &regions)  # 全 22 规则（块/相异/差异化/独居/形状池/围栏/罗盘……）
       全部规则通过才返回 Some(regions)
 ```
 
-> 也就是说：DLX 负责“几何上不重叠、全覆盖”，而**规则合法性由 `check_all` 兜底**。
-> 这样一条规则也不漏。
+> 也就是说：DLX 负责“几何上不重叠、全覆盖”，而**规则合法性由 `solver/validate::validate`
+> （全 22 规则）兜底**。这样一条规则也不漏。
 
 ---
 

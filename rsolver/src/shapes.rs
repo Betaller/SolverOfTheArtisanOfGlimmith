@@ -182,3 +182,16 @@ pub fn rose_symbol_types(puzzle: &Puzzle) -> Vec<String> {
     s
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_rectangle() {
+        assert!(is_rectangle(&[[0, 0], [0, 1], [1, 0], [1, 1]]));
+        assert!(is_rectangle(&[[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2]])); // 2x3
+        assert!(!is_rectangle(&[[0, 0], [0, 1], [1, 0]])); // L triomino
+        assert!(!is_rectangle(&[]));
+    }
+}
+

@@ -59,12 +59,13 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Optio
     dlx.set_deadline(deadline);
 
     // Search, validating every complete tiling against the global rules
-    // (edge constraints, watchtowers, and — via `constraints::check_all` — the
-    // region-level rules like block / different / differentiation / solitary).
-    // Keep searching until a valid tiling is found or the deadline expires.
-    // This lets a block puzzle (routed here through a synthesized rectangle
-    // pool) land on a *valid* rectangle partition instead of the first
-    // (usually trivial all-1×1) one.
+    // (edge constraints, watchtowers, and — via `validate.rs` — every rule
+    // type, so a tiling that violates fence / compass / ring / rose_window is
+    // rejected here instead of slipping to the router).  Keep searching until
+    // a valid tiling is found or the deadline expires.  This lets a block
+    // puzzle (routed here through a synthesized rectangle pool) land on a
+    // *valid* rectangle partition instead of the first (usually trivial
+    // all-1×1) one.
     let mut result: Option<Vec<RegionInfo>> = None;
     let mut partial: Vec<usize> = Vec::new();
     let mut row_check = |_partial: &[usize]| true;
@@ -622,11 +623,11 @@ fn reconstruct_and_validate(
         }
     }).collect();
 
-    // Region-level rules (block / different / differentiation / solitary /
-    // non_block / shape_pool ...).  Edge/vertex rules (inequality, difference,
-    // watchtower, compass, rose_window) are handled above or by the router.
-    let rule_results = crate::constraints::check_all(puzzle, &puzzle.rules, &regions);
-    if !puzzle.rules.iter().all(|r| rule_results.contains(&r.ctype)) {
+    // Full independent re-validation via `validate.rs` — the same acceptance
+    // gate aog and rose use.  Covers every rule type, so a DLX tiling that
+    // violates fence / compass / ring / rose_window (previously stubbed in
+    // `constraints.rs`) is rejected here instead of slipping to the router.
+    if !crate::solver::validate::validate(puzzle, &regions) {
         return None;
     }
 

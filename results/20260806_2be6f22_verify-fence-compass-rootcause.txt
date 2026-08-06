@@ -1,0 +1,54 @@
+# 全量 verify 失败根因调研（2026-08-06，commit 82c9132）
+# 源：results/20260806_82c9132_verify-full.txt（1295 题，228 失败）
+
+## 用户观察：大量失败与围栏(fence)、罗盘(compass)相关
+## 结论：均为求解器代码问题（constraints.rs 的 9 个 stub 检查器放行 fallback 错误解）
+## 排除：谜题问题 / 规则理解问题 / 转换问题（30/30 官方解通过 Python 验证器）
+
+## 一、228 个失败分类
+    161 Rust solver timed out after 30s   （预算耗尽：大 rose / 组合题 aog 解不出）
+     30 答案未通过独立验证               （stub 放行 fallback 错误解 ← 本调研核心）
+     15 Rust solver exited with code -9   （OOM：aog 形状库 / rose 候选爆炸，已知 P0 #0/#0'）
+     14 No solution found                 （watchtower/ring/compass 题无求解器解出）
+      7 Solution found but fails rule validation （Rust 非 stub 真实检查拒绝自身错误解）
+      1 Solution found but crosses a pre-drawn boundary
+
+## 二、30 个「答案未通过独立验证」的根因链
+    aog 失败（组合题如 ring+fence+rose 预算内解不出）
+      → rose 失败（无法处理 ring/fence 附加约束）
+      → backtrack/pieces 产出解（搜索中完全不感知 fence/compass/ring）
+      → build_solution → constraints::check_all
+          fence/compass/ring/rose_window/puzzle_piece/brick/inequality/difference/watchtower 全为
+          `=> true` 恒真 stub（rsolver/src/constraints.rs:19,24-30）
+      → 错误解标记 solved=true 逃过 Rust 内部复查
+      → Python router IndependentValidator 拦下 → 因 RustSolver 是唯一求解器 → 判 FAIL
+
+## 三、为什么不是谜题/规则理解/转换问题
+    1. 30/30 官方解通过 Python IndependentValidator（errors=[]）
+    2. fence 语义四端一致：Python validator / Rust validate.rs / JS glimmith-solver / C++ 参考
+       （fence_pattern = 线索格 4 个边界方向的 3×3 十字图案，dihedral 归一化比较）
+    3. aog palisade_type_from_fence 编码正确（count=边界数，count0→type1=全同区=0边界 等，与 C++ 自洽）
+    4. convert_archive.py 的 F 值映射正确；puz2json.py 的映射注释反转但为死代码（语料 1794 个
+       fence_pattern 全为 3×3 list，由 convert_archive 生成）
+    5. aog 正常路径围栏检查有效：0048（precise+fence）aog 直接解出且合法
+
+## 四、抽样 trace（AOG_DEBUG，solver= 指示产出求解器）
+    0660 (ring+fence+rose)   → aog fail → rose fail → backtrack regions=2（错误 33+3）
+    1222 (fence+ring)        → aog fail → rose fail → backtrack regions=2
+    0437/0497/0952 (fence)   → backtrack
+    0634 (compass+rose)      → aog fail → rose fail → backtrack regions=4
+    0223 (shape_pool+rose)   → pieces regions=30（官方 31）
+    1352 (rose)              → pieces regions=4
+    0573 (block+rose)        → 单跑 aog 产出合法 8 区域；verify 失败为负载下 fallback 产出 5 区域
+
+## 五、修复（已于 2026-08-06 实施）
+    1. 删除 `rsolver/src/constraints.rs`；`build_solution`（solver/mod.rs）与 pieces 改用
+       `crate::solver::validate::validate` 全量复查（覆盖全部 22 规则，与 aog 出口/rose 验收同一闸门）。
+    2. 效果：30 题「答案未通过独立验证」改为 Rust 内诚实拒绝（「fails rule validation」/
+       「No solution found」），不再上报错误解。这些题仍 FAIL（求解器解不出，非错解）。
+    3. 回归：40 抽样 PASS + 10 ring/compass PASS 0 回归；36/36 抽样解与官方解一致（0 DIFF）。
+    4. 附带修复：check_heterogeneous/check_homogeneous 区域级 vs 边级语义分歧统一为 validate.rs 边级。
+    5. 未做（能力提升，非本修复范围）：aog 组合题预算内搜索 / backtrack/pieces 搜索期
+       fence/compass/ring 约束 / rose 处理 ring/fence 附加约束。这些是「解不出」而非「错解」。
+    6. benchmark 脚本新增「解 vs 官方解」比对（verify_puzzles.py / benchmark_rust_solver.py，
+       `src/validation/official_answer.py`，matches_official 字段，DIFF 即失败）。

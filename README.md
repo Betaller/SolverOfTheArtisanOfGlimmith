@@ -35,7 +35,8 @@ RustSolver
 
 ### Rust 求解器（`rsolver/`）
 
-子进程协议：谜题 JSON → stdin，题解 JSON → stdout。内部按顺序尝试 4 个算法，先出答案者胜：
+子进程协议：谜题 JSON → stdin，题解 JSON → stdout（`rsolver --batch` 支持多行输入逐行输出，
+`RustSolver.solve_batch` 复用一个子进程批量求解）。内部按顺序尝试 4 个算法，先出答案者胜：
 
 ```
 ① AoG DFS（主力，C++ 参考求解器的 1:1 移植 + 剪枝）→ ② Rose（纯玫瑰窗）

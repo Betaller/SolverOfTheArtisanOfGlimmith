@@ -195,7 +195,7 @@ cd rsolver && cargo build --release     # 构建（Python 侧 RustSolver 依赖�
 
 echo '<puzzle_json>' | ./target/release/rsolver       # stdin 输入
 ./target/release/rsolver puzzle.json                   # 文件输入
-./target/release/rsolver --parse file                  # （main.rs 注释里的用法）
+printf '<p1>\n<p2>\n' | ./target/release/rsolver --batch   # 多行 JSON → 逐行题解
 ```
 
 ### 4.2 环境变量
@@ -242,7 +242,8 @@ python scripts/verify_puzzles.py --dir puzzles/official/A --timeout 30
 | `solver/rose/rose_growth.rs` | 584 | 07 |
 | `shapes.rs` | 184 | 02 / 08 |
 | `constraints.rs` | 336 | 08 |
-| `main.rs` | 331 | 01 |
+| `main.rs` | 93 | 01 |
+| `io.rs` | 264 | 01 |
 | `dlx.rs` | 270 | 05 |
 | `types.rs` | 221 | 02 |
 | `solver/mod.rs` | 238 | 01 |

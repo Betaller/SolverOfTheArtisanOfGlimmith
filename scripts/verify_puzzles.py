@@ -36,6 +36,53 @@ class PuzzleResult:
     attempts: list[str] = field(default_factory=list)
 
 
+def test_batch(args: tuple[list[str], float]) -> list[tuple[str, PuzzleResult]]:
+    """Solve a chunk of puzzles in ONE rsolver `--batch` subprocess (via
+    `RustSolver.solve_batch`), then independently re-verify each with the same
+    `IndependentValidator` used by `test_one`.  Returns `(path, PuzzleResult)`
+    pairs preserving input order.
+    """
+    paths, timeout = args
+    results: list[tuple[str, PuzzleResult]] = []
+    try:
+        from src.solver.rust_solver import RustSolver
+
+        solver = RustSolver()
+        to_solve: list[tuple[str, str, object]] = []  # (name, path, puzzle)
+        for path in paths:
+            name = path.replace('\\', '/').split('/')[-1]
+            try:
+                with open(path, encoding='utf-8') as f:
+                    data = json.load(f)
+                puzzle = dict_to_puzzle(data)
+            except Exception as e:
+                results.append((path, PuzzleResult(name, False, 0, 0, False, str(e))))
+                continue
+            if not puzzle.rules:
+                results.append((path, PuzzleResult(name, True, 0, 0, True)))
+                continue
+            to_solve.append((name, path, puzzle))
+
+        solutions = solver.solve_batch([p for _, _, p in to_solve], timeout=timeout)
+        for (name, path, puzzle), solution in zip(to_solve, solutions):
+            if not solution.solved:
+                results.append((path, PuzzleResult(
+                    name, False, solution.steps_taken, solution.elapsed_ms,
+                    False, solution.error_message or '无解', 'rust', ['rust(fail)'])))
+                continue
+            board = solution_to_board(puzzle, solution)
+            val = IndependentValidator().validate(puzzle, board)
+            results.append((path, PuzzleResult(
+                name, True, solution.steps_taken, solution.elapsed_ms,
+                val.solved, "; ".join(val.errors[:3]) if not val.solved else None,
+                'rust', ['rust(ok)'])))
+    except Exception as e:
+        for path in paths:
+            name = path.replace('\\', '/').split('/')[-1]
+            results.append((path, PuzzleResult(name, False, 0, 0, False, str(e))))
+    return results
+
+
 def test_one(args: tuple[str, float, bool]) -> PuzzleResult:
     path, timeout, log_failures = args
     name = path.replace('\\', '/').split('/')[-1]
@@ -124,6 +171,8 @@ def main():
     parser.add_argument("--dir", default="puzzles", help="谜题目录 (默认 puzzles)")
     parser.add_argument("--timeout", type=float, default=30, help="每题超时秒数")
     parser.add_argument("-j", "--jobs", type=int, default=0, help="并行数 (默认 CPU 核心数)")
+    parser.add_argument("--batch", type=int, default=1,
+                        help="每批谜题数，复用同一个 rsolver 子进程 (默认 1=逐题 spawn)")
     parser.add_argument("--rules", help="只验证包含该规则的谜题 (如 block)")
     parser.add_argument("--out", help="把每题结果追加写入该 JSONL 文件")
     args = parser.parse_args()
@@ -164,9 +213,8 @@ def main():
         out_ctx as out_fh,
         concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs or None) as pool,
     ):
-        fut_map = {pool.submit(test_one, (f, args.timeout, True)): f for f in files}
-        for done, fut in enumerate(concurrent.futures.as_completed(fut_map), 1):
-            r = fut.result()
+        def emit(path: str, r: PuzzleResult, done: int) -> None:
+            nonlocal passed
             status = "PASS" if r.solved and r.validated else "FAIL"
             if r.solved and r.validated:
                 passed += 1
@@ -177,7 +225,20 @@ def main():
                   f"steps={r.steps:<6} time={r.elapsed_ms:>5}ms"
                   f"{'  ' + r.error if r.error else ''}")
             if out_fh is not None:
-                out_fh.write(json.dumps(_record(fut_map[fut], r), ensure_ascii=False) + "\n")
+                out_fh.write(json.dumps(_record(path, r), ensure_ascii=False) + "\n")
+
+        if args.batch > 1:
+            chunks = [files[i:i + args.batch] for i in range(0, len(files), args.batch)]
+            fut_map = {pool.submit(test_batch, (chunk, args.timeout)): chunk for chunk in chunks}
+            done = 0
+            for fut in concurrent.futures.as_completed(fut_map):
+                for path, r in fut.result():
+                    done += 1
+                    emit(path, r, done)
+        else:
+            fut_map = {pool.submit(test_one, (f, args.timeout, True)): f for f in files}
+            for done, fut in enumerate(concurrent.futures.as_completed(fut_map), 1):
+                emit(fut_map[fut], fut.result(), done)
 
     print(f"\n结果: {passed}/{total} 通过")
     if failed:

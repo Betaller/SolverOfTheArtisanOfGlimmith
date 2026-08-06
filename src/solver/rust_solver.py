@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import select
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from src.io.puzzle_codec import puzzle_to_dict
@@ -43,6 +47,39 @@ def _crosses_boundary(board: Board, r0: int, c0: int, rh: int, rw: int) -> bool:
             if edge is not None and edge.is_boundary:
                 return True
     return False
+
+
+class _BatchLineReader:
+    """Line reader over a raw pipe fd with a per-line deadline.
+
+    Reads in chunks (not byte-by-byte) so the per-puzzle read overhead stays
+    far below the subprocess-spawn cost it replaces.  A leftover partial line
+    from one chunk is buffered for the next `readline`.
+    """
+
+    def __init__(self, fd: int) -> None:
+        self.fd = fd
+        self.buf = bytearray()
+
+    def readline(self, deadline: float) -> str | None:
+        """Return the next complete line, or `None` if `deadline` passes first
+        (or EOF hits mid-line)."""
+        while True:
+            nl = self.buf.find(b"\n")
+            if nl != -1:
+                line = bytes(self.buf[:nl])
+                del self.buf[: nl + 1]
+                return line.decode("utf-8", errors="replace")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            readable, _, _ = select.select([self.fd], [], [], remaining)
+            if not readable:
+                return None
+            chunk = os.read(self.fd, 8192)
+            if not chunk:
+                return None if not self.buf else self.buf.decode("utf-8", errors="replace")
+            self.buf += chunk
 
 
 def _fitting_rectangles(puzzle: Puzzle) -> list[list[list[int]]]:
@@ -109,7 +146,8 @@ class RustSolver(Solver):
     # use its budget.
     RUST_PARTS = 3
 
-    def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
+    def _prepare_input(self, puzzle: Puzzle) -> str:
+        """Compact single-line puzzle JSON for the Rust subprocess."""
         data = puzzle_to_dict(puzzle)
         # block → shape_pool: hand the Rust pieces (DLX) solver a pool of every
         # rectangle up to the board size, so block puzzles use the exact-cover
@@ -117,7 +155,44 @@ class RustSolver(Solver):
         # rule by the router, so a non-rectangle tiling can never slip through.
         if puzzle.has_rule("block") and not data.get("shape_pool"):
             data["shape_pool"] = _fitting_rectangles(puzzle)
-        input_json = json.dumps(data, ensure_ascii=True)
+        return json.dumps(data, ensure_ascii=True)
+
+    def _parse_solution(self, data: dict, puzzle: Puzzle) -> Solution:
+        """Turn one solution-JSON dict into a Solution."""
+        if not data.get("solved"):
+            return Solution(
+                solved=False,
+                steps_taken=data.get("steps_taken", 0),
+                elapsed_ms=data.get("elapsed_ms", 0),
+                error_message=data.get("error_message", "No solution"),
+            )
+
+        regions: list[RegionInfo] = []
+        for rd in data.get("regions", []):
+            cells = [(c[0], c[1]) for c in rd.get("cells", [])]
+            shape_cells = [(s[0], s[1]) for s in rd.get("shape", [])]
+            regions.append(RegionInfo(
+                region_id=rd["region_id"],
+                cells=cells,
+                area=rd.get("area", len(cells)),
+                shape=Shape(cells=frozenset(shape_cells)),
+                normalized_shape_key=rd.get("normalized_shape_key", ""),
+                matched_shape_name=rd.get("matched_shape_name"),
+            ))
+
+        board = self._board_from_regions(puzzle, regions)
+
+        return Solution(
+            solved=True,
+            board=board,
+            regions=regions,
+            steps_taken=data.get("steps_taken", 0),
+            elapsed_ms=data.get("elapsed_ms", 0),
+            rule_results=data.get("rule_results", {}),
+        )
+
+    def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
+        input_json = self._prepare_input(puzzle)
 
         try:
             proc = subprocess.run(
@@ -150,37 +225,81 @@ class RustSolver(Solver):
         except json.JSONDecodeError as e:
             return Solution(solved=False, error_message=f"Invalid JSON from solver: {e}")
 
-        if not data.get("solved"):
-            return Solution(
-                solved=False,
-                steps_taken=data.get("steps_taken", 0),
-                elapsed_ms=data.get("elapsed_ms", 0),
-                error_message=data.get("error_message", "No solution"),
+        return self._parse_solution(data, puzzle)
+
+    def solve_batch(self, puzzles: list[Puzzle], timeout: float = 30.0) -> list[Solution]:
+        """Solve many puzzles in ONE rsolver `--batch` subprocess (line-delimited
+        JSON in/out), reusing the process instead of spawning one per puzzle.
+
+        Each puzzle gets its own `timeout * RUST_PARTS` wall-clock budget, read
+        line-by-line (so a puzzle whose rose solver exceeds its internal 30s
+        deadline is cut at its budget, exactly as single-puzzle mode does).
+        Returns one Solution per input puzzle, in order.
+        """
+        lines = [self._prepare_input(p) for p in puzzles]
+        input_data = "\n".join(lines) + "\n"
+        per_puzzle = timeout * self.RUST_PARTS
+        failed = lambda msg: [  # noqa: E731
+            Solution(solved=False, error_message=msg) for _ in puzzles
+        ]
+
+        try:
+            # Binary mode: the per-puzzle reader does `os.read` on the raw fd,
+            # so Python's buffered reader must not be in between.
+            proc = subprocess.Popen(
+                [self._binary, "--batch"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
+        except FileNotFoundError:
+            return failed(f"Rust solver binary not found: {self._binary}")
+        except Exception as e:
+            return failed(str(e))
 
-        regions: list[RegionInfo] = []
-        for rd in data.get("regions", []):
-            cells = [(c[0], c[1]) for c in rd.get("cells", [])]
-            shape_cells = [(s[0], s[1]) for s in rd.get("shape", [])]
-            regions.append(RegionInfo(
-                region_id=rd["region_id"],
-                cells=cells,
-                area=rd.get("area", len(cells)),
-                shape=Shape(cells=frozenset(shape_cells)),
-                normalized_shape_key=rd.get("normalized_shape_key", ""),
-                matched_shape_name=rd.get("matched_shape_name"),
-            ))
+        # Feed stdin in a thread so a large input can't deadlock against Rust's
+        # stdout (Rust reads all input up front, then solves and writes output).
+        def _feed() -> None:
+            try:
+                proc.stdin.write(input_data.encode("utf-8"))
+                proc.stdin.flush()
+            finally:
+                proc.stdin.close()
 
-        board = self._board_from_regions(puzzle, regions)
+        threading.Thread(target=_feed, daemon=True).start()
 
-        return Solution(
-            solved=True,
-            board=board,
-            regions=regions,
-            steps_taken=data.get("steps_taken", 0),
-            elapsed_ms=data.get("elapsed_ms", 0),
-            rule_results=data.get("rule_results", {}),
-        )
+        results: list[Solution] = []
+        reader = _BatchLineReader(proc.stdout.fileno())
+        try:
+            for i, puzzle in enumerate(puzzles):
+                line = reader.readline(time.monotonic() + per_puzzle)
+                if line is None:
+                    # This puzzle exceeded its budget or the process died.
+                    code = proc.poll()
+                    err = (f"Rust batch died (exit {code})" if code is not None
+                           else f"Rust batch timed out after {timeout:.0f}s")
+                    with contextlib.suppress(Exception):
+                        proc.kill()
+                    while len(results) < len(puzzles):
+                        results.append(Solution(solved=False, error_message=err))
+                    with contextlib.suppress(Exception):
+                        proc.wait()
+                    return results
+                try:
+                    results.append(self._parse_solution(json.loads(line), puzzle))
+                except json.JSONDecodeError as e:
+                    results.append(Solution(
+                        solved=False,
+                        error_message=f"Invalid JSON from batch line {i}: {e}",
+                    ))
+            with contextlib.suppress(Exception):
+                proc.wait()
+        except Exception as e:
+            with contextlib.suppress(Exception):
+                proc.kill()
+            while len(results) < len(puzzles):
+                results.append(Solution(solved=False, error_message=str(e)))
+        return results
 
     @staticmethod
     def _board_from_regions(puzzle: Puzzle, regions: list[RegionInfo]) -> Board:

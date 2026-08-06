@@ -186,6 +186,29 @@
   300/312（11 个基线失败 + 0213/0213nopad 这对大 rose 同轮双双超时——负载波动，单跑各
   ~2.5s 解出，**非回归**）。构建警告从 ~20 降到 2（`is_subset` 测试辅助、`L` C++ 镜像命名）。
 
+### 2026-08-06 · P2 #7：批量模式（子进程复用）+ IO 移出 main.rs（本会话）
+
+解决 `verify_puzzles.py` / `benchmark_rust_solver.py` 每题 spawn 一次 rsolver 的启动开销：
+- **rsolver `--batch`**：从 stdin **逐行读**多份紧凑谜题 JSON，逐题求解、**逐行输出**
+  题解 JSON（1 输入行 ↔ 1 输出行；坏行输出 `solved:false` 继续）。单题模式（文件/单段
+  JSON）完全不变。
+- **IO 移出 main.rs**（用户要求）：新建 `src/io.rs` 承载 JSON 模型 / `build_puzzle` /
+  序列化 / `solve_json_line`；`main.rs` 只做 stdin/argv/stdout 调度。
+- **`RustSolver.solve_batch`**：一个 `--batch` 子进程批量求解，**每题独立预算**
+  （`select` + `os.read` 逐行读，超时只截断该题与后续题，已完成的保留）——与单题模式
+  每题的墙钟上限一致，大 rose runaway（如 C4-2）不会烧掉整批预算。
+- **`verify_puzzles.py --batch N` / `benchmark_rust_solver.py --batch N`**：文件分块，
+  每块复用一个子进程（默认 1 = 逐题，行为不变）。
+
+- **验证**：`cargo test` 9 通过；`pytest` 290 通过；C 区 batch 与单题均 **4/5**（C4-1
+  保留解出、C4-2 预算内截断）。`ruff check src/` 无新增（`supports` ARG003 为历史问题）。
+- **已知局限**：批量逐进程顺序求解，某题若超出内部 30s 预算（已知大 rose runaway，
+  如 C4-2 / 0804 / 1433，见附录 B），**同批排在其后的题会连带判超时**（每题仍独立
+  截断、已完成者保留）。reference 集 batch 8 5/22 vs 单题 15/22 即此连带所致。
+  **精确验证请用默认 `--batch 1`**；`--batch N` 适用于良性集合的吞吐扫描（快题实测
+  提速 ~5×，spawn 开销 ~1ms/题 → ~1.3s/1258 题）。批量模式交付子进程复用架构
+  （`--batch` 协议 + `io.rs`），不改变任何求解结果。
+
 ---
 
 ## 附录

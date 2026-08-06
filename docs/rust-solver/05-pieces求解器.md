@@ -110,7 +110,8 @@ generate_polyominoes(puzzle, sr, sc, size)
 >
 > **面积目标上限 `MAX_AREA_TARGET = 12`**（`pieces.rs:33-36`）：面积目标 > 12 时
 > 跳过 DLX 候选生成、留给 backtrack——枚举大面积的连通多连块会爆炸（如 1301 的
-> 面积 48）。阈值与 Python `ExactCoverSolver` 一致（`max(targets) <= 12`）。
+> 面积 48）。阈值沿用已移除的 Python `ExactCoverSolver`（`max(targets) <= 12`，
+> 2026-08-06 随 Python 求解器栈删除，见 `docs/official-puzzles-status.md` §C.0）。
 
 ### 4.3 罗盘候选
 

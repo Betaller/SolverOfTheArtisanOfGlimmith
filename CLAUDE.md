@@ -6,15 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 《格里米斯的工匠》(The Artisan of Glimmith) — solver & editor for its region-division puzzles. The core task: partition a rectangular grid into connected regions satisfying all on-cell / edge / vertex clue constraints. There are 22 rule types (see `RULE_NAMES` in `src/models/puzzle.py`).
 
-Two solver stacks exist side by side:
-- **Python solver** (`src/solver/`) — exact-cover (DLX), rose-window, backtracking.
-- **Rust solver** (`rsolver/`) — faster subprocess solver speaking JSON over stdin/stdout.
+Solver engine: **Rust solver** (`rsolver/`) — a single subprocess speaking JSON over stdin/stdout. The Python stack (`src/solver/`) holds only the router interface (`base.py`), the Rust subprocess wrapper (`rust_solver.py`), and shared rule/shape infra (`constraints.py` / `shapes.py`); the Python solving algorithms (exact-cover / rose / backtrack) were removed in 2026-08-06 after a corpus-wide evaluation showed they solved nothing the Rust engine can't.
 
 ## Commands
 
 ```bash
 python src/app.py                       # Qt UI (PySide6)
-python -m pytest tests/ -x --tb=short   # full test suite (~365 tests)
+python -m pytest tests/ -x --tb=short   # full test suite (~290 tests)
 python scripts/verify_puzzles.py        # verify all puzzles solve (30s timeout each)
 
 ruff check src/ tests/                  # lint (line-length=100)
@@ -32,13 +30,13 @@ Single puzzle debug: `python scripts/verify_puzzles.py --dir puzzles/official/A 
 
 ### Solver routing (Python)
 
-`SolverRouter` (`src/solver/base.py`) chains solvers in priority order:
+`SolverRouter` (`src/solver/base.py`) chains solvers in priority order. Since 2026-08-06 the chain is Rust-only (the Python exact-cover / rose / backtrack solvers were removed — see `docs/official-puzzles-status.md` §C.0):
 
 ```
-RustSolver → ExactCoverSolver → RoseSolver → BacktrackSolver → FallbackExactCoverSolver
+RustSolver
 ```
 
-**Key invariant:** the router independently re-verifies every solver's answer via `IndependentValidator` (`src/validation/validator.py`), decoupled from solver-internal rule checks. A wrong answer is logged and the router falls through to the next solver. Any change to rule checking, or a new solver, must preserve this guarantee — a buggy solver can never smuggle a wrong answer through.
+**Key invariant:** the router independently re-verifies every solver's answer via `IndependentValidator` (`src/validation/validator.py`), decoupled from solver-internal rule checks. A wrong answer is logged and the router reports failure. Any change to rule checking, or a new solver, must preserve this guarantee — a buggy solver can never smuggle a wrong answer through.
 
 ### Rust solver
 
@@ -61,7 +59,7 @@ Conventions:
 
 ### Rule checkers
 
-All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one unit-test file per rule in `tests/unit/test_rules/`. `src/solver/validator.py` and `src/validation/validator.py` (`IndependentValidator`) validate final solutions.
+All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one unit-test file per rule in `tests/unit/test_rules/`. `src/validation/validator.py` (`IndependentValidator`) validates final solutions (the only validation entry point; `src/solver/validator.py` was removed with the Python solver stack).
 
 ### Puzzles, scripts, reference projects
 
@@ -102,6 +100,9 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 
 1. 更新 `docs/official-puzzles-status.md`（进度数字、DIFF/UNSOLVED 变化、结论）。
 2. 跑通 `pytest`、`cargo test` 与相关 `verify_puzzles.py` 片段，把结果记入该文档。
+3. **基准评估结果随提交入库**：影响求解结果（可解性 / 性能 / 规则语义）的提交，必须把对应
+   基准 / 全量扫描输出存为 `results/YYYYMMDD_<short-sha|描述>.txt` 并**随该提交一起入库**
+   （不允许只留在 /tmp）。纯文档、无行为变化的重构等不影响求解结果的提交可豁免。
 
 不满足即视为未完成。全量扫描方式与脚本见该文档 §2。
 

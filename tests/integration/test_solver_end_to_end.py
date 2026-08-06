@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import pytest
-
-from src.models.board import Board, Shape, EdgeConstraint, EdgeConstraintType, CompassClue
+from src.models.board import Board, Shape
 from src.models.puzzle import Puzzle, Rule
-from src.solver.backtrack import BacktrackSolver
-from src.solver.validator import SolutionValidator
-from src.solver.propagator import ConstraintPropagator
-from src.solver.shapes import enumerate_polyominoes, canonical_key, shapes_equal
-from src.solver.propagator import update_boundary_edges
+from src.solver.base import default_router
+from src.solver.shapes import canonical_key
+from src.validation.validator import IndependentValidator, solution_to_board
 
 
 def make_puzzle_with_boundaries(
@@ -43,52 +39,52 @@ def apply_solution_to_board(board: Board, region_map: list[list[int]]) -> Board:
     return board
 
 
+def solve(puzzle: Puzzle, timeout: float = 30.0):
+    """Run the default (Rust-only) router, which re-verifies every answer."""
+    return default_router().route(puzzle, timeout=timeout)
+
+
+def validate(puzzle: Puzzle, board: Board):
+    return IndependentValidator().validate(puzzle, board)
+
+
 class TestEndToEndNoRules:
     def test_solve_2x2_board(self) -> None:
         b = Board(2, 2)
         puzzle = Puzzle.from_board(b)
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
-        assert solution.board.is_complete is True
         for region in solution.regions:
             assert len(region.cells) == region.area
 
     def test_solve_2x2_precise_1(self) -> None:
         b = Board(2, 2)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(1)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
-        assert solution.board.is_complete is True
         assert len(solution.regions) == 4
 
     def test_solve_4x4_precise_4(self) -> None:
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(4)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
         assert len(solution.regions) == 4
 
     def test_validator_accepts_solver_output(self) -> None:
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(4)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
-        validator = SolutionValidator()
-        validation = validator.validate(puzzle, solution.board)
+        validation = validate(puzzle, solution_to_board(puzzle, solution))
         assert validation.solved is True
-        assert validation.error_message is None
 
 
 class TestEndToEndPreciseRule:
     def test_solve_4x4_precise_4(self) -> None:
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(4)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
         assert len(solution.regions) == 4
         for region in solution.regions:
@@ -97,8 +93,7 @@ class TestEndToEndPreciseRule:
     def test_solve_4x4_precise_2(self) -> None:
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(2)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
         assert len(solution.regions) == 8
         for region in solution.regions:
@@ -107,8 +102,7 @@ class TestEndToEndPreciseRule:
     def test_solve_3x3_precise_3(self) -> None:
         b = Board(3, 3)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(3)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
         assert len(solution.regions) == 3
         for region in solution.regions:
@@ -117,11 +111,9 @@ class TestEndToEndPreciseRule:
     def test_validator_accepts_precise_solution(self) -> None:
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(4)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
-        validator = SolutionValidator()
-        validation = validator.validate(puzzle, solution.board)
+        validation = validate(puzzle, solution_to_board(puzzle, solution))
         assert validation.solved is True
         assert validation.rule_results.get("precise") is True
 
@@ -130,8 +122,7 @@ class TestEndToEndRangeRule:
     def test_solve_4x4_range_2_4(self) -> None:
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.range(2, 4)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
         for region in solution.regions:
             assert 2 <= region.area <= 4
@@ -139,8 +130,7 @@ class TestEndToEndRangeRule:
     def test_solve_4x4_range_4_4_equivalent_to_precise(self) -> None:
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.range(4, 4)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
         for region in solution.regions:
             assert region.area == 4
@@ -148,8 +138,7 @@ class TestEndToEndRangeRule:
 
 class TestEndToEndAreaRule:
     def test_solve_with_area_clues(self, puzzle_with_area_clues: Puzzle) -> None:
-        solver = BacktrackSolver(puzzle_with_area_clues)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle_with_area_clues, timeout=30)
         assert solution.solved is True
         region0 = solution.region_of(0, 0)
         region2 = solution.region_of(2, 2)
@@ -165,12 +154,10 @@ class TestEndToEndBlockRule:
         for r in range(2):
             for c in range(2):
                 b.cell(r, c).region_id = 0
-        from src.solver.propagator import update_boundary_edges
-        update_boundary_edges(b)
+        apply_solution_to_board(b, [[0, 0], [0, 0]])
         puzzle = Puzzle.from_board(Board(2, 2), rules=[Rule.block()])
-        validator = SolutionValidator()
-        solution = validator.validate(puzzle, b)
-        assert solution.solved is True
+        validation = validate(puzzle, b)
+        assert validation.solved is True
 
 
 class TestEndToEndShapePool:
@@ -178,8 +165,7 @@ class TestEndToEndShapePool:
         b = Board(2, 4)
         domino = Shape(cells=frozenset([(0, 0), (0, 1)]))
         puzzle = Puzzle.from_board(b, rules=[Rule.shape_pool([domino])])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
         for region in solution.regions:
             assert region.area == 2
@@ -189,10 +175,11 @@ class TestEndToEndSameRule:
     def test_solve_4x4_precise_4_same(self) -> None:
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(4), Rule.same()])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
-        shape_keys = {r.normalized_shape_key for r in solution.regions}
+        # Rust reports the placed (non-normalized) shape key; compute the
+        # dihedral canonical key from the cells to check 'same' semantics.
+        shape_keys = {canonical_key(frozenset(r.cells)) for r in solution.regions}
         assert len(shape_keys) == 1
 
 
@@ -200,8 +187,7 @@ class TestEndToEndMixedConstraints:
     def test_solve_2x4_precise_2_different(self) -> None:
         b = Board(2, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(2), Rule.different()])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         # Dominoes all share the same canonical key, so 'different' cannot be satisfied
         assert solution.solved is False
 
@@ -212,8 +198,7 @@ class TestEndToEndSolitaryRule:
         b.cell(0, 0).symbol = "A"
         b.cell(1, 0).symbol = "B"
         puzzle = Puzzle.from_board(b, rules=[Rule.solitary(), Rule.precise(2)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
         assert len(solution.regions) == 2
         region_a = solution.region_of(0, 0)
@@ -227,8 +212,7 @@ class TestEndToEndPreciseRangeConflict:
         # precise and range together - game logic allows both but range is redundant
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(4), Rule.range(2, 6)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
         for region in solution.regions:
             assert region.area == 4
@@ -238,42 +222,22 @@ class TestEndToEndValidationCycle:
     def test_full_solve_and_validate_cycle(self) -> None:
         b = Board(4, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(4)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
 
-        # Re-validate
-        validator = SolutionValidator()
-        validation = validator.validate(puzzle, solution.board)
+        # Re-validate independently
+        validation = validate(puzzle, solution_to_board(puzzle, solution))
         assert validation.solved is True
-        assert validation.error_message is None
 
-        # Check solution metadata
-        assert solution.steps_taken > 0
+        # Check solution metadata (Rust aog path does not report step counts)
         assert solution.elapsed_ms >= 0
-
-    def test_propagator_agrees_with_validator(self) -> None:
-        b = Board(4, 4)
-        puzzle = Puzzle.from_board(b, rules=[Rule.precise(4)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
-        assert solution.solved is True
-
-        propagator = ConstraintPropagator(puzzle)
-        board = solution.board
-        regions = board.get_regions()
-        for rid in regions:
-            assert propagator.check_region_valid(board, rid) is True
-            assert propagator.check_region_shape(board, rid) is True
-            assert propagator.check_region_complete(board, rid) is True
 
 
 class TestEndToEndSmallBoards:
     def test_solve_all_2x2_precise_1(self) -> None:
         b = Board(2, 2)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(1)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
         assert len(solution.regions) == 4
         for region in solution.regions:
@@ -282,8 +246,7 @@ class TestEndToEndSmallBoards:
     def test_solve_2x4_precise_2(self) -> None:
         b = Board(2, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(2)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
         assert len(solution.regions) == 4
         for region in solution.regions:
@@ -292,8 +255,7 @@ class TestEndToEndSmallBoards:
     def test_solve_3x4_precise_3(self) -> None:
         b = Board(3, 4)
         puzzle = Puzzle.from_board(b, rules=[Rule.precise(3)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
         assert len(solution.regions) == 4
         for region in solution.regions:
@@ -311,13 +273,9 @@ class TestEndToEndValidatorWithKnownSolution:
             [3, 3, 4, 4],
         ]
         apply_solution_to_board(b, region_map)
-        validator = SolutionValidator()
-        solution = validator.validate(puzzle, b)
+        solution = validate(puzzle, b)
         assert solution.solved is True
-        assert solution.error_message is None
-        assert len(solution.regions) == 4
-        for region in solution.regions:
-            assert region.area == 4
+        assert len(solution.errors) == 0
 
     def test_known_invalid_disconnected_solution(self) -> None:
         b = Board(4, 4)
@@ -329,11 +287,10 @@ class TestEndToEndValidatorWithKnownSolution:
             [0, 0, 0, 0],
         ]
         apply_solution_to_board(b, region_map)
-        validator = SolutionValidator()
-        solution = validator.validate(puzzle, b)
-        # Even though disconnected, board is complete
+        solution = validate(puzzle, b)
+        # Even though the board is complete, a region is disconnected
         assert solution.solved is False
-        assert "连通" in solution.error_message
+        assert any("连通" in e for e in solution.errors)
 
 
 class TestEndToEndPreDrawnBoundaries:
@@ -341,10 +298,9 @@ class TestEndToEndPreDrawnBoundaries:
         puzzle = make_puzzle_with_boundaries(3, 3, [
             (0, 1, 0, 2), (1, 1, 1, 2),
         ])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
-        board = solution.board
+        board = solution_to_board(puzzle, solution)
         for (r1, c1, r2, c2) in [(0, 1, 0, 2), (1, 1, 1, 2)]:
             e = board.edge_between(r1, c1, r2, c2)
             assert e is not None
@@ -371,10 +327,9 @@ class TestEndToEndPreDrawnBoundaries:
             (4, 1, 5, 1), (4, 2, 5, 2), (4, 3, 5, 3),
         ]
         puzzle = make_puzzle_with_boundaries(6, 5, boundaries, blocked)
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=30)
+        solution = solve(puzzle, timeout=30)
         assert solution.solved is True
-        board = solution.board
+        board = solution_to_board(puzzle, solution)
         violations = 0
         for r1, c1, r2, c2 in boundaries:
             c1_cell = board.cell(r1, c1)
@@ -385,10 +340,9 @@ class TestEndToEndPreDrawnBoundaries:
 
     def test_boundary_enforced_during_search(self) -> None:
         puzzle = make_puzzle_with_boundaries(2, 3, [(0, 1, 0, 2)])
-        solver = BacktrackSolver(puzzle)
-        solution = solver.solve(timeout=10)
+        solution = solve(puzzle, timeout=10)
         assert solution.solved is True
-        board = solution.board
+        board = solution_to_board(puzzle, solution)
         c1 = board.cell(0, 1)
         c2 = board.cell(0, 2)
         assert c1.assigned and c2.assigned

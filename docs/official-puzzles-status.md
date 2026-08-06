@@ -7,7 +7,7 @@
 
 ## 第一部分：进度
 
-> 全量扫描 / 基准快照，按时间顺序**往后追加**（旧的在上）。每题完整求解结果见仓库根目录 `scan_official_results.jsonl`。
+> 全量扫描 / 基准快照，按时间顺序**往后追加**（旧的在上）。每题完整求解结果存 `results/YYYYMMDD_<short-sha|描述>.txt`，随提交入库。
 
 ### 2026-08-05 · 修复后基准（commit `33d32c5`）
 - **result**：`results/20260805_33d32c5_rust-official-bench.txt`
@@ -37,7 +37,7 @@
 - 注：Zone3 -1 为 aog 预算下调后某题的计时/非确定性波动（rose 兜底仍未解）。
 
 ### 2026-08-06 · brick 回溯短板闭合（本会话）
-- **result**：`/tmp/bench_final3.log`（`scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 40 -j 8`）
+- **result**：`results/20260806_dfadfe3_brick-gap-rust-only-bench.txt`（`scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 40 -j 8`）
 - **1052 / 1258 通过**，较上一基准（1047）**+5**，**0 个真实新增失败**。
 
   | Zone | 通过 | 未解 | 变化 |
@@ -49,6 +49,12 @@
 
 - 新解出：**1301**（brick+area，backtrack ≈30s=aog 30s 预算+回溯秒级）、**0957**（brick+block+rose，≈1.9s）、0732 / 0710 / 0795 / 0265 / 1382。两个 Rust-only 缺口（1301/0957）全部闭合。
 - 注：0957 在全量并行下偶发 exit -9（rose 内存压力，solo ≈1.9s）；0985 全量并行下 40s 超时（solo ≈16s）——均为**负载波动**非回归。基准用 `--timeout 40` 是为了容纳 1301 的 30s aog 预算。
+
+### 2026-08-06 · Python 求解器移除后 Rust-only router 验证
+- **result**：`results/20260806_rustonly-router-verify-zone1.txt`（`scripts/verify_puzzles.py --dir puzzles/official/Zone1 --timeout 25 -j 8`，`default_router` 只走 RustSolver）
+- **Zone1 301/312 通过**，与 dfadfe3 Rust-only 基准 Zone1（301/312）**完全一致 → 移除 Python 兜底零回归**。
+- 11 道失败：0882 exit -9（8 并行内存压力，非回归）；0223/1435 Rust 返回错解被 IndependentValidator 拦截（历史 Python 亦未解出）；其余为已知超时/UNSOLVED（0804/1433/1434 大 rose 等）。
+- 测试：`pytest` 290 通过、`cargo test` 9 通过（详见第二部分 C.0 条目）。
 
 ---
 
@@ -107,6 +113,21 @@
 
 - **验证**：`cargo test` 9 通过；`pytest` 387 通过；全量 Rust-only 基准 **1052/1258**（0 真实回归，见第一部分最新条目）；router 实测 1301（≈30s）/0957（≈1.9s）均 `rust(ok)`，不再依赖 Python 兜底。
 
+### 2026-08-06 · 评估并移除 Python 求解器（plan C.0 完成）
+**评估**：Rust-only 全量基准 1052/1258 之后，Python 求解器（exact_cover / rose / backtrack，及 dlx / candidates / region_match / rose_growth / bfs_candidates / polyomino_cache / checks / propagator / validator）是否还有解出价值？
+- **历史全路由扫描**（Aug 5，brick 修复前）：~1000+ 官方题中 Python 兜底只解出 **5 道**（C4-1 / 0277 = rose、1169 = exact_cover、1301 / 0153 = backtrack），逐一核对**现均由 Rust 解出**（均不在 206 道 Rust-only 失败清单）。
+- **定向扫描**：对 206 道 Rust-only 失败题跑全路由（含 Python 兜底），处理 82/206（40%）**Python 兜底 0 命中**（81 次尝试全败）；唯一解出为 Rust（0745，58s，超 bench 40s 时限）。因已知 rose 内存压力（单进程 4.3GB/15GB）中止，剩余 Zone3 硬题为能力极限、Python 亦从未解出。
+- **结论**：Python 求解器对官方语料无解出价值，移除。
+
+**移除内容**：
+- `default_router` 改 **Rust-only**（`RustSolver()`）。
+- 删除 `src/solver/`：backtrack / dlx / candidates / bfs_candidates / region_match / rose_growth / polyomino_cache / checks / propagator / validator / exact_cover / rose；`src/services/solver_service.py`（UI 已死）；调试脚本（show_candidates / debug_222 / test_111 / test_222）。
+- **保留共享层**：`constraints.py`（RULE_CHECKERS）、`shapes.py`、`exceptions.py`、`src/validation/validator.py`（IndependentValidator）——UI 编辑器（shape_editor/shape_gallery）、生成脚本与独立校验依赖。
+- `gen_ai_puzzles.py` 改用 router 校验；`main_window.py` 去掉 SolverService。
+- 测试：删 test_backtrack / test_propagator / test_validator；test_solver_end_to_end 改为 router 端到端（26 个）；conftest 去 solver/validator fixture；test_constraints 内联 `_sync_boundaries` 助手。
+
+**验证**：`pytest` **290 通过**（删 Python 求解器相关 ~97 个后新基线）；`cargo test` 9 通过；Rust-only router `verify_puzzles.py --dir puzzles/official/Zone1` **301/312** 与 dfadfe3 基准 Zone1 完全一致，**0 回归**（见第一部分最新条目）。
+
 ---
 
 ## 附录
@@ -127,7 +148,7 @@ Zone3/7-zone3-mixed/1144
 **根因**：求解器能力限制（compass/rose/ring 强规则组合搜索空间大、剪枝不足），**不是校验或转换问题**。
 
 ### C. 后续计划
-0. **评估 Python 求解器去留**：Rust-only 全量回归通过后，确认 Python 求解器（exact_cover/rose/backtrack 及其导入、测试、文档）是否不再需要；确认则清理相关代码与文档（`default_router` 改 Rust-only、删文件、修导入、同步 `architecture.md` / `docs/重构` / `CLAUDE.md`）。
+0. ~~**评估 Python 求解器去留**~~ **已完成（2026-08-06）**：评估证明 Python 求解器对官方语料无解出价值（历史仅解 5 道且现全由 Rust 解出；206 道失败题定向扫描 Python 0 命中）。已删 Python 求解算法、`default_router` 改 Rust-only、保留 constraints/shapes 共享层与 IndependentValidator，测试与文档同步（见第二部分 C.0 条目）。
 1. ~~修 Rust **brick 回溯短板**（0957/1301）~~ **已完成（2026-08-06）**：砖纹语义修正 + 删除 `check_merge_ok` + area 剪枝，1301/0957 均由 Rust 解出。下一步可做 **Rust-only 全量回归**（router 只走 RustSolver 验证全部官方题），通过后再评估删 Python 求解器（与 C.0 衔接）。
 2. 修回溯内存泄漏（`backtrack._solve_rose_parallel` 守护线程不退出，全量 verify OOM / 1004 300s 不收敛）——全量回归阻塞项。
 3. 甄别 6 道 watchtower DIFF（游戏侧实测 or 望塔规则深挖）。
@@ -140,5 +161,8 @@ Zone3/7-zone3-mixed/1144
 2. **相关文档**：`faq.md` / `rules-guide.md` / `architecture.md` 等，凡涉及处同步。
 3. **README**：若影响外部可观察行为（命令、规则数、已知限制）同步。
 4. **测试**：`pytest`、`cargo test`、相关 `verify_puzzles.py` 片段，把结果记入本文件。
+5. **基准结果随提交入库**：影响求解结果（可解性 / 性能 / 规则语义）的提交，必须把对应基准 /
+   全量扫描输出存为 `results/YYYYMMDD_<short-sha|描述>.txt` 并**随该提交一起入库**（不允许只
+   留在 /tmp）。纯文档、无行为变化的重构等不影响求解结果的提交可豁免。
 
 不满足即视为未完成，不应合入。

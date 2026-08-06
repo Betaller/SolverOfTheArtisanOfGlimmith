@@ -3,6 +3,11 @@
 > 状态:分析/方案文档,已过一轮独立审查(2026-08-05)。
 > 适用范围:Python 求解器(`src/`)、Rust 求解器(`rsolver/`)、第三方参考项目(`third_party/`)。
 >
+> **更新（2026-08-06）**：文中"现状来源"所引 Python 求解器源码（`backtrack.py` /
+> `candidates.py` / `exact_cover/solver.py` 等）已随 Python 求解器栈移除
+> （`docs/official-puzzles-status.md` §C.0）。本文的建模对比与性能分析仍可供 Rust 侧
+> 数据结构（`rsolver/`）参考，但逐行引用不再对应现有代码。
+>
 > 审查结论:方案方向正确、可实施性强。关键修正——Cell 实测 192B 与估算一致但逐字段归因有误;`Cell.region_id` 是 Rust 求解路径死字段;P0/P1 风险分别为"低-中"/"中-高";**遗漏了 `pieces.rs` 候选生成(每层克隆 BTreeSet)这一更靠前的热点**,应插在 P0 之后。
 >
 > 关联文档：`rsolver` 源码详解系列见 [rust-solver/README.md](../rust-solver/README.md)（架构 / 数据结构 / 规则映射 / 四大算法 / 验证）。

@@ -80,19 +80,19 @@ TAGSolver/
 │   │   ├── puzzle.py         # Puzzle, Rule, Shape
 │   │   └── solution.py       # Solution
 │   │
-│   ├── solver/               # 求解引擎
+│   ├── solver/               # Rust-only 接口 + 规则/形状共享层
 │   │   ├── __init__.py
+│   │   ├── base.py           # SolverRouter / default_router（Rust-only）
+│   │   ├── rust_solver.py    # Rust 子进程求解器
 │   │   ├── shapes.py         # 形状匹配引擎
-│   │   ├── constraints.py    # 约束定义
-│   │   ├── propagator.py     # 约束传播
-│   │   ├── backtrack.py      # 回溯搜索
-│   │   ├── validator.py      # 解验证器
+│   │   ├── constraints.py    # 22 条规则校验器
 │   │   └── exceptions.py     # 求解异常
 │   │
 │   ├── services/             # 服务层
-│   │   ├── __init__.py
-│   │   ├── puzzle_service.py # 谜题 CRUD 服务
-│   │   └── solver_service.py # 求解任务管理
+│   │   └── puzzle_service.py # 谜题 CRUD 服务
+│   │
+│   └── validation/
+│       └── validator.py      # IndependentValidator（独立解验证）
 │   │
 │   ├── ui/                   # UI 层
 │   │   ├── __init__.py
@@ -118,9 +118,6 @@ TAGSolver/
 │   │   ├── test_board.py
 │   │   ├── test_shapes.py
 │   │   ├── test_constraints.py
-│   │   ├── test_backtrack.py
-│   │   ├── test_validator.py
-│   │   ├── test_propagator.py
 │   │   ├── test_puzzle_codec.py
 │   │   └── test_rules/
 │   │       ├── test_rule_01_shape_pool.py

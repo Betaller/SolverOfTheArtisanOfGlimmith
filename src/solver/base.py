@@ -38,7 +38,7 @@ class SolverRouter:
     """按优先级链式尝试求解器，分配超时预算。
 
     Usage:
-        router = SolverRouter([ExactCoverSolver(), BacktrackSolver()])
+        router = SolverRouter([RustSolver()])
         solution = router.route(puzzle, timeout=30)
     """
 
@@ -135,20 +135,14 @@ class SolverRouter:
 
 
 def default_router() -> SolverRouter:
-    from src.solver.exact_cover.solver import ExactCoverSolver, FallbackExactCoverSolver
-    from src.solver.rose.solver import RoseSolver
-    from src.solver.backtrack import BacktrackSolver
     from src.solver.rust_solver import RustSolver
 
-    # Rust first (aog → pieces → backtrack, plus the rose-window solver ported
-    # from Python).  The Python solvers stay as a fallback for the few puzzles
-    # Rust cannot solve yet (e.g. brick+area backtrack 1301, range+rose
-    # 1334/1342); they can be removed once Rust covers those and a full-corpus
-    # Rust-only verification shows no regression.
+    # Rust-only routing: the binary runs aog → pieces → backtrack plus the
+    # rose-window solver internally.  The Python solver stack (exact_cover /
+    # rose / backtrack) was removed 2026-08-06: a corpus-wide evaluation showed
+    # it solved 0 puzzles the Rust stack cannot (see
+    # docs/official-puzzles-status.md §C.0).  Every answer is still
+    # independently re-verified via IndependentValidator in `route`.
     return SolverRouter([
         RustSolver(),
-        ExactCoverSolver(),
-        RoseSolver(),
-        BacktrackSolver(),
-        FallbackExactCoverSolver(),
     ])

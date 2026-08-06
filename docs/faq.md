@@ -105,7 +105,8 @@ archive 每个官方题都带 `solution` 字段（紧凑边界网格，stride=3�
 - **围栏格与障碍格相邻时**：项目 `check_rule_fence` 不把 blocked 邻居算作边界，游戏会算。
   不规则棋盘上的围栏格可能校验失败，属项目实现限制，不是转换错误。
 - **验证方法**：把 archive 的 `solution`（紧凑格式，stride=3，`#`/`##` 为墙）反推成区域，
-  填充 `Board` 后跑 `SolutionValidator` 对照。转换质量以“官方解能通过校验”为准。
+  填充 `Board` 后跑 `IndependentValidator`（`src/validation/validator.py`）对照。转换质量以
+  “官方解能通过校验”为准。
 
 ## 3. Git 子模块（third_party）
 

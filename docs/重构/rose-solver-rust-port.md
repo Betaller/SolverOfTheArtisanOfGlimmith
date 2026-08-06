@@ -1,8 +1,12 @@
 # rose 求解器下沉到 Rust 层：设计文档
 
-> 状态：**已实施 Phase 1-4**（cells / region_match 单符号 / rose_growth 单多符号 / 分发），集成验证中。
+> 状态：**已实施 Phase 1-4**（cells / region_match 单符号 / rose_growth 单多符号 / 分发）。
 > 关联：`docs/official-puzzles-status.md`（软门禁）、`docs/重构/data-structures.md`。
 > 分工：**本窗口只做 rose 移植**；block/solitary/backtrack 建模由另一个窗口负责（`e926943` 已合入）。
+> 更新（2026-08-06）：文中所引 Python 源码（`src/solver/rose/solver.py`、`region_match.py`、
+> `rose_growth.py`、`bfs_candidates.py`、`candidates.py`）已随 Python 求解器栈移除
+> （`docs/official-puzzles-status.md` §C.0）。本文保留作为 Rust rose 移植的设计与行为记录，
+> 行为对照以 Rust 侧实现为准。
 
 ## 1. 背景与目标
 

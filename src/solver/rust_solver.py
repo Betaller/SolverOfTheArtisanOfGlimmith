@@ -3,13 +3,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from src.io.puzzle_codec import puzzle_to_dict
 from src.models.board import Board, Shape
 from src.models.puzzle import Puzzle
-from src.models.solution import Solution, RegionInfo
+from src.models.solution import RegionInfo, Solution
 from src.solver.base import Solver
 
 
@@ -143,10 +142,8 @@ class RustSolver(Solver):
             return Solution(solved=False, error_message=str(e))
 
         if proc.returncode != 0:
-            return Solution(
-                solved=False,
-                error_message=f"Rust solver exited with code {proc.returncode}: {proc.stderr[:500]}",
-            )
+            err = f"Rust solver exited with code {proc.returncode}: {proc.stderr[:500]}"
+            return Solution(solved=False, error_message=err)
 
         try:
             data = json.loads(proc.stdout)

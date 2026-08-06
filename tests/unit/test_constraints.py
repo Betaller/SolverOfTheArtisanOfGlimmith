@@ -1,27 +1,43 @@
 from __future__ import annotations
 
-import pytest
-
 from src.models.board import (
-    Board, Cell, Edge, EdgeConstraint, EdgeConstraintType,
-    Shape, CompassClue, Vertex,
+    Board,
+    Cell,
+    CompassClue,
+    EdgeConstraint,
+    EdgeConstraintType,
+    Shape,
 )
 from src.models.puzzle import Puzzle, Rule
 from src.solver.constraints import (
-    RULE_CHECKERS, get_region_cells, get_region_shape,
-    check_region_connectivity, check_boundary_consistency,
-    check_rule_shape_pool, check_rule_rose_window,
-    check_rule_heterogeneous, check_rule_homogeneous,
-    check_rule_precise, check_rule_puzzle_piece, check_rule_mixed,
-    check_rule_area, check_rule_same, check_rule_range,
-    check_rule_fence, check_rule_different, check_rule_solitary,
-    check_rule_block, check_rule_non_block,
-    check_rule_differentiation, check_rule_brick, check_rule_ring,
-    check_rule_inequality, check_rule_difference,
-    check_rule_watchtower, check_rule_compass,
+    RULE_CHECKERS,
+    check_boundary_consistency,
+    check_region_connectivity,
+    check_rule_area,
+    check_rule_block,
+    check_rule_brick,
+    check_rule_compass,
+    check_rule_difference,
+    check_rule_different,
+    check_rule_differentiation,
+    check_rule_fence,
+    check_rule_heterogeneous,
+    check_rule_homogeneous,
+    check_rule_inequality,
+    check_rule_mixed,
+    check_rule_non_block,
+    check_rule_precise,
+    check_rule_puzzle_piece,
+    check_rule_range,
+    check_rule_ring,
+    check_rule_rose_window,
+    check_rule_same,
+    check_rule_shape_pool,
+    check_rule_solitary,
+    check_rule_watchtower,
+    get_region_cells,
+    get_region_shape,
 )
-
-from src.solver.shapes import enumerate_polyominoes, shape_from_cells
 
 
 def board_with_regions(
@@ -33,6 +49,17 @@ def board_with_regions(
         for c in range(width):
             b.cell(r, c).region_id = region_map[r][c]
     return b
+
+
+def _sync_boundaries(b: Board) -> None:
+    """Recompute boundary edges from assigned region IDs (was
+    ``src.solver.propagator.update_boundary_edges``, removed with the Python
+    solver stack)."""
+    for e in b.edges():
+        c1 = b.cell(e.r1, e.c1)
+        c2 = b.cell(e.r2, e.c2)
+        if c1.assigned and c2.assigned:
+            e.is_boundary = c1.region_id != c2.region_id
 
 
 def puzzle_with_rules(rules: list[Rule]) -> Puzzle:
@@ -638,8 +665,7 @@ class TestRuleBrick:
     def test_brick_satisfied(self) -> None:
         puzzle = puzzle_with_rules([Rule.brick()])
         b = board_with_regions(2, 2, [[1, 1], [2, 2]])
-        from src.solver.propagator import update_boundary_edges
-        update_boundary_edges(b)
+        _sync_boundaries(b)
         # Vertex (0,0): count of boundary edges = 2 (left and right), not 4 -> OK
         assert check_rule_brick(puzzle, b) is True
 
@@ -649,8 +675,7 @@ class TestRuleBrick:
             [1, 2],
             [3, 4],
         ])
-        from src.solver.propagator import update_boundary_edges
-        update_boundary_edges(b)
+        _sync_boundaries(b)
         # Vertex (0,0): all 4 edges are boundaries, count = 4 -> violate
         assert check_rule_brick(puzzle, b) is False
 

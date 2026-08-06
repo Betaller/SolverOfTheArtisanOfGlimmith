@@ -1,0 +1,330 @@
+共 312 个谜题，并行 8 线程
+
+[  1/312] PASS 0049.json            via=rust         steps=0      time=    4ms
+[  2/312] PASS 0009.json            via=rust         steps=0      time=    5ms
+[  3/312] PASS 0008.json            via=rust         steps=0      time=    7ms
+[  4/312] PASS 0053.json            via=rust         steps=0      time=    7ms
+[  5/312] PASS 0054.json            via=rust         steps=0      time=    8ms
+[  6/312] PASS 0050.json            via=rust         steps=0      time=    8ms
+[  7/312] PASS 0066.json            via=rust         steps=0      time=    9ms
+[  8/312] PASS 0012.json            via=rust         steps=0      time=   12ms
+[  9/312] PASS 0067B.json           via=rust         steps=0      time=    8ms
+[ 10/312] PASS 0067.json            via=rust         steps=0      time=   10ms
+[ 11/312] PASS 0643.json            via=rust         steps=0      time=    5ms
+[ 12/312] PASS 0079.json            via=rust         steps=0      time=    8ms
+[ 13/312] PASS 0159.json            via=rust         steps=0      time=    7ms
+[ 14/312] PASS 0527.json            via=rust         steps=0      time=   16ms
+[ 15/312] PASS 0157.json            via=rust         steps=0      time=   15ms
+[ 16/312] PASS 0080.json            via=rust         steps=0      time=   20ms
+[ 17/312] PASS 0180.json            via=rust         steps=0      time=    9ms
+[ 18/312] PASS 0182.json            via=rust         steps=0      time=   11ms
+[ 19/312] PASS 0179B.json           via=rust         steps=0      time=   14ms
+[ 20/312] PASS 0181.json            via=rust         steps=0      time=   17ms
+[ 21/312] PASS 0201.json            via=rust         steps=0      time=   19ms
+[ 22/312] PASS 0183.json            via=rust         steps=0      time=   27ms
+[ 23/312] PASS 0165.json            via=rust         steps=0      time=   50ms
+[ 24/312] PASS 0167.json            via=rust         steps=0      time=   56ms
+[ 25/312] PASS 0219.json            via=rust         steps=0      time=   33ms
+[ 26/312] PASS 0324.json            via=rust         steps=0      time=   23ms
+[ 27/312] PASS 1029.json            via=rust         steps=0      time=   10ms
+[ 28/312] PASS 0220.json            via=rust         steps=0      time=   32ms
+[ 29/312] PASS 1031.json            via=rust         steps=0      time=    8ms
+[ 30/312] PASS 0276.json            via=rust         steps=0      time=   22ms
+[ 31/312] PASS 0474.json            via=rust         steps=0      time=   15ms
+[ 32/312] PASS 1033.json            via=rust         steps=0      time=   10ms
+[ 33/312] PASS 1068.json            via=rust         steps=0      time=   14ms
+[ 34/312] PASS 1066.json            via=rust         steps=0      time=   17ms
+[ 35/312] PASS 1065.json            via=rust         steps=0      time=   14ms
+[ 36/312] PASS 1070.json            via=rust         steps=0      time=   17ms
+[ 37/312] PASS 1122.json            via=rust         steps=0      time=    6ms
+[ 38/312] PASS 1243.json            via=rust         steps=0      time=   15ms
+[ 39/312] PASS 1167.json            via=rust         steps=0      time=   10ms
+[ 40/312] PASS 1244.json            via=rust         steps=0      time=   21ms
+[ 41/312] PASS 1123.json            via=rust         steps=0      time=   29ms
+[ 42/312] PASS 1252.json            via=rust         steps=0      time=   20ms
+[ 43/312] PASS 1424.json            via=rust         steps=0      time=   12ms
+[ 44/312] PASS 1427.json            via=rust         steps=0      time=   14ms
+[ 45/312] PASS 1428.json            via=rust         steps=0      time=   20ms
+[ 46/312] PASS 1426.json            via=rust         steps=0      time=   36ms
+[ 47/312] PASS 1069.json            via=rust         steps=0      time=   94ms
+[ 48/312] PASS 0329.json            via=rust         steps=0      time=  127ms
+[ 49/312] PASS 1429.json            via=rust         steps=0      time=   37ms
+[ 50/312] PASS 1439.json            via=rust         steps=0      time=   22ms
+[ 51/312] PASS 0136.json            via=rust         steps=0      time=   20ms
+[ 52/312] PASS 0046.json            via=rust         steps=0      time=   27ms
+[ 53/312] PASS 1438.json            via=rust         steps=0      time=   37ms
+[ 54/312] PASS 0172.json            via=rust         steps=0      time=   21ms
+[ 55/312] PASS 0176.json            via=rust         steps=0      time=   17ms
+[ 56/312] PASS 0173.json            via=rust         steps=0      time=   25ms
+[ 57/312] PASS 0177.json            via=rust         steps=0      time=   18ms
+[ 58/312] PASS 0174.json            via=rust         steps=0      time=   31ms
+[ 59/312] PASS 0227.json            via=rust         steps=0      time=    4ms
+[ 60/312] PASS 0178.json            via=rust         steps=0      time=   17ms
+[ 61/312] PASS 0225.json            via=rust         steps=0      time=   19ms
+[ 62/312] PASS 0226.json            via=rust         steps=0      time=   22ms
+[ 63/312] PASS 0232.json            via=rust         steps=0      time=    8ms
+[ 64/312] PASS 0228.json            via=rust         steps=0      time=   26ms
+[ 65/312] PASS 0247.json            via=rust         steps=0      time=    4ms
+[ 66/312] PASS 0248.json            via=rust         steps=0      time=    6ms
+[ 67/312] PASS 0250.json            via=rust         steps=0      time=    6ms
+[ 68/312] PASS 0249.json            via=rust         steps=0      time=   16ms
+[ 69/312] PASS 0230.json            via=rust         steps=0      time=   39ms
+[ 70/312] PASS 0229.json            via=rust         steps=0      time=   43ms
+[ 71/312] PASS 0253.json            via=rust         steps=0      time=    7ms
+[ 72/312] PASS 0259.json            via=rust         steps=0      time=   10ms
+[ 73/312] PASS 0695.json            via=rust         steps=0      time=    4ms
+[ 74/312] PASS 0535.json            via=rust         steps=0      time=   30ms
+[ 75/312] PASS 0783.json            via=rust         steps=0      time=    4ms
+[ 76/312] PASS 0331.json            via=rust         steps=0      time=  275ms
+[ 77/312] PASS 0784.json            via=rust         steps=0      time=   25ms
+[ 78/312] PASS 0861.json            via=rust         steps=0      time=   19ms
+[ 79/312] PASS 0880.json            via=rust         steps=0      time=   14ms
+[ 80/312] PASS 0538.json            via=rust         steps=0      time=   81ms
+[ 81/312] PASS 0881g.json           via=rust         steps=0      time=    5ms
+[ 82/312] PASS 1030.json            via=rust         steps=0      time=    3ms
+[ 83/312] PASS 0881.json            via=rust         steps=0      time=   21ms
+[ 84/312] PASS 1036.json            via=rust         steps=0      time=    4ms
+[ 85/312] PASS 1096.json            via=rust         steps=0      time=    3ms
+[ 86/312] PASS 1037.json            via=rust         steps=0      time=    5ms
+[ 87/312] PASS 1097.json            via=rust         steps=0      time=    6ms
+[ 88/312] PASS 0252.json            via=rust         steps=0      time=  148ms
+[ 89/312] PASS 0224.json            via=rust         steps=0      time=  733ms
+[ 90/312] PASS 1125.json            via=rust         steps=0      time=    5ms
+[ 91/312] PASS 1168.json            via=rust         steps=0      time=    4ms
+[ 92/312] PASS 1170b.json           via=rust         steps=0      time=    7ms
+[ 93/312] PASS 1171.json            via=rust         steps=0      time=    5ms
+[ 94/312] PASS 1172.json            via=rust         steps=0      time=    6ms
+[ 95/312] PASS 1250.json            via=rust         steps=0      time=    4ms
+[ 96/312] PASS 1269.json            via=rust         steps=0      time=    3ms
+[ 97/312] PASS 1270.json            via=rust         steps=0      time= 1338ms
+[ 98/312] PASS 0051.json            via=rust         steps=0      time=    5ms
+[ 99/312] PASS 0052.json            via=rust         steps=0      time=    3ms
+[100/312] PASS 0057.json            via=rust         steps=0      time=    3ms
+[101/312] PASS 0058.json            via=rust         steps=0      time=    3ms
+[102/312] PASS 0059.json            via=rust         steps=0      time=    3ms
+[103/312] PASS 0072.json            via=rust         steps=0      time=    3ms
+[104/312] PASS 0115.json            via=rust         steps=0      time=    3ms求解器 rust 对谜题 0223.json 返回错误答案: 区域数 30 ≠ 每符号次数 31
+
+[105/312] PASS 0422.json            via=rust         steps=0      time=    4ms
+[106/312] PASS 0425.json            via=rust         steps=0      time=    6ms
+[107/312] PASS 0426.json            via=rust         steps=0      time=    3ms
+[108/312] PASS 1393.json            via=rust         steps=0      time=   23ms
+[109/312] PASS 0042.json            via=rust         steps=0      time=    4ms
+[110/312] PASS 0043.json            via=rust         steps=0      time=    4ms
+[111/312] PASS 0095.json            via=rust         steps=0      time=    4ms
+[112/312] PASS 0096.json            via=rust         steps=0      time=    4ms
+[113/312] PASS 0101.json            via=rust         steps=0      time=    3ms
+[114/312] PASS 0693b.json           via=rust         steps=0      time=    6ms
+[115/312] PASS 1271.json            via=rust         steps=0      time=    4ms
+[116/312] PASS 1281.json            via=rust         steps=0      time=    4ms
+[117/312] PASS 0210.json            via=rust         steps=0      time=    3ms
+[118/312] PASS 0211.json            via=rust         steps=0      time=   53ms
+[119/312] PASS 0212.json            via=rust         steps=0      time=    4ms
+[120/312] PASS 1283.json            via=rust         steps=0      time=    3ms
+[121/312] PASS 1284pad.json         via=rust         steps=0      time=   64ms
+[122/312] PASS 0055.json            via=rust         steps=0      time=    3ms
+[123/312] PASS 0056.json            via=rust         steps=0      time=    4ms
+[124/312] PASS 0060.json            via=rust         steps=0      time=    2ms
+[125/312] PASS 0061.json            via=rust         steps=0      time=    5ms
+[126/312] PASS 0064.json            via=rust         steps=0      time=    4ms
+[127/312] PASS 0065.json            via=rust         steps=0      time=    5ms
+[128/312] PASS 0074.json            via=rust         steps=0      time=    2ms
+[129/312] PASS 0077.json            via=rust         steps=0      time=    5ms
+[130/312] PASS 0085.json            via=rust         steps=0      time=    5ms
+[131/312] PASS 0117.json            via=rust         steps=0      time=    3ms
+[132/312] PASS 0124.json            via=rust         steps=0      time=   10ms
+[133/312] PASS 0235.json            via=rust         steps=0      time=    7ms
+[134/312] PASS 0236.json            via=rust         steps=0      time=    4ms
+[135/312] PASS 0237.json            via=rust         steps=0      time=    8ms
+[136/312] PASS 0238.json            via=rust         steps=0      time=    3ms
+[137/312] PASS 0239.json            via=rust         steps=0      time=    3ms
+[138/312] PASS 0266.json            via=rust         steps=0      time=    5ms
+[139/312] PASS 0267.json            via=rust         steps=0      time=    6ms
+[140/312] PASS 0416.json            via=rust         steps=0      time=    8ms
+[141/312] PASS 0423.json            via=rust         steps=0      time=    3ms
+[142/312] PASS 0424.json            via=rust         steps=0      time=    4ms
+[143/312] PASS 0551.json            via=rust         steps=0      time=    5ms
+[144/312] PASS 0948.json            via=rust         steps=0      time=    7ms
+[145/312] PASS 0949.json            via=rust         steps=0      time=    3ms
+[146/312] PASS 0950.json            via=rust         steps=0      time=    3ms
+[147/312] PASS 1239.json            via=rust         steps=0      time=    5ms
+[148/312] PASS 1240.json            via=rust         steps=0      time=    3ms
+[149/312] PASS 1251.json            via=rust         steps=0      time=    5ms
+[150/312] PASS 1285.json            via=rust         steps=0      time=    6ms
+[151/312] PASS 1444.json            via=rust         steps=0      time=    6ms
+[152/312] PASS 1445.json            via=rust         steps=0      time=    5ms
+[153/312] PASS 0027.json            via=rust         steps=0      time=    5ms
+[154/312] PASS 0091.json            via=rust         steps=0      time=    5ms
+[155/312] PASS 0097.json            via=rust         steps=0      time=    4ms
+[156/312] PASS 0099.json            via=rust         steps=0      time=    5ms
+[157/312] PASS 0105nopad.json       via=rust         steps=0      time=    5ms
+[158/312] PASS 0106nopad.json       via=rust         steps=0      time=    7ms
+[159/312] PASS 0107nopad.json       via=rust         steps=0      time=    4ms
+[160/312] PASS 0108.json            via=rust         steps=0      time=    6ms
+[161/312] PASS 0109.json            via=rust         steps=0      time=    7ms
+[162/312] PASS 0231.json            via=rust         steps=0      time= 3191ms
+[163/312] PASS 0126.json            via=rust         steps=0      time=    5ms
+[164/312] PASS 0528.json            via=rust         steps=0      time=    8ms
+[165/312] PASS 0529.json            via=rust         steps=0      time=    8ms
+[166/312] PASS 0530.json            via=rust         steps=0      time=    4ms
+[167/312] PASS 0531.json            via=rust         steps=0      time=    4ms
+[168/312] PASS 0533.json            via=rust         steps=0      time=    9ms
+[169/312] PASS 0536.json            via=rust         steps=0      time=    6ms
+[170/312] PASS 0672.json            via=rust         steps=0      time=    4ms
+[171/312] PASS 0673.json            via=rust         steps=0      time=    5ms
+[172/312] PASS 0692.json            via=rust         steps=0      time=    3ms
+[173/312] PASS 0694.json            via=rust         steps=0      time=    3ms
+[174/312] PASS 0946.json            via=rust         steps=0      time=    5ms
+[175/312] PASS 1024.json            via=rust         steps=0      time=    8ms
+[176/312] PASS 1025.json            via=rust         steps=0      time=    3ms
+[177/312] PASS 1160.json            via=rust         steps=0      time=    3ms
+[178/312] PASS 1161.json            via=rust         steps=0      time=    3ms
+[179/312] PASS 1162.json            via=rust         steps=0      time=    3ms
+[180/312] PASS 1241.json            via=rust         steps=0      time=    4ms
+[181/312] PASS 1275.json            via=rust         steps=0      time=    4ms
+[182/312] PASS 1276.json            via=rust         steps=0      time=    4ms
+[183/312] PASS 1278.json            via=rust         steps=0      time=    3ms
+[184/312] PASS 1280.json            via=rust         steps=0      time=    3ms
+[185/312] PASS 1415pad.json         via=rust         steps=0      time=    4ms
+[186/312] PASS 0195.json            via=rust         steps=0      time=    3ms
+[187/312] PASS 0196flip.json        via=rust         steps=0      time=    9ms
+[188/312] PASS 0197.json            via=rust         steps=0      time=    5ms
+[189/312] PASS 0198.json            via=rust         steps=0      time=    6ms
+[190/312] PASS 0114.json            via=rust         steps=0      time= 1210ms
+[191/312] PASS 0213.json            via=rust         steps=0      time= 2656ms
+[192/312] PASS 0214.json            via=rust         steps=0      time=  128ms
+[193/312] PASS 0215.json            via=rust         steps=0      time=    3ms
+[194/312] PASS 0216.json            via=rust         steps=0      time=   15ms
+[195/312] PASS 0217.json            via=rust         steps=0      time=   86ms
+[196/312] PASS 0218.json            via=rust         steps=0      time=  582ms
+[197/312] PASS 0221.json            via=rust         steps=0      time=    5ms
+[198/312] PASS 0222.json            via=rust         steps=0      time=    6ms
+[199/312] FAIL 0223.json            via=-            steps=0      time= 3007ms  [rust] 答案未通过独立验证: 区域数 30 ≠ 每符号次数 31
+[200/312] PASS 0277.json            via=rust         steps=0      time= 3065ms
+[201/312] PASS 0296.json            via=rust         steps=0      time=    2ms
+[202/312] PASS 0454.json            via=rust         steps=0      time=   99ms
+[203/312] PASS 0455.json            via=rust         steps=0      time=    3ms
+[204/312] PASS 0801.json            via=rust         steps=0      time=    2ms
+[205/312] PASS 0802.json            via=rust         steps=0      time=    3ms
+[206/312] PASS 0803.json            via=rust         steps=0      time=    3ms
+[207/312] FAIL 0882.json            via=-            steps=0      time=18832ms  [rust] Rust solver exited with code -9: 求解器 rust 对谜题 1435.json 返回错误答案: (0,1) 所在区域形状与标记不一致
+
+[208/312] PASS 0805.json            via=rust         steps=0      time=   20ms
+[209/312] PASS 0833.json            via=rust         steps=0      time=11451ms
+[210/312] PASS 0939.json            via=rust         steps=0      time=  354ms
+[211/312] PASS 1163.json            via=rust         steps=0      time=    4ms
+[212/312] PASS 1164.json            via=rust         steps=0      time=  127ms
+[213/312] PASS 1165.json            via=rust         steps=0      time=    5ms
+[214/312] PASS 1236.json            via=rust         steps=0      time=    5ms
+[215/312] PASS 1237.json            via=rust         steps=0      time=    5ms
+[216/312] PASS 1238.json            via=rust         steps=0      time=    9ms
+[217/312] PASS 1273.json            via=rust         steps=0      time=    4ms
+[218/312] PASS 1274.json            via=rust         steps=0      time=    3ms
+[219/312] PASS 1279.json            via=rust         steps=0      time=    3ms
+[220/312] PASS 1430.json            via=rust         steps=0      time=    3ms
+[221/312] FAIL 1435.json            via=-            steps=0      time=60046ms  [rust] 答案未通过独立验证: (0,1) 所在区域形状与标记不一致
+[222/312] FAIL 0732.json            via=-            steps=0      time=75035ms  [rust] Rust solver timed out after 25s
+[223/312] PASS 0123.json            via=rust         steps=0      time=    5ms
+[224/312] PASS 0128.json            via=rust         steps=0      time=    4ms
+[225/312] PASS 0133.json            via=rust         steps=0      time=    5ms
+[226/312] PASS 0134.json            via=rust         steps=0      time=    5ms
+[227/312] PASS 0135.json            via=rust         steps=0      time=    4ms
+[228/312] PASS 0137.json            via=rust         steps=0      time=    4ms
+[229/312] PASS 0144.json            via=rust         steps=0      time=    6ms
+[230/312] PASS 0146.json            via=rust         steps=0      time=    9ms
+[231/312] PASS 0147.json            via=rust         steps=0      time=    5ms
+[232/312] PASS 0148.json            via=rust         steps=0      time=    4ms
+[233/312] PASS 0149.json            via=rust         steps=0      time=    6ms
+[234/312] PASS 0150.json            via=rust         steps=0      time=    4ms
+[235/312] PASS 0151.json            via=rust         steps=0      time=    5ms
+[236/312] FAIL 1098.json            via=-            steps=0      time=75067ms  [rust] Rust solver timed out after 25s
+[237/312] PASS 0175.json            via=rust         steps=0      time=    4ms
+[238/312] PASS 0200.json            via=rust         steps=0      time=    5ms
+[239/312] FAIL 1099.json            via=-            steps=0      time=75106ms  [rust] Rust solver timed out after 25s
+[240/312] PASS 0363.json            via=rust         steps=0      time=    6ms
+[241/312] PASS 0364.json            via=rust         steps=0      time=    7ms
+[242/312] FAIL 1100.json            via=-            steps=0      time=75113ms  [rust] Rust solver timed out after 25s
+[243/312] PASS 0365.json            via=rust         steps=0      time=    5ms
+[244/312] PASS 0366.json            via=rust         steps=0      time=    6ms
+[245/312] PASS 0371.json            via=rust         steps=0      time=    7ms
+[246/312] PASS 0368.json            via=rust         steps=0      time=   12ms
+[247/312] PASS 0379.json            via=rust         steps=0      time=    3ms
+[248/312] PASS 0380.json            via=rust         steps=0      time=    4ms
+[249/312] PASS 0392.json            via=rust         steps=0      time=    4ms
+[250/312] PASS 1040.json            via=rust         steps=0      time=    4ms
+[251/312] PASS 1042.json            via=rust         steps=0      time=    5ms
+[252/312] PASS 1043.json            via=rust         steps=0      time=    8ms
+[253/312] PASS 1048.json            via=rust         steps=0      time=    5ms
+[254/312] PASS 1046.json            via=rust         steps=0      time=    8ms
+[255/312] PASS 1051.json            via=rust         steps=0      time=    5ms
+[256/312] PASS 1049.json            via=rust         steps=0      time=    8ms
+[257/312] PASS 0361.json            via=rust         steps=0      time=  126ms
+[258/312] PASS 1053.json            via=rust         steps=0      time=    9ms
+[259/312] PASS 1054.json            via=rust         steps=0      time=    6ms
+[260/312] PASS 1057.json            via=rust         steps=0      time=    8ms
+[261/312] PASS 1423.json            via=rust         steps=0      time=    4ms
+[262/312] PASS 1245.json            via=rust         steps=0      time=    8ms
+[263/312] PASS 1058.json            via=rust         steps=0      time=   15ms
+[264/312] PASS 0070.json            via=rust         steps=0      time=    4ms
+[265/312] PASS 0075.json            via=rust         steps=0      time=    5ms
+[266/312] PASS 0092.json            via=rust         steps=0      time=    5ms
+[267/312] PASS 0093.json            via=rust         steps=0      time=    8ms
+[268/312] PASS 0098.json            via=rust         steps=0      time=    4ms
+[269/312] PASS 0110.json            via=rust         steps=0      time=    7ms
+[270/312] PASS 0112.json            via=rust         steps=0      time=    5ms
+[271/312] PASS 0118.json            via=rust         steps=0      time=    3ms
+[272/312] PASS 0030.json            via=rust         steps=0      time=   40ms
+[273/312] PASS 0119.json            via=rust         steps=0      time=    8ms
+[274/312] PASS 0122.json            via=rust         steps=0      time=    3ms
+[275/312] PASS 0116.json            via=rust         steps=0      time=   20ms
+[276/312] PASS 0121.json            via=rust         steps=0      time=   10ms
+[277/312] PASS 0130.json            via=rust         steps=0      time=    5ms
+[278/312] PASS 0140.json            via=rust         steps=0      time=    9ms
+[279/312] PASS 0138.json            via=rust         steps=0      time=   13ms
+[280/312] PASS 0156.json            via=rust         steps=0      time=    9ms
+[281/312] PASS 0199.json            via=rust         steps=0      time=    8ms
+[282/312] PASS 0243.json            via=rust         steps=0      time=   13ms
+[283/312] PASS 0244.json            via=rust         steps=0      time=    3ms
+[284/312] PASS 0245.json            via=rust         steps=0      time=    3ms
+[285/312] PASS 0246.json            via=rust         steps=0      time=    5ms
+[286/312] PASS 0255.json            via=rust         steps=0      time=   46ms
+[287/312] PASS 0278.json            via=rust         steps=0      time=    4ms
+[288/312] PASS 0781.json            via=rust         steps=0      time=   33ms
+[289/312] PASS 0257.json            via=rust         steps=0      time=   80ms
+[290/312] PASS 0782.json            via=rust         steps=0      time=    7ms
+[291/312] PASS 1127.json            via=rust         steps=0      time=    6ms
+[292/312] PASS 1128.json            via=rust         steps=0      time=    7ms
+[293/312] PASS 1235.json            via=rust         steps=0      time=   12ms
+[294/312] PASS 1242.json            via=rust         steps=0      time=    6ms
+[295/312] PASS 1416.json            via=rust         steps=0      time=    6ms
+[296/312] PASS 1418.json            via=rust         steps=0      time=    4ms
+[297/312] PASS 1417.json            via=rust         steps=0      time=    5ms
+[298/312] PASS 1419.json            via=rust         steps=0      time=   61ms
+[299/312] PASS 1420.json            via=rust         steps=0      time=   61ms
+[300/312] PASS 0184.json            via=rust         steps=0      time=  219ms
+[301/312] PASS 1422.json            via=rust         steps=0      time=    5ms
+[302/312] PASS 1431.json            via=rust         steps=0      time=    4ms
+[303/312] PASS 1421b.json           via=rust         steps=0      time=   11ms
+[304/312] PASS 1440.json            via=rust         steps=0      time=    8ms
+[305/312] PASS 1442.json            via=rust         steps=0      time=    6ms
+[306/312] PASS 1443.json            via=rust         steps=0      time=    7ms
+[307/312] PASS 1441b.json           via=rust         steps=0      time=   20ms
+[308/312] PASS 0153.json            via=rust         steps=0      time= 3770ms
+[309/312] FAIL 0213nopad.json       via=-            steps=0      time=75115ms  [rust] Rust solver timed out after 25s
+[310/312] FAIL 0804.json            via=-            steps=0      time=75146ms  [rust] Rust solver timed out after 25s
+[311/312] FAIL 1433.json            via=-            steps=0      time=75011ms  [rust] Rust solver timed out after 25s
+[312/312] FAIL 1434.json            via=-            steps=0      time=75479ms  [rust] Rust solver timed out after 25s
+
+结果: 301/312 通过
+失败 11 个:
+  0223.json: [rust] 答案未通过独立验证: 区域数 30 ≠ 每符号次数 31
+  0882.json: [rust] Rust solver exited with code -9: 
+  1435.json: [rust] 答案未通过独立验证: (0,1) 所在区域形状与标记不一致
+  0732.json: [rust] Rust solver timed out after 25s
+  1098.json: [rust] Rust solver timed out after 25s
+  1099.json: [rust] Rust solver timed out after 25s
+  1100.json: [rust] Rust solver timed out after 25s
+  0213nopad.json: [rust] Rust solver timed out after 25s
+  0804.json: [rust] Rust solver timed out after 25s
+  1433.json: [rust] Rust solver timed out after 25s
+  1434.json: [rust] Rust solver timed out after 25s

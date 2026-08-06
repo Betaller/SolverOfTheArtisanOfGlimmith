@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.models.board import Board, Shape
 from src.models.puzzle import Puzzle, Rule
-from src.solver.backtrack import BacktrackSolver
+from src.solver.base import default_router
 from src.io.puzzle_codec import serialize
 from collections import Counter
 
@@ -17,8 +17,10 @@ BASE = Path(__file__).resolve().parent.parent / "puzzles" / "aiGen"
 
 def make_and_save(category: str, filename: str, puzzle: Puzzle) -> bool:
     path = BASE / category / filename
-    solver = BacktrackSolver(puzzle)
-    sol = solver.solve(timeout=60)
+    # Rust-only router: the binary (aog → pieces → backtrack → rose) solves the
+    # generated puzzle and independently re-verifies the answer before we save it.
+    router = default_router()
+    sol = router.route(puzzle, timeout=60, puzzle_name=f"{category}/{filename}")
     if sol.solved:
         areas = Counter(r.area for r in sol.regions)
         print(f"  OK {category}/{filename}: {len(sol.regions)}区域 面积{dict(areas)} {sol.elapsed_ms}ms")

@@ -57,16 +57,15 @@ main.py
         ├── main_window.py       依赖: services.puzzle_service, models
         ├── grid_widget.py       依赖: models
         ├── constraint_panel.py  依赖: models
-        └── solver_runner.py     依赖: services.solver_service
+        └── solver_runner.py     依赖: solver.base（default_router）
   └── services/
-        ├── puzzle_service.py    依赖: models, io
-        └── solver_service.py    依赖: solver, models
-  └── solver/
-        ├── backtrack.py         依赖: models, propagator
-        ├── propagator.py        依赖: models, constraints
-        ├── constraints.py       依赖: models
-        ├── shapes.py            依赖: models
-        └── validator.py         依赖: models, constraints, shapes
+        └── puzzle_service.py    依赖: models, io
+  └── solver/                    Rust-only 接口 + 规则/形状共享层
+        ├── base.py              Solver ABC + SolverRouter（default_router 只挂 RustSolver）
+        ├── rust_solver.py       Rust 子进程封装，依赖: models, io
+        ├── constraints.py       RULE_CHECKERS（22 条规则校验器），依赖: models
+        ├── shapes.py            形状变换/规范化，依赖: models
+        └── exceptions.py        求解异常
   └── models/
         ├── board.py
         ├── puzzle.py
@@ -74,6 +73,10 @@ main.py
   └── io/
         └── puzzle_codec.py      依赖: models
 ```
+
+> 说明：Python 求解算法（backtrack / exact_cover / rose / dlx / propagator 等）已于
+> 2026-08-06 移除（`docs/official-puzzles-status.md` §C.0），`src/solver/` 仅保留接口与共享层。
+> 求解引擎为 Rust 子进程（`rsolver/`），协议见 `src/solver/rust_solver.py`。
 
 ---
 

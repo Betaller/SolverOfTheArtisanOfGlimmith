@@ -17,7 +17,6 @@ from src.models.board import Board, CompassClue
 from src.models.puzzle import Puzzle
 from src.models.solution import Solution
 from src.services.puzzle_service import PuzzleService
-from src.services.solver_service import SolverService
 from src.io.puzzle_codec import puzzle_to_dict, dict_to_puzzle
 from src.ui.grid_widget import GridWidget
 from src.ui.constraint_panel import ConstraintPanel
@@ -87,7 +86,6 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._puzzle_service = PuzzleService()
-        self._solver_service = SolverService()
         self._puzzle: Puzzle | None = None
         self._current_file: str | None = None
         self._initial_puzzle_data: dict | None = None

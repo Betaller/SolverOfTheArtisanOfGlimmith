@@ -3,7 +3,9 @@
 > 阅读对象：想理解玫瑰窗题怎么解的人。
 > 前置：01（路由）、03（rose_window 规则）。
 > 代码：`solver/rose/*`（约 1540 行），是 Python
-> `src/solver/rose/solver.py + region_match.py + rose_growth.py` 的移植。
+> `src/solver/rose/solver.py + region_match.py + rose_growth.py` 的移植
+> （Python 源码已随求解器栈移除，2026-08-06，见 `docs/official-puzzles-status.md` §C.0；
+> 本文保留作为行为记录）。
 
 ---
 

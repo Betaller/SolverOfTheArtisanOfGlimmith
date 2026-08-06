@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.models.board import Board, Cell, Shape, CompassClue
+from src.models.board import Board, Shape
 from src.models.puzzle import Puzzle, Rule
-from src.solver.backtrack import BacktrackSolver
-from src.solver.validator import SolutionValidator
 from src.solver.shapes import enumerate_polyominoes
 
 
@@ -67,17 +65,6 @@ def _shape_name(s: Shape) -> str:
         if cells == [(0, 0), (0, 1), (1, 1), (1, 2)]:
             return "S4"
     return f"shape_{len(cells)}"
-
-
-@pytest.fixture
-def solver() -> BacktrackSolver:
-    puzzle = Puzzle.from_board(Board(4, 4), rules=[Rule(type="precise", params={"area": 4})])
-    return BacktrackSolver(puzzle)
-
-
-@pytest.fixture
-def validator() -> SolutionValidator:
-    return SolutionValidator()
 
 
 def apply_solution_to_board(board: Board, region_map: list[list[int]]) -> Board:

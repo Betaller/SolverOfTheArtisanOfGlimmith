@@ -27,6 +27,8 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
         cell_index[r][c] = i;
     }
     let has_area_rule = puzzle.rules.iter().any(|r| r.ctype == "area");
+    let edge_constraints = collect_edge_constraints(puzzle);
+    let has_edge_constraints = !edge_constraints.is_empty();
 
     let mut state = BacktrackState {
         cell_to_region: vec![None; h * w],
@@ -43,6 +45,8 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
         region_clue: HashMap::new(),
         frontier: HashMap::new(),
         has_area_rule,
+        edge_constraints,
+        has_edge_constraints,
     };
 
     if std::env::var("AOG_DEBUG").is_ok() { eprintln!("backtrack: start undecided={}", state.undecided_count); }
@@ -51,6 +55,16 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
     } else {
         None
     }
+}
+
+/// Pre-computed edge constraint between two cell positions.
+#[derive(Debug, Clone)]
+struct EdgeAreaConstraint {
+    cell_a: (usize, usize),
+    cell_b: (usize, usize),
+    /// "inequality" (value==1 ⇒ A > B; else B > A) or "difference" (value=D).
+    ctype: EdgeConstraintType,
+    value: Option<i64>,
 }
 
 struct BacktrackState {
@@ -73,12 +87,57 @@ struct BacktrackState {
     region_clue: HashMap<usize, usize>, // rid -> required area from a numbered cell inside
     frontier: HashMap<usize, HashMap<(usize, usize), usize>>, // rid -> {undecided cell : adjacency count}
     has_area_rule: bool,
+    /// Pre-computed inequality / difference edge constraints for mid-search pruning.
+    edge_constraints: Vec<EdgeAreaConstraint>,
+    has_edge_constraints: bool,
 }
 
 #[derive(Debug, Clone)]
 struct AreaBounds {
     min_area: usize,
     max_area: usize,
+}
+
+/// Collect all inequality / difference edge constraints for mid-search pruning.
+fn collect_edge_constraints(puzzle: &Puzzle) -> Vec<EdgeAreaConstraint> {
+    let mut out = Vec::new();
+    let h = puzzle.height;
+    let w = puzzle.width;
+    for r in 0..h {
+        for c in 0..w.saturating_sub(1) {
+            if let Some(ref ec) = puzzle.h_edges[r][c].constraint {
+                match ec.ctype {
+                    EdgeConstraintType::Inequality | EdgeConstraintType::Difference => {
+                        out.push(EdgeAreaConstraint {
+                            cell_a: (r, c),
+                            cell_b: (r, c + 1),
+                            ctype: ec.ctype.clone(),
+                            value: ec.value,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    for r in 0..h.saturating_sub(1) {
+        for c in 0..w {
+            if let Some(ref ec) = puzzle.v_edges[r][c].constraint {
+                match ec.ctype {
+                    EdgeConstraintType::Inequality | EdgeConstraintType::Difference => {
+                        out.push(EdgeAreaConstraint {
+                            cell_a: (r, c),
+                            cell_b: (r + 1, c),
+                            ctype: ec.ctype.clone(),
+                            value: ec.value,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
 }
 
 fn compute_area_bounds(puzzle: &Puzzle) -> AreaBounds {
@@ -127,6 +186,87 @@ fn timed_out(state: &BacktrackState) -> bool {
     Instant::now() >= state.deadline
 }
 
+/// Mid-search pruning for inequality / difference edge constraints.
+///
+/// When one side of a constraint edge is assigned to a sealed region (empty
+/// frontier, area fixed), the other side's possible area range is narrowed.
+/// If no feasible target remains the partial assignment is dead.
+fn check_edge_area_mid_search(state: &BacktrackState) -> bool {
+    if !state.has_edge_constraints {
+        return true;
+    }
+    let w = state.width;
+    for ec in &state.edge_constraints {
+        let ra = state.cell_to_region[ec.cell_a.0 * w + ec.cell_a.1];
+        let rb = state.cell_to_region[ec.cell_b.0 * w + ec.cell_b.1];
+        let (Some(ra), Some(rb)) = (ra, rb) else { continue; };
+        if ra == rb {
+            continue; // same region, constraint edge was overridden
+        }
+
+        let area_a = state.region_shapes.get(ra).map(|s| s.len()).unwrap_or(0);
+        let area_b = state.region_shapes.get(rb).map(|s| s.len()).unwrap_or(0);
+        let sealed_a = state
+            .frontier
+            .get(&ra)
+            .map(|f| f.is_empty())
+            .unwrap_or(true);
+        let sealed_b = state
+            .frontier
+            .get(&rb)
+            .map(|f| f.is_empty())
+            .unwrap_or(true);
+
+        match ec.ctype {
+            EdgeConstraintType::Difference => {
+                let d = ec.value.unwrap_or(0) as usize;
+                // If A is sealed, B must eventually be area_a ± d.
+                if sealed_a {
+                    let lo = area_a.saturating_sub(d);
+                    let hi = area_a + d;
+                    if area_b > hi {
+                        return false;
+                    }
+                    if sealed_b && area_b != lo && area_b != hi {
+                        return false;
+                    }
+                    if area_b + state.undecided_count < lo {
+                        return false;
+                    }
+                }
+                if sealed_b {
+                    let lo = area_b.saturating_sub(d);
+                    let hi = area_b + d;
+                    if area_a > hi {
+                        return false;
+                    }
+                    if sealed_a && area_a != lo && area_a != hi {
+                        return false;
+                    }
+                    if area_a + state.undecided_count < lo {
+                        return false;
+                    }
+                }
+            }
+            EdgeConstraintType::Inequality => {
+                // value==1 ⇒ first endpoint (A) larger: area_a > area_b
+                let (larger_area, smaller_area, larger_sealed, _smaller_sealed) =
+                    if ec.value == Some(1) {
+                        (area_a, area_b, sealed_a, sealed_b)
+                    } else {
+                        (area_b, area_a, sealed_b, sealed_a)
+                    };
+                // larger > smaller  ⇒  larger ≥ smaller + 1
+                if larger_sealed && larger_area <= smaller_area {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
 fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
     if state.undecided_count == 0 {
         return check_global_constraints(puzzle, state);
@@ -142,7 +282,12 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         return false;
     }
 
-    let (r, c) = pick_next_cell(state);
+    // Edge area constraint pruning: sealed regions force neighbour areas.
+    if !check_edge_area_mid_search(state) {
+        return false;
+    }
+
+    let (r, c) = pick_next_cell(puzzle, state);
     let cell = &puzzle.cells[r][c];
     let h = puzzle.height;
     let w = puzzle.width;
@@ -292,11 +437,59 @@ fn is_undecided(state: &BacktrackState, r: usize, c: usize) -> bool {
     state.cell_index[r][c] != usize::MAX && state.cell_to_region[r * state.width + c].is_none()
 }
 
+/// Count the number of distinct adjacent regions to an undecided cell, plus one
+/// for the "start new region" option.  This is the cell's *domain size* — the
+/// MRV (Minimum Remaining Values) heuristic picks the cell with smallest domain.
+///
+/// Uses `is_adjacent_free` so that pre-drawn boundaries (and blocked neighbours)
+/// are respected: a neighbour blocked by a boundary can't be joined.
+fn cell_domain_size(puzzle: &Puzzle, state: &BacktrackState, r: usize, c: usize) -> usize {
+    let w = state.width;
+    let h = state.cell_index.len();
+    let mut rids: HashSet<usize> = HashSet::with_capacity(4);
+    if c > 0 {
+        if let Some(rid) = state.cell_to_region[r * w + (c - 1)] {
+            if grid::is_adjacent_free(puzzle, r, c, r, c - 1) {
+                rids.insert(rid);
+            }
+        }
+    }
+    if c + 1 < w {
+        if let Some(rid) = state.cell_to_region[r * w + (c + 1)] {
+            if grid::is_adjacent_free(puzzle, r, c, r, c + 1) {
+                rids.insert(rid);
+            }
+        }
+    }
+    if r > 0 {
+        if let Some(rid) = state.cell_to_region[(r - 1) * w + c] {
+            if grid::is_adjacent_free(puzzle, r, c, r - 1, c) {
+                rids.insert(rid);
+            }
+        }
+    }
+    if r + 1 < h {
+        if let Some(rid) = state.cell_to_region[(r + 1) * w + c] {
+            if grid::is_adjacent_free(puzzle, r, c, r + 1, c) {
+                rids.insert(rid);
+            }
+        }
+    }
+    // +1 for the "start a new region" option (always available)
+    rids.len() + 1
+}
+
 /// Pick the next cell: grow an under-target clue-region first (its frontier,
-/// smallest row-major index), else the smallest row-major undecided cell.
-fn pick_next_cell(state: &BacktrackState) -> (usize, usize) {
+/// smallest domain-size among those, row-major tiebreak), else the globally
+/// most-constrained undecided cell (MRV / entropy heuristic).
+///
+/// The MRV fallback replaces the old row-major scan.  Cells with only 1 option
+/// (must join a specific neighbouring region or must start fresh) are selected
+/// first — they have no real choice and delaying them only wastes search.
+fn pick_next_cell(puzzle: &Puzzle, state: &BacktrackState) -> (usize, usize) {
     if state.has_area_rule {
         let mut best: Option<(usize, usize)> = None;
+        let mut best_domain = usize::MAX;
         let mut best_idx = usize::MAX;
         for (&rid, &n) in &state.region_clue {
             let area = state.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
@@ -304,8 +497,13 @@ fn pick_next_cell(state: &BacktrackState) -> (usize, usize) {
                 if let Some(fr) = state.frontier.get(&rid) {
                     for &cell in fr.keys() {
                         if is_undecided(state, cell.0, cell.1) {
+                            let domain = cell_domain_size(puzzle, state, cell.0, cell.1);
                             let i = state.cell_index[cell.0][cell.1];
-                            if i < best_idx {
+                            // Prefer smaller domain; tiebreak by row-major index
+                            if domain < best_domain
+                                || (domain == best_domain && i < best_idx)
+                            {
+                                best_domain = domain;
                                 best_idx = i;
                                 best = Some(cell);
                             }
@@ -318,12 +516,23 @@ fn pick_next_cell(state: &BacktrackState) -> (usize, usize) {
             return cell;
         }
     }
-    for &cell in &state.fillable {
-        if state.cell_to_region[cell.0 * state.width + cell.1].is_none() {
-            return cell;
+    // MRV fallback: scan all undecided cells, pick the one with smallest domain.
+    let mut best: Option<(usize, usize)> = None;
+    let mut best_domain = usize::MAX;
+    let mut best_idx = usize::MAX;
+    for &(r, c) in &state.fillable {
+        if state.cell_to_region[r * state.width + c].is_some() {
+            continue;
+        }
+        let domain = cell_domain_size(puzzle, state, r, c);
+        let i = state.cell_index[r][c];
+        if domain < best_domain || (domain == best_domain && i < best_idx) {
+            best_domain = domain;
+            best_idx = i;
+            best = Some((r, c));
         }
     }
-    unreachable!("undecided_count > 0 but no undecided cell")
+    best.expect("undecided_count > 0 but no undecided cell")
 }
 
 /// Each clue-region must reach its target area: sealed regions (empty frontier)
@@ -445,39 +654,103 @@ fn check_watchtowers_ok(state: &BacktrackState) -> bool {
     true
 }
 
-/// Number of solution boundaries around the interior vertex (r,c) (the corner
-/// shared by cells (r,c), (r+1,c), (r,c+1), (r+1,c+1)).
+
+/// Lower / upper bound on boundary-degree at a vertex.
 ///
-/// Blocked cells are empty space, not regions: a blocked-blocked edge is one
-/// shared AREA_BLOCK value (NOT a boundary), mirroring the authoritative
-/// `aog::validate::count_boundary_edges_at_vertex` and the C++ check_tatami.
-fn vertex_boundary_count(puzzle: &Puzzle, state: &BacktrackState, r: usize, c: usize) -> usize {
-    let is_bound = |a: (usize, usize), b: (usize, usize)| -> bool {
-        let ra = if puzzle.cells[a.0][a.1].blocked {
-            None
+/// `lb` = edges where BOTH sides are assigned AND differ (definite boundaries).
+/// `ub` = `lb` + edges where at least one side is unassigned (potential boundaries).
+///
+/// Blocked cells are treated as empty space (blocked-blocked = no boundary,
+/// blocked-region = boundary), mirroring `vertex_boundary_count`.
+fn vertex_boundary_bounds(
+    puzzle: &Puzzle,
+    state: &BacktrackState,
+    vr: usize,
+    vc: usize,
+) -> (usize, usize) {
+    let cells = [
+        (vr as i32, vc as i32),
+        (vr as i32 + 1, vc as i32),
+        (vr as i32, vc as i32 + 1),
+        (vr as i32 + 1, vc as i32 + 1),
+    ];
+    // Edge pairs: top(0,1), bottom(2,3), left(0,2), right(1,3)
+    let edges = [(0usize, 1usize), (2, 3), (0, 2), (1, 3)];
+
+    #[derive(PartialEq)]
+    enum CellState {
+        Blocked,
+        Unassigned,
+        Assigned(usize),
+    }
+    let cell_state = |i: usize| -> Option<CellState> {
+        let (a, b) = cells[i];
+        if a < 0 || b < 0 {
+            return None;
+        }
+        let au = a as usize;
+        let bu = b as usize;
+        if au >= puzzle.height || bu >= puzzle.width {
+            return None;
+        }
+        if puzzle.cells[au][bu].blocked {
+            Some(CellState::Blocked)
         } else {
-            state.cell_to_region[a.0 * state.width + a.1]
-        };
-        let rb = if puzzle.cells[b.0][b.1].blocked {
-            None
-        } else {
-            state.cell_to_region[b.0 * state.width + b.1]
-        };
-        match (ra, rb) {
-            (Some(x), Some(y)) => x != y,
-            (None, None) => false, // blocked-blocked = same empty space / outer border
-            _ => true, // one side a region, the other empty space / outer border
+            match state.cell_to_region[au * state.width + bu] {
+                Some(rid) => Some(CellState::Assigned(rid)),
+                None => Some(CellState::Unassigned),
+            }
         }
     };
-    is_bound((r, c), (r + 1, c)) as usize
-        + is_bound((r, c), (r, c + 1)) as usize
-        + is_bound((r, c + 1), (r + 1, c + 1)) as usize
-        + is_bound((r + 1, c), (r + 1, c + 1)) as usize
+
+    let mut lb = 0usize;
+    let mut unknown = 0usize;
+    for &(i, j) in &edges {
+        let ra = cell_state(i);
+        let rb = cell_state(j);
+        match (ra, rb) {
+            (Some(CellState::Assigned(a)), Some(CellState::Assigned(b))) => {
+                if a != b {
+                    lb += 1;
+                }
+            }
+            (Some(CellState::Blocked), Some(CellState::Blocked)) => {
+                // blocked-blocked → not a boundary
+            }
+            (Some(CellState::Assigned(_)), Some(CellState::Blocked))
+            | (Some(CellState::Blocked), Some(CellState::Assigned(_)))
+            | (Some(CellState::Blocked), Some(CellState::Unassigned))
+            | (Some(CellState::Unassigned), Some(CellState::Blocked)) => {
+                // region-blocked or future-region-blocked → definite boundary
+                lb += 1;
+            }
+            (Some(CellState::Unassigned), Some(CellState::Unassigned))
+            | (Some(CellState::Unassigned), Some(CellState::Assigned(_)))
+            | (Some(CellState::Assigned(_)), Some(CellState::Unassigned)) => {
+                // at least one side unassigned (not blocked) → unknown
+                unknown += 1;
+            }
+            _ => {
+                // out-of-bounds → outer border boundary
+                lb += 1;
+            }
+        }
+    }
+    (lb, lb + unknown)
 }
 
-/// Incremental ring/brick check: after assigning cell (r,c), verify its corner
-/// vertices don't already form a forbidden intersection (ring: 3 boundaries,
-/// brick: 4 boundaries).
+/// Incremental ring/brick check with arc-consistency propagation.
+///
+/// After assigning cell (r,c), for each of its four corner vertices compute the
+/// lower bound on boundary edges.  If the lower bound already reaches the
+/// forbidden degree the partial assignment is dead — no matter how the remaining
+/// unassigned cells around that vertex are placed, the vertex will end up with
+/// ≥3 (ring) or ≥4 (brick) boundaries.
+///
+/// This is stronger than the old check, which only looked at vertices whose four
+/// cells were *all* assigned and therefore missed early violations (e.g. 3
+/// assigned cells in 3 different regions ⇒ 3 definite boundaries ⇒ ring
+/// violation even though the 4th cell is still undecided).
 fn check_vertex_ring_ok(puzzle: &Puzzle, r: usize, c: usize, state: &BacktrackState) -> bool {
     let has_ring = puzzle.rules.iter().any(|rule| rule.ctype == "ring");
     let has_brick = puzzle.rules.iter().any(|rule| rule.ctype == "brick");
@@ -495,20 +768,14 @@ fn check_vertex_ring_ok(puzzle: &Puzzle, r: usize, c: usize, state: &BacktrackSt
         if vr < 0 || vc < 0 || vr + 1 >= h || vc + 1 >= w {
             continue;
         }
-        let cells = [(vr, vc), (vr + 1, vc), (vr, vc + 1), (vr + 1, vc + 1)];
-        if !cells.iter().all(|&(a, b)| {
-            state.cell_to_region[a as usize * state.width + b as usize].is_some()
-                || puzzle.cells[a as usize][b as usize].blocked
-        }) {
-            continue;
+        let (lb, _ub) = vertex_boundary_bounds(puzzle, state, vr as usize, vc as usize);
+        // ring: degree 3 already reached → dead.  (ub check not needed: if lb ≥ 3
+        // the violation is certain regardless of future assignments.)
+        if has_ring && lb >= 3 {
+            return false;
         }
-        let bc = vertex_boundary_count(puzzle, state, vr as usize, vc as usize);
-        // brick: 4-way junction — blocked cells count as a distinct value
-        // (their edges are border segments, mirroring C++ check_tatami and the
-        // game's glimmith-solver).  A vertex with one blocked + 3 regions IS a
-        // 4-way.  vertex_boundary_count already treats blocked-blocked as no
-        // boundary, so no skip is needed here.
-        if (has_ring && bc == 3) || (has_brick && bc == 4) {
+        // brick: degree 4 already reached → dead.
+        if has_brick && lb >= 4 {
             return false;
         }
     }
@@ -516,6 +783,7 @@ fn check_vertex_ring_ok(puzzle: &Puzzle, r: usize, c: usize, state: &BacktrackSt
 }
 
 /// Leaf ring/brick check: no interior vertex may form a forbidden intersection.
+/// At the leaf all cells are assigned, so lb == ub == actual degree.
 fn check_ring_ok(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     let has_ring = puzzle.rules.iter().any(|rule| rule.ctype == "ring");
     let has_brick = puzzle.rules.iter().any(|rule| rule.ctype == "brick");
@@ -524,8 +792,8 @@ fn check_ring_ok(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     }
     for r in 0..puzzle.height.saturating_sub(1) {
         for c in 0..puzzle.width.saturating_sub(1) {
-            let bc = vertex_boundary_count(puzzle, state, r, c);
-            if (has_ring && bc == 3) || (has_brick && bc == 4) {
+            let (lb, _ub) = vertex_boundary_bounds(puzzle, state, r, c);
+            if (has_ring && lb == 3) || (has_brick && lb == 4) {
                 return false;
             }
         }

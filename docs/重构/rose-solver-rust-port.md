@@ -108,6 +108,11 @@ fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<Regi
 `CellSet` / `edge_key` / `PreBoundaries`；`rose_symbol_types`（`constraints.py:80-89`）、`rose_M`（`constraints.py:92-99`，各符号计数不等则 0）；`solve_rose` 入口返回 None。
 
 ### Phase 2 单符号 region_match（关键路径，解 C4-1/0277）
+> 优化（2026-08-06）：`region_match` 感知 `range`/`precise` 的全局区域尺寸界
+> （`rose::region_size_bounds`），先按 `[min,max]` 过滤候选、组合枚举
+> `min_val=max(min,N)`。修复 range+rose 组合爆炸（1342 1265 万组合 → 1 个，
+> 1334 → 6 个），1334/1342 由 30s FAIL → <1s 解出。
+
 按 `region_match.py`：
 1. `generate_all_candidates`（`bfs_candidates.py`）：BFS 枚举边界合规连通子集，CAP=20000、MAX_CELLS=100；单符号收集全部子集。
 2. 面积预过滤：`sz <= total - (M-1)`（`region_match.py:253-264`）。

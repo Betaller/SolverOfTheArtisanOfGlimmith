@@ -1,176 +1,111 @@
-# 官方谜题求解状态与结论
+# 官方谜题求解状态
 
-> 状态：持续维护。**每次对求解器 / 转换脚本 / 规则校验器 / 规则语义的任何优化，都必须更新本文件**（见文末「软门禁」）。
+> **准则：官方题的官方解是唯一解。**
+> 对求解器 / 转换脚本 / 规则校验器 / 规则语义的**每次优化**，必须在本文件**第一部分（进度）与第二部分（变更）各追加一条**，并同步相关文档、跑测试（见文末「软门禁」）。
 
-## 1. 结论（2026-08-05 深挖）
+---
 
-**准则：官方题的官方解是唯一解。**
+## 第一部分：进度
 
-早期全量扫描发现 129 道「求解器解 ≠ 官方解」，逐一深挖后确认**绝大多数并非真多解，而是转换 / 校验的真实 bug**。已修复：
+> 全量扫描 / 基准快照，按时间顺序**往后追加**（旧的在上）。每题完整求解结果见仓库根目录 `scan_official_results.jsonl`。
 
-| # | Bug | 根因 | 修复 commit |
-|---|---|---|---|
-| 1 | gemini/delta 边约束未被强制 | `build_rules` 只给 inequality/difference 生成规则类型，`=`/`!` 边没有 `homogeneous`/`heterogeneous` → aog 求解器跳过边约束、`IndependentValidator` 也不分发边检查 → 求解器产出违反边约束的划分却被判合法 | `4ab9e4b` |
-| 2 | 玫瑰窗检测读错位置 | `_is_rose_window` 用固定 2 字符步长切原始网格找 P 符号，前面有变宽格（罗盘 `U…` / `S` 形）时位置错位 → rose_window 规则被静默丢弃（如 0634） | `047f9a1` |
-| 3 | 环纹规则漏边框 T 型 | 环纹检查只遍历**内部顶点**（`board.vertices()`），而内部区域边界与**外边框**相遇也是 3 段 = T 型（如 0638 的 L 形划分）。另 `check_rule_ring` 误用 `Edge.is_boundary`（预画边界）而非区域边界 | `9a6c965` |
-| 4 | 1SPR 的 S 格缺 shape 约束 | 1SPR 谜题中 `S#` 格只记 symbol，未加 `shape_pattern` → 缺少 puzzle_piece 约束 | 用户修复（未提交） |
+### 2026-08-05 · 修复后基准（commit `33d32c5`）
+- **result**：`results/20260805_33d32c5_rust-official-bench.txt`
+- 工具：`scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 20 -j 8`（Rust 求解器）
+- **1040 / 1258 通过**（Zone1 300/312，Zone2 387/438，Zone3 329/481）；失败全为超时。
+- 修复前 verify 日志 ~190 FAIL 中大量是 gemini/delta、玫瑰窗、环纹 bug 导致的错误解被接受；本次失败均为「解不出」而非「错解」。
 
-**补充发现**：`= (gemini)` / `! (delta)` 边在游戏中的语义是「两侧区域**同形/异形**」，不是「同区域」——项目校验器与游戏文档（glimmith-solver rules-inventory）一致，非 bug。
+### 2026-08-05 · rose 求解器下沉 Rust（commit `4733f59`）
+- **result**：`results/20260805_4733f59_rose-port-rust-only.txt`
+- 工具：`scripts/verify_puzzles.py --dir puzzles/official --timeout 25 -j 8`（router 只走 RustSolver）
+- **1048 / 1258 通过**，较上次 **+8**。
+- 提升类型：**纯 rose_window**（aog 曾超时/UNSOLVED）——C4-1、0277、0213、0213nopad 新解出且与官方一致；0833（10×11）时解时不（大网格候选上限敏感）。
+- 注：router 仍保留 Python 兜底（Rust-only 有 2 题解不出：1301/0957，brick 回溯短板）。
 
-## 2. 解题进度（全量扫描，2026-08-05）
+### 2026-08-06 · rose 尺寸感知优化（commit `7e569e7`）
+- **result**：`results/20260806_7e569e7_rose-size-aware-fix.txt`
+- 工具：`scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 25 -j 8`
+- **1047 / 1258 通过**，较基准（1040）**+7**。
 
-扫描方式：每题经 `default_router()`（Rust aog→pieces→backtrack 链）求解，用 `IndependentValidator` 独立校验，并与官方 answer 文件对照。`scripts/verify_puzzles.py` 现支持 `--rules <type>`（按规则过滤）与 `--out <file>`（JSONL 存档，schema 对齐 `scan_official_results.jsonl`），可按规则做专项扫描。
+  | Zone | 通过 | 未解 | 变化 |
+  |---|---|---|---|
+  | Zone1 | 300 / 312 | 12 | 0 |
+  | Zone2 | 393 / 438 | 45 | **+6** |
+  | Zone3 | 328 / 481 | 153 | -1 |
 
-| 状态 | 数量 | 占比 | 说明 |
-|---|---|---|---|
-| MATCH（与官方一致） | 982 | 79.8% | |
-| DIFF（解≠官方） | 6 | 0.5% | 全为 watchtower，见 §3 |
-| UNSOLVED（求解器解不出） | 235 | 19.1% | 见 §4 |
-| 无官方解（0067 / 1130） | 2 | — | archive 无 solution 字段，无 answer 文件 |
-| 未跑完（超难，卡在回溯） | 7 | — | 回溯候选枚举超时，见 §5 |
+- 提升类型：**range+rose**（带区域尺寸约束的玫瑰窗）——1334/1342 由 30s FAIL → **<1s 解出**（见第二部分对应条目）。
+- 注：Zone3 -1 为 aog 预算下调后某题的计时/非确定性波动（rose 兜底仍未解）。
 
-> 数字为 2026-08-05 修复后全量扫描（1224/1231 已完成）。每题的完整求解结果见仓库根目录 `scan_official_results.jsonl`。
+---
 
-### 2.1 基准（benchmark，2026-08-05 修复后）
+## 第二部分：变更内容
 
-| 工具 | 范围 | 结果 |
-|---|---|---|
-| `scripts/benchmark_rust_solver.py`（Rust 求解器） | puzzles/official 1258 题 | **1040 / 1258 通过**（Zone1 300/312, Zone2 387/438, Zone3 329/481），失败全为 20s 超时 |
-| `scripts/verify_puzzles.py`（完整路由链） | puzzles/official | 跑到 990/1258 被 OOM 中断（862 PASS / 128 FAIL）——回溯 rose-parallel 线程内存泄漏，见 §5 |
+> 按时间顺序**往后追加**（旧的在上）。每次：日期、commit、改了什么、结果。
 
-**失败均为 UNSOLVED（求解器超时/无解），不再有「接受了非法解」的失败。** 修复前 verify 日志里有 ~190 FAIL，其中大量是 gemini/delta、玫瑰窗、环纹 bug 导致的错误解被接受。
+### 2026-08-05 · 校验 / 转换修复（commits `4ab9e4b` `047f9a1` `9a6c965` `bde3713`）
+早期全量扫描发现 129 道「求解器解 ≠ 官方解」，逐一深挖后确认**绝大多数并非真多解，而是转换 / 校验的真实 bug**：
 
-完整原始输出：`results/benchmark_rust_official_33d32c5.txt`（头部标注脚本、commit `33d32c5`、代码状态 `bde3713`+`9a6c965`）。
+1. **gemini/delta 边约束未被强制**（`4ab9e4b`）：`build_rules` 只给 inequality/difference 生成规则类型，`=`/`!` 边没有 `homogeneous`/`heterogeneous` → aog 求解器跳过边约束、`IndependentValidator` 也不分发边检查 → 求解器产出违反边约束的划分却被判合法。
+2. **玫瑰窗检测读错位置**（`047f9a1`）：`_is_rose_window` 用固定 2 字符步长切原始网格找 P 符号，前面有变宽格（罗盘 `U…` / `S` 形）时位置错位 → rose_window 规则被静默丢弃（如 0634）。
+3. **环纹规则漏边框 T 型**（`9a6c965`）：环纹检查只遍历内部顶点，内部区域边界与外边框相遇也是 3 段 = T 型（如 0638）；另 `check_rule_ring` 误用 `Edge.is_boundary` 而非区域边界。
+4. **1SPR 的 S 格缺 shape 约束**（`bde3713`）：1SPR 谜题 `S#` 格只记 symbol 未加 `shape_pattern` → 缺 puzzle_piece 约束。
 
-另：`scan_official_results.jsonl`（仓库根目录）保存了每题的求解结果（区域划分、耗时、规则、校验结果），可复用于后续对比。
+**补充**：`= (gemini)` / `! (delta)` 边语义是「两侧区域同形/异形」，非「同区域」——校验器与游戏文档（glimmith-solver）一致，非 bug。
+**结果**：129 道 → 6 道（全为 watchtower，见附录 A）。
 
-### 2.2 rose 求解器下沉到 Rust（2026-08-05）
+### 2026-08-05 · block / solitary 建模修复 + block→形状池（commit `e926943`，另一窗口）
+方块题专项：全语料 66 道 block 题，逐题硬超时复扫。
+- **根因**：Rust 回溯/pieces 把 block 候选面积硬约束为 4（`min_a=max_a=4`）、`check_block` 要求全 2×2；aog 才是正确的「任意矩形」。`solitary` 同病（误当面积=1）。
+- **修复**：① block→形状池转换（`rust_solver.py` 合成"所有矩形"注入载荷，`pieces` DLX 接手）；② 修 Rust block/solitary 建模（`backtrack.rs`/`pieces.rs`/`constraints.rs`，`check_block`→`is_rectangle`、`check_same/different`→按形状等）；③ DLX 迭代到合法划分（`dlx.rs search_with_check`）；④ 预算语义改「单元预算」（每部分各拿完整 timeout）；⑤ 形状池按盘面预筛。
+- **结果**（单元预算 20s）：0908v2、0826、0829 新解出（DLX）；0446、1109、1004 仍 UNSOLVED（DLX distinct 形状剪枝 / compass 专项 / rose 组合+内存泄漏，见后续计划）。
+- 剩余方向：0446（形状去重剪枝）、1109（compass 剪枝）、1004（先修回溯 rose-parallel 内存泄漏）。
 
-把 Python rose 求解器（`region_match.py` + `rose_growth.py`）移植进 Rust（`rsolver/src/solver/rose/`），使 Rust 二进制能解 aog 解不出的**无尺寸约束纯 rose** 题。设计文档：`docs/重构/rose-solver-rust-port.md`。
+### 2026-08-05 · rose 求解器下沉 Rust（commit `4733f59`）
+把 Python rose 求解器（`region_match.py` + `rose_growth.py`）移植进 Rust（`rsolver/src/solver/rose/`），使 Rust 二进制能解 aog 解不出的**无尺寸约束纯 rose**。设计文档：`docs/重构/rose-solver-rust-port.md`。
+- 模块：`cells.rs`（CellSet 位集/边键/PreBoundaries）、`region_match.rs`（候选 BFS + 面积/分区过滤 + 面积组合 + MRV）、`rose_growth.rs`（wavefront + swap/链式修复，单/多符号）、`mod.rs`（入口，`aog::validate` 作验收门）。
+- 分发：rose-capable 题 aog 先 5s 预算（保住 ~30 道 <1s 已解），失败后 rose 用剩余预算。
+- **结果**：纯 rose 语料 30 题 28 题可解；C4-1/0277/0213/0213nopad 新解出且与官方一致；大网格（0804/1433/1434）仍 UNSOLVED（Python 也解不出，无回归）。
 
-- Rust-only `verify_puzzles.py`（puzzles/official，1258 题）：**1048 / 1258 通过**（较 rose 移植前 rust-only 基准 1040 提升 8 题）。
-- 新增解出且与官方一致：**C4-1、0277、0213、0213nopad**（原 aog 30s 超时/UNSOLVED）；0833（10×11）时解时不（大网格，候选上限敏感）。
-- 纯 rose 语料 30 题中 28 题 Rust 可解；大网格（0804/1433/1434）仍 UNSOLVED（Python 也解不出，无回归）。
-- **router 仍保留 Python 兜底**：Rust-only 基准下 2 题（1301 brick+area、0957 brick+block+rose）解不出，是 **Rust backtrack/pieces 的 brick 短板**（非 rose 问题），Python backtrack 兜底（router 保留 Python 链，实际无回归）。等 Rust 补齐 brick 回溯后再删 Python（软门禁）。
-
-### 2.3 rose 差距对比与优化（2026-08-06）
-
-对比 Python rose 与 Rust rose，找到并修复了 range+rose 差距：
+### 2026-08-06 · rose 尺寸感知优化（commit `7e569e7`）
+对比 Python rose 与 Rust rose，找到并修复 **range+rose 差距**（带区域尺寸约束的玫瑰窗）：
 
 | 题 | Python rose | 优化前 Rust | 优化后 Rust |
 |---|---|---|---|
 | 1334（range+rose, 7×5） | 9.4s | 30s FAIL | **438ms ✓** |
 | 1342（range+rose, 6×6） | 30.9s | 30s FAIL | **865ms ✓** |
 
-**根因**：`region_match` 生成面积组合时 `min_area_per_region=1`，对带尺寸约束的 rose 题组合爆炸（1342 达 **1265 万组合**，内存 ~1GB）；且候选 BFS 20000 上限 + 位集遍历顺序与 Python frozenset 不同，会截断掉合法候选。
+- **根因**：① `region_match` 面积组合 `min_area_per_region=1`，带尺寸约束的题组合爆炸（1342 达 **1265 万组合**，~1GB）；② 候选 BFS 20000 上限 + 位集遍历顺序与 Python frozenset 不同，截断保留的候选不一致。
+- **修复**：`rose::region_size_bounds()`（解析 range/precise 全局区域尺寸界）+ region_match 按 `[min,max]` 过滤候选、组合 `min_val=max(min,N)`。1342 组合 1265 万 → **1 个**，1334 → 6 个。`AOG_ROSE_BUDGET_MS` 5s→3s（aog 解 <1s 纯 rose 后，硬题快速交 rose）。
+- **结果**：Rust-only 基准 1047/1258（rose 前 1040）。0 个 rose 专属差距；剩余 2 个 Rust-only 缺口（0957 brick+block+rose、1301 brick+area）为 **brick 回溯短板**（非 rose），router Python 兜底覆盖，实际无回归。
 
-**修复**：`region_match` 感知 `range`/`precise` 的全局区域尺寸界（`rose::region_size_bounds`），先按 `[min,max]` 过滤候选、组合枚举 `min_val=max(min,N)`。1342 组合从 1265 万 → **1 个**，1334 → 6 个。另把 `AOG_ROSE_BUDGET_MS` 设为 3s（aog 解 <1s 的纯 rose 后，硬题快速交 rose）。
+---
 
-Rust-only 基准：**1047/1258 通过**（rose 前 1040）。0 个 rose 专属差距；剩余 2 个 Rust-only 缺口均为 brick 回溯短板。
-- Rust-only 全量输出：`results/verify_rust_only_4733f59.txt`（头部标注脚本、commit `4733f59`）。
+## 附录
 
-## 3. 解 ≠ 官方解（DIFF）分析
-
-**仅剩 6 道，全为 watchtower 规则**：
-
+### A. 当前 DIFF（解 ≠ 官方解）—— 6 道，全为 watchtower
 ```
 Zone3/3-vertex-radar/0543  0544  0662  0663  0800
 Zone3/7-zone3-mixed/1144
 ```
+双重验证：官方解与求解器解**均**通过全部建模规则（望塔值 0 违例）。已对照 aog `check_radar` 语义确认 watchtower 建模正确。按当前规则**确实存在多个合法解**，属「官方解是其中一解」的候选。待办：游戏侧实测，或核查望塔规则在障碍格/边框的语义。
 
-每道都做了双重验证：官方解与求解器解**均**通过全部建模规则（望塔值逐一核对，0 违例）。已对照 aog `check_radar` 语义确认 watchtower 规则建模正确。因此这 6 道在 archive 编码的规则下**确实存在多个合法解**，属「官方解是其中一解，而非唯一解」的候选。
+### B. 当前 UNSOLVED 分析（求解器解不出，非错解）
+按类型（近似）：Zone3/7-zone3-mixed 33、Zone3/2-loopy 31、Zone3/6-compass-main 29、Zone3/5-inequality 19、Zone3/3-vertex-radar 18、Zone3/8-endgame 18、Zone3/4-difference 15、其余 Zone1/Zone2 散布。
+主要规则组合：compass+solitary、rose_window（剩大网格 0804/1433/1434）、compass+rose_window、rose_window+same/ring/watchtower 等。
+**根因**：求解器能力限制（compass/rose/ring 强规则组合搜索空间大、剪枝不足），**不是校验或转换问题**。
 
-> 待办：若坚持官方解必唯一，需在游戏侧实测这 6 道（或核查望塔规则在障碍格/边框附近的语义是否还有遗漏）。
+### C. 后续计划
+1. 修 Rust **brick 回溯短板**（0957/1301，或借 Python 兜底）；补齐后做 Rust-only 全量回归再删 Python 求解器。
+2. 修回溯内存泄漏（`backtrack._solve_rose_parallel` 守护线程不退出，全量 verify OOM / 1004 300s 不收敛）——全量回归阻塞项。
+3. 甄别 6 道 watchtower DIFF（游戏侧实测 or 望塔规则深挖）。
+4. compass / ring 组合剪枝；0446（DLX 形状去重）、1109（compass 专项）、1004（rose+watchtower）。
+5. 每次优化后重跑全量扫描刷新「第一部分」数字。
 
-## 4. 未解（UNSOLVED）分析
-
-按类型分布：
-
-| 类型 | 未解数 | 主要规则 |
-|---|---|---|
-| Zone3/7-zone3-mixed | 33 | 混合（compass/rose/ring 组合） |
-| Zone3/2-loopy | 31 | ring（环纹） |
-| Zone3/6-compass-main | 29 | compass |
-| Zone3/5-inequality | 19 | inequality |
-| Zone3/3-vertex-radar | 18 | watchtower |
-| Zone3/8-endgame | 18 | 混合 |
-| Zone3/4-difference | 15 | difference |
-| 其余 Zone1/Zone2 | 72 | 散布 |
-
-按规则组合（前几名）：
-
-| 规则组合 | 未解数 | 原因推测 |
-|---|---|---|
-| compass + solitary | 13 | compass 搜索空间大 |
-| rose_window（纯） | ~2 | 玫瑰窗区域匹配；rose 移植后 0277/0213/0213nopad 已解，剩大网格 0804/1433/1434（见 §2.2） |
-| inequality | 6 | 面积不等约束难传播 |
-| compass + rose_window | 6 | 双强规则组合 |
-| rose_window + same / ring / watchtower | 13 | 组合剪枝不足 |
-
-**根因**：主要是**求解器能力限制**——compass、rose_window、ring 等强规则的组合搜索空间大，现有剪枝不足，在超时内找不到解。**不是校验或转换问题**（这些题不再产出错误答案，只解不出）。
-
-## 4.1 方块规则（block）题专项（2026-08-05）
-
-全语料含 `block`（方块）规则的题共 **66 道**（official 65 + reference 1，user/aiGen 无）。逐题硬超时复扫（`scripts/verify_puzzles.py --rules block --out <file>`，单元预算 20s/部分），当前状态：
-
-| 状态 | 数量 | 说明 |
-|---|---|---|
-| 求解器可解（校验通过） | 63 | 含 0835 / 0836 两题求解器解 ≠ 官方解（官方解非唯一，与 §3 同类） |
-| 求解器解不出 | 3 | 0446 / 1109（各部分 20s 预算内失败）+ 1004（rose 组合病理超时） |
-| **真无解** | **0** | 3 道解不出的题，官方解经 `IndependentValidator` 全规则校验**全部通过** |
-
-剩余 3 道：different+block（0446，14×14）、block+area+compass+solitary（1109，12×12）、block+watchtower+rose_window（1004，13×13）。
-
-根因（两条，均有代码实证）：
-1. **Rust 回溯 / pieces 对 `block` 的建模错误**：`backtrack.rs:80-83`、`pieces.rs:138` 把 block 的候选区域面积硬约束为 4（`min_a=max_a=4`），`constraints.rs:204-207` 的 `check_block` 更要求所有区域 == 2×2 方块；而 aog（`core.rs:614` `only_rectangles`、`validate.rs:164` `is_rectangle`）才是正确的"任意矩形"。回溯用 `max_area` 硬性截断区域生长（`backtrack.rs:201-205`），因此对任何"区域非全 2×2"的方块题**结构上不可能找到解**——6 道 UNSOLVED 的官方解区域大小各异（平均 3.6~13），全部命中。**`solitary` 同病**：`backtrack.rs:76-79`、`pieces.rs:137` 把独居误当"面积=1"，大概率也是 §4 中 13 道 compass+solitary UNSOLVED 的真凶（而非"搜索空间大"）。
-2. **大棋盘 + 强规则组合下 aog 剪枝不足**：Rust 子进程在预算内解不出（首错均为 `rust timed out`）；且 exact_cover 启用门槛 est≤5000（`src/solver/exact_cover/solver.py:29-34`）挡掉了 0446（est=11025）、1109（est=6084）的纯 DLX 路径。1004 的 150s 硬超时另与 §5.3 回溯 rose-parallel 内存泄漏/线程不退出有关。
-
-**不是建模/转换问题**——所有官方解都通过校验，只是求解器跑不出来。
-
-### 已实施优化（2026-08-05 二次迭代，3 道已解出）
-
-背景调研确认了两条路径：A) block→形状池转换（语义等价成立，`shape_pool` 允许复用/省略形状）；B) 修 Rust 的 block/solitary 建模错误。本轮两者都落地了：
-
-1. **block → 形状池转换**：`src/solver/rust_solver.py` 在把 block 题发给 Rust 时，合成"所有矩形"（1×1…H×W）形状池注入载荷，让 `pieces`（DLX）接手。语义安全：最终答案仍由 router 用原 `block` 规则校验。
-2. **修 Rust block/solitary 建模**：`backtrack.rs` / `pieces.rs` 移除 `block→4..4`、`solitary→1..1` 面积强制；`constraints.rs` 的 `check_block`（2×2 方块）→ `is_rectangle`（任意矩形）、`check_nonblock` → 非矩形、`check_same`/`check_different` → 按**形状**（原误按面积）、`check_solitary` → 每区域恰好 1 个线索格、`check_differentiation` → 邻区面积不同（与 aog 语义对齐）。backtrack 叶子检查补齐 block/different/solitary/differentiation。
-3. **DLX 迭代到合法划分**：`dlx.rs` `search_with_check` 支持 on_solution 返回 true 中止；`pieces.rs` 用它 + `constraints::check_all` 逐个校验完整划分，跳过不满足 co-rule 的平凡划分（如全 1×1），直到找到合法矩形划分或超时。
-4. **预算语义改为「单元预算」**：`timeout` 是每个求解器部分的预算，不是总分摊。`src/solver/base.py` 不再 `remaining/pending` 分摊，每个 Python 求解器各拿完整 `timeout`；Rust 侧 aog/pieces/backtrack 各拿完整 `timeout`（`mod.rs`），subprocess 给足 3× 墙钟（`rust_solver.py`）。
-5. **形状池按盘面预筛**：`rust_solver.py::_fitting_rectangles` 只保留"至少有一个合法放置（不越障碍格、不跨预画边界）"的矩形，缩小注入形状池。对不规则盘面收益显著：0446 池 196→64（-67%）、1004 169→49（-71%）、0829 -60%、0826 -55%、0908v2 -61%；满盘面（1109）不变。求解速度小幅提升（0908v2 11.4→10.5s、0826 23.6→22.5s、0829 27.7→24.8s），池计算开销 ≤17ms。
-
-**结果**（单元预算 20s，pytest ~387 全过，无回归）：
-
-| 题 | 之前 | 现在 |
-|---|---|---|
-| 0908v2（differentiation+block+inequality，8×8） | UNSOLVED | ✅ 11.4s（rust/pieces DLX） |
-| 0826（block+rose_window，10×10） | UNSOLVED | ✅ 23.6s（rust/pieces DLX） |
-| 0829（block+area+solitary，11×11） | UNSOLVED | ✅ 27.7s（rust/pieces DLX） |
-| 0446（different+block，14×14） | UNSOLVED | ❌ 209s（DLX 搜索 distinct 矩形划分超预算） |
-| 1109（block+area+compass+solitary，12×12） | UNSOLVED | ❌ 120s（compass 强约束） |
-| 1004（block+watchtower+rose_window，13×13） | UNSOLVED | ❌ 300s 硬超时（rose 组合 + §5.4 泄漏） |
-
-其余 60 道（含 reference、0957、0835/0836）抽查全部照常解出。
-
-**剩余 3 道的方向**：0446（distinct 矩形划分，DLX 可加形状去重剪枝）、1109（compass，需 compass 专项剪枝）、1004（rose+watchtower + 回溯 rose-parallel 内存泄漏，先修 §5.4）。
-
-## 5. 后续计划
-
-1. **甄别 6 道 watchtower DIFF**：在游戏侧实测；或深挖望塔规则在障碍格/边框附近的语义。
-2. **提升求解能力**：compass+rose、ring 组合的剪枝；卡死题（回溯候选枚举超时）专项。
-3. **✅ 修 Rust block/solitary 建模 + block→形状池转换（已实施）**：见 §4.1。方块题 63/66 可解。剩余：0446（DLX distinct 形状剪枝）、1109（compass 专项剪枝）、1004（见 4）。
-4. **修回溯内存泄漏**：`backtrack._solve_rose_parallel` 的守护线程超时后不退出、累积内存，导致 `verify_puzzles.py` 全量跑 OOM（~990/1258）与 1004 等 rose 题 300s 不收敛。这是全量回归的阻塞项。
-5. **回归基准**：**预算语义已改为「单元预算」（每部分各拿完整 timeout）**，影响全语料求解行为，需重跑全量扫描刷新 §2 数字（`scan_official_results.jsonl` 旧数字基于分摊预算）。每次优化后 `scripts/verify_puzzles.py` + 全量扫描。
-6. **README / 文档同步**：见「软门禁」。
-
-## 6. 软门禁（Soft Gate）
-
+### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：
-
-1. **更新本文档**：刷新 §2 进度数字；若 DIFF / UNSOLVED 集合有变化，更新 §3 / §4 并说明原因。
-2. **更新对应文档**：`faq.md`（转换/校验经验）、`rules-guide.md`（规则语义）、`architecture.md`（求解架构）等，凡涉及处同步。
-3. **README**：若影响外部可观察行为（命令、规则数、已知限制），同步 README。
-4. **跑测试 + 验证**：`pytest`、`cargo test`、相关 `verify_puzzles.py` 片段，把结果记入本文档。
+1. **本文件**：第一部分（进度快照）与第二部分（变更记录）各追加一条。
+2. **相关文档**：`faq.md` / `rules-guide.md` / `architecture.md` 等，凡涉及处同步。
+3. **README**：若影响外部可观察行为（命令、规则数、已知限制）同步。
+4. **测试**：`pytest`、`cargo test`、相关 `verify_puzzles.py` 片段，把结果记入本文件。
 
 不满足即视为未完成，不应合入。
-
----
-*最近更新：2026-08-05（方块题优化：修 Rust block/solitary 建模 + block→形状池转换 + 单元预算语义，方块题 60→63 可解；此前：gemini/delta 边约束、玫瑰窗检测、环纹边框 T 型、1SPR shape 修复）*

@@ -93,7 +93,7 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 - `solver/pieces.rs` / `dlx.rs` → `05-pieces求解器.md`
 - `solver/backtrack.rs` → `06-backtrack求解器.md`
 - `solver/rose/**` → `07-rose求解器.md`
-- `constraints.rs` / `solver/aog/validate.rs` → `08-验证与约束检查.md`
+- `solver/validate.rs`（完整独立验证器；原 `constraints.rs` 已于 2026-08-06 删除，逻辑并入） → `08-验证与约束检查.md`
 
 **官方题准则：官方解是唯一解。** 对求解器 / 转换脚本 / 规则校验器 / 规则语义的**任何优化**，
 除上述文档同步外，还必须：
@@ -102,7 +102,9 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 2. 跑通 `pytest`、`cargo test` 与相关 `verify_puzzles.py` 片段，把结果记入该文档。
 3. **基准评估结果随提交入库**：影响求解结果（可解性 / 性能 / 规则语义）的提交，必须把对应
    基准 / 全量扫描输出存为 `results/YYYYMMDD_<short-sha|描述>.txt` 并**随该提交一起入库**
-   （不允许只留在 /tmp）。纯文档、无行为变化的重构等不影响求解结果的提交可豁免。
+   （不允许只留在 /tmp）。同时把产出该结果的 `rsolver` 二进制存为
+   `results/bin/rsolver-<short-sha>.<平台>`（如 `rsolver-f1cfa16.linux-x86_64`），保证结果可复现。
+   纯文档、无行为变化的重构等不影响求解结果的提交可豁免。
 
 不满足即视为未完成。全量扫描方式与脚本见该文档 §2。
 

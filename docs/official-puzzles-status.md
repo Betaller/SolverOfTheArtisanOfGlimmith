@@ -69,7 +69,8 @@
 - **改动**：用户报告 0800/0543 官方题与 JSON 有差异。根因：官方题在**外边界顶点**上有望塔，但**转换器**（`convert_archive.py` 只收集内部行/列）与**模型**（Rust `io.rs` 顶点数组 `(h-1)×(w-1)`，`build_puzzle` 拒绝边界坐标）双双丢弃。
   - 顶点约定改为**绝对网格坐标** `(0..=h × 0..=w)`：`rsolver` io.rs / validate.rs / backtrack.rs / pieces.rs / aog core.rs 雷达编码（`2r+2, 2c+2`）；Python board.py / validator.py / UI grid_widget.py（绘制与点击映射去 `±1` 偏移）。
   - 转换器收集全部边界望塔；85 个 watchtower 谜题 JSON 以 `puzzles.json` 为权威源迁移 vertices。
-- **效果**：**watchtower DIFF 全部消除（0 DIFF）**。6 道（0543/0544/0662/0663/0800/1144）解出且与官方解一致；0985 加约束后 30s 超时（FAIL 但不再出错误解）。50 PASS / 35 FAIL（35 个失败全部为基线既有失败，**0 回归**）。
+- **效果**：**watchtower DIFF 全部消除（0 DIFF）**。6 道（0543/0544/0662/0663/0800/1144）解出且与官方解一致；0985 加约束后 30s 超时（FAIL 但不再出错误解）。watchtower 专项 50 PASS / 35 FAIL（35 个失败全部为基线既有失败，**0 回归**）。
+- **全量 verify**：**1070 PASS / 225 FAIL / 0 DIFF**（vs 基线 1067/228/7DIFF，净 **+3 PASS**；14 个 PASS→FAIL 全部为并行负载临界波动，单跑解出，无真实回归）。
 - **验证**：`cargo test` 6 通过；`pytest` 全绿；watchtower 专项 verify 0 DIFF；6/7 DIFF 题解出官方解。
 
 ---
@@ -315,6 +316,8 @@ Zone3/7-zone3-mixed/1144
 4. **测试**：`pytest`、`cargo test`、相关 `verify_puzzles.py` 片段，把结果记入本文件。
 5. **基准结果随提交入库**：影响求解结果（可解性 / 性能 / 规则语义）的提交，必须把对应基准 /
    全量扫描输出存为 `results/YYYYMMDD_<short-sha|描述>.txt` 并**随该提交一起入库**（不允许只
-   留在 /tmp）。纯文档、无行为变化的重构等不影响求解结果的提交可豁免。
+   留在 /tmp）。同时把产出该结果的 `rsolver` 二进制存为
+   `results/bin/rsolver-<short-sha>.<平台>`（结果可复现）。纯文档、无行为变化的重构等不影响
+   求解结果的提交可豁免。
 
 不满足即视为未完成，不应合入。

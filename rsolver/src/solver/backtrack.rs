@@ -487,9 +487,10 @@ fn cell_domain_size(puzzle: &Puzzle, state: &BacktrackState, r: usize, c: usize)
 /// (must join a specific neighbouring region or must start fresh) are selected
 /// first — they have no real choice and delaying them only wastes search.
 fn pick_next_cell(puzzle: &Puzzle, state: &BacktrackState) -> (usize, usize) {
+    // Area-rule path: grow under-target clue-regions from their frontier, using
+    // the original row-major ordering (which is well-tuned for this path).
     if state.has_area_rule {
         let mut best: Option<(usize, usize)> = None;
-        let mut best_domain = usize::MAX;
         let mut best_idx = usize::MAX;
         for (&rid, &n) in &state.region_clue {
             let area = state.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
@@ -497,13 +498,8 @@ fn pick_next_cell(puzzle: &Puzzle, state: &BacktrackState) -> (usize, usize) {
                 if let Some(fr) = state.frontier.get(&rid) {
                     for &cell in fr.keys() {
                         if is_undecided(state, cell.0, cell.1) {
-                            let domain = cell_domain_size(puzzle, state, cell.0, cell.1);
                             let i = state.cell_index[cell.0][cell.1];
-                            // Prefer smaller domain; tiebreak by row-major index
-                            if domain < best_domain
-                                || (domain == best_domain && i < best_idx)
-                            {
-                                best_domain = domain;
+                            if i < best_idx {
                                 best_idx = i;
                                 best = Some(cell);
                             }
@@ -516,7 +512,10 @@ fn pick_next_cell(puzzle: &Puzzle, state: &BacktrackState) -> (usize, usize) {
             return cell;
         }
     }
-    // MRV fallback: scan all undecided cells, pick the one with smallest domain.
+    // MRV fallback: when there are no area-number clues to guide growth, pick
+    // the globally most-constrained undecided cell (minimum remaining values).
+    // Cells with only 1 option (must join a specific region or start fresh) are
+    // selected first — they have no real choice and delaying them wastes search.
     let mut best: Option<(usize, usize)> = None;
     let mut best_domain = usize::MAX;
     let mut best_idx = usize::MAX;

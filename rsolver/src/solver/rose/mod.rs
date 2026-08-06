@@ -12,35 +12,10 @@ pub mod rose_growth;
 use std::collections::HashMap;
 use std::time::Instant;
 
+use crate::shapes::rose_symbol_types;
 use crate::types::{Puzzle, RegionInfo};
 
 use cells::{CellSet, PreBoundaries};
-
-/// Symbol types from the rule params, else the sorted distinct cell symbols.
-pub fn rose_symbol_types(puzzle: &Puzzle) -> Vec<String> {
-    let rule = puzzle.rules.iter().find(|r| r.ctype == "rose_window");
-    let Some(rule) = rule else {
-        return Vec::new();
-    };
-    if let Some(arr) = rule.params.get("symbol_types").and_then(|v| v.as_array()) {
-        let t: Vec<String> = arr
-            .iter()
-            .filter_map(|x| x.as_str().map(|s| s.to_string()))
-            .collect();
-        if !t.is_empty() {
-            return t;
-        }
-    }
-    let mut s: Vec<String> = puzzle
-        .cells
-        .iter()
-        .flatten()
-        .filter_map(|c| c.symbol.clone())
-        .collect();
-    s.sort();
-    s.dedup();
-    s
-}
 
 /// Number of regions = occurrences of each symbol type; 0 if counts differ.
 pub fn rose_m(puzzle: &Puzzle, symbol_types: &[String]) -> usize {
@@ -93,37 +68,9 @@ pub fn build_regions(region_of: &[Option<usize>], _h: usize, w: usize) -> Vec<Re
     regions
 }
 
-/// Global region-size bounds from `range` / `precise` rules (1..=usize::MAX
-/// when unconstrained).  Lets region_match prune candidates and area combos so
-/// size-constrained rose puzzles (e.g. range+rose) don't explode combinatorially.
-pub fn region_size_bounds(puzzle: &Puzzle) -> (usize, usize) {
-    let mut min_b = 1usize;
-    let mut max_b = usize::MAX;
-    for r in &puzzle.rules {
-        match r.ctype.as_str() {
-            "precise" => {
-                if let Some(v) = r.params.get("area").and_then(|v| v.as_u64()) {
-                    min_b = v as usize;
-                    max_b = v as usize;
-                }
-            }
-            "range" => {
-                if let Some(v) = r.params.get("min").and_then(|v| v.as_u64()) {
-                    min_b = min_b.max(v as usize);
-                }
-                if let Some(v) = r.params.get("max").and_then(|v| v.as_u64()) {
-                    max_b = max_b.min(v as usize);
-                }
-            }
-            _ => {}
-        }
-    }
-    (min_b, max_b)
-}
-
 /// Accept a candidate solution only if the full independent validator passes.
 pub fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<RegionInfo>> {
-    if crate::solver::aog::validate::validate(puzzle, &regions) {
+    if crate::solver::validate::validate(puzzle, &regions) {
         Some(regions)
     } else {
         None

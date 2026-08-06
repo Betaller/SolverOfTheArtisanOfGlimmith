@@ -27,7 +27,7 @@
 | 当前 rsolver 在 C4-1 上 aog 跑满 30s 后 `{solved:false, elapsed_ms:33384}` | 实测 `rsolver ... C/C4-1.json` |
 | aog 尊重 deadline（`aog/search.rs:844` 每层递归检查 `Instant::now() >= core.deadline`） | 代码确认 |
 | aog 已能 <750ms 解约 30 道纯 rose 题——**分发不能回归这些** | `scan_official_results.jsonl` 纯 rose MATCH 行 elapsed 均 <750ms |
-| Rust `aog/validate.rs` 是**完整独立校验器**（含真正的 `check_rose_window` `validate.rs:327-392`），可复用于 rose 解验收门 | 代码确认 |
+| Rust `solver/validate.rs` 是**完整独立校验器**（含真正的 `check_rose_window` `validate.rs:327-380`），可复用于 rose 解验收门 | 代码确认 |
 | Rust `constraints.rs` 对 rose/fence/brick/ring/inequality/difference/watchtower/compass/puzzle_piece 是 **stub（返回 true）**，不可作验收门 | `constraints.rs:35-49` |
 | 未解纯 rose 集：0277（Python rose 可解）、0213、0213nopad、0804、0833、1433、1434、0881g | `scan_official_results.jsonl` UNSOLVED 行 |
 
@@ -98,11 +98,11 @@ let aog_budget = if rose_capable { AOG_ROSE_BUDGET_MS.min(timeout_ms) } else { t
 
 ## 6. 验收门
 
-rose 返回 `Vec<RegionInfo>` 后，用 **`aog::validate::validate(puzzle, &regions)`**（完整 22 规则）验收，通过才返回；分发侧走 `build_solution`（非 trusted，保留边界兜底 + rule_results）。**不要**走 `build_solution_trusted`（跳过校验）。
+rose 返回 `Vec<RegionInfo>` 后，用 **`crate::solver::validate::validate(puzzle, &regions)`**（完整 22 规则）验收，通过才返回；分发侧走 `build_solution`（非 trusted，保留边界兜底 + rule_results）。**不要**走 `build_solution_trusted`（跳过校验）。
 
 ```rust
 fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<RegionInfo>> {
-    if crate::solver::aog::validate::validate(puzzle, &regions) { Some(regions) } else { None }
+    if crate::solver::validate::validate(puzzle, &regions) { Some(regions) } else { None }
 }
 ```
 
@@ -146,7 +146,7 @@ fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<Regi
 
 ## 9. 验证
 
-1. **cargo 单测**：CellSet 操作（含跨 word）；`edge_key` 规范化（`(1,2,1,1)==(1,1,1,2)`）；`PreBoundaries::from_puzzle`（C4-1 已知边界）；`generate_all_candidates`（2×2 带边界）；`_enum_area_combos_bounded`（`total=4,parts=2` → `[(1,3),(2,2),(3,1)]`）；`_match_regions_mrv`（2×2 手造）；`aog::validate` 对 C4-1 解为 true。
+1. **cargo 单测**：CellSet 操作（含跨 word）；`edge_key` 规范化（`(1,2,1,1)==(1,1,1,2)`）；`PreBoundaries::from_puzzle`（C4-1 已知边界）；`generate_all_candidates`（2×2 带边界）；`_enum_area_combos_bounded`（`total=4,parts=2` → `[(1,3),(2,2),(3,1)]`）；`_match_regions_mrv`（2×2 手造）；`solver::validate` 对 C4-1 解为 true。
 2. **集成**：`cargo build --release` 后：
    - `rsolver/target/release/rsolver puzzles/official/C/C4-1.json`
    - `rsolver/target/release/rsolver puzzles/official/Zone1/7-slash-pack/0277.json`
@@ -163,7 +163,7 @@ fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<Regi
 | 多符号 `in_same` / 链式修复易错 | 机械移植 + `aog::validate` 验收兜底（`rose_growth.py:149-198, 254-265`） |
 | MATCH→DIFF 回归（~30 道 aog 已解纯 rose） | 分发"aog 先赢短预算"，语料回归确认 |
 | 大网格纯 rose（0213/0833/1433/1434/0804）仍超时 | 可接受（aog 本就失败，无回归）；后续可放宽 `ROSE_TIMEOUT_MS` |
-| `build_solution` 的 constraints stub | 安全——先用 `aog::validate` 验收，不走 trusted |
+| `build_solution` 的 constraints stub | 安全——先用 `solver::validate` 验收，不走 trusted |
 
 ---
 *最近更新：2026-08-05（方案批准，待实施）*

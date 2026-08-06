@@ -1,11 +1,14 @@
 //! Cells-based rule validation, ported from the Python `IndependentValidator`.
 //!
-//! The AoG search works on the C++-style padded grid; this validates the
-//! extracted regions against the rsolver `Puzzle` model so a buggy fill can
-//! never be reported as a solution.
+//! The complete, solver-agnostic independent validator: it validates the
+//! extracted regions of any solver against the rsolver `Puzzle` model so a
+//! buggy fill can never be reported as a solution.  The AoG search works on the
+//! C++-style padded grid; this module is the common acceptance gate for aog
+//! (`solver/aog/mod.rs`) and rose (`solver/rose/mod.rs`).
 
 use std::collections::{HashMap, HashSet};
 
+use crate::shapes::{collect_pool_shapes, dihedral_key, is_rectangle, rose_symbol_types};
 use crate::types::*;
 
 pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
@@ -75,7 +78,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     for rule in &puzzle.rules {
         match rule.ctype.as_str() {
             "shape_pool" => {
-                let pool: HashSet<String> = super::core::collect_pool_shapes(puzzle)
+                let pool: HashSet<String> = collect_pool_shapes(puzzle)
                     .iter()
                     .map(|s| dihedral_key(s))
                     .collect();
@@ -322,26 +325,13 @@ fn region_of(by_rid: &HashMap<usize, Vec<[usize; 2]>>, r: usize, c: usize) -> Op
 
 /// rose_window: each region contains exactly one of each symbol type.
 fn check_rose_window(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
-    // Determine symbol types.
-    let types: Vec<String> = if let Some(rule) = puzzle.rules.iter().find(|r| r.ctype == "rose_window") {
-        if let Some(arr) = rule.params.get("symbol_types").and_then(|v| v.as_array()) {
-            arr.iter()
-                .filter_map(|t| t.as_str().map(|s| s.to_string()))
-                .collect()
-        } else {
-            let mut s: Vec<String> = puzzle
-                .cells
-                .iter()
-                .flatten()
-                .filter_map(|c| c.symbol.clone())
-                .collect();
-            s.sort();
-            s.dedup();
-            s
-        }
-    } else {
+    // Symbol types come from the shared helper.  A puzzle with no rose_window
+    // rule short-circuits (defensive — the dispatcher only reaches this arm
+    // when the rule is present).
+    if !puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
         return true;
-    };
+    }
+    let types = rose_symbol_types(puzzle);
     if types.is_empty() {
         return false;
     }
@@ -388,47 +378,6 @@ fn check_rose_window(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     true
 }
 
-/// Dihedral-normalized shape key (all rotations + reflections).
-fn dihedral_key(cells: &[[usize; 2]]) -> String {
-    let signed: Vec<(isize, isize)> = cells
-        .iter()
-        .map(|&[r, c]| (r as isize, c as isize))
-        .collect();
-    let mut best: Option<String> = None;
-    for &rot in &[0, 1, 2, 3] {
-        for &refl in &[false, true] {
-            let mut t: Vec<(isize, isize)> = signed
-                .iter()
-                .map(|&(r, c)| {
-                    let (mut rr, mut cc) = (r, c);
-                    if refl {
-                        cc = -cc;
-                    }
-                    for _ in 0..rot {
-                        (rr, cc) = (-cc, rr);
-                    }
-                    (rr, cc)
-                })
-                .collect();
-            let min_r = t.iter().map(|x| x.0).min().unwrap_or(0);
-            let min_c = t.iter().map(|x| x.1).min().unwrap_or(0);
-            for p in &mut t {
-                p.0 -= min_r;
-                p.1 -= min_c;
-            }
-            t.sort();
-            let key = t
-                .iter()
-                .map(|&(r, c)| format!("({},{})", r, c))
-                .collect::<String>();
-            if best.as_ref().map_or(true, |b| &key < b) {
-                best = Some(key);
-            }
-        }
-    }
-    best.unwrap_or_default()
-}
-
 fn is_connected(cells: &[[usize; 2]], h: usize, w: usize) -> bool {
     if cells.is_empty() {
         return false;
@@ -452,23 +401,6 @@ fn is_connected(cells: &[[usize; 2]], h: usize, w: usize) -> bool {
         }
     }
     seen.len() == cells.len()
-}
-
-fn is_rectangle(cells: &[[usize; 2]]) -> bool {
-    if cells.is_empty() {
-        return false;
-    }
-    let mut min_r = usize::MAX;
-    let mut max_r = 0usize;
-    let mut min_c = usize::MAX;
-    let mut max_c = 0usize;
-    for &[r, c] in cells {
-        min_r = min_r.min(r);
-        max_r = max_r.max(r);
-        min_c = min_c.min(c);
-        max_c = max_c.max(c);
-    }
-    cells.len() == (max_r - min_r + 1) * (max_c - min_c + 1)
 }
 
 fn adjacent_pairs_satisfy(

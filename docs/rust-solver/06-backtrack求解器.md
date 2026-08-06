@@ -45,10 +45,11 @@ struct BacktrackState {
 
 ### 2.1 面积上下界 `compute_area_bounds`
 
-`backtrack.rs:78-123`：
+`backtrack.rs:78-79` 是 `shapes::area_bounds`（`shapes.rs:115`）的薄包装——面积
+上下界已收敛为全 solver 共享的唯一实现（pieces / backtrack / rose 通用）：
 
 ```
-初始 (1, 总数)
+初始 (1, h*w)
 for 规则:
   precise → 上下界 = area
   range   → min.max(v), max.min(v)
@@ -57,9 +58,9 @@ for 每格罗盘:
   min_area = max(min_area, needed)
 ```
 
-> 注释特别说明：`block` 和 `solitary` **不**参与面积上下界——历史上曾把 block 强设
-> 成 4..4、solitary 设成 1..1，结果任何非 2×2 / 非单格的块题在结构上就不可解了。
-> 这是修过的坑（`backtrack.rs:102-107`）。
+> `block` 和 `solitary` **不**参与面积上下界——历史上曾把 block 强设成 4..4、
+> solitary 设成 1..1，结果任何非 2×2 / 非单格的块题在结构上就不可解了。这是修过的坑
+> （`shapes.rs` 注释有记录）。
 
 ### 2.2 望塔收集 `collect_watchtowers`
 

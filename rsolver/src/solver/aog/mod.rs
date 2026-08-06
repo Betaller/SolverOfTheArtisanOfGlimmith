@@ -7,7 +7,6 @@ pub mod core;
 pub mod empty;
 pub mod search;
 pub mod types;
-pub mod validate;
 
 use std::time::Instant;
 
@@ -31,7 +30,7 @@ pub fn solve_aog(puzzle: &Puzzle, deadline: Instant) -> Option<Vec<RegionInfo>> 
     let ret = search::dfs(1, &mut core, &mut sp, &pools);
     if ret != -1 {
         let regions = extract_regions(&core, &sp, puzzle);
-        if !validate::validate(puzzle, &regions) {
+        if !crate::solver::validate::validate(puzzle, &regions) {
             eprintln!("aog: internal validation rejected solution ({} regions)", regions.len());
             return None;
         }

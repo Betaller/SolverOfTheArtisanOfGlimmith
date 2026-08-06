@@ -76,50 +76,9 @@ struct AreaBounds {
 }
 
 fn compute_area_bounds(puzzle: &Puzzle) -> AreaBounds {
-    let h = puzzle.height;
-    let w = puzzle.width;
-    let total = h * w;
-
-    let mut min_a: usize = 1;
-    let mut max_a: usize = total;
-
-    for rule in &puzzle.rules {
-        match rule.ctype.as_str() {
-            "precise" => {
-                if let Some(v) = rule.params.get("area").and_then(|v| v.as_u64()) {
-                    min_a = v as usize;
-                    max_a = v as usize;
-                }
-            }
-            "range" => {
-                if let Some(v) = rule.params.get("min").and_then(|v| v.as_u64()) {
-                    min_a = min_a.max(v as usize);
-                }
-                if let Some(v) = rule.params.get("max").and_then(|v| v.as_u64()) {
-                    max_a = max_a.min(v as usize);
-                }
-            }
-            // NOTE: `block` (regions must be solid rectangles of any size) and
-            // `solitary` (one clue cell per region) do NOT constrain area, so they
-            // are intentionally absent here.  A previous version forced block→4..4
-            // and solitary→1..1, which made backtrack structurally unable to solve
-            // any block puzzle whose regions aren't all 2×2 / size-1.
-            _ => {}
-        }
-    }
-
-    // Compass clues imply minimum area
-    for r in 0..h {
-        for c in 0..w {
-            if let Some(ref comp) = puzzle.cells[r][c].compass {
-                let needed = 1 + comp.up.unwrap_or(0) as usize + comp.down.unwrap_or(0) as usize
-                    + comp.left.unwrap_or(0) as usize + comp.right.unwrap_or(0) as usize;
-                min_a = min_a.max(needed);
-            }
-        }
-    }
-
-    AreaBounds { min_area: min_a, max_area: max_a }
+    // Shared helper: precise/range rules + compass-derived minimum.
+    let (min_area, max_area) = crate::shapes::area_bounds(puzzle);
+    AreaBounds { min_area, max_area }
 }
 
 fn collect_watchtowers(puzzle: &Puzzle) -> Vec<(Vec<[usize; 2]>, usize)> {
@@ -732,7 +691,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     let has_non_block = puzzle.rules.iter().any(|r| r.ctype == "non_block");
     if has_block || has_non_block {
         for shape in state.region_shapes.values() {
-            let rect = crate::constraints::is_rectangle(shape);
+            let rect = crate::shapes::is_rectangle(shape);
             if (has_block && !rect) || (has_non_block && rect) {
                 return false;
             }
@@ -744,7 +703,7 @@ fn check_global_constraints(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     if puzzle.rules.iter().any(|r| r.ctype == "different") {
         let mut keys: HashSet<String> = HashSet::new();
         for shape in state.region_shapes.values() {
-            if !keys.insert(crate::constraints::dihedral_key(shape)) {
+            if !keys.insert(crate::shapes::dihedral_key(shape)) {
                 return false;
             }
         }

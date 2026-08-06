@@ -71,13 +71,13 @@ solve_rose(puzzle, start, timeout_ms)
 ├─ 若 symbol_types 空或 m==0 → None
 │
 ├─ ① region_match::solve_by_region_match(...)
-│     命中 → accept_if_valid（aog/validate.rs 验收）→ Some
+│     命中 → accept_if_valid（solver/validate.rs 验收）→ Some
 │
 └─ ② rose_growth::solve_rose_growth(...)   # 回退
       命中 → accept_if_valid → Some
 ```
 
-`accept_if_valid`（`rose/mod.rs:125-131`）用 `aog/validate.rs` 这套**完整独立验证器**
+`accept_if_valid`（`rose/mod.rs:72-75`）用 `solver/validate.rs` 这套**完整独立验证器**
 验收——所以 rose 的解也必须过全规则校验。
 
 ---
@@ -209,7 +209,7 @@ match_regions_mrv(sized, all_positions, ..., covered, assignment, ...)
       │                                          │
       └──────────────┬───────────────────────────┘
                      ▼
-        accept_if_valid → aog/validate.rs 全套验收
+        accept_if_valid → solver/validate.rs 全套验收
                      │
                      ▼
                   RegionInfo
@@ -223,7 +223,7 @@ match_regions_mrv(sized, all_positions, ..., covered, assignment, ...)
 |---|---|
 | `solve_rose` 入口 | `rose/mod.rs:134` |
 | `rose_m`（区域数 = 符号计数） | `rose/mod.rs:46` |
-| `region_size_bounds`（面积范围） | `rose/mod.rs:99` |
+| `area_bounds`（面积范围，共享） | `shapes.rs:115` |
 | `CellSet` 位集 | `rose/cells.rs:12` |
 | `edge_key` / `PreBoundaries` | `rose/cells.rs:94, 104` |
 | `generate_all_candidates` BFS | `rose/region_match.rs:22` |

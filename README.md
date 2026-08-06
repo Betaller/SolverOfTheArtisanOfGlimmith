@@ -43,7 +43,7 @@ RustSolver
 ```
 
 aog 求解器内部检查视为权威（`build_solution_trusted`），Rust 侧不再重验证；rose/pieces/
-backtrack 的答案须过 `aog/validate.rs` 验收门。
+backtrack 的答案须过 `solver/validate.rs` 验收门。
 
 ### 目录结构
 

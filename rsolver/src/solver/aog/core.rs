@@ -485,40 +485,6 @@ pub fn check_radar(x: i32, y: i32, core: &AoGCore, sp: &Vec<Vec<u32>>) -> bool {
 
 // ── Puzzle grid construction from the JSON model ─────────────────────────────
 
-/// Collect pool shapes from both the top-level array and `shape_pool` rule params.
-pub fn collect_pool_shapes(puzzle: &Puzzle) -> Vec<Vec<[usize; 2]>> {
-    let mut pool_shapes: Vec<Vec<[usize; 2]>> = puzzle.shape_pool.clone();
-    for rule in &puzzle.rules {
-        if rule.ctype != "shape_pool" {
-            continue;
-        }
-        if let Some(shapes) = rule.params.get("shapes").and_then(|v| v.as_array()) {
-            for s in shapes {
-                let cells: Vec<[usize; 2]> = s
-                    .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|xy| {
-                                let cc = xy.as_array()?;
-                                if cc.len() < 2 {
-                                    return None;
-                                }
-                                let r = cc[0].as_i64()?;
-                                let c = cc[1].as_i64()?;
-                                Some([r.max(0) as usize, c.max(0) as usize])
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                if !cells.is_empty() {
-                    pool_shapes.push(cells);
-                }
-            }
-        }
-    }
-    pool_shapes
-}
-
 fn pattern_key(cells: &[[usize; 2]]) -> String {
     let mut v: Vec<String> = cells.iter().map(|xy| format!("{},{}", xy[0], xy[1])).collect();
     v.sort();
@@ -563,28 +529,9 @@ impl AoGCore {
         if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
             // rose_window is supported natively; continue.
         }
-        let rose_types: Vec<String> = if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
-            if let Some(rule) = puzzle.rules.iter().find(|r| r.ctype == "rose_window") {
-                if let Some(types) = rule.params.get("symbol_types").and_then(|v| v.as_array()) {
-                    types
-                        .iter()
-                        .filter_map(|t| t.as_str().map(|s| s.to_string()))
-                        .collect()
-                } else {
-                    let mut s: Vec<String> = (0..h)
-                        .flat_map(|r| (0..w).map(move |c| (r, c)))
-                        .filter_map(|(r, c)| puzzle.cells[r][c].symbol.clone())
-                        .collect();
-                    s.sort();
-                    s.dedup();
-                    s
-                }
-            } else {
-                Vec::new()
-            }
-        } else {
-            Vec::new()
-        };
+        // Symbol type list (shared helper: rule params, else distinct cell
+        // symbols — unified with rose / validate).
+        let rose_types: Vec<String> = crate::shapes::rose_symbol_types(puzzle);
 
         let mut config = Config::default();
         for rule in &puzzle.rules {
@@ -629,7 +576,7 @@ impl AoGCore {
         config.predefine_shapes_only = active.contains("shape_pool");
 
         // Collect pool shapes from both the top-level array and the rule params.
-        let pool_shapes = collect_pool_shapes(puzzle);
+        let pool_shapes = crate::shapes::collect_pool_shapes(puzzle);
         let has_shape_pool = !pool_shapes.is_empty();
         let use_area_numbers = active.contains("area");
         let use_compass = active.contains("compass");

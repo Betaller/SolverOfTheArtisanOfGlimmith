@@ -110,7 +110,7 @@ fn build_context(puzzle: &Puzzle) -> SolveContext {
         })
         .collect();
 
-    let (eff_min, eff_max) = compute_eff_area_bounds(puzzle, h, w);
+    let (eff_min, eff_max) = crate::shapes::area_bounds(puzzle);
 
     let watchtowers = collect_watchtower_data(puzzle);
     let edge_constraints = collect_edge_constraints_data(puzzle);
@@ -124,46 +124,6 @@ fn build_context(puzzle: &Puzzle) -> SolveContext {
         edge_constraints,
         fillable,
     }
-}
-
-fn compute_eff_area_bounds(puzzle: &Puzzle, h: usize, w: usize) -> (usize, usize) {
-    let mut min_a = 1usize;
-    let mut max_a = h * w;
-
-    for rule in &puzzle.rules {
-        match rule.ctype.as_str() {
-            "precise" => {
-                if let Some(v) = rule.params.get("area").and_then(|v| v.as_u64()) {
-                    min_a = v as usize;
-                    max_a = v as usize;
-                }
-            }
-            "range" => {
-                if let Some(v) = rule.params.get("min").and_then(|v| v.as_u64()) {
-                    min_a = min_a.max(v as usize);
-                }
-                if let Some(v) = rule.params.get("max").and_then(|v| v.as_u64()) {
-                    max_a = max_a.min(v as usize);
-                }
-            }
-            // NOTE: `block` (rectangles of any size) and `solitary` (one clue
-            // cell per region) do NOT constrain area — previously forced to
-            // 4..4 / 1..1, which made pieces unable to place valid regions.
-            _ => {}
-        }
-    }
-
-    for r in 0..h {
-        for c in 0..w {
-            if let Some(ref comp) = puzzle.cells[r][c].compass {
-                let needed = 1 + comp.up.unwrap_or(0) as usize + comp.down.unwrap_or(0) as usize
-                    + comp.left.unwrap_or(0) as usize + comp.right.unwrap_or(0) as usize;
-                min_a = min_a.max(needed);
-            }
-        }
-    }
-
-    (min_a, max_a)
 }
 
 fn collect_watchtower_data(puzzle: &Puzzle) -> Vec<(Vec<[usize; 2]>, usize)> {

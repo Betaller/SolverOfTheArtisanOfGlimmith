@@ -264,7 +264,7 @@ reconstruct_and_validate(puzzle, placements, row_ids, ctx)
 |---|---|
 | `solve_pieces` 主流程 | `pieces.rs:33` |
 | `build_context` | `pieces.rs:93` |
-| 面积上下界 `compute_eff_area_bounds` | `pieces.rs:125` |
+| 面积上下界（共享 `shapes::area_bounds`） | `shapes.rs:115` |
 | 候选生成 `generate_all_placements` | `pieces.rs:218` |
 | 形状池候选 | `pieces.rs:224-245` |
 | 面积数字候选 `generate_polyominoes` / `poly_rec` | `pieces.rs:247-270, 359-428` |

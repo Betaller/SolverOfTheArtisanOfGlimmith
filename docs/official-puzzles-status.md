@@ -128,6 +128,27 @@
 
 **验证**：`pytest` **290 通过**（删 Python 求解器相关 ~97 个后新基线）；`cargo test` 9 通过；Rust-only router `verify_puzzles.py --dir puzzles/official/Zone1` **301/312** 与 dfadfe3 基准 Zone1 完全一致，**0 回归**（见第一部分最新条目）。
 
+### 2026-08-06 · P0 重构：validate.rs 独立 + 收敛 5 处重复实现（本会话）
+
+纯重构，**无行为变化**（求解数字不变，基准豁免）。
+1. **validate.rs 提升为独立模块**：`solver/aog/validate.rs` → `solver/validate.rs`，
+   消除 rose 依赖 aog 的反向依赖；`aog/mod.rs` 出口与 `rose/mod.rs` 验收改走
+   `crate::solver::validate::validate`。
+2. **新建 `shapes.rs` 收敛 5 处重复实现**：
+   - `dihedral_key`（constraints / validate 两份 → `shapes.rs:32` 唯一）；
+   - `is_rectangle`（两份 → `shapes.rs:12` 唯一）；
+   - `collect_pool_shapes`（aog/core 与 constraints 的双来源收集 → `shapes.rs:75` 唯一）；
+   - `area_bounds`（pieces/backtrack/rose 三版合并 → `shapes.rs:115`；统一默认 max=h*w、
+     罗盘派生 min；rose 侧因 `region_match` 再 `min(total-(m-1))` 重界，行为不变）；
+   - `rose_symbol_types`（rose/aog/validate 三处内联 → `shapes.rs:160` 唯一；空
+     `symbol_types` 数组回退格子符号的语义统一，语料无空数组题，边界不触发）。
+3. `check_mixed` 已统一的「相邻异形」语义**保持不变**（本轮只收敛，不动实现）。
+
+- **验证**：`cargo test` 9 通过；`pytest` 290 通过；Zone1 `verify_puzzles.py --timeout 25 -j 8`
+  **301/312**（11 失败与 rustonly-router 基准组成一致，**0 回归**）。
+- 注：0213 / 0213nopad（大 rose）在 -j8 负载下偶发互换超时（本轮 0213 超时、上轮 0213nopad
+  超时），单跑各 ~2.5s 解出——与已知 0833 / 0882 同类负载波动，非回归。
+
 ---
 
 ## 附录

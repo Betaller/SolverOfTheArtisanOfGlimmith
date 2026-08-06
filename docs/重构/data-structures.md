@@ -188,11 +188,11 @@ struct BacktrackState {
 
 **波及面(比初稿多)**:
 - 构造:`main.rs:180-228`。
-- 读取:`grid.rs:7-10`(`is_adjacent_free`)、`solver/mod.rs:99,116`(`regions_respect_boundaries`)、`solver/backtrack.rs:109,465-535`、`solver/pieces.rs:162,182-203,568-571`、`solver/aog/core.rs:660-769`(build)、**`solver/aog/validate.rs:48,59,261,539-552`**(aog 解的独立校验器,漏改会出大问题)。
+- 读取:`grid.rs:7-10`(`is_adjacent_free`)、`solver/mod.rs:99,116`(`regions_respect_boundaries`)、`solver/backtrack.rs:109,465-535`、`solver/pieces.rs:162,182-203,568-571`、`solver/aog/core.rs:660-769`(build)、**`solver/validate.rs:48,59,261,539-552`**(aog 解的独立校验器,漏改会出大问题)。
 - `aog/search.rs` 与 `aog/empty.rs` **不读 Puzzle**,扁平化不影响 aog 搜索热路径(好消息)。
 
 **预期收益**:内存占用下降 ~3.5×;访问局部性提升;aog 之外的求解器受益。
-**风险**:中-高。动核心模型,波及面含 `grid.rs`/`mod.rs`/`aog/validate.rs`/aog build;Cell 瘦身与 aog build 强耦合,必须全量回归。
+**风险**:中-高。动核心模型,波及面含 `grid.rs`/`mod.rs`/`solver/validate.rs`/aog build;Cell 瘦身与 aog build 强耦合,必须全量回归。
 **验证**:`cargo test` + `cargo clippy`;`python -m pytest tests/`;`scripts/verify_puzzles.py --timeout 30`;对照 `scripts/benchmark.py` 基线。
 
 ### P2(中风险 · 收益存疑 · 必须先测量):Python 回溯复制优化

@@ -4,6 +4,7 @@ pub mod aog;
 pub mod backtrack;
 pub mod pieces;
 pub mod rose;
+pub mod validate;
 
 use crate::types::*;
 use std::collections::HashMap;

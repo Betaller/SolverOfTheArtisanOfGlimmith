@@ -370,7 +370,7 @@ pub fn solve_by_region_match(
 
     // Pre-filter by area and region-size bounds: each candidate must be within
     // [range.min, range.max] (or precise) and leave >= 1 cell per other seed.
-    let (min_sz, max_sz) = super::region_size_bounds(puzzle);
+    let (min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
     for cands in all_candidates.iter_mut() {
         let max_for_this = max_sz.min(total - (m - 1));
         cands.retain(|c| c.len() >= min_sz && c.len() <= max_for_this);

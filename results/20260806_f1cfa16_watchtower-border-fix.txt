@@ -1,0 +1,42 @@
+# 边界望塔缺失修复（watchtower 顶点绝对坐标约定，2026-08-06）
+
+## 问题
+用户报告 0800 / 0543 官方题与 JSON 有差异：官方题在**外边界顶点**上有望塔（watchtower），
+JSON 缺失。0800 官方源（archiveofglimmith.github.io/puzzles.json）经游戏解析约定
+（顶点行角点 3c）解析出 **12 个雷达顶点，JSON 只保留 6 个内部顶点，丢失 6 个边界望塔**：
+`(0,2)=2, (0,3)=1, (1,4)=1, (3,0)=2, (4,1)=2, (4,2)=1`。官方解全部满足这些边界望塔。
+
+## 根因（转换 + 模型双层 bug）
+1. `scripts/convert_archive.py:362-369` 只在 `1 ≤ r ≤ height-1`、`1 ≤ c ≤ width-1` 收集望塔，
+   丢弃上下左右四条边界。
+2. Rust `rsolver/src/io.rs` 顶点数组是 `(h-1)×(w-1)`（仅内部顶点），`build_puzzle` 对边界
+   坐标 `return Err("vertex out of range")` —— 模型不能表示边界顶点。
+
+## 影响范围
+85 个 watchtower 谜题中 **14 个有边界望塔**（0483/0491/0543/0544/0662/0663/0800/0984/
+0985/0990/1144/1145/1272/1446）。**6 个 watchtower DIFF 题（0543/0544/0662/0663/0800/1144）
+全在其中**——此前误判为「多解/规则理解」，实际是边界望塔缺失导致盘面约束不足。
+
+## 修复
+1. **顶点约定改绝对网格坐标** `(0..=h × 0..=w)`（含外边界角点）：
+   - `rsolver/src/io.rs`：顶点数组 `(h+1)×(w+1)`，接受 `row∈0..=h, col∈0..=w`。
+   - `rsolver/src/solver/validate.rs` / `backtrack.rs` / `pieces.rs`：watchtower 统计在界
+     非阻塞周围格（绝对角点 {(r-1,c-1),(r-1,c),(r,c-1),(r,c)}）的不同区域数。
+   - `rsolver/src/solver/aog/core.rs`：雷达编码 `(2r+2, 2c+2)`（原 `2r+4`，格右下角）。
+   - `src/models/board.py`：`_build_vertices`（(h+1)×(w+1)）、`cells_surrounding_vertex`、
+     `edges_surrounding_vertex`（绝对约定）。
+   - `src/ui/grid_widget.py`：`_draw_vertices` 坐标 `v.col/v.row`（原 `+1` 偏移）、点击映射
+     去掉 `-1` 偏移。
+2. **转换器** `scripts/convert_archive.py`：收集 `0..=height × 0..=width` 全部望塔。
+3. **迁移 85 个 watchtower 谜题 JSON**（`puzzles.json` 权威源，游戏解析约定，`indent=2`
+   保留原格式）：只动 `vertices` 字段。
+
+## 验证
+- **watchtower DIFF 全部消除（0 DIFF）**：50 PASS / 35 FAIL / 0 DIFF。
+- 6 道（0543/0544/0662/0663/0800/1144）经 router **解出且与官方解一致**（0800 由 aog
+  直接解出，aog 边界雷达编码正确生效）。
+- 0985（原 DIFF）：加边界约束后 30s 超时（FAIL 但**不再出错误解**；官方解通过完整验证器，
+  是可解的，搜索变难）。
+- **0 回归**：35 个 watchtower FAIL 全部为基线既有失败；全量 verify 对比（见
+  `20260806_watchtower_verify_full.txt`）。
+- `cargo test` 6 通过；`pytest` 全绿；`ruff` 无新增错误。

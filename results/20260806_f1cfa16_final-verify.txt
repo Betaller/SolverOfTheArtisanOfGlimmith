@@ -1,0 +1,1525 @@
+共 1295 个谜题，并行 CPU核数 线程
+
+[  1/1295] PASS rose_01_4x4_2sym.json via=rust         steps=0      time=    3ms
+[  2/1295] PASS combo_04_6x6_rose+pool_boundary.json via=rust         steps=0      time=    7ms
+[  3/1295] PASS rose_03_6x4_2sym_boundary.json via=rust         steps=0      time=    7ms
+[  4/1295] PASS combo_02_4x4_rose+pool.json via=rust         steps=0      time=    9ms
+[  5/1295] PASS A1-1.json            via=rust         steps=0      time=    6ms
+[  6/1295] PASS rose_02_5x5_3sym_blocked.json via=rust         steps=0      time=    8ms
+[  7/1295] PASS combo_01_4x4_rose_domino.json via=rust         steps=0      time=    8ms
+[  8/1295] PASS pool_02_6x6_block+L.json via=rust         steps=0      time=    9ms
+[  9/1295] PASS rose_04_6x6_3sym.json via=rust         steps=0      time=   11ms
+[ 10/1295] PASS A1-5.json            via=rust         steps=0      time=    9ms
+[ 11/1295] PASS combo_03_4x6_rose+pool.json via=rust         steps=0      time=   18ms
+[ 12/1295] PASS pool_03_6x4_domino.json via=rust         steps=0      time=   15ms
+[ 13/1295] PASS B2-3.json            via=rust         steps=0      time=    9ms
+[ 14/1295] PASS A3-2.json            via=rust         steps=0      time=   18ms
+[ 15/1295] PASS pool_01_4x4_block.json via=rust         steps=0      time=   22ms
+[ 16/1295] PASS B2-2.json            via=rust         steps=0      time=   11ms
+[ 17/1295] PASS A1-6.json            via=rust         steps=0      time=   20ms
+[ 18/1295] PASS B1-1.json            via=rust         steps=0      time=   16ms
+[ 19/1295] PASS A2-1.json            via=rust         steps=0      time=   18ms
+[ 20/1295] PASS A1-2.json            via=rust         steps=0      time=   24ms
+[ 21/1295] PASS pool_04_5x5_triomino.json via=rust         steps=0      time=   30ms
+[ 22/1295] PASS B1-4.json            via=rust         steps=0      time=   19ms
+[ 23/1295] PASS B2-1.json            via=rust         steps=0      time=   21ms
+[ 24/1295] PASS A1-3.json            via=rust         steps=0      time=   33ms
+[ 25/1295] PASS B1-2.json            via=rust         steps=0      time=   22ms
+[ 26/1295] PASS B3-1.json            via=rust         steps=0      time=   26ms
+[ 27/1295] PASS A1-4.json            via=rust         steps=0      time=   37ms
+[ 28/1295] PASS C1-1.json            via=rust         steps=0      time=   17ms
+[ 29/1295] PASS B3-2.json            via=rust         steps=0      time=   27ms
+[ 30/1295] PASS A2-2.json            via=rust         steps=0      time=   39ms
+[ 31/1295] PASS 0009.json            via=rust         steps=0      time=   12ms
+[ 32/1295] PASS C1-3.json            via=rust         steps=0      time=   25ms
+[ 33/1295] PASS A2-3.json            via=rust         steps=0      time=   38ms
+[ 34/1295] PASS B6-1.json            via=rust         steps=0      time=   32ms
+[ 35/1295] PASS A3-1.json            via=rust         steps=0      time=   48ms
+[ 36/1295] PASS 0067.json            via=rust         steps=0      time=    7ms
+[ 37/1295] PASS 0050.json            via=rust         steps=0      time=   12ms
+[ 38/1295] PASS 0012.json            via=rust         steps=0      time=   15ms
+[ 39/1295] PASS B1-3.json            via=rust         steps=0      time=   28ms
+[ 40/1295] PASS B4-1.json            via=rust         steps=0      time=   46ms
+[ 41/1295] PASS 0008.json            via=rust         steps=0      time=   10ms
+[ 42/1295] PASS 0066.json            via=rust         steps=0      time=   14ms
+[ 43/1295] PASS 0643.json            via=rust         steps=0      time=   17ms
+[ 44/1295] PASS 0067B.json           via=rust         steps=0      time=   14ms
+[ 45/1295] PASS 0079.json            via=rust         steps=0      time=   28ms
+[ 46/1295] PASS 0054.json            via=rust         steps=0      time=   26ms
+[ 47/1295] PASS 0527.json            via=rust         steps=0      time=   24ms
+[ 48/1295] PASS 0159.json            via=rust         steps=0      time=   30ms
+[ 49/1295] PASS 0053.json            via=rust         steps=0      time=   41ms
+[ 50/1295] PASS 0182.json            via=rust         steps=0      time=   18ms
+[ 51/1295] PASS 0049.json            via=rust         steps=0      time=   41ms
+[ 52/1295] PASS 0080.json            via=rust         steps=0      time=   27ms
+[ 53/1295] PASS 0181.json            via=rust         steps=0      time=   33ms
+[ 54/1295] PASS 0157.json            via=rust         steps=0      time=   49ms
+[ 55/1295] PASS 0180.json            via=rust         steps=0      time=   26ms
+[ 56/1295] PASS 0179B.json           via=rust         steps=0      time=   52ms
+[ 57/1295] PASS 0183.json            via=rust         steps=0      time=   29ms
+[ 58/1295] PASS 1031.json            via=rust         steps=0      time=   22ms
+[ 59/1295] PASS 0276.json            via=rust         steps=0      time=   31ms
+[ 60/1295] PASS 0220.json            via=rust         steps=0      time=   55ms
+[ 61/1295] PASS 0167.json            via=rust         steps=0      time=   55ms
+[ 62/1295] PASS 1029.json            via=rust         steps=0      time=   46ms
+[ 63/1295] PASS 0219.json            via=rust         steps=0      time=   50ms
+[ 64/1295] PASS 0165.json            via=rust         steps=0      time=   99ms
+[ 65/1295] PASS 0324.json            via=rust         steps=0      time=   71ms
+[ 66/1295] PASS 1065.json            via=rust         steps=0      time=   69ms
+[ 67/1295] PASS 0474.json            via=rust         steps=0      time=   39ms
+[ 68/1295] PASS 0201.json            via=rust         steps=0      time=   73ms
+[ 69/1295] PASS 1033.json            via=rust         steps=0      time=   64ms
+[ 70/1295] PASS 1122.json            via=rust         steps=0      time=   66ms
+[ 71/1295] PASS 1066.json            via=rust         steps=0      time=   62ms
+[ 72/1295] PASS 1068.json            via=rust         steps=0      time=   80ms
+[ 73/1295] PASS 1070.json            via=rust         steps=0      time=   77ms
+[ 74/1295] PASS 1424.json            via=rust         steps=0      time=   39ms
+[ 75/1295] PASS 1167.json            via=rust         steps=0      time=   44ms
+[ 76/1295] PASS 1426.json            via=rust         steps=0      time=   34ms
+[ 77/1295] PASS 1123.json            via=rust         steps=0      time=  106ms
+[ 78/1295] PASS 1252.json            via=rust         steps=0      time=   53ms
+[ 79/1295] PASS 1427.json            via=rust         steps=0      time=   66ms
+[ 80/1295] PASS 1243.json            via=rust         steps=0      time=   65ms
+[ 81/1295] PASS 1429.json            via=rust         steps=0      time=   62ms
+[ 82/1295] PASS 1244.json            via=rust         steps=0      time=   72ms
+[ 83/1295] PASS 1438.json            via=rust         steps=0      time=   60ms
+[ 84/1295] PASS 0046.json            via=rust         steps=0      time=   60ms
+[ 85/1295] PASS 1428.json            via=rust         steps=0      time=   79ms
+[ 86/1295] PASS 1069.json            via=rust         steps=0      time=  190ms
+[ 87/1295] PASS 0172.json            via=rust         steps=0      time=   68ms
+[ 88/1295] PASS 0176.json            via=rust         steps=0      time=   41ms
+[ 89/1295] PASS 1439.json            via=rust         steps=0      time=   82ms
+[ 90/1295] PASS 0174.json            via=rust         steps=0      time=   48ms
+[ 91/1295] PASS 0178.json            via=rust         steps=0      time=   64ms
+[ 92/1295] PASS 0136.json            via=rust         steps=0      time=   58ms
+[ 93/1295] PASS 0331.json            via=rust         steps=0      time=  243ms
+[ 94/1295] PASS 0173.json            via=rust         steps=0      time=   60ms
+[ 95/1295] PASS 0227.json            via=rust         steps=0      time=   70ms
+[ 96/1295] PASS 0226.json            via=rust         steps=0      time=   81ms
+[ 97/1295] PASS 0177.json            via=rust         steps=0      time=   77ms
+[ 98/1295] PASS 0225.json            via=rust         steps=0      time=   87ms
+[ 99/1295] PASS 0329.json            via=rust         steps=0      time=  294ms
+[100/1295] PASS 0248.json            via=rust         steps=0      time=   32ms
+[101/1295] PASS 0250.json            via=rust         steps=0      time=   28ms
+[102/1295] PASS 0228.json            via=rust         steps=0      time=   72ms
+[103/1295] PASS 0232.json            via=rust         steps=0      time=   43ms
+[104/1295] PASS 0259.json            via=rust         steps=0      time=   45ms
+[105/1295] PASS 0247.json            via=rust         steps=0      time=   37ms
+[106/1295] PASS 0230.json            via=rust         steps=0      time=   93ms
+[107/1295] PASS 0249.json            via=rust         steps=0      time=   62ms
+[108/1295] PASS 0253.json            via=rust         steps=0      time=   38ms
+[109/1295] PASS 0535.json            via=rust         steps=0      time=   65ms
+[110/1295] PASS 0229.json            via=rust         steps=0      time=  123ms
+[111/1295] PASS 0695.json            via=rust         steps=0      time=   39ms
+[112/1295] PASS 0861.json            via=rust         steps=0      time=   42ms
+[113/1295] PASS 0881.json            via=rust         steps=0      time=   44ms
+[114/1295] PASS 0880.json            via=rust         steps=0      time=   55ms
+[115/1295] PASS 0881g.json           via=rust         steps=0      time=   40ms
+[116/1295] PASS 0783.json            via=rust         steps=0      time=   47ms
+[117/1295] PASS 0784.json            via=rust         steps=0      time=   77ms
+[118/1295] PASS 1036.json            via=rust         steps=0      time=   71ms
+[119/1295] PASS 1037.json            via=rust         steps=0      time=   62ms
+[120/1295] PASS 1096.json            via=rust         steps=0      time=   45ms
+[121/1295] PASS 1030.json            via=rust         steps=0      time=   59ms
+[122/1295] PASS 1125.json            via=rust         steps=0      time=   32ms
+[123/1295] PASS 0538.json            via=rust         steps=0      time=  160ms
+[124/1295] PASS 1172.json            via=rust         steps=0      time=   23ms
+[125/1295] PASS 1168.json            via=rust         steps=0      time=   19ms
+[126/1295] PASS 1170b.json           via=rust         steps=0      time=   26ms
+[127/1295] PASS 0252.json            via=rust         steps=0      time=  189ms
+[128/1295] PASS 1097.json            via=rust         steps=0      time=   85ms
+[129/1295] PASS 1171.json            via=rust         steps=0      time=   71ms
+[130/1295] PASS 1250.json            via=rust         steps=0      time=   60ms
+[131/1295] PASS 1269.json            via=rust         steps=0      time=   76ms
+[132/1295] PASS 0052.json            via=rust         steps=0      time=   31ms
+[133/1295] PASS 0051.json            via=rust         steps=0      time=   30ms
+[134/1295] PASS 0115.json            via=rust         steps=0      time=   31ms
+[135/1295] PASS 0057.json            via=rust         steps=0      time=   27ms
+[136/1295] PASS 0059.json            via=rust         steps=0      time=   39ms
+[137/1295] PASS 0058.json            via=rust         steps=0      time=   26ms
+[138/1295] PASS 0422.json            via=rust         steps=0      time=   32ms
+[139/1295] PASS 0072.json            via=rust         steps=0      time=   40ms
+[140/1295] PASS 0425.json            via=rust         steps=0      time=   32ms
+[141/1295] PASS 0426.json            via=rust         steps=0      time=   20ms
+[142/1295] PASS 0042.json            via=rust         steps=0      time=   26ms
+[143/1295] PASS 0095.json            via=rust         steps=0      time=   16ms
+[144/1295] PASS 0693b.json           via=rust         steps=0      time=   21ms
+[145/1295] PASS 0096.json            via=rust         steps=0      time=   36ms
+[146/1295] PASS 0101.json            via=rust         steps=0      time=   36ms
+[147/1295] PASS 0043.json            via=rust         steps=0      time=   38ms
+[148/1295] PASS 0210.json            via=rust         steps=0      time=   20ms
+[149/1295] PASS 1281.json            via=rust         steps=0      time=   41ms
+[150/1295] PASS 1271.json            via=rust         steps=0      time=   47ms
+[151/1295] PASS 1393.json            via=rust         steps=0      time=   72ms
+[152/1295] PASS 0212.json            via=rust         steps=0      time=   52ms
+[153/1295] PASS 1283.json            via=rust         steps=0      time=   30ms
+[154/1295] PASS 0064.json            via=rust         steps=0      time=   12ms
+[155/1295] PASS 0065.json            via=rust         steps=0      time=   19ms
+[156/1295] PASS 0055.json            via=rust         steps=0      time=   16ms
+[157/1295] PASS 0061.json            via=rust         steps=0      time=   37ms
+[158/1295] PASS 0056.json            via=rust         steps=0      time=   28ms
+[159/1295] PASS 0060.json            via=rust         steps=0      time=   30ms
+[160/1295] PASS 0074.json            via=rust         steps=0      time=   31ms
+[161/1295] PASS 0117.json            via=rust         steps=0      time=   27ms
+[162/1295] PASS 0085.json            via=rust         steps=0      time=   26ms
+[163/1295] PASS 0077.json            via=rust         steps=0      time=   25ms
+[164/1295] PASS 0124.json            via=rust         steps=0      time=   40ms
+[165/1295] PASS 0236.json            via=rust         steps=0      time=   34ms
+[166/1295] PASS 1284pad.json         via=rust         steps=0      time=  117ms
+[167/1295] PASS 0211.json            via=rust         steps=0      time=  141ms
+[168/1295] PASS 0235.json            via=rust         steps=0      time=   50ms
+[169/1295] PASS 0237.json            via=rust         steps=0      time=   46ms
+[170/1295] PASS 0238.json            via=rust         steps=0      time=   45ms
+[171/1295] PASS 0423.json            via=rust         steps=0      time=   15ms
+[172/1295] PASS 0267.json            via=rust         steps=0      time=   45ms
+[173/1295] PASS 0416.json            via=rust         steps=0      time=   30ms
+[174/1295] PASS 0551.json            via=rust         steps=0      time=   26ms
+[175/1295] PASS 0266.json            via=rust         steps=0      time=   64ms
+[176/1295] PASS 0948.json            via=rust         steps=0      time=   76ms
+[177/1295] PASS 0424.json            via=rust         steps=0      time=   68ms
+[178/1295] PASS 0239.json            via=rust         steps=0      time=   70ms
+[179/1295] PASS 0950.json            via=rust         steps=0      time=   78ms
+[180/1295] PASS 1240.json            via=rust         steps=0      time=   73ms
+[181/1295] PASS 0949.json            via=rust         steps=0      time=   78ms
+[182/1295] PASS 1239.json            via=rust         steps=0      time=   81ms
+[183/1295] PASS 1251.json            via=rust         steps=0      time=  103ms
+[184/1295] PASS 0027.json            via=rust         steps=0      time=   44ms
+[185/1295] PASS 1285.json            via=rust         steps=0      time=   40ms
+[186/1295] PASS 0091.json            via=rust         steps=0      time=   52ms
+[187/1295] PASS 0105nopad.json       via=rust         steps=0      time=   51ms
+[188/1295] PASS 1445.json            via=rust         steps=0      time=   72ms
+[189/1295] PASS 1444.json            via=rust         steps=0      time=   72ms
+[190/1295] PASS 0099.json            via=rust         steps=0      time=   45ms
+[191/1295] PASS 0106nopad.json       via=rust         steps=0      time=   40ms
+[192/1295] PASS 0108.json            via=rust         steps=0      time=   39ms
+[193/1295] PASS 0107nopad.json       via=rust         steps=0      time=   36ms
+[194/1295] PASS 0097.json            via=rust         steps=0      time=   75ms
+[195/1295] PASS 0530.json            via=rust         steps=0      time=   12ms
+[196/1295] PASS 0126.json            via=rust         steps=0      time=   27ms
+[197/1295] PASS 0531.json            via=rust         steps=0      time=   30ms
+[198/1295] PASS 0528.json            via=rust         steps=0      time=   46ms
+[199/1295] PASS 0533.json            via=rust         steps=0      time=   40ms
+[200/1295] PASS 0672.json            via=rust         steps=0      time=   50ms
+[201/1295] PASS 0109.json            via=rust         steps=0      time=   61ms
+[202/1295] PASS 0529.json            via=rust         steps=0      time=   77ms
+[203/1295] PASS 0692.json            via=rust         steps=0      time=   15ms
+[204/1295] PASS 0224.json            via=rust         steps=0      time=  827ms
+[205/1295] PASS 0536.json            via=rust         steps=0      time=   84ms
+[206/1295] PASS 0694.json            via=rust         steps=0      time=   34ms
+[207/1295] PASS 0946.json            via=rust         steps=0      time=   32ms
+[208/1295] PASS 1024.json            via=rust         steps=0      time=   55ms
+[209/1295] PASS 1162.json            via=rust         steps=0      time=   35ms
+[210/1295] PASS 0673.json            via=rust         steps=0      time=   64ms
+[211/1295] PASS 1160.json            via=rust         steps=0      time=   68ms
+[212/1295] PASS 1161.json            via=rust         steps=0      time=   31ms
+[213/1295] PASS 1025.json            via=rust         steps=0      time=   70ms
+[214/1295] PASS 1280.json            via=rust         steps=0      time=    9ms
+[215/1295] PASS 1278.json            via=rust         steps=0      time=   26ms
+[216/1295] PASS 1276.json            via=rust         steps=0      time=   38ms
+[217/1295] PASS 1275.json            via=rust         steps=0      time=   31ms
+[218/1295] PASS 0195.json            via=rust         steps=0      time=   31ms
+[219/1295] PASS 1241.json            via=rust         steps=0      time=   42ms
+[220/1295] PASS 0198.json            via=rust         steps=0      time=   48ms
+[221/1295] PASS 0196flip.json        via=rust         steps=0      time=   51ms
+[222/1295] PASS 0197.json            via=rust         steps=0      time=   60ms
+[223/1295] PASS 1415pad.json         via=rust         steps=0      time=   45ms
+[224/1295] PASS 0215.json            via=rust         steps=0      time=   17ms
+[225/1295] PASS 0222.json            via=rust         steps=0      time=    9ms
+[226/1295] PASS 0221.json            via=rust         steps=0      time=   14ms
+[227/1295] PASS 0296.json            via=rust         steps=0      time=    9ms
+[228/1295] PASS 0455.json            via=rust         steps=0      time=   15ms
+[229/1295] PASS 0216.json            via=rust         steps=0      time=   71ms
+[230/1295] PASS 0801.json            via=rust         steps=0      time=    5ms
+[231/1295] PASS 0803.json            via=rust         steps=0      time=    6ms
+[232/1295] PASS 0802.json            via=rust         steps=0      time=   13ms
+[233/1295] PASS 0805.json            via=rust         steps=0      time=   43ms
+[234/1295] PASS 0217.json            via=rust         steps=0      time=  206ms
+[235/1295] PASS 0454.json            via=rust         steps=0      time=  247ms
+[236/1295] PASS 1163.json            via=rust         steps=0      time=   10ms
+[237/1295] PASS 0214.json            via=rust         steps=0      time=  546ms
+[238/1295] PASS 1165.json            via=rust         steps=0      time=    6ms
+[239/1295] PASS 1236.json            via=rust         steps=0      time=   13ms
+[240/1295] PASS 1164.json            via=rust         steps=0      time=  272ms
+[241/1295] PASS 1237.json            via=rust         steps=0      time=   15ms
+[242/1295] PASS 1238.json            via=rust         steps=0      time=   22ms
+[243/1295] PASS 1273.json            via=rust         steps=0      time=    8ms
+[244/1295] PASS 1274.json            via=rust         steps=0      time=   10ms
+[245/1295] PASS 1430.json            via=rust         steps=0      time=   11ms
+[246/1295] PASS 1279.json            via=rust         steps=0      time=   10ms
+[247/1295] PASS 0939.json            via=rust         steps=0      time=  525ms
+[248/1295] PASS 0123.json            via=rust         steps=0      time=    7ms
+[249/1295] PASS 0128.json            via=rust         steps=0      time=    6ms
+[250/1295] PASS 0133.json            via=rust         steps=0      time=    7ms
+[251/1295] PASS 0134.json            via=rust         steps=0      time=    6ms
+[252/1295] PASS 0135.json            via=rust         steps=0      time=    7ms
+[253/1295] PASS 0137.json            via=rust         steps=0      time=    6ms
+[254/1295] PASS 0144.json            via=rust         steps=0      time=   10ms
+[255/1295] PASS 0146.json            via=rust         steps=0      time=   14ms
+[256/1295] PASS 0147.json            via=rust         steps=0      time=    7ms
+[257/1295] PASS 0148.json            via=rust         steps=0      time=    7ms
+[258/1295] PASS 0149.json            via=rust         steps=0      time=   12ms
+[259/1295] PASS 0150.json            via=rust         steps=0      time=    7ms
+[260/1295] PASS 0151.json            via=rust         steps=0      time=    7ms
+[261/1295] PASS 0114.json            via=rust         steps=0      time= 1322ms
+[262/1295] PASS 0175.json            via=rust         steps=0      time=   13ms
+[263/1295] PASS 0200.json            via=rust         steps=0      time=    9ms
+[264/1295] PASS 0218.json            via=rust         steps=0      time= 1301ms
+[265/1295] PASS 0363.json            via=rust         steps=0      time=   16ms
+[266/1295] PASS 0364.json            via=rust         steps=0      time=   19ms
+[267/1295] PASS 0365.json            via=rust         steps=0      time=   13ms
+[268/1295] PASS 0366.json            via=rust         steps=0      time=   16ms
+[269/1295] PASS 0368.json            via=rust         steps=0      time=   25ms
+[270/1295] PASS 0371.json            via=rust         steps=0      time=   17ms
+[271/1295] PASS 0379.json            via=rust         steps=0      time=    9ms
+[272/1295] PASS 0380.json            via=rust         steps=0      time=   12ms
+[273/1295] PASS 0392.json            via=rust         steps=0      time=    8ms
+[274/1295] PASS 1040.json            via=rust         steps=0      time=   12ms
+[275/1295] PASS 1042.json            via=rust         steps=0      time=   13ms
+[276/1295] PASS 1043.json            via=rust         steps=0      time=   11ms
+[277/1295] PASS 1046.json            via=rust         steps=0      time=   11ms
+[278/1295] PASS 1048.json            via=rust         steps=0      time=   14ms
+[279/1295] PASS 1049.json            via=rust         steps=0      time=   14ms
+[280/1295] PASS 1051.json            via=rust         steps=0      time=   13ms
+[281/1295] PASS 1053.json            via=rust         steps=0      time=   12ms
+[282/1295] PASS 1054.json            via=rust         steps=0      time=   10ms
+[283/1295] PASS 0361.json            via=rust         steps=0      time=  545ms
+[284/1295] PASS 1057.json            via=rust         steps=0      time=    9ms
+[285/1295] PASS 1058.json            via=rust         steps=0      time=   18ms
+[286/1295] PASS 1245.json            via=rust         steps=0      time=   17ms
+[287/1295] PASS 1423.json            via=rust         steps=0      time=   11ms
+[288/1295] PASS 0070.json            via=rust         steps=0      time=    7ms
+[289/1295] PASS 0075.json            via=rust         steps=0      time=    8ms
+[290/1295] PASS 0092.json            via=rust         steps=0      time=   10ms
+[291/1295] PASS 0093.json            via=rust         steps=0      time=    9ms
+[292/1295] PASS 0098.json            via=rust         steps=0      time=    9ms
+[293/1295] PASS 0030.json            via=rust         steps=0      time=   91ms
+[294/1295] PASS 0110.json            via=rust         steps=0      time=   28ms
+[295/1295] PASS 0112.json            via=rust         steps=0      time=   10ms
+[296/1295] PASS 0118.json            via=rust         steps=0      time=    8ms
+[297/1295] PASS 0119.json            via=rust         steps=0      time=   11ms
+[298/1295] PASS 0121.json            via=rust         steps=0      time=   28ms
+[299/1295] PASS 0116.json            via=rust         steps=0      time=   51ms
+[300/1295] PASS 0122.json            via=rust         steps=0      time=   12ms
+[301/1295] PASS 0130.json            via=rust         steps=0      time=   14ms
+[302/1295] PASS 0140.json            via=rust         steps=0      time=   20ms
+[303/1295] PASS 0138.json            via=rust         steps=0      time=   38ms
+[304/1295] PASS 0156.json            via=rust         steps=0      time=   11ms
+[305/1295] PASS C4-1.json            via=rust         steps=0      time= 3215ms
+[306/1295] PASS 0243.json            via=rust         steps=0      time=    8ms
+[307/1295] PASS 0244.json            via=rust         steps=0      time=    8ms
+[308/1295] PASS 0199.json            via=rust         steps=0      time=   33ms
+[309/1295] PASS 0245.json            via=rust         steps=0      time=   14ms
+[310/1295] PASS 0246.json            via=rust         steps=0      time=   15ms
+[311/1295] PASS 0255.json            via=rust         steps=0      time=   72ms
+[312/1295] PASS 0278.json            via=rust         steps=0      time=    9ms
+[313/1295] PASS 0257.json            via=rust         steps=0      time=   99ms
+[314/1295] PASS 0782.json            via=rust         steps=0      time=    8ms
+[315/1295] PASS 1127.json            via=rust         steps=0      time=    6ms
+[316/1295] PASS 1270.json            via=rust         steps=0      time= 2964ms
+[317/1295] PASS 1128.json            via=rust         steps=0      time=   27ms
+[318/1295] PASS 0184.json            via=rust         steps=0      time=  305ms
+[319/1295] PASS 0781.json            via=rust         steps=0      time=  143ms
+[320/1295] PASS 1242.json            via=rust         steps=0      time=   16ms
+[321/1295] PASS 1416.json            via=rust         steps=0      time=   17ms
+[322/1295] PASS 1417.json            via=rust         steps=0      time=   22ms
+[323/1295] PASS 1235.json            via=rust         steps=0      time=   77ms
+[324/1295] PASS 1418.json            via=rust         steps=0      time=   18ms
+[325/1295] PASS 0231.json            via=rust         steps=0      time= 3236ms
+[326/1295] PASS 1419.json            via=rust         steps=0      time=   29ms
+[327/1295] PASS 1422.json            via=rust         steps=0      time=    7ms
+[328/1295] PASS 1420.json            via=rust         steps=0      time=   19ms
+[329/1295] PASS 1421b.json           via=rust         steps=0      time=   18ms
+[330/1295] PASS 1431.json            via=rust         steps=0      time=    7ms
+[331/1295] PASS 1440.json            via=rust         steps=0      time=   14ms
+[332/1295] PASS 1443.json            via=rust         steps=0      time=   12ms
+[333/1295] PASS 1442.json            via=rust         steps=0      time=   20ms
+[334/1295] PASS 0185.json            via=rust         steps=0      time=   21ms
+[335/1295] PASS 0280.json            via=rust         steps=0      time=    6ms
+[336/1295] PASS 0292.json            via=rust         steps=0      time=    7ms
+[337/1295] PASS 1441b.json           via=rust         steps=0      time=   39ms
+[338/1295] PASS 0334.json            via=rust         steps=0      time=    9ms
+[339/1295] PASS 0335.json            via=rust         steps=0      time=    9ms
+[340/1295] PASS 0344r.json           via=rust         steps=0      time=   12ms
+[341/1295] PASS 0346.json            via=rust         steps=0      time=    9ms
+[342/1295] PASS 0281.json            via=rust         steps=0      time=   35ms
+[343/1295] PASS 0348.json            via=rust         steps=0      time=   12ms
+[344/1295] PASS 0376.json            via=rust         steps=0      time=   35ms
+[345/1295] PASS 0378.json            via=rust         steps=0      time=   45ms
+[346/1295] PASS 0552.json            via=rust         steps=0      time=   10ms
+[347/1295] PASS 0553.json            via=rust         steps=0      time=   12ms
+[348/1295] PASS 0554.json            via=rust         steps=0      time=   12ms
+[349/1295] PASS 0555.json            via=rust         steps=0      time=   15ms
+[350/1295] PASS 0360.json            via=rust         steps=0      time=  121ms
+[351/1295] PASS 0647.json            via=rust         steps=0      time=    9ms
+[352/1295] PASS 0648.json            via=rust         steps=0      time=   12ms
+[353/1295] PASS 0649.json            via=rust         steps=0      time=   11ms
+[354/1295] PASS C1-2.json            via=rust         steps=0      time= 3907ms
+[355/1295] PASS 0388.json            via=rust         steps=0      time=  341ms
+[356/1295] PASS 0743.json            via=rust         steps=0      time=   12ms
+[357/1295] PASS 0744.json            via=rust         steps=0      time=   14ms
+[358/1295] PASS 0277.json            via=rust         steps=0      time= 3119ms
+[359/1295] PASS 0746.json            via=rust         steps=0      time=   13ms
+[360/1295] PASS 0747.json            via=rust         steps=0      time=    7ms
+[361/1295] PASS 0748.json            via=rust         steps=0      time=   12ms
+[362/1295] PASS 0187.json            via=rust         steps=0      time= 1188ms
+[363/1295] PASS 0750.json            via=rust         steps=0      time=   17ms
+[364/1295] PASS 0739.json            via=rust         steps=0      time= 1322ms
+[365/1295] PASS 0752.json            via=rust         steps=0      time=    7ms
+[366/1295] PASS 0753.json            via=rust         steps=0      time=   25ms
+[367/1295] PASS 0755.json            via=rust         steps=0      time=   15ms
+[368/1295] PASS 1101.json            via=rust         steps=0      time=  129ms
+[369/1295] PASS 1159.json            via=rust         steps=0      time=   13ms
+[370/1295] PASS 0751.json            via=rust         steps=0      time=  809ms
+[371/1295] PASS 0153.json            via=rust         steps=0      time= 7367ms
+[372/1295] PASS 1328.json            via=rust         steps=0      time=    6ms
+[373/1295] PASS 0386.json            via=rust         steps=0      time= 6960ms
+[374/1295] PASS 0086.json            via=rust         steps=0      time=    8ms
+[375/1295] PASS 0168.json            via=rust         steps=0      time=    7ms
+[376/1295] PASS 0169.json            via=rust         steps=0      time=  146ms
+[377/1295] PASS 0170.json            via=rust         steps=0      time=   22ms
+[378/1295] PASS 0300.json            via=rust         steps=0      time=    6ms
+[379/1295] PASS 0833.json            via=rust         steps=0      time=14102ms
+[380/1295] PASS 0320.json            via=rust         steps=0      time=   20ms
+[381/1295] PASS 0328.json            via=rust         steps=0      time=    8ms
+[382/1295] PASS 0362.json            via=rust         steps=0      time=   12ms
+[383/1295] PASS 0375.json            via=rust         steps=0      time=   10ms
+[384/1295] PASS 0393.json            via=rust         steps=0      time=    6ms
+[385/1295] PASS 0400.json            via=rust         steps=0      time=    6ms
+[386/1295] PASS 1261.json            via=rust         steps=0      time=21807ms
+[387/1295] PASS 0461.json            via=rust         steps=0      time=   27ms
+[388/1295] PASS 0485b.json           via=rust         steps=0      time=   22ms
+[389/1295] PASS 0490.json            via=rust         steps=0      time=   78ms
+[390/1295] PASS 0506.json            via=rust         steps=0      time=   12ms
+[391/1295] PASS 0572.json            via=rust         steps=0      time=   14ms
+[392/1295] PASS 0598.json            via=rust         steps=0      time=   11ms
+[393/1295] PASS 0738.json            via=rust         steps=0      time=   14ms
+[394/1295] PASS 0847.json            via=rust         steps=0      time=   20ms
+[395/1295] PASS 0862.json            via=rust         steps=0      time=   16ms
+[396/1295] FAIL 0882.json            via=-            steps=0      time=28269ms  [rust] Rust solver exited with code -9: 
+[397/1295] PASS 0863.json            via=rust         steps=0      time= 1511ms
+[398/1295] PASS 0865.json            via=rust         steps=0      time=   87ms
+[399/1295] PASS 0864b.json           via=rust         steps=0      time=  798ms
+[400/1295] PASS 0868.json            via=rust         steps=0      time=   72ms
+[401/1295] PASS 0871b.json           via=rust         steps=0      time= 1184ms
+[402/1295] PASS 0872.json            via=rust         steps=0      time=   77ms
+[403/1295] PASS 0867.json            via=rust         steps=0      time= 3501ms
+[404/1295] PASS 0877.json            via=rust         steps=0      time=   20ms
+[405/1295] FAIL 0742.json            via=-            steps=0      time=30123ms  [rust] Solution found but fails rule validation
+[406/1295] FAIL 0401.json            via=-            steps=0      time=33831ms  [rust] Solution found but fails rule validation
+[407/1295] PASS 0883.json            via=rust         steps=0      time=  109ms
+[408/1295] PASS 1113.json            via=rust         steps=0      time= 8732ms
+[409/1295] PASS 1114.json            via=rust         steps=0      time= 1009ms
+[410/1295] PASS 1119.json            via=rust         steps=0      time=   19ms
+[411/1295] PASS 1120.json            via=rust         steps=0      time=   16ms
+[412/1295] PASS 1202.json            via=rust         steps=0      time=   85ms
+[413/1295] PASS 1203.json            via=rust         steps=0      time=    9ms
+[414/1295] PASS 1204.json            via=rust         steps=0      time=    7ms
+[415/1295] PASS 1205.json            via=rust         steps=0      time=   13ms
+[416/1295] PASS 1206.json            via=rust         steps=0      time=   10ms
+[417/1295] PASS 1358.json            via=rust         steps=0      time=    9ms
+[418/1295] PASS 1359.json            via=rust         steps=0      time=   17ms
+[419/1295] PASS 1360.json            via=rust         steps=0      time=  198ms
+[420/1295] PASS 1361.json            via=rust         steps=0      time=   18ms
+[421/1295] PASS 1368.json            via=rust         steps=0      time=   30ms
+[422/1295] PASS 0048.json            via=rust         steps=0      time=   22ms
+[423/1295] PASS 0084.json            via=rust         steps=0      time=   10ms
+[424/1295] FAIL 1435.json            via=-            steps=0      time=60059ms  [rust] Solution found but fails rule validation
+[425/1295] PASS 0102.json            via=rust         steps=0      time=   22ms
+[426/1295] PASS 0291.json            via=rust         steps=0      time=   22ms
+[427/1295] PASS 0293.json            via=rust         steps=0      time=   19ms
+[428/1295] PASS 0294.json            via=rust         steps=0      time=   33ms
+[429/1295] PASS 0295.json            via=rust         steps=0      time=   32ms
+[430/1295] PASS 0302.json            via=rust         steps=0      time=   14ms
+[431/1295] PASS 0321.json            via=rust         steps=0      time=   28ms
+[432/1295] PASS 0323.json            via=rust         steps=0      time=   31ms
+[433/1295] PASS 0326.json            via=rust         steps=0      time=   15ms
+[434/1295] PASS 0336.json            via=rust         steps=0      time=  174ms
+[435/1295] PASS 0087.json            via=rust         steps=0      time=  990ms
+[436/1295] PASS 0342.json            via=rust         steps=0      time=   16ms
+[437/1295] PASS 0340.json            via=rust         steps=0      time=   93ms
+[438/1295] PASS 0427.json            via=rust         steps=0      time=    7ms
+[439/1295] PASS 0429.json            via=rust         steps=0      time=   11ms
+[440/1295] PASS 0430.json            via=rust         steps=0      time=   14ms
+[441/1295] PASS 0431.json            via=rust         steps=0      time=    7ms
+[442/1295] PASS 0434.json            via=rust         steps=0      time=    8ms
+[443/1295] FAIL C4-2.json            via=-            steps=0      time=90111ms  [rust] Rust solver timed out after 30s
+[444/1295] FAIL 0732.json            via=-            steps=0      time=90124ms  [rust] Rust solver timed out after 30s
+[445/1295] PASS 0441.json            via=rust         steps=0      time=   10ms
+[446/1295] PASS 0443.json            via=rust         steps=0      time=   13ms
+[447/1295] PASS 0444.json            via=rust         steps=0      time=   10ms
+[448/1295] FAIL 1099.json            via=-            steps=0      time=90114ms  [rust] Rust solver timed out after 30s
+[449/1295] PASS 0449.json            via=rust         steps=0      time=    8ms
+[450/1295] PASS 0453.json            via=rust         steps=0      time=   13ms
+[451/1295] FAIL 1100.json            via=-            steps=0      time=90143ms  [rust] Rust solver timed out after 30s
+[452/1295] PASS 0450.json            via=rust         steps=0      time=   24ms
+[453/1295] FAIL 1098.json            via=-            steps=0      time=90161ms  [rust] Rust solver timed out after 30s
+[454/1295] PASS 0463.json            via=rust         steps=0      time=   16ms
+[455/1295] PASS 0457.json            via=rust         steps=0      time=   18ms
+[456/1295] PASS 0465.json            via=rust         steps=0      time=    7ms
+[457/1295] PASS 0464.json            via=rust         steps=0      time=   27ms
+[458/1295] PASS 0705b.json           via=rust         steps=0      time=   26ms
+[459/1295] PASS 0704.json            via=rust         steps=0      time=  111ms
+[460/1295] PASS 0473.json            via=rust         steps=0      time=  136ms
+[461/1295] PASS 0707.json            via=rust         steps=0      time=  182ms
+[462/1295] PASS 0708.json            via=rust         steps=0      time=  244ms
+[463/1295] FAIL 0213.json            via=-            steps=0      time=90117ms  [rust] Rust solver timed out after 30s
+[464/1295] FAIL 0213nopad.json       via=-            steps=0      time=90129ms  [rust] Rust solver timed out after 30s
+[465/1295] PASS 1008.json            via=rust         steps=0      time=    8ms
+[466/1295] FAIL 0223.json            via=-            steps=0      time=90110ms  [rust] Rust solver timed out after 30s
+[467/1295] PASS 1010.json            via=rust         steps=0      time=   13ms
+[468/1295] PASS 1007a.json           via=rust         steps=0      time=   39ms
+[469/1295] PASS 1013.json            via=rust         steps=0      time=    7ms
+[470/1295] PASS 1014.json            via=rust         steps=0      time=   10ms
+[471/1295] FAIL 0804.json            via=-            steps=0      time=90180ms  [rust] Rust solver timed out after 30s
+[472/1295] PASS 1020.json            via=rust         steps=0      time=   10ms
+[473/1295] PASS 1108.json            via=rust         steps=0      time=   86ms
+[474/1295] PASS 1115.json            via=rust         steps=0      time=    9ms
+[475/1295] PASS 1116.json            via=rust         steps=0      time=    6ms
+[476/1295] PASS 1117.json            via=rust         steps=0      time=    5ms
+[477/1295] PASS 1118.json            via=rust         steps=0      time=    5ms
+[478/1295] PASS 1121.json            via=rust         steps=0      time=    6ms
+[479/1295] PASS 1018.json            via=rust         steps=0      time=  244ms
+[480/1295] PASS 1129.json            via=rust         steps=0      time=   10ms
+[481/1295] PASS 1253.json            via=rust         steps=0      time=   10ms
+[482/1295] PASS 1315.json            via=rust         steps=0      time=   11ms
+[483/1295] PASS 0145.json            via=rust         steps=0      time=    6ms
+[484/1295] PASS 0254.json            via=rust         steps=0      time=   10ms
+[485/1295] PASS 0319.json            via=rust         steps=0      time=   13ms
+[486/1295] PASS 0350.json            via=rust         steps=0      time=   14ms
+[487/1295] PASS 0352.json            via=rust         steps=0      time=    9ms
+[488/1295] PASS 0351.json            via=rust         steps=0      time=   18ms
+[489/1295] PASS 0355.json            via=rust         steps=0      time=    8ms
+[490/1295] PASS 0353.json            via=rust         steps=0      time=   20ms
+[491/1295] PASS 0357.json            via=rust         steps=0      time=   17ms
+[492/1295] PASS 0356.json            via=rust         steps=0      time=   26ms
+[493/1295] PASS 1005.json            via=rust         steps=0      time=  699ms
+[494/1295] PASS 0372.json            via=rust         steps=0      time=    6ms
+[495/1295] PASS 0381.json            via=rust         steps=0      time=   34ms
+[496/1295] FAIL 1433.json            via=-            steps=0      time=90102ms  [rust] Rust solver timed out after 30s
+[497/1295] PASS 0602.json            via=rust         steps=0      time=   10ms
+[498/1295] PASS 0700.json            via=rust         steps=0      time=   18ms
+[499/1295] FAIL 0437.json            via=-            steps=0      time=31459ms  [rust] Solution found but fails rule validation
+[500/1295] FAIL 1434.json            via=-            steps=0      time=90668ms  [rust] Rust solver timed out after 30s
+[501/1295] PASS 1095.json            via=rust         steps=0      time=   12ms
+[502/1295] PASS 1176.json            via=rust         steps=0      time=    6ms
+[503/1295] PASS 1177.json            via=rust         steps=0      time=   46ms
+[504/1295] PASS 1178.json            via=rust         steps=0      time=   19ms
+[505/1295] PASS 0706.json            via=rust         steps=0      time= 2039ms
+[506/1295] PASS 1331.json            via=rust         steps=0      time=   42ms
+[507/1295] PASS 1364.json            via=rust         steps=0      time=   15ms
+[508/1295] PASS 1330.json            via=rust         steps=0      time=  607ms
+[509/1295] PASS 1366.json            via=rust         steps=0      time=   12ms
+[510/1295] PASS 0076.json            via=rust         steps=0      time=   13ms
+[511/1295] PASS 1365.json            via=rust         steps=0      time=  435ms
+[512/1295] PASS 0258.json            via=rust         steps=0      time=   16ms
+[513/1295] PASS 0282.json            via=rust         steps=0      time=   13ms
+[514/1295] PASS 0283.json            via=rust         steps=0      time=   11ms
+[515/1295] PASS 0264.json            via=rust         steps=0      time=   55ms
+[516/1295] PASS 0284.json            via=rust         steps=0      time=   12ms
+[517/1295] PASS 0285.json            via=rust         steps=0      time=   12ms
+[518/1295] PASS 0310.json            via=rust         steps=0      time=   19ms
+[519/1295] PASS 0314.json            via=rust         steps=0      time=   10ms
+[520/1295] PASS 0316.json            via=rust         steps=0      time=   16ms
+[521/1295] PASS 0315.json            via=rust         steps=0      time=   20ms
+[522/1295] PASS 0318.json            via=rust         steps=0      time=    9ms
+[523/1295] FAIL 0710.json            via=-            steps=0      time=90218ms  [rust] Rust solver timed out after 30s
+[524/1295] PASS 0327.json            via=rust         steps=0      time=   12ms
+[525/1295] PASS 0332.json            via=rust         steps=0      time=    5ms
+[526/1295] PASS 0333.json            via=rust         steps=0      time=   68ms
+[527/1295] FAIL 0745.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[528/1295] FAIL 0749.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[529/1295] PASS 0603.json            via=rust         steps=0      time=   20ms
+[530/1295] PASS 0604.json            via=rust         steps=0      time=    9ms
+[531/1295] PASS 0605.json            via=rust         steps=0      time=    6ms
+[532/1295] PASS 0645.json            via=rust         steps=0      time=   10ms
+[533/1295] PASS 0701.json            via=rust         steps=0      time=    7ms
+[534/1295] PASS 0723.json            via=rust         steps=0      time=   12ms
+[535/1295] PASS 0754.json            via=rust         steps=0      time=    7ms
+[536/1295] PASS 0757.json            via=rust         steps=0      time=   17ms
+[537/1295] PASS 0758.json            via=rust         steps=0      time=    7ms
+[538/1295] PASS 0760.json            via=rust         steps=0      time=   10ms
+[539/1295] PASS 0761.json            via=rust         steps=0      time=  320ms
+[540/1295] PASS 0349.json            via=rust         steps=0      time=  759ms
+[541/1295] PASS 1034.json            via=rust         steps=0      time=   20ms
+[542/1295] PASS 1173.json            via=rust         steps=0      time=   24ms
+[543/1295] PASS 1035.json            via=rust         steps=0      time=   18ms
+[544/1295] PASS 1174.json            via=rust         steps=0      time=   13ms
+[545/1295] PASS 1175.json            via=rust         steps=0      time=   21ms
+[546/1295] PASS 1254.json            via=rust         steps=0      time=   21ms
+[547/1295] PASS 1262.json            via=rust         steps=0      time=   28ms
+[548/1295] PASS 1305.json            via=rust         steps=0      time=   11ms
+[549/1295] PASS 1263.json            via=rust         steps=0      time=   40ms
+[550/1295] PASS 1309.json            via=rust         steps=0      time=   27ms
+[551/1295] PASS 1310.json            via=rust         steps=0      time=   18ms
+[552/1295] PASS 1311.json            via=rust         steps=0      time=   15ms
+[553/1295] PASS 1312.json            via=rust         steps=0      time=   20ms
+[554/1295] PASS 1313.json            via=rust         steps=0      time=   47ms
+[555/1295] PASS 1336.json            via=rust         steps=0      time=    8ms
+[556/1295] PASS 1308.json            via=rust         steps=0      time=  205ms
+[557/1295] FAIL 1183.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[558/1295] PASS 0286.json            via=rust         steps=0      time=   14ms
+[559/1295] PASS 0287.json            via=rust         steps=0      time=   21ms
+[560/1295] PASS 0288.json            via=rust         steps=0      time=   17ms
+[561/1295] FAIL 1329.json            via=-            steps=0      time=90139ms  [rust] Rust solver timed out after 30s
+[562/1295] PASS 0290.json            via=rust         steps=0      time=   42ms
+[563/1295] PASS 0322.json            via=rust         steps=0      time=   12ms
+[564/1295] PASS 0556.json            via=rust         steps=0      time=    7ms
+[565/1295] PASS 0557.json            via=rust         steps=0      time=   13ms
+[566/1295] PASS 0558.json            via=rust         steps=0      time=   11ms
+[567/1295] PASS 0625.json            via=rust         steps=0      time=   17ms
+[568/1295] PASS 0626.json            via=rust         steps=0      time=   20ms
+[569/1295] PASS 0641.json            via=rust         steps=0      time=   10ms
+[570/1295] PASS 0733.json            via=rust         steps=0      time=   12ms
+[571/1295] PASS 0734.json            via=rust         steps=0      time=   13ms
+[572/1295] PASS 0737.json            via=rust         steps=0      time=   10ms
+[573/1295] PASS 0762.json            via=rust         steps=0      time=   16ms
+[574/1295] PASS 0768.json            via=rust         steps=0      time=   12ms
+[575/1295] PASS 0769.json            via=rust         steps=0      time=   73ms
+[576/1295] FAIL 0308.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[577/1295] PASS 0771.json            via=rust         steps=0      time=   39ms
+[578/1295] PASS 0772.json            via=rust         steps=0      time= 2218ms
+[579/1295] PASS 0773.json            via=rust         steps=0      time=    9ms
+[580/1295] PASS 0774.json            via=rust         steps=0      time= 2424ms
+[581/1295] PASS 0775.json            via=rust         steps=0      time=   44ms
+[582/1295] PASS 0777.json            via=rust         steps=0      time=   26ms
+[583/1295] PASS 0778.json            via=rust         steps=0      time=   15ms
+[584/1295] PASS 0779.json            via=rust         steps=0      time=   13ms
+[585/1295] PASS 0780.json            via=rust         steps=0      time=  171ms
+[586/1295] PASS 0973.json            via=rust         steps=0      time=   30ms
+[587/1295] PASS 1179.json            via=rust         steps=0      time=   12ms
+[588/1295] PASS 1180.json            via=rust         steps=0      time=   10ms
+[589/1295] PASS 1181.json            via=rust         steps=0      time=   13ms
+[590/1295] PASS 1182.json            via=rust         steps=0      time=    9ms
+[591/1295] PASS 1332.json            via=rust         steps=0      time=   15ms
+[592/1295] FAIL 0875.json            via=-            steps=0      time=90124ms  [rust] Rust solver timed out after 30s
+[593/1295] FAIL 0709.json            via=-            steps=0      time=30034ms  [rust] Solution found but fails rule validation
+[594/1295] FAIL 1011a.json           via=-            steps=0      time=30169ms  [rust] Solution found but fails rule validation
+[595/1295] FAIL 0878v2.json          via=-            steps=0      time=90095ms  [rust] Rust solver timed out after 30s
+[596/1295] PASS 1343.json            via=rust         steps=0      time=   37ms
+[597/1295] PASS 1345.json            via=rust         steps=0      time=   15ms
+[598/1295] FAIL 0439.json            via=-            steps=0      time=33045ms  [rust] Solution found but fails rule validation
+[599/1295] PASS 1347.json            via=rust         steps=0      time=    9ms
+[600/1295] PASS 1346.json            via=rust         steps=0      time=  274ms
+[601/1295] PASS 1349.json            via=rust         steps=0      time=   39ms
+[602/1295] PASS 1350.json            via=rust         steps=0      time=  312ms
+[603/1295] FAIL 0341.json            via=-            steps=0      time=30025ms  [rust] Solution found but fails rule validation
+[604/1295] PASS 0081.json            via=rust         steps=0      time=   11ms
+[605/1295] FAIL 0879.json            via=-            steps=0      time=90131ms  [rust] Rust solver timed out after 30s
+[606/1295] PASS 0100.json            via=rust         steps=0      time=   43ms
+[607/1295] PASS 0163.json            via=rust         steps=0      time=   28ms
+[608/1295] PASS 0194.json            via=rust         steps=0      time=   14ms
+[609/1295] PASS 0241.json            via=rust         steps=0      time=  422ms
+[610/1295] PASS 0256.json            via=rust         steps=0      time=   12ms
+[611/1295] PASS 0272.json            via=rust         steps=0      time=  204ms
+[612/1295] PASS 0306.json            via=rust         steps=0      time=    8ms
+[613/1295] PASS 0313.json            via=rust         steps=0      time=   22ms
+[614/1295] PASS 0559.json            via=rust         steps=0      time=    7ms
+[615/1295] PASS 0560.json            via=rust         steps=0      time=   12ms
+[616/1295] PASS 0561.json            via=rust         steps=0      time=   12ms
+[617/1295] PASS 0562b.json           via=rust         steps=0      time=    9ms
+[618/1295] PASS 0599.json            via=rust         steps=0      time=    8ms
+[619/1295] PASS 0600.json            via=rust         steps=0      time=   36ms
+[620/1295] PASS 0601.json            via=rust         steps=0      time=   16ms
+[621/1295] PASS 0677.json            via=rust         steps=0      time=   26ms
+[622/1295] PASS 0736.json            via=rust         steps=0      time=   14ms
+[623/1295] PASS 0764.json            via=rust         steps=0      time=    9ms
+[624/1295] PASS 0815.json            via=rust         steps=0      time=   16ms
+[625/1295] PASS 0816.json            via=rust         steps=0      time=   21ms
+[626/1295] PASS 0817.json            via=rust         steps=0      time=   11ms
+[627/1295] PASS 0818.json            via=rust         steps=0      time=   20ms
+[628/1295] PASS 0819.json            via=rust         steps=0      time=   65ms
+[629/1295] FAIL 1370.json            via=-            steps=0      time=30017ms  [rust] Solution found but fails rule validation
+[630/1295] PASS 0820.json            via=rust         steps=0      time=   49ms
+[631/1295] PASS 1334.json            via=rust         steps=0      time= 4545ms
+[632/1295] PASS 0823.json            via=rust         steps=0      time=   30ms
+[633/1295] PASS 0822.json            via=rust         steps=0      time=  320ms
+[634/1295] PASS 0884.json            via=rust         steps=0      time=   13ms
+[635/1295] PASS 0890.json            via=rust         steps=0      time=    6ms
+[636/1295] PASS 1187.json            via=rust         steps=0      time=   12ms
+[637/1295] PASS 1188.json            via=rust         steps=0      time=   11ms
+[638/1295] PASS 1189.json            via=rust         steps=0      time=   12ms
+[639/1295] PASS 1190.json            via=rust         steps=0      time=    9ms
+[640/1295] PASS 1191.json            via=rust         steps=0      time=   14ms
+[641/1295] PASS 1192.json            via=rust         steps=0      time=   10ms
+[642/1295] PASS 1342.json            via=rust         steps=0      time= 4440ms
+[643/1295] PASS 0821.json            via=rust         steps=0      time=  706ms
+[644/1295] PASS 1354.json            via=rust         steps=0      time=   25ms
+[645/1295] PASS 1355.json            via=rust         steps=0      time=   12ms
+[646/1295] FAIL 0459.json            via=-            steps=0      time=35849ms  [rust] Solution found but fails rule validation
+[647/1295] PASS 1357.json            via=rust         steps=0      time=   11ms
+[648/1295] PASS 1353.json            via=rust         steps=0      time=  619ms
+[649/1295] PASS 0129b.json           via=rust         steps=0      time=   14ms
+[650/1295] PASS 1436.json            via=rust         steps=0      time=  452ms
+[651/1295] PASS 0503.json            via=rust         steps=0      time=   10ms
+[652/1295] PASS 1337.json            via=rust         steps=0      time= 7098ms
+[653/1295] PASS 0564.json            via=rust         steps=0      time=   15ms
+[654/1295] PASS 0565.json            via=rust         steps=0      time=   10ms
+[655/1295] PASS 0567.json            via=rust         steps=0      time=   21ms
+[656/1295] PASS 0568.json            via=rust         steps=0      time=   12ms
+[657/1295] PASS 0639.json            via=rust         steps=0      time=    8ms
+[658/1295] PASS 0640.json            via=rust         steps=0      time=   15ms
+[659/1295] PASS 0675.json            via=rust         steps=0      time=   88ms
+[660/1295] PASS 0702.json            via=rust         steps=0      time=   14ms
+[661/1295] PASS 0785.json            via=rust         steps=0      time=   11ms
+[662/1295] PASS 0786.json            via=rust         steps=0      time=  496ms
+[663/1295] PASS 0787.json            via=rust         steps=0      time=   14ms
+[664/1295] PASS 0788.json            via=rust         steps=0      time=   21ms
+[665/1295] PASS 0789.json            via=rust         steps=0      time=   26ms
+[666/1295] PASS 0790.json            via=rust         steps=0      time=  254ms
+[667/1295] PASS 0791.json            via=rust         steps=0      time=   95ms
+[668/1295] PASS 0793.json            via=rust         steps=0      time=   26ms
+[669/1295] PASS 0504.json            via=rust         steps=0      time= 3658ms
+[670/1295] PASS 0385.json            via=rust         steps=0      time= 8341ms
+[671/1295] PASS 0796.json            via=rust         steps=0      time=    7ms
+[672/1295] PASS 0797.json            via=rust         steps=0      time=   10ms
+[673/1295] PASS 0798.json            via=rust         steps=0      time=    7ms
+[674/1295] PASS 0808.json            via=rust         steps=0      time=  530ms
+[675/1295] PASS 0811.json            via=rust         steps=0      time=    8ms
+[676/1295] PASS 1184.json            via=rust         steps=0      time=    5ms
+[677/1295] PASS 1352.json            via=rust         steps=0      time=24481ms
+[678/1295] FAIL 0390.json            via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[679/1295] PASS 1264.json            via=rust         steps=0      time=   49ms
+[680/1295] PASS 1316.json            via=rust         steps=0      time=   17ms
+[681/1295] PASS 1317.json            via=rust         steps=0      time=   12ms
+[682/1295] FAIL 1348.json            via=-            steps=0      time=30846ms  [rust] Solution found but fails rule validation
+[683/1295] PASS 1319.json            via=rust         steps=0      time=   13ms
+[684/1295] PASS 1356.json            via=rust         steps=0      time=28228ms
+[685/1295] PASS 1321.json            via=rust         steps=0      time=  733ms
+[686/1295] PASS 0010.json            via=rust         steps=0      time=   15ms
+[687/1295] PASS 0032.json            via=rust         steps=0      time=   49ms
+[688/1295] PASS 0203.json            via=rust         steps=0      time=   44ms
+[689/1295] PASS 0304.json            via=rust         steps=0      time=   17ms
+[690/1295] PASS 0305.json            via=rust         steps=0      time=   14ms
+[691/1295] PASS 0397.json            via=rust         steps=0      time=   12ms
+[692/1295] PASS 0402.json            via=rust         steps=0      time=   25ms
+[693/1295] PASS 0479.json            via=rust         steps=0      time=   13ms
+[694/1295] PASS 0481.json            via=rust         steps=0      time=   25ms
+[695/1295] PASS 0486.json            via=rust         steps=0      time=   28ms
+[696/1295] PASS 0505.json            via=rust         steps=0      time=   12ms
+[697/1295] PASS 0569.json            via=rust         steps=0      time=   11ms
+[698/1295] PASS 0570.json            via=rust         steps=0      time=   18ms
+[699/1295] PASS 0571.json            via=rust         steps=0      time=   22ms
+[700/1295] PASS 0573.json            via=rust         steps=0      time= 1244ms
+[701/1295] PASS 0765.json            via=rust         steps=0      time=   17ms
+[702/1295] PASS 0766.json            via=rust         steps=0      time=   12ms
+[703/1295] PASS 0809.json            via=rust         steps=0      time=   12ms
+[704/1295] PASS 0810.json            via=rust         steps=0      time=   13ms
+[705/1295] PASS 0795.json            via=rust         steps=0      time=29799ms
+[706/1295] PASS 0827.json            via=rust         steps=0      time=  247ms
+[707/1295] PASS 1318.json            via=rust         steps=0      time=17604ms
+[708/1295] PASS 0830.json            via=rust         steps=0      time=   10ms
+[709/1295] PASS 0831.json            via=rust         steps=0      time=  125ms
+[710/1295] PASS 0832.json            via=rust         steps=0      time=   37ms
+[711/1295] PASS 0835.json            via=rust         steps=0      time=   17ms
+[712/1295] PASS 0836.json            via=rust         steps=0      time=   49ms
+[713/1295] PASS 0849.json            via=rust         steps=0      time=   41ms
+[714/1295] PASS 1169.json            via=rust         steps=0      time=   95ms
+[715/1295] PASS 1193.json            via=rust         steps=0      time=   38ms
+[716/1295] PASS 1194.json            via=rust         steps=0      time=   56ms
+[717/1295] PASS 1195.json            via=rust         steps=0      time=   76ms
+[718/1295] PASS 1196.json            via=rust         steps=0      time=   40ms
+[719/1295] PASS 1197.json            via=rust         steps=0      time=   40ms
+[720/1295] PASS 1256.json            via=rust         steps=0      time=   14ms
+[721/1295] PASS 1265.json            via=rust         steps=0      time=  188ms
+[722/1295] PASS 1323.json            via=rust         steps=0      time=   65ms
+[723/1295] PASS 1324.json            via=rust         steps=0      time=   36ms
+[724/1295] PASS 1335.json            via=rust         steps=0      time=  170ms
+[725/1295] PASS 1362.json            via=rust         steps=0      time=   21ms
+[726/1295] PASS 0162.json            via=rust         steps=0      time=   11ms
+[727/1295] FAIL 1019.json            via=-            steps=0      time=90143ms  [rust] Rust solver timed out after 30s
+[728/1295] PASS 0345.json            via=rust         steps=0      time=   12ms
+[729/1295] FAIL 0383.json            via=-            steps=0      time=90125ms  [rust] Rust solver timed out after 30s
+[730/1295] FAIL 0384.json            via=-            steps=0      time=90117ms  [rust] Rust solver timed out after 30s
+[731/1295] PASS 0482.json            via=rust         steps=0      time=    5ms
+[732/1295] PASS 0478.json            via=rust         steps=0      time=   10ms
+[733/1295] PASS 0498.json            via=rust         steps=0      time=   14ms
+[734/1295] PASS 0574.json            via=rust         steps=0      time=   10ms
+[735/1295] PASS 0575.json            via=rust         steps=0      time=   10ms
+[736/1295] PASS 0576.json            via=rust         steps=0      time=   43ms
+[737/1295] PASS 0577.json            via=rust         steps=0      time=   20ms
+[738/1295] FAIL 0763.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[739/1295] PASS 0670.json            via=rust         steps=0      time=   22ms
+[740/1295] PASS 0671.json            via=rust         steps=0      time=   12ms
+[741/1295] FAIL 0382.json            via=-            steps=0      time=90333ms  [rust] Rust solver timed out after 30s
+[742/1295] PASS 0807.json            via=rust         steps=0      time=  215ms
+[743/1295] PASS 0814.json            via=rust         steps=0      time=    7ms
+[744/1295] PASS 0699.json            via=rust         steps=0      time=  322ms
+[745/1295] PASS 0842.json            via=rust         steps=0      time=    7ms
+[746/1295] FAIL 0960.json            via=-            steps=0      time=90112ms  [rust] Rust solver timed out after 30s
+[747/1295] FAIL 0317.json            via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[748/1295] FAIL 0325.json            via=-            steps=0      time=90094ms  [rust] Rust solver timed out after 30s
+[749/1295] PASS 0852.json            via=rust         steps=0      time=   24ms
+[750/1295] PASS 0851.json            via=rust         steps=0      time=   39ms
+[751/1295] PASS 0853.json            via=rust         steps=0      time=   10ms
+[752/1295] PASS 0854.json            via=rust         steps=0      time=   11ms
+[753/1295] PASS 0855.json            via=rust         steps=0      time=   35ms
+[754/1295] PASS 0857.json            via=rust         steps=0      time=   60ms
+[755/1295] PASS 0858.json            via=rust         steps=0      time=   16ms
+[756/1295] PASS 0859.json            via=rust         steps=0      time=   44ms
+[757/1295] PASS 0860fix2.json        via=rust         steps=0      time=  150ms
+[758/1295] FAIL 1340.json            via=-            steps=0      time=90098ms  [rust] Rust solver timed out after 30s
+[759/1295] PASS 1026.json            via=rust         steps=0      time=  133ms
+[760/1295] PASS 1028.json            via=rust         steps=0      time=   11ms
+[761/1295] PASS 1032.json            via=rust         steps=0      time=   12ms
+[762/1295] PASS 1088.json            via=rust         steps=0      time=   27ms
+[763/1295] FAIL 0289.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[764/1295] PASS 1199.json            via=rust         steps=0      time=   11ms
+[765/1295] PASS 1200.json            via=rust         steps=0      time=   27ms
+[766/1295] PASS 1255.json            via=rust         steps=0      time=    9ms
+[767/1295] PASS 1325.json            via=rust         steps=0      time=   17ms
+[768/1295] PASS 1201.json            via=rust         steps=0      time=   75ms
+[769/1295] PASS 0021.json            via=rust         steps=0      time=   24ms
+[770/1295] PASS 0033.json            via=rust         steps=0      time=   20ms
+[771/1295] PASS 0037.json            via=rust         steps=0      time=   10ms
+[772/1295] PASS 0407.json            via=rust         steps=0      time=    7ms
+[773/1295] PASS 0508.json            via=rust         steps=0      time=   48ms
+[774/1295] PASS 0596.json            via=rust         steps=0      time=    9ms
+[775/1295] PASS 0612.json            via=rust         steps=0      time=    9ms
+[776/1295] PASS 0613.json            via=rust         steps=0      time=    9ms
+[777/1295] PASS 0614.json            via=rust         steps=0      time=    7ms
+[778/1295] PASS 0615.json            via=rust         steps=0      time=   10ms
+[779/1295] PASS 0622.json            via=rust         steps=0      time=   42ms
+[780/1295] PASS 0656.json            via=rust         steps=0      time=   11ms
+[781/1295] PASS 0667.json            via=rust         steps=0      time=   13ms
+[782/1295] PASS 0668.json            via=rust         steps=0      time=   14ms
+[783/1295] PASS 0669.json            via=rust         steps=0      time=    8ms
+[784/1295] PASS 1326.json            via=rust         steps=0      time= 3883ms
+[785/1295] PASS 0876.json            via=rust         steps=0      time=   55ms
+[786/1295] FAIL 0770.json            via=-            steps=0      time=90099ms  [rust] Rust solver timed out after 30s
+[787/1295] PASS 0933.json            via=rust         steps=0      time=   15ms
+[788/1295] PASS 0934.json            via=rust         steps=0      time=   17ms
+[789/1295] PASS 0906.json            via=rust         steps=0      time=  435ms
+[790/1295] PASS 0936.json            via=rust         steps=0      time=   43ms
+[791/1295] PASS 0938.json            via=rust         steps=0      time=   34ms
+[792/1295] PASS 0940.json            via=rust         steps=0      time=   50ms
+[793/1295] PASS 0942.json            via=rust         steps=0      time=   23ms
+[794/1295] PASS 0943.json            via=rust         steps=0      time=  237ms
+[795/1295] PASS 0945.json            via=rust         steps=0      time=   13ms
+[796/1295] PASS 0944.json            via=rust         steps=0      time=   24ms
+[797/1295] PASS 0951.json            via=rust         steps=0      time=  686ms
+[798/1295] PASS 0953.json            via=rust         steps=0      time=   23ms
+[799/1295] PASS 0954.json            via=rust         steps=0      time= 1276ms
+[800/1295] PASS 0955.json            via=rust         steps=0      time=  870ms
+[801/1295] FAIL 0826.json            via=-            steps=0      time=37665ms  [rust] Rust solver exited with code -9: 
+[802/1295] FAIL 1333.json            via=-            steps=0      time=90094ms  [rust] Rust solver timed out after 30s
+[803/1295] PASS 0958.json            via=rust         steps=0      time=   11ms
+[804/1295] PASS 0959.json            via=rust         steps=0      time=   31ms
+[805/1295] PASS 0961.json            via=rust         steps=0      time=  153ms
+[806/1295] PASS 0964.json            via=rust         steps=0      time=   11ms
+[807/1295] FAIL 0838.json            via=-            steps=0      time=21999ms  [rust] Rust solver exited with code -9: 
+[808/1295] PASS 1021.json            via=rust         steps=0      time=   16ms
+[809/1295] PASS 1154.json            via=rust         steps=0      time=   18ms
+[810/1295] PASS 1155.json            via=rust         steps=0      time=   11ms
+[811/1295] PASS 1158.json            via=rust         steps=0      time=   11ms
+[812/1295] PASS 1216.json            via=rust         steps=0      time=   67ms
+[813/1295] PASS 1217.json            via=rust         steps=0      time=   21ms
+[814/1295] PASS 1218.json            via=rust         steps=0      time=   97ms
+[815/1295] PASS 1219.json            via=rust         steps=0      time=   47ms
+[816/1295] PASS 1220.json            via=rust         steps=0      time=   31ms
+[817/1295] PASS 1266.json            via=rust         steps=0      time=   33ms
+[818/1295] PASS 1286.json            via=rust         steps=0      time=  330ms
+[819/1295] PASS 1287.json            via=rust         steps=0      time=  130ms
+[820/1295] PASS 1288.json            via=rust         steps=0      time=    8ms
+[821/1295] PASS 1289.json            via=rust         steps=0      time=   10ms
+[822/1295] PASS 1290.json            via=rust         steps=0      time=   13ms
+[823/1295] PASS 1291.json            via=rust         steps=0      time=   29ms
+[824/1295] PASS 1292fix.json         via=rust         steps=0      time=   14ms
+[825/1295] FAIL 0497.json            via=-            steps=0      time=30452ms  [rust] Solution found but fails rule validation
+[826/1295] PASS 1295.json            via=rust         steps=0      time=   38ms
+[827/1295] FAIL 0848.json            via=-            steps=0      time=30051ms  [rust] Solution found but fails rule validation
+[828/1295] PASS 1297.json            via=rust         steps=0      time=   77ms
+[829/1295] PASS 1298.json            via=rust         steps=0      time=   12ms
+[830/1295] PASS 1299.json            via=rust         steps=0      time=   18ms
+[831/1295] PASS 1300.json            via=rust         steps=0      time=   11ms
+[832/1295] FAIL 1351.json            via=-            steps=0      time=90108ms  [rust] Rust solver timed out after 30s
+[833/1295] PASS 1303.json            via=rust         steps=0      time=   29ms
+[834/1295] PASS 1363.json            via=rust         steps=0      time=    7ms
+[835/1295] PASS 1367.json            via=rust         steps=0      time=   35ms
+[836/1295] FAIL 0171.json            via=-            steps=0      time=90101ms  [rust] Rust solver timed out after 30s
+[837/1295] PASS 1371.json            via=rust         steps=0      time=  148ms
+[838/1295] PASS 1296.json            via=rust         steps=0      time= 2009ms
+[839/1295] PASS 1396.json            via=rust         steps=0      time=   35ms
+[840/1295] FAIL 0824.json            via=-            steps=0      time=90095ms  [rust] Rust solver timed out after 30s
+[841/1295] PASS 0502.json            via=rust         steps=0      time=   16ms
+[842/1295] PASS 0548.json            via=rust         steps=0      time=   48ms
+[843/1295] PASS 0549.json            via=rust         steps=0      time=   49ms
+[844/1295] PASS 0593.json            via=rust         steps=0      time=  719ms
+[845/1295] PASS 0594.json            via=rust         steps=0      time=  135ms
+[846/1295] PASS 0595.json            via=rust         steps=0      time=  133ms
+[847/1295] PASS 0408.json            via=rust         steps=0      time= 2370ms
+[848/1295] FAIL 0794.json            via=-            steps=0      time=90110ms  [rust] Rust solver timed out after 30s
+[849/1295] PASS 0635.json            via=rust         steps=0      time=  269ms
+[850/1295] PASS 0657.json            via=rust         steps=0      time=   11ms
+[851/1295] FAIL 0957.json            via=-            steps=0      time=25336ms  [rust] Rust solver exited with code -9: 
+[852/1295] PASS 0659.json            via=rust         steps=0      time=  333ms
+[853/1295] PASS 0658.json            via=rust         steps=0      time=  903ms
+[854/1295] PASS 0665.json            via=rust         steps=0      time=    6ms
+[855/1295] PASS 0666.json            via=rust         steps=0      time=   10ms
+[856/1295] FAIL 0952.json            via=-            steps=0      time=30159ms  [rust] Solution found but fails rule validation
+[857/1295] PASS 0678.json            via=rust         steps=0      time=   20ms
+[858/1295] PASS 0740.json            via=rust         steps=0      time=   11ms
+[859/1295] PASS 0799.json            via=rust         steps=0      time=   12ms
+[860/1295] PASS 1369.json            via=rust         steps=0      time= 8326ms
+[861/1295] PASS 0869.json            via=rust         steps=0      time=   16ms
+[862/1295] FAIL 0660.json            via=-            steps=0      time= 3358ms  [rust] Solution found but fails rule validation
+[863/1295] FAIL 1185.json            via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[864/1295] PASS 0892.json            via=rust         steps=0      time=   21ms
+[865/1295] PASS 0962.json            via=rust         steps=0      time=   22ms
+[866/1295] PASS 0873.json            via=rust         steps=0      time= 4704ms
+[867/1295] PASS 0870.json            via=rust         steps=0      time=13888ms
+[868/1295] FAIL 1186.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[869/1295] PASS 1301.json            via=rust         steps=0      time=30014ms
+[870/1295] FAIL 1320.json            via=-            steps=0      time=90103ms  [rust] Rust solver timed out after 30s
+[871/1295] PASS 0970.json            via=rust         steps=0      time=   17ms
+[872/1295] PASS 0968.json            via=rust         steps=0      time= 5092ms
+[873/1295] FAIL 0628.json            via=-            steps=0      time=31139ms  [rust] Solution found but fails rule validation
+[874/1295] PASS 0963.json            via=rust         steps=0      time=22833ms
+[875/1295] FAIL 0829.json            via=-            steps=0      time=90161ms  [rust] Rust solver timed out after 30s
+[876/1295] FAIL 0834.json            via=-            steps=0      time=37049ms  [rust] No solution found
+[877/1295] FAIL 0965.json            via=-            steps=0      time=30153ms  [rust] Solution found but fails rule validation
+[878/1295] FAIL 0303.json            via=-            steps=0      time=90143ms  [rust] Rust solver timed out after 30s
+[879/1295] FAIL 0967.json            via=-            steps=0      time=30252ms  [rust] No solution found
+[880/1295] FAIL 0690.json            via=-            steps=0      time=47336ms  [rust] Rust solver exited with code -9: 
+[881/1295] FAIL 0347.json            via=-            steps=0      time=90107ms  [rust] Rust solver timed out after 30s
+[882/1295] PASS 1153.json            via=rust         steps=0      time=   24ms
+[883/1295] FAIL 0969.json            via=-            steps=0      time=29071ms  [rust] Rust solver exited with code -9: 
+[884/1295] PASS 1157.json            via=rust         steps=0      time=    3ms
+[885/1295] FAIL 0688.json            via=-            steps=0      time=90096ms  [rust] Rust solver timed out after 30s
+[886/1295] PASS 1221.json            via=rust         steps=0      time=    7ms
+[887/1295] FAIL 0850.json            via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[888/1295] FAIL 0856.json            via=-            steps=0      time=90098ms  [rust] Rust solver timed out after 30s
+[889/1295] FAIL 0866.json            via=-            steps=0      time=90099ms  [rust] Rust solver timed out after 30s
+[890/1295] FAIL 1222.json            via=-            steps=0      time= 3205ms  [rust] Solution found but fails rule validation
+[891/1295] FAIL 0844.json            via=-            steps=0      time=90106ms  [rust] Rust solver timed out after 30s
+[892/1295] FAIL 0976.json            via=-            steps=0      time=30484ms  [rust] Rust solver exited with code -9: 
+[893/1295] PASS 1376.json            via=rust         steps=0      time=  931ms
+[894/1295] PASS 1377.json            via=rust         steps=0      time=   29ms
+[895/1295] FAIL 0977.json            via=-            steps=0      time=32564ms  [rust] Rust solver exited with code -9: 
+[896/1295] FAIL 0956.json            via=-            steps=0      time=90101ms  [rust] Rust solver timed out after 30s
+[897/1295] PASS 0024.json            via=rust         steps=0      time=   23ms
+[898/1295] PASS 0045.json            via=rust         steps=0      time=   12ms
+[899/1295] FAIL 0966.json            via=-            steps=0      time=90099ms  [rust] Rust solver timed out after 30s
+[900/1295] PASS 0192.json            via=rust         steps=0      time=   24ms
+[901/1295] PASS 0193.json            via=rust         steps=0      time=  375ms
+[902/1295] FAIL 0978.json            via=-            steps=0      time=30982ms  [rust] Rust solver exited with code -9: 
+[903/1295] FAIL 0606.json            via=-            steps=0      time=75557ms  [rust] Rust solver exited with code -9: 
+[904/1295] PASS 0410.json            via=rust         steps=0      time=   41ms
+[905/1295] PASS 1223.json            via=rust         steps=0      time=22453ms
+[906/1295] FAIL 1294.json            via=-            steps=0      time=90102ms  [rust] Rust solver timed out after 30s
+[907/1295] PASS 0483.json            via=rust         steps=0      time=   16ms
+[908/1295] PASS 0489.json            via=rust         steps=0      time=    7ms
+[909/1295] FAIL 1091.json            via=-            steps=0      time=29795ms  [rust] Rust solver exited with code -9: 
+[910/1295] PASS 0263.json            via=rust         steps=0      time=13619ms
+[911/1295] PASS 0515.json            via=rust         steps=0      time=   10ms
+[912/1295] PASS 0516.json            via=rust         steps=0      time=   11ms
+[913/1295] PASS 0539.json            via=rust         steps=0      time=   16ms
+[914/1295] PASS 0540.json            via=rust         steps=0      time=   11ms
+[915/1295] PASS 0542.json            via=rust         steps=0      time=   14ms
+[916/1295] PASS 0543.json            via=rust         steps=0      time=   33ms
+[917/1295] PASS 0544.json            via=rust         steps=0      time=   49ms
+[918/1295] PASS 0661.json            via=rust         steps=0      time=   42ms
+[919/1295] PASS 0662.json            via=rust         steps=0      time=  104ms
+[920/1295] PASS 0663.json            via=rust         steps=0      time=    7ms
+[921/1295] PASS 0664.json            via=rust         steps=0      time=   70ms
+[922/1295] PASS 0687.json            via=rust         steps=0      time=  564ms
+[923/1295] PASS 0800.json            via=rust         steps=0      time=   34ms
+[924/1295] PASS 0981.json            via=rust         steps=0      time=   21ms
+[925/1295] PASS 0982.json            via=rust         steps=0      time=   12ms
+[926/1295] FAIL 1215.json            via=-            steps=0      time=30875ms  [rust] Rust solver exited with code -9: 
+[927/1295] FAIL 0209.json            via=-            steps=0      time=90318ms  [rust] Rust solver timed out after 30s
+[928/1295] FAIL 1224.json            via=-            steps=0      time=31601ms  [rust] No solution found
+[929/1295] PASS 0989.json            via=rust         steps=0      time=  123ms
+[930/1295] FAIL 0971.json            via=-            steps=0      time=64459ms  [rust] No solution found
+[931/1295] PASS 0991.json            via=rust         steps=0      time=  362ms
+[932/1295] FAIL 1374b.json           via=-            steps=0      time=35618ms  [rust] Rust solver exited with code -9: 
+[933/1295] FAIL 1404.json            via=-            steps=0      time=30076ms  [rust] No solution found
+[934/1295] FAIL 1378.json            via=-            steps=0      time=34621ms  [rust] Solution found but fails rule validation
+[935/1295] PASS 0995.json            via=rust         steps=0      time=  139ms
+[936/1295] PASS 0996.json            via=rust         steps=0      time=  285ms
+[937/1295] PASS 0997.json            via=rust         steps=0      time=  682ms
+[938/1295] FAIL 0405.json            via=-            steps=0      time=30089ms  [rust] No solution found
+[939/1295] FAIL 1375.json            via=-            steps=0      time=45127ms  [rust] Solution found but fails rule validation
+[940/1295] PASS 0992.json            via=rust         steps=0      time=13696ms
+[941/1295] PASS 1001.json            via=rust         steps=0      time=   54ms
+[942/1295] PASS 1002.json            via=rust         steps=0      time= 3178ms
+[943/1295] FAIL 0496.json            via=-            steps=0      time=35350ms  [rust] No solution found
+[944/1295] PASS 1198.json            via=rust         steps=0      time=   82ms
+[945/1295] PASS 1225.json            via=rust         steps=0      time=   14ms
+[946/1295] PASS 1226.json            via=rust         steps=0      time=   16ms
+[947/1295] PASS 1227.json            via=rust         steps=0      time=   19ms
+[948/1295] PASS 1228.json            via=rust         steps=0      time=   25ms
+[949/1295] PASS 1229.json            via=rust         steps=0      time=    9ms
+[950/1295] PASS 1230.json            via=rust         steps=0      time=  167ms
+[951/1295] PASS 1272.json            via=rust         steps=0      time=    9ms
+[952/1295] PASS 1379.json            via=rust         steps=0      time=   47ms
+[953/1295] PASS 1380.json            via=rust         steps=0      time=  119ms
+[954/1295] FAIL 0972.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[955/1295] PASS 1437.json            via=rust         steps=0      time=   42ms
+[956/1295] PASS 1381.json            via=rust         steps=0      time= 2449ms
+[957/1295] PASS 0207.json            via=rust         steps=0      time=   10ms
+[958/1295] PASS 0269.json            via=rust         steps=0      time=  902ms
+[959/1295] FAIL 0491.json            via=-            steps=0      time=42385ms  [rust] No solution found
+[960/1295] PASS 0398.json            via=rust         steps=0      time=    6ms
+[961/1295] PASS 0404.json            via=rust         steps=0      time=   23ms
+[962/1295] PASS 0480.json            via=rust         steps=0      time=    9ms
+[963/1295] FAIL 0974.json            via=-            steps=0      time=91037ms  [rust] Rust solver timed out after 30s
+[964/1295] FAIL 1373.json            via=-            steps=0      time=67337ms  [rust] Solution found but fails rule validation
+[965/1295] PASS 0587.json            via=rust         steps=0      time=    3ms
+[966/1295] PASS 0588.json            via=rust         steps=0      time=  124ms
+[967/1295] PASS 0589.json            via=rust         steps=0      time=   24ms
+[968/1295] PASS 0494.json            via=rust         steps=0      time= 3585ms
+[969/1295] PASS 0591.json            via=rust         steps=0      time=   13ms
+[970/1295] PASS 0590.json            via=rust         steps=0      time=  119ms
+[971/1295] PASS 0608.json            via=rust         steps=0      time=   10ms
+[972/1295] PASS 0609.json            via=rust         steps=0      time=    7ms
+[973/1295] PASS 0610.json            via=rust         steps=0      time=  153ms
+[974/1295] PASS 0623.json            via=rust         steps=0      time=    6ms
+[975/1295] PASS 0731.json            via=rust         steps=0      time=   35ms
+[976/1295] FAIL 0979.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[977/1295] PASS 0840.json            via=rust         steps=0      time=  156ms
+[978/1295] PASS 0893.json            via=rust         steps=0      time=   10ms
+[979/1295] PASS 0913.json            via=rust         steps=0      time=    9ms
+[980/1295] FAIL 0980.json            via=-            steps=0      time=90198ms  [rust] Rust solver timed out after 30s
+[981/1295] PASS 0915.json            via=rust         steps=0      time=    9ms
+[982/1295] PASS 0916.json            via=rust         steps=0      time= 1752ms
+[983/1295] PASS 0917c.json           via=rust         steps=0      time= 1156ms
+[984/1295] PASS 0918b.json           via=rust         steps=0      time=  613ms
+[985/1295] PASS 0914.json            via=rust         steps=0      time= 7419ms
+[986/1295] PASS 0920.json            via=rust         steps=0      time=   65ms
+[987/1295] FAIL 0987.json            via=-            steps=0      time=90106ms  [rust] Rust solver timed out after 30s
+[988/1295] PASS 0919.json            via=rust         steps=0      time= 4919ms
+[989/1295] FAIL 1000.json            via=-            steps=0      time=38076ms  [rust] Solution found but fails rule validation
+[990/1295] FAIL 1156.json            via=-            steps=0      time=90114ms  [rust] Rust solver timed out after 30s
+[991/1295] PASS 0925.json            via=rust         steps=0      time= 5712ms
+[992/1295] PASS 0927.json            via=rust         steps=0      time=   11ms
+[993/1295] FAIL 0189.json            via=-            steps=0      time=90106ms  [rust] Rust solver timed out after 30s
+[994/1295] FAIL 0412.json            via=-            steps=0      time=90117ms  [rust] Rust solver timed out after 30s
+[995/1295] FAIL 0419.json            via=-            steps=0      time=90462ms  [rust] Rust solver timed out after 30s
+[996/1295] PASS 0931.json            via=rust         steps=0      time= 2132ms
+[997/1295] FAIL 0507.json            via=-            steps=0      time=51590ms  [rust] No solution found
+[998/1295] FAIL 0983.json            via=-            steps=0      time=90415ms  [rust] Rust solver timed out after 30s
+[999/1295] PASS 1211.json            via=rust         steps=0      time=  101ms
+[1000/1295] PASS 1212.json            via=rust         steps=0      time=   19ms
+[1001/1295] PASS 1213.json            via=rust         steps=0      time=   49ms
+[1002/1295] PASS 1267.json            via=rust         steps=0      time=  109ms
+[1003/1295] FAIL 0984.json            via=-            steps=0      time=90146ms  [rust] Rust solver timed out after 30s
+[1004/1295] PASS 1383.json            via=rust         steps=0      time=  341ms
+[1005/1295] PASS 1384.json            via=rust         steps=0      time=   11ms
+[1006/1295] PASS 1385.json            via=rust         steps=0      time=  117ms
+[1007/1295] PASS 1039.json            via=rust         steps=0      time= 5615ms
+[1008/1295] PASS 1401.json            via=rust         steps=0      time=   22ms
+[1009/1295] FAIL 0985.json            via=-            steps=0      time=90110ms  [rust] Rust solver timed out after 30s
+[1010/1295] FAIL 0990.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1011/1295] PASS 0251.json            via=rust         steps=0      time=  135ms
+[1012/1295] PASS 0190.json            via=rust         steps=0      time= 3911ms
+[1013/1295] FAIL 0993.json            via=-            steps=0      time=90111ms  [rust] Rust solver timed out after 30s
+[1014/1295] PASS 0273.json            via=rust         steps=0      time=  221ms
+[1015/1295] PASS 0484b.json           via=rust         steps=0      time=  120ms
+[1016/1295] PASS 0578.json            via=rust         steps=0      time=    9ms
+[1017/1295] PASS 0579.json            via=rust         steps=0      time=    7ms
+[1018/1295] PASS 0582.json            via=rust         steps=0      time=    7ms
+[1019/1295] PASS 0583.json            via=rust         steps=0      time=   10ms
+[1020/1295] PASS 0584.json            via=rust         steps=0      time=   21ms
+[1021/1295] PASS 0585.json            via=rust         steps=0      time=   14ms
+[1022/1295] FAIL 0994.json            via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[1023/1295] PASS 0607.json            via=rust         steps=0      time=   10ms
+[1024/1295] PASS 0611.json            via=rust         steps=0      time=   10ms
+[1025/1295] PASS 0727.json            via=rust         steps=0      time=   13ms
+[1026/1295] PASS 0728.json            via=rust         steps=0      time=   10ms
+[1027/1295] PASS 0729.json            via=rust         steps=0      time=    7ms
+[1028/1295] PASS 0735.json            via=rust         steps=0      time=    8ms
+[1029/1295] PASS 0841.json            via=rust         steps=0      time=   10ms
+[1030/1295] PASS 0843.json            via=rust         steps=0      time=   59ms
+[1031/1295] PASS 0845.json            via=rust         steps=0      time=   29ms
+[1032/1295] FAIL 0998.json            via=-            steps=0      time=90099ms  [rust] Rust solver timed out after 30s
+[1033/1295] FAIL 0999.json            via=-            steps=0      time=90877ms  [rust] Rust solver timed out after 30s
+[1034/1295] PASS 0895.json            via=rust         steps=0      time=    9ms
+[1035/1295] PASS 0896.json            via=rust         steps=0      time=   24ms
+[1036/1295] PASS 1112.json            via=rust         steps=0      time=19842ms
+[1037/1295] FAIL 1003.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1038/1295] PASS 0900.json            via=rust         steps=0      time=   93ms
+[1039/1295] PASS 1268fix.json         via=rust         steps=0      time=29909ms
+[1040/1295] PASS 0902.json            via=rust         steps=0      time=   12ms
+[1041/1295] FAIL 0206.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1042/1295] FAIL 0270.json            via=-            steps=0      time=90096ms  [rust] Rust solver timed out after 30s
+[1043/1295] FAIL 0592.json            via=-            steps=0      time=90111ms  [rust] Rust solver timed out after 30s
+[1044/1295] PASS 0907.json            via=rust         steps=0      time=   36ms
+[1045/1295] FAIL 0839.json            via=-            steps=0      time=90120ms  [rust] Rust solver timed out after 30s
+[1046/1295] PASS 0910.json            via=rust         steps=0      time= 2107ms
+[1047/1295] PASS 0911.json            via=rust         steps=0      time= 2614ms
+[1048/1295] FAIL 0586.json            via=-            steps=0      time=38809ms  [rust] Solution found but fails rule validation
+[1049/1295] FAIL 0921.json            via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[1050/1295] PASS 1208.json            via=rust         steps=0      time=   28ms
+[1051/1295] PASS 1209.json            via=rust         steps=0      time=   15ms
+[1052/1295] FAIL 0923fix.json         via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1053/1295] PASS 1210.json            via=rust         steps=0      time=  885ms
+[1054/1295] FAIL 0924fix.json         via=-            steps=0      time=90112ms  [rust] Rust solver timed out after 30s
+[1055/1295] PASS 1398.json            via=rust         steps=0      time=   40ms
+[1056/1295] PASS 1399.json            via=rust         steps=0      time=   10ms
+[1057/1295] PASS 1397a.json           via=rust         steps=0      time= 3877ms
+[1058/1295] PASS 1408.json            via=rust         steps=0      time=   15ms
+[1059/1295] PASS 1409.json            via=rust         steps=0      time=  344ms
+[1060/1295] PASS 1410.json            via=rust         steps=0      time=   13ms
+[1061/1295] PASS 0904.json            via=rust         steps=0      time=27217ms
+[1062/1295] FAIL 0926.json            via=-            steps=0      time=91497ms  [rust] Rust solver timed out after 30s
+[1063/1295] PASS 1412.json            via=rust         steps=0      time=  333ms
+[1064/1295] PASS 1414.json            via=rust         steps=0      time=   10ms
+[1065/1295] PASS 0905.json            via=rust         steps=0      time=26202ms
+[1066/1295] PASS 0034.json            via=rust         steps=0      time=  250ms
+[1067/1295] PASS 0078.json            via=rust         steps=0      time=   93ms
+[1068/1295] PASS 0094.json            via=rust         steps=0      time=   12ms
+[1069/1295] PASS 0104.json            via=rust         steps=0      time=   18ms
+[1070/1295] PASS 0083.json            via=rust         steps=0      time=  255ms
+[1071/1295] PASS 0242.json            via=rust         steps=0      time=  409ms
+[1072/1295] FAIL 0928.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1073/1295] PASS 0908v2.json          via=rust         steps=0      time=26380ms
+[1074/1295] PASS 0387.json            via=rust         steps=0      time=   75ms
+[1075/1295] PASS 1413.json            via=rust         steps=0      time= 9052ms
+[1076/1295] PASS 0373.json            via=rust         steps=0      time= 9390ms
+[1077/1295] PASS 0477.json            via=rust         steps=0      time=    6ms
+[1078/1295] PASS 0500.json            via=rust         steps=0      time=   60ms
+[1079/1295] PASS 0617.json            via=rust         steps=0      time=   18ms
+[1080/1295] FAIL 0929.json            via=-            steps=0      time=90124ms  [rust] Rust solver timed out after 30s
+[1081/1295] FAIL 0930d-real.json      via=-            steps=0      time=90225ms  [rust] Rust solver timed out after 30s
+[1082/1295] PASS 0633.json            via=rust         steps=0      time=   30ms
+[1083/1295] PASS 1382.json            via=rust         steps=0      time=35977ms
+[1084/1295] FAIL 1400.json            via=-            steps=0      time=90095ms  [rust] Rust solver timed out after 30s
+[1085/1295] FAIL 0152.json            via=-            steps=0      time=90140ms  [rust] Rust solver timed out after 30s
+[1086/1295] FAIL 0262.json            via=-            steps=0      time=90157ms  [rust] Rust solver timed out after 30s
+[1087/1295] PASS 0698.json            via=rust         steps=0      time=    9ms
+[1088/1295] PASS 0922.json            via=rust         steps=0      time=   11ms
+[1089/1295] FAIL 0265.json            via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[1090/1295] FAIL 0634.json            via=-            steps=0      time=19450ms  [rust] Solution found but fails rule validation
+[1091/1295] FAIL 0846.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[1092/1295] PASS 1061.json            via=rust         steps=0      time=   19ms
+[1093/1295] PASS 1062b.json           via=rust         steps=0      time=   28ms
+[1094/1295] PASS 1016.json            via=rust         steps=0      time= 8881ms
+[1095/1295] PASS 1071.json            via=rust         steps=0      time=   18ms
+[1096/1295] PASS 1072.json            via=rust         steps=0      time=   39ms
+[1097/1295] FAIL 0894.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1098/1295] PASS 1076.json            via=rust         steps=0      time=   16ms
+[1099/1295] FAIL 0898fix2.json        via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[1100/1295] FAIL 0899.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1101/1295] PASS 1077.json            via=rust         steps=0      time= 4950ms
+[1102/1295] FAIL 0901.json            via=-            steps=0      time=90104ms  [rust] Rust solver timed out after 30s
+[1103/1295] PASS 1081.json            via=rust         steps=0      time=   14ms
+[1104/1295] FAIL 0903.json            via=-            steps=0      time=90107ms  [rust] Rust solver timed out after 30s
+[1105/1295] PASS 1083.json            via=rust         steps=0      time=   53ms
+[1106/1295] PASS 1084.json            via=rust         steps=0      time=  160ms
+[1107/1295] PASS 1082.json            via=rust         steps=0      time= 7823ms
+[1108/1295] PASS 1087.json            via=rust         steps=0      time=  129ms
+[1109/1295] PASS 1086.json            via=rust         steps=0      time= 6750ms
+[1110/1295] FAIL 0912.json            via=-            steps=0      time=90101ms  [rust] Rust solver timed out after 30s
+[1111/1295] PASS 1094.json            via=rust         steps=0      time=   12ms
+[1112/1295] FAIL 1078.json            via=-            steps=0      time=30027ms  [rust] Solution found but fails rule validation
+[1113/1295] FAIL 1207b.json           via=-            steps=0      time=90110ms  [rust] Rust solver timed out after 30s
+[1114/1295] PASS 1231.json            via=rust         steps=0      time=   30ms
+[1115/1295] PASS 1232.json            via=rust         steps=0      time=   12ms
+[1116/1295] PASS 1233.json            via=rust         steps=0      time=   11ms
+[1117/1295] PASS 1234.json            via=rust         steps=0      time=   26ms
+[1118/1295] PASS 1105.json            via=rust         steps=0      time= 1563ms
+[1119/1295] PASS 1257.json            via=rust         steps=0      time=    8ms
+[1120/1295] PASS 1104.json            via=rust         steps=0      time= 7457ms
+[1121/1295] FAIL 1407a.json           via=-            steps=0      time=90184ms  [rust] Rust solver timed out after 30s
+[1122/1295] FAIL 1411.json            via=-            steps=0      time=90096ms  [rust] Rust solver timed out after 30s
+[1123/1295] PASS 1372.json            via=rust         steps=0      time=   23ms
+[1124/1295] FAIL 0312.json            via=-            steps=0      time=90321ms  [rust] Rust solver timed out after 30s
+[1125/1295] PASS 1387.json            via=rust         steps=0      time=  129ms
+[1126/1295] FAIL 1092.json            via=-            steps=0      time=30049ms  [rust] Solution found but fails rule validation
+[1127/1295] PASS 1388.json            via=rust         steps=0      time=   34ms
+[1128/1295] PASS 1390.json            via=rust         steps=0      time=    7ms
+[1129/1295] PASS 1391.json            via=rust         steps=0      time=   93ms
+[1130/1295] PASS 1389.json            via=rust         steps=0      time=  425ms
+[1131/1295] FAIL 0374.json            via=-            steps=0      time=90155ms  [rust] Rust solver timed out after 30s
+[1132/1295] PASS 0299.json            via=rust         steps=0      time=   23ms
+[1133/1295] PASS 0389.json            via=rust         steps=0      time=   21ms
+[1134/1295] PASS 0468.json            via=rust         steps=0      time=   10ms
+[1135/1295] PASS 0495.json            via=rust         steps=0      time=   15ms
+[1136/1295] PASS 0513.json            via=rust         steps=0      time=   16ms
+[1137/1295] PASS 0517.json            via=rust         steps=0      time=  447ms
+[1138/1295] PASS 0518.json            via=rust         steps=0      time=   15ms
+[1139/1295] PASS 0521.json            via=rust         steps=0      time=   14ms
+[1140/1295] PASS 0523.json            via=rust         steps=0      time=   13ms
+[1141/1295] PASS 0524.json            via=rust         steps=0      time=   10ms
+[1142/1295] FAIL 0445.json            via=-            steps=0      time=90092ms  [rust] Rust solver timed out after 30s
+[1143/1295] PASS 0627.json            via=rust         steps=0      time=    9ms
+[1144/1295] PASS 0525.json            via=rust         steps=0      time= 2757ms
+[1145/1295] PASS 0711.json            via=rust         steps=0      time=   18ms
+[1146/1295] PASS 0712.json            via=rust         steps=0      time=   11ms
+[1147/1295] PASS 0714.json            via=rust         steps=0      time=    9ms
+[1148/1295] PASS 0715.json            via=rust         steps=0      time=    9ms
+[1149/1295] PASS 0716.json            via=rust         steps=0      time=   11ms
+[1150/1295] PASS 0717.json            via=rust         steps=0      time=  206ms
+[1151/1295] PASS 0718.json            via=rust         steps=0      time=    6ms
+[1152/1295] PASS 0719.json            via=rust         steps=0      time=    7ms
+[1153/1295] PASS 0720.json            via=rust         steps=0      time=   14ms
+[1154/1295] PASS 0721.json            via=rust         steps=0      time=   11ms
+[1155/1295] PASS 0722.json            via=rust         steps=0      time=   18ms
+[1156/1295] PASS 0724.json            via=rust         steps=0      time=   11ms
+[1157/1295] PASS 0726.json            via=rust         steps=0      time=   10ms
+[1158/1295] PASS 0767.json            via=rust         steps=0      time=   12ms
+[1159/1295] PASS 0885.json            via=rust         steps=0      time=    8ms
+[1160/1295] PASS 0886.json            via=rust         steps=0      time=   10ms
+[1161/1295] PASS 0887.json            via=rust         steps=0      time=   15ms
+[1162/1295] PASS 0888.json            via=rust         steps=0      time=    9ms
+[1163/1295] PASS 0889.json            via=rust         steps=0      time=   19ms
+[1164/1295] PASS 1394.json            via=rust         steps=0      time=  257ms
+[1165/1295] FAIL 1403.json            via=-            steps=0      time= 5613ms  [rust] Solution found but fails rule validation
+[1166/1295] PASS 0684.json            via=rust         steps=0      time= 3388ms
+[1167/1295] PASS 1152.json            via=rust         steps=0      time=  436ms
+[1168/1295] FAIL 0469.json            via=-            steps=0      time=90102ms  [rust] Rust solver timed out after 30s
+[1169/1295] FAIL 0619.json            via=-            steps=0      time=90102ms  [rust] Rust solver timed out after 30s
+[1170/1295] FAIL 0620.json            via=-            steps=0      time=90113ms  [rust] Rust solver timed out after 30s
+[1171/1295] PASS 1152v1.json          via=rust         steps=0      time= 2234ms
+[1172/1295] FAIL 1017.json            via=-            steps=0      time=65618ms  [rust] Solution found but fails rule validation
+[1173/1295] FAIL 0681.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[1174/1295] PASS 0616.json            via=rust         steps=0      time=   43ms
+[1175/1295] FAIL 0683.json            via=-            steps=0      time=90129ms  [rust] Rust solver timed out after 30s
+[1176/1295] FAIL 0685.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1177/1295] FAIL 1060.json            via=-            steps=0      time=90355ms  [rust] Rust solver timed out after 30s
+[1178/1295] FAIL 1067.json            via=-            steps=0      time=90102ms  [rust] Rust solver timed out after 30s
+[1179/1295] PASS 0632.json            via=rust         steps=0      time=  168ms
+[1180/1295] FAIL 1074.json            via=-            steps=0      time=90094ms  [rust] Rust solver timed out after 30s
+[1181/1295] FAIL 0418.json            via=-            steps=0      time=34681ms  [rust] Solution found but fails rule validation
+[1182/1295] FAIL 1080.json            via=-            steps=0      time=90104ms  [rust] Rust solver timed out after 30s
+[1183/1295] FAIL 1079.json            via=-            steps=0      time=90607ms  [rust] Rust solver timed out after 30s
+[1184/1295] PASS 0654.json            via=rust         steps=0      time=  315ms
+[1185/1295] PASS 0676.json            via=rust         steps=0      time= 2690ms
+[1186/1295] FAIL 1093.json            via=-            steps=0      time=90123ms  [rust] Rust solver timed out after 30s
+[1187/1295] FAIL 0637.json            via=-            steps=0      time=31783ms  [rust] Solution found but fails rule validation
+[1188/1295] FAIL 0638.json            via=-            steps=0      time=32917ms  [rust] Solution found but fails rule validation
+[1189/1295] PASS 1090.json            via=rust         steps=0      time=  300ms
+[1190/1295] PASS 1102.json            via=rust         steps=0      time=   78ms
+[1191/1295] FAIL 0776.json            via=-            steps=0      time= 3733ms  [rust] No solution found
+[1192/1295] FAIL 1246.json            via=-            steps=0      time=90165ms  [rust] Rust solver timed out after 30s
+[1193/1295] FAIL 1258.json            via=-            steps=0      time=90096ms  [rust] Rust solver timed out after 30s
+[1194/1295] PASS 1111.json            via=rust         steps=0      time=  159ms
+[1195/1295] FAIL 0631.json            via=-            steps=0      time=39744ms  [rust] No solution found
+[1196/1295] FAIL 1259.json            via=-            steps=0      time=90415ms  [rust] Rust solver timed out after 30s
+[1197/1295] FAIL 1260.json            via=-            steps=0      time=90449ms  [rust] Rust solver timed out after 30s
+[1198/1295] FAIL 1386.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[1199/1295] FAIL 1402.json            via=-            steps=0      time=90103ms  [rust] Rust solver timed out after 30s
+[1200/1295] FAIL 0629.json            via=-            steps=0      time=64367ms  [rust] No solution found
+[1201/1295] PASS 1106.json            via=rust         steps=0      time=20600ms
+[1202/1295] PASS 1139.json            via=rust         steps=0      time=   60ms
+[1203/1295] FAIL 1395b.json           via=-            steps=0      time=90291ms  [rust] Rust solver timed out after 30s
+[1204/1295] FAIL 1130.json            via=-            steps=0      time=90119ms  [rust] Rust solver timed out after 30s
+[1205/1295] FAIL 0417.json            via=-            steps=0      time=90095ms  [rust] Rust solver timed out after 30s
+[1206/1295] PASS 1143.json            via=rust         steps=0      time=   14ms
+[1207/1295] FAIL 0421.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[1208/1295] PASS 1145.json            via=rust         steps=0      time=   12ms
+[1209/1295] FAIL 0492.json            via=-            steps=0      time=90142ms  [rust] Rust solver timed out after 30s
+[1210/1295] FAIL 0493.json            via=-            steps=0      time=90099ms  [rust] Rust solver timed out after 30s
+[1211/1295] PASS 1148.json            via=rust         steps=0      time= 1912ms
+[1212/1295] PASS 1247.json            via=rust         steps=0      time=  303ms
+[1213/1295] PASS 1144.json            via=rust         steps=0      time= 8895ms
+[1214/1295] PASS 1142.json            via=rust         steps=0      time=13052ms
+[1215/1295] FAIL 0679.json            via=-            steps=0      time=64246ms  [rust] Solution found but fails rule validation
+[1216/1295] PASS 0125.json            via=rust         steps=0      time=   26ms
+[1217/1295] PASS 0154.json            via=rust         steps=0      time=   84ms
+[1218/1295] PASS 0164.json            via=rust         steps=0      time=  141ms
+[1219/1295] FAIL 1405.json            via=-            steps=0      time= 7800ms  [rust] No solution found
+[1220/1295] PASS 0208.json            via=rust         steps=0      time=  640ms
+[1221/1295] PASS 0268.json            via=rust         steps=0      time=  511ms
+[1222/1295] FAIL 1110.json            via=-            steps=0      time=40744ms  [rust] Solution found but fails rule validation
+[1223/1295] PASS 0537.json            via=rust         steps=0      time=  620ms
+[1224/1295] PASS 0233.json            via=rust         steps=0      time= 3245ms
+[1225/1295] PASS 0646.json            via=rust         steps=0      time=   84ms
+[1226/1295] FAIL 0621.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[1227/1295] PASS 0653.json            via=rust         steps=0      time=  152ms
+[1228/1295] FAIL 0630.json            via=-            steps=0      time=90513ms  [rust] Rust solver timed out after 30s
+[1229/1295] PASS 0652.json            via=rust         steps=0      time= 1526ms
+[1230/1295] FAIL 1134.json            via=-            steps=0      time=46358ms  [rust] No solution found
+[1231/1295] FAIL 0651.json            via=-            steps=0      time=90108ms  [rust] Rust solver timed out after 30s
+[1232/1295] PASS 0897fix.json         via=rust         steps=0      time=   66ms
+[1233/1295] FAIL 0655.json            via=-            steps=0      time=90127ms  [rust] Rust solver timed out after 30s
+[1234/1295] PASS 0937.json            via=rust         steps=0      time=  535ms
+[1235/1295] PASS 0941.json            via=rust         steps=0      time=   43ms
+[1236/1295] FAIL 0703.json            via=-            steps=0      time=30403ms  [rust] Solution found but fails rule validation
+[1237/1295] PASS 0988.json            via=rust         steps=0      time=  245ms
+[1238/1295] FAIL 1136.json            via=-            steps=0      time=60810ms  [rust] No solution found
+[1239/1295] PASS 1073.json            via=rust         steps=0      time=  241ms
+[1240/1295] FAIL 0697.json            via=-            steps=0      time=90104ms  [rust] Rust solver timed out after 30s
+[1241/1295] FAIL 1107.json            via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[1242/1295] FAIL 1131.json            via=-            steps=0      time=90136ms  [rust] Rust solver timed out after 30s
+[1243/1295] FAIL 1132.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1244/1295] FAIL 1133.json            via=-            steps=0      time=90099ms  [rust] Rust solver timed out after 30s
+[1245/1295] PASS 1151.json            via=rust         steps=0      time=   98ms
+[1246/1295] FAIL 1135.json            via=-            steps=0      time=90901ms  [rust] Rust solver timed out after 30s
+[1247/1295] FAIL 1137.json            via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1248/1295] FAIL 1140fix.json         via=-            steps=0      time=90094ms  [rust] Rust solver timed out after 30s
+[1249/1295] FAIL 1141.json            via=-            steps=0      time=90093ms  [rust] Rust solver timed out after 30s
+[1250/1295] PASS 10x10-poly-pali.json via=rust         steps=0      time=    6ms
+[1251/1295] PASS 1446.json            via=rust         steps=0      time= 1734ms
+[1252/1295] PASS 11x11-poly-area.json via=rust         steps=0      time=  913ms
+[1253/1295] FAIL 14x14-shape-gemini-delta.json via=-            steps=0      time=   19ms  [rust] Solution found but fails rule validation
+[1254/1295] PASS 168-rose-match7.json via=rust         steps=0      time=   34ms
+[1255/1295] PASS 28-shape.json        via=rust         steps=0      time=   10ms
+[1256/1295] PASS 2x2-shape.json       via=rust         steps=0      time=    9ms
+[1257/1295] PASS 2x4-diff-ineq-area.json via=rust         steps=0      time=    5ms
+[1258/1295] PASS 42-rose-match21.json via=rust         steps=0      time=    9ms
+[1259/1295] PASS 4x4-shape.json       via=rust         steps=0      time=    6ms
+[1260/1295] FAIL 1146.json            via=-            steps=0      time=90096ms  [rust] Rust solver timed out after 30s
+[1261/1295] FAIL 1147.json            via=-            steps=0      time=90112ms  [rust] Rust solver timed out after 30s
+[1262/1295] PASS 5x5-compass-rose-watch.json via=rust         steps=0      time= 5569ms
+[1263/1295] FAIL 1392.json            via=-            steps=0      time=90726ms  [rust] Rust solver timed out after 30s
+[1264/1295] PASS 7x7m1-gemini-delta-precut.json via=rust         steps=0      time=   21ms
+[1265/1295] PASS 7x7m3-compass.json   via=rust         steps=0      time=  360ms
+[1266/1295] FAIL 1406.json            via=-            steps=0      time=90116ms  [rust] Rust solver timed out after 30s
+[1267/1295] FAIL 0446.json            via=-            steps=0      time=90184ms  [rust] Rust solver timed out after 30s
+[1268/1295] FAIL 0618.json            via=-            steps=0      time=90216ms  [rust] Rust solver timed out after 30s
+[1269/1295] PASS 8x8-ineq-watch-boxy.json via=rust         steps=0      time=  428ms
+[1270/1295] FAIL 0680.json            via=-            steps=0      time=90108ms  [rust] Rust solver timed out after 30s
+[1271/1295] FAIL 0682.json            via=-            steps=0      time=90201ms  [rust] Rust solver timed out after 30s
+[1272/1295] PASS 11.json              via=rust         steps=0      time=   23ms
+[1273/1295] PASS 222.json             via=rust         steps=0      time=   11ms
+[1274/1295] PASS 333.json             via=rust         steps=0      time=    7ms
+[1275/1295] PASS 7x7m9-diff-mismatch.json via=rust         steps=0      time=22925ms
+[1276/1295] PASS 7x7-area-sizesep.json via=rust         steps=0      time=26750ms
+[1277/1295] FAIL 0825.json            via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[1278/1295] FAIL 0932.json            via=-            steps=0      time=90094ms  [rust] Rust solver timed out after 30s
+[1279/1295] FAIL 0975a.json           via=-            steps=0      time=90111ms  [rust] Rust solver timed out after 30s
+[1280/1295] FAIL 1004.json            via=-            steps=0      time=90172ms  [rust] Rust solver timed out after 30s
+[1281/1295] FAIL 1085a.json           via=-            steps=0      time=90098ms  [rust] Rust solver timed out after 30s
+[1282/1295] FAIL 1109.json            via=-            steps=0      time=90506ms  [rust] Rust solver timed out after 30s
+[1283/1295] FAIL 1138.json            via=-            steps=0      time=90333ms  [rust] Rust solver timed out after 30s
+[1284/1295] FAIL 1149a.json           via=-            steps=0      time=90096ms  [rust] Rust solver timed out after 30s
+[1285/1295] FAIL 1150fix.json         via=-            steps=0      time=90098ms  [rust] Rust solver timed out after 30s
+[1286/1295] FAIL 1248.json            via=-            steps=0      time=90067ms  [rust] Rust solver timed out after 30s
+[1287/1295] FAIL 1249.json            via=-            steps=0      time=90098ms  [rust] Rust solver timed out after 30s
+[1288/1295] FAIL 1322.json            via=-            steps=0      time=90095ms  [rust] Rust solver timed out after 30s
+[1289/1295] FAIL 10x10m2-rose-watch.json via=-            steps=0      time=90099ms  [rust] Rust solver timed out after 30s
+[1290/1295] FAIL 61-compass.json      via=-            steps=0      time=90097ms  [rust] Rust solver timed out after 30s
+[1291/1295] FAIL 7x7-compass-solitude.json via=-            steps=0      time=90121ms  [rust] Rust solver timed out after 30s
+[1292/1295] FAIL 8x10m22-watch.json   via=-            steps=0      time=90265ms  [rust] Rust solver timed out after 30s
+[1293/1295] FAIL 8x8-area.json        via=-            steps=0      time=90315ms  [rust] Rust solver timed out after 30s
+[1294/1295] FAIL 8x8m8-min3-max6-nonboxy-ineq.json via=-            steps=0      time=90100ms  [rust] Rust solver timed out after 30s
+[1295/1295] FAIL 9x10-loopy-rose-watch.json via=-            steps=0      time=90101ms  [rust] Rust solver timed out after 30s
+
+结果: 1070/1295 通过
+失败 225 个:
+  0882.json: [rust] Rust solver exited with code -9: 
+  0742.json: [rust] Solution found but fails rule validation
+  0401.json: [rust] Solution found but fails rule validation
+  1435.json: [rust] Solution found but fails rule validation
+  C4-2.json: [rust] Rust solver timed out after 30s
+  0732.json: [rust] Rust solver timed out after 30s
+  1099.json: [rust] Rust solver timed out after 30s
+  1100.json: [rust] Rust solver timed out after 30s
+  1098.json: [rust] Rust solver timed out after 30s
+  0213.json: [rust] Rust solver timed out after 30s
+  0213nopad.json: [rust] Rust solver timed out after 30s
+  0223.json: [rust] Rust solver timed out after 30s
+  0804.json: [rust] Rust solver timed out after 30s
+  1433.json: [rust] Rust solver timed out after 30s
+  0437.json: [rust] Solution found but fails rule validation
+  1434.json: [rust] Rust solver timed out after 30s
+  0710.json: [rust] Rust solver timed out after 30s
+  0745.json: [rust] Rust solver timed out after 30s
+  0749.json: [rust] Rust solver timed out after 30s
+  1183.json: [rust] Rust solver timed out after 30s
+  1329.json: [rust] Rust solver timed out after 30s
+  0308.json: [rust] Rust solver timed out after 30s
+  0875.json: [rust] Rust solver timed out after 30s
+  0709.json: [rust] Solution found but fails rule validation
+  1011a.json: [rust] Solution found but fails rule validation
+  0878v2.json: [rust] Rust solver timed out after 30s
+  0439.json: [rust] Solution found but fails rule validation
+  0341.json: [rust] Solution found but fails rule validation
+  0879.json: [rust] Rust solver timed out after 30s
+  1370.json: [rust] Solution found but fails rule validation
+  0459.json: [rust] Solution found but fails rule validation
+  0390.json: [rust] Rust solver timed out after 30s
+  1348.json: [rust] Solution found but fails rule validation
+  1019.json: [rust] Rust solver timed out after 30s
+  0383.json: [rust] Rust solver timed out after 30s
+  0384.json: [rust] Rust solver timed out after 30s
+  0763.json: [rust] Rust solver timed out after 30s
+  0382.json: [rust] Rust solver timed out after 30s
+  0960.json: [rust] Rust solver timed out after 30s
+  0317.json: [rust] Rust solver timed out after 30s
+  0325.json: [rust] Rust solver timed out after 30s
+  1340.json: [rust] Rust solver timed out after 30s
+  0289.json: [rust] Rust solver timed out after 30s
+  0770.json: [rust] Rust solver timed out after 30s
+  0826.json: [rust] Rust solver exited with code -9: 
+  1333.json: [rust] Rust solver timed out after 30s
+  0838.json: [rust] Rust solver exited with code -9: 
+  0497.json: [rust] Solution found but fails rule validation
+  0848.json: [rust] Solution found but fails rule validation
+  1351.json: [rust] Rust solver timed out after 30s
+  0171.json: [rust] Rust solver timed out after 30s
+  0824.json: [rust] Rust solver timed out after 30s
+  0794.json: [rust] Rust solver timed out after 30s
+  0957.json: [rust] Rust solver exited with code -9: 
+  0952.json: [rust] Solution found but fails rule validation
+  0660.json: [rust] Solution found but fails rule validation
+  1185.json: [rust] Rust solver timed out after 30s
+  1186.json: [rust] Rust solver timed out after 30s
+  1320.json: [rust] Rust solver timed out after 30s
+  0628.json: [rust] Solution found but fails rule validation
+  0829.json: [rust] Rust solver timed out after 30s
+  0834.json: [rust] No solution found
+  0965.json: [rust] Solution found but fails rule validation
+  0303.json: [rust] Rust solver timed out after 30s
+  0967.json: [rust] No solution found
+  0690.json: [rust] Rust solver exited with code -9: 
+  0347.json: [rust] Rust solver timed out after 30s
+  0969.json: [rust] Rust solver exited with code -9: 
+  0688.json: [rust] Rust solver timed out after 30s
+  0850.json: [rust] Rust solver timed out after 30s
+  0856.json: [rust] Rust solver timed out after 30s
+  0866.json: [rust] Rust solver timed out after 30s
+  1222.json: [rust] Solution found but fails rule validation
+  0844.json: [rust] Rust solver timed out after 30s
+  0976.json: [rust] Rust solver exited with code -9: 
+  0977.json: [rust] Rust solver exited with code -9: 
+  0956.json: [rust] Rust solver timed out after 30s
+  0966.json: [rust] Rust solver timed out after 30s
+  0978.json: [rust] Rust solver exited with code -9: 
+  0606.json: [rust] Rust solver exited with code -9: 
+  1294.json: [rust] Rust solver timed out after 30s
+  1091.json: [rust] Rust solver exited with code -9: 
+  1215.json: [rust] Rust solver exited with code -9: 
+  0209.json: [rust] Rust solver timed out after 30s
+  1224.json: [rust] No solution found
+  0971.json: [rust] No solution found
+  1374b.json: [rust] Rust solver exited with code -9: 
+  1404.json: [rust] No solution found
+  1378.json: [rust] Solution found but fails rule validation
+  0405.json: [rust] No solution found
+  1375.json: [rust] Solution found but fails rule validation
+  0496.json: [rust] No solution found
+  0972.json: [rust] Rust solver timed out after 30s
+  0491.json: [rust] No solution found
+  0974.json: [rust] Rust solver timed out after 30s
+  1373.json: [rust] Solution found but fails rule validation
+  0979.json: [rust] Rust solver timed out after 30s
+  0980.json: [rust] Rust solver timed out after 30s
+  0987.json: [rust] Rust solver timed out after 30s
+  1000.json: [rust] Solution found but fails rule validation
+  1156.json: [rust] Rust solver timed out after 30s
+  0189.json: [rust] Rust solver timed out after 30s
+  0412.json: [rust] Rust solver timed out after 30s
+  0419.json: [rust] Rust solver timed out after 30s
+  0507.json: [rust] No solution found
+  0983.json: [rust] Rust solver timed out after 30s
+  0984.json: [rust] Rust solver timed out after 30s
+  0985.json: [rust] Rust solver timed out after 30s
+  0990.json: [rust] Rust solver timed out after 30s
+  0993.json: [rust] Rust solver timed out after 30s
+  0994.json: [rust] Rust solver timed out after 30s
+  0998.json: [rust] Rust solver timed out after 30s
+  0999.json: [rust] Rust solver timed out after 30s
+  1003.json: [rust] Rust solver timed out after 30s
+  0206.json: [rust] Rust solver timed out after 30s
+  0270.json: [rust] Rust solver timed out after 30s
+  0592.json: [rust] Rust solver timed out after 30s
+  0839.json: [rust] Rust solver timed out after 30s
+  0586.json: [rust] Solution found but fails rule validation
+  0921.json: [rust] Rust solver timed out after 30s
+  0923fix.json: [rust] Rust solver timed out after 30s
+  0924fix.json: [rust] Rust solver timed out after 30s
+  0926.json: [rust] Rust solver timed out after 30s
+  0928.json: [rust] Rust solver timed out after 30s
+  0929.json: [rust] Rust solver timed out after 30s
+  0930d-real.json: [rust] Rust solver timed out after 30s
+  1400.json: [rust] Rust solver timed out after 30s
+  0152.json: [rust] Rust solver timed out after 30s
+  0262.json: [rust] Rust solver timed out after 30s
+  0265.json: [rust] Rust solver timed out after 30s
+  0634.json: [rust] Solution found but fails rule validation
+  0846.json: [rust] Rust solver timed out after 30s
+  0894.json: [rust] Rust solver timed out after 30s
+  0898fix2.json: [rust] Rust solver timed out after 30s
+  0899.json: [rust] Rust solver timed out after 30s
+  0901.json: [rust] Rust solver timed out after 30s
+  0903.json: [rust] Rust solver timed out after 30s
+  0912.json: [rust] Rust solver timed out after 30s
+  1078.json: [rust] Solution found but fails rule validation
+  1207b.json: [rust] Rust solver timed out after 30s
+  1407a.json: [rust] Rust solver timed out after 30s
+  1411.json: [rust] Rust solver timed out after 30s
+  0312.json: [rust] Rust solver timed out after 30s
+  1092.json: [rust] Solution found but fails rule validation
+  0374.json: [rust] Rust solver timed out after 30s
+  0445.json: [rust] Rust solver timed out after 30s
+  1403.json: [rust] Solution found but fails rule validation
+  0469.json: [rust] Rust solver timed out after 30s
+  0619.json: [rust] Rust solver timed out after 30s
+  0620.json: [rust] Rust solver timed out after 30s
+  1017.json: [rust] Solution found but fails rule validation
+  0681.json: [rust] Rust solver timed out after 30s
+  0683.json: [rust] Rust solver timed out after 30s
+  0685.json: [rust] Rust solver timed out after 30s
+  1060.json: [rust] Rust solver timed out after 30s
+  1067.json: [rust] Rust solver timed out after 30s
+  1074.json: [rust] Rust solver timed out after 30s
+  0418.json: [rust] Solution found but fails rule validation
+  1080.json: [rust] Rust solver timed out after 30s
+  1079.json: [rust] Rust solver timed out after 30s
+  1093.json: [rust] Rust solver timed out after 30s
+  0637.json: [rust] Solution found but fails rule validation
+  0638.json: [rust] Solution found but fails rule validation
+  0776.json: [rust] No solution found
+  1246.json: [rust] Rust solver timed out after 30s
+  1258.json: [rust] Rust solver timed out after 30s
+  0631.json: [rust] No solution found
+  1259.json: [rust] Rust solver timed out after 30s
+  1260.json: [rust] Rust solver timed out after 30s
+  1386.json: [rust] Rust solver timed out after 30s
+  1402.json: [rust] Rust solver timed out after 30s
+  0629.json: [rust] No solution found
+  1395b.json: [rust] Rust solver timed out after 30s
+  1130.json: [rust] Rust solver timed out after 30s
+  0417.json: [rust] Rust solver timed out after 30s
+  0421.json: [rust] Rust solver timed out after 30s
+  0492.json: [rust] Rust solver timed out after 30s
+  0493.json: [rust] Rust solver timed out after 30s
+  0679.json: [rust] Solution found but fails rule validation
+  1405.json: [rust] No solution found
+  1110.json: [rust] Solution found but fails rule validation
+  0621.json: [rust] Rust solver timed out after 30s
+  0630.json: [rust] Rust solver timed out after 30s
+  1134.json: [rust] No solution found
+  0651.json: [rust] Rust solver timed out after 30s
+  0655.json: [rust] Rust solver timed out after 30s
+  0703.json: [rust] Solution found but fails rule validation
+  1136.json: [rust] No solution found
+  0697.json: [rust] Rust solver timed out after 30s
+  1107.json: [rust] Rust solver timed out after 30s
+  1131.json: [rust] Rust solver timed out after 30s
+  1132.json: [rust] Rust solver timed out after 30s
+  1133.json: [rust] Rust solver timed out after 30s
+  1135.json: [rust] Rust solver timed out after 30s
+  1137.json: [rust] Rust solver timed out after 30s
+  1140fix.json: [rust] Rust solver timed out after 30s
+  1141.json: [rust] Rust solver timed out after 30s
+  14x14-shape-gemini-delta.json: [rust] Solution found but fails rule validation
+  1146.json: [rust] Rust solver timed out after 30s
+  1147.json: [rust] Rust solver timed out after 30s
+  1392.json: [rust] Rust solver timed out after 30s
+  1406.json: [rust] Rust solver timed out after 30s
+  0446.json: [rust] Rust solver timed out after 30s
+  0618.json: [rust] Rust solver timed out after 30s
+  0680.json: [rust] Rust solver timed out after 30s
+  0682.json: [rust] Rust solver timed out after 30s
+  0825.json: [rust] Rust solver timed out after 30s
+  0932.json: [rust] Rust solver timed out after 30s
+  0975a.json: [rust] Rust solver timed out after 30s
+  1004.json: [rust] Rust solver timed out after 30s
+  1085a.json: [rust] Rust solver timed out after 30s
+  1109.json: [rust] Rust solver timed out after 30s
+  1138.json: [rust] Rust solver timed out after 30s
+  1149a.json: [rust] Rust solver timed out after 30s
+  1150fix.json: [rust] Rust solver timed out after 30s
+  1248.json: [rust] Rust solver timed out after 30s
+  1249.json: [rust] Rust solver timed out after 30s
+  1322.json: [rust] Rust solver timed out after 30s
+  10x10m2-rose-watch.json: [rust] Rust solver timed out after 30s
+  61-compass.json: [rust] Rust solver timed out after 30s
+  7x7-compass-solitude.json: [rust] Rust solver timed out after 30s
+  8x10m22-watch.json: [rust] Rust solver timed out after 30s
+  8x8-area.json: [rust] Rust solver timed out after 30s
+  8x8m8-min3-max6-nonboxy-ineq.json: [rust] Rust solver timed out after 30s
+  9x10-loopy-rose-watch.json: [rust] Rust solver timed out after 30s

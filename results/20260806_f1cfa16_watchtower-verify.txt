@@ -1,0 +1,125 @@
+共 85 个谜题，并行 8 线程
+
+[  1/85] PASS 0045.json            via=rust         steps=0      time=   13ms
+[  2/85] PASS 0410.json            via=rust         steps=0      time=    7ms
+[  3/85] PASS 0024.json            via=rust         steps=0      time=    9ms
+[  4/85] PASS 0192.json            via=rust         steps=0      time=   28ms
+[  5/85] PASS 0483.json            via=rust         steps=0      time=   17ms
+[  6/85] PASS 0489.json            via=rust         steps=0      time=    8ms
+[  7/85] PASS 0193.json            via=rust         steps=0      time=  202ms
+[  8/85] PASS 0515.json            via=rust         steps=0      time=    7ms
+[  9/85] PASS 0516.json            via=rust         steps=0      time=    5ms
+[ 10/85] PASS 0539.json            via=rust         steps=0      time=    5ms
+[ 11/85] PASS 0540.json            via=rust         steps=0      time=    5ms
+[ 12/85] PASS 0542.json            via=rust         steps=0      time=    6ms
+[ 13/85] PASS 0543.json            via=rust         steps=0      time=   35ms
+[ 14/85] PASS 0544.json            via=rust         steps=0      time=  104ms
+[ 15/85] PASS 0661.json            via=rust         steps=0      time=   33ms
+[ 16/85] PASS 0662.json            via=rust         steps=0      time=  235ms
+[ 17/85] PASS 0663.json            via=rust         steps=0      time=    7ms
+[ 18/85] PASS 0664.json            via=rust         steps=0      time=   66ms
+[ 19/85] PASS 0687.json            via=rust         steps=0      time= 1844ms
+[ 20/85] PASS 0800.json            via=rust         steps=0      time=   10ms
+[ 21/85] PASS 0981.json            via=rust         steps=0      time=    7ms
+[ 22/85] PASS 0982.json            via=rust         steps=0      time=   11ms
+[ 23/85] PASS 0263.json            via=rust         steps=0      time= 9173ms
+[ 24/85] FAIL 0491.json            via=-            steps=0      time=26899ms  [rust] Rust solver exited with code -9: 
+[ 25/85] FAIL 0405.json            via=-            steps=0      time=30109ms  [rust] No solution found
+[ 26/85] PASS 0989.json            via=rust         steps=0      time=   89ms
+[ 27/85] FAIL 0496.json            via=-            steps=0      time=36471ms  [rust] No solution found
+[ 28/85] PASS 0991.json            via=rust         steps=0      time=  550ms
+[ 29/85] PASS 0992.json            via=rust         steps=0      time=16270ms
+[ 30/85] FAIL 0189.json            via=-            steps=0      time=75083ms  [rust] Rust solver timed out after 25s
+[ 31/85] FAIL 0412.json            via=-            steps=0      time=75090ms  [rust] Rust solver timed out after 25s
+[ 32/85] PASS 0995.json            via=rust         steps=0      time=   56ms
+[ 33/85] FAIL 0419.json            via=-            steps=0      time=75267ms  [rust] Rust solver timed out after 25s
+[ 34/85] PASS 0996.json            via=rust         steps=0      time=  182ms
+[ 35/85] PASS 0997.json            via=rust         steps=0      time=  964ms
+[ 36/85] FAIL 0983.json            via=-            steps=0      time=75272ms  [rust] Rust solver timed out after 25s
+[ 37/85] FAIL 0984.json            via=-            steps=0      time=75102ms  [rust] Rust solver timed out after 25s
+[ 38/85] PASS 1001.json            via=rust         steps=0      time=   54ms
+[ 39/85] PASS 1002.json            via=rust         steps=0      time= 4099ms
+[ 40/85] FAIL 0985.json            via=-            steps=0      time=75086ms  [rust] Rust solver timed out after 25s
+[ 41/85] PASS 1198.json            via=rust         steps=0      time=   36ms
+[ 42/85] PASS 1225.json            via=rust         steps=0      time=    5ms
+[ 43/85] PASS 1226.json            via=rust         steps=0      time=    6ms
+[ 44/85] PASS 1227.json            via=rust         steps=0      time=    4ms
+[ 45/85] PASS 1228.json            via=rust         steps=0      time=    6ms
+[ 46/85] PASS 1229.json            via=rust         steps=0      time=    5ms
+[ 47/85] PASS 1230.json            via=rust         steps=0      time=   35ms
+[ 48/85] PASS 1272.json            via=rust         steps=0      time=    4ms
+[ 49/85] PASS 1379.json            via=rust         steps=0      time=   69ms
+[ 50/85] PASS 1380.json            via=rust         steps=0      time=  125ms
+[ 51/85] FAIL 0990.json            via=-            steps=0      time=75083ms  [rust] Rust solver timed out after 25s
+[ 52/85] PASS 1437.json            via=rust         steps=0      time=   23ms
+[ 53/85] PASS 1381.json            via=rust         steps=0      time= 3507ms
+[ 54/85] FAIL 1000.json            via=-            steps=0      time=36214ms  [rust] Solution found but fails rule validation
+[ 55/85] FAIL 0993.json            via=-            steps=0      time=75082ms  [rust] Rust solver timed out after 25s
+[ 56/85] FAIL 0418.json            via=-            steps=0      time=33360ms  [rust] Solution found but fails rule validation
+[ 57/85] FAIL 0994.json            via=-            steps=0      time=75076ms  [rust] Rust solver timed out after 25s
+[ 58/85] FAIL 0998.json            via=-            steps=0      time=75084ms  [rust] Rust solver timed out after 25s
+[ 59/85] PASS 0676.json            via=rust         steps=0      time= 1554ms
+[ 60/85] FAIL 0999.json            via=-            steps=0      time=75805ms  [rust] Rust solver timed out after 25s
+[ 61/85] FAIL 0776.json            via=-            steps=0      time= 3964ms  [rust] No solution found
+[ 62/85] FAIL 1003.json            via=-            steps=0      time=75075ms  [rust] Rust solver timed out after 25s
+[ 63/85] FAIL 0417.json            via=-            steps=0      time=75077ms  [rust] Rust solver timed out after 25s
+[ 64/85] FAIL 0492.json            via=-            steps=0      time=75083ms  [rust] Rust solver timed out after 25s
+[ 65/85] PASS 1144.json            via=rust         steps=0      time= 2897ms
+[ 66/85] PASS 1145.json            via=rust         steps=0      time=    4ms
+[ 67/85] FAIL 0493.json            via=-            steps=0      time=75082ms  [rust] Rust solver timed out after 25s
+[ 68/85] FAIL 0651.json            via=-            steps=0      time=75079ms  [rust] Rust solver timed out after 25s
+[ 69/85] PASS 1148.json            via=rust         steps=0      time=  906ms
+[ 70/85] PASS 1247.json            via=rust         steps=0      time=  270ms
+[ 71/85] FAIL 1136.json            via=-            steps=0      time=60587ms  [rust] No solution found
+[ 72/85] PASS 1405.json            via=rust         steps=0      time= 2428ms
+[ 73/85] FAIL 0697.json            via=-            steps=0      time=75077ms  [rust] Rust solver timed out after 25s
+[ 74/85] FAIL 1135.json            via=-            steps=0      time=75759ms  [rust] Rust solver timed out after 25s
+[ 75/85] FAIL 1137.json            via=-            steps=0      time=75079ms  [rust] Rust solver timed out after 25s
+[ 76/85] FAIL 1140fix.json         via=-            steps=0      time=75075ms  [rust] Rust solver timed out after 25s
+[ 77/85] FAIL 1146.json            via=-            steps=0      time=75076ms  [rust] Rust solver timed out after 25s
+[ 78/85] PASS 1446.json            via=rust         steps=0      time= 2203ms
+[ 79/85] FAIL 1147.json            via=-            steps=0      time=75090ms  [rust] Rust solver timed out after 25s
+[ 80/85] FAIL 1392.json            via=-            steps=0      time=75214ms  [rust] Rust solver timed out after 25s
+[ 81/85] FAIL 1406.json            via=-            steps=0      time=75038ms  [rust] Rust solver timed out after 25s
+[ 82/85] FAIL 1004.json            via=-            steps=0      time=75090ms  [rust] Rust solver timed out after 25s
+[ 83/85] FAIL 1138.json            via=-            steps=0      time=75414ms  [rust] Rust solver timed out after 25s
+[ 84/85] FAIL 1149a.json           via=-            steps=0      time=75022ms  [rust] Rust solver timed out after 25s
+[ 85/85] FAIL 1150fix.json         via=-            steps=0      time=75072ms  [rust] Rust solver timed out after 25s
+
+结果: 50/85 通过
+失败 35 个:
+  0491.json: [rust] Rust solver exited with code -9: 
+  0405.json: [rust] No solution found
+  0496.json: [rust] No solution found
+  0189.json: [rust] Rust solver timed out after 25s
+  0412.json: [rust] Rust solver timed out after 25s
+  0419.json: [rust] Rust solver timed out after 25s
+  0983.json: [rust] Rust solver timed out after 25s
+  0984.json: [rust] Rust solver timed out after 25s
+  0985.json: [rust] Rust solver timed out after 25s
+  0990.json: [rust] Rust solver timed out after 25s
+  1000.json: [rust] Solution found but fails rule validation
+  0993.json: [rust] Rust solver timed out after 25s
+  0418.json: [rust] Solution found but fails rule validation
+  0994.json: [rust] Rust solver timed out after 25s
+  0998.json: [rust] Rust solver timed out after 25s
+  0999.json: [rust] Rust solver timed out after 25s
+  0776.json: [rust] No solution found
+  1003.json: [rust] Rust solver timed out after 25s
+  0417.json: [rust] Rust solver timed out after 25s
+  0492.json: [rust] Rust solver timed out after 25s
+  0493.json: [rust] Rust solver timed out after 25s
+  0651.json: [rust] Rust solver timed out after 25s
+  1136.json: [rust] No solution found
+  0697.json: [rust] Rust solver timed out after 25s
+  1135.json: [rust] Rust solver timed out after 25s
+  1137.json: [rust] Rust solver timed out after 25s
+  1140fix.json: [rust] Rust solver timed out after 25s
+  1146.json: [rust] Rust solver timed out after 25s
+  1147.json: [rust] Rust solver timed out after 25s
+  1392.json: [rust] Rust solver timed out after 25s
+  1406.json: [rust] Rust solver timed out after 25s
+  1004.json: [rust] Rust solver timed out after 25s
+  1138.json: [rust] Rust solver timed out after 25s
+  1149a.json: [rust] Rust solver timed out after 25s
+  1150fix.json: [rust] Rust solver timed out after 25s

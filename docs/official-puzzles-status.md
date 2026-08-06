@@ -65,7 +65,7 @@
 - **benchmark 脚本**：`verify_puzzles.py` / `benchmark_rust_solver.py` 新增「解 vs 官方题解」比对（`matches_official`，DIFF 即失败）。
 
 ### 2026-08-06 · 边界望塔修复（watchtower 顶点绝对坐标约定）
-- **result**：`results/20260806_watchtower-verify.txt`（watchtower 专项 verify）+ `results/20260806_final_verify.txt`（全量 verify）
+- **result**：`results/20260806_f1cfa16_watchtower-verify.txt`（watchtower 专项 verify）+ `results/20260806_f1cfa16_final-verify.txt`（全量 verify），二进制存 `results/bin/rsolver-f1cfa16.linux-x86_64`
 - **改动**：用户报告 0800/0543 官方题与 JSON 有差异。根因：官方题在**外边界顶点**上有望塔，但**转换器**（`convert_archive.py` 只收集内部行/列）与**模型**（Rust `io.rs` 顶点数组 `(h-1)×(w-1)`，`build_puzzle` 拒绝边界坐标）双双丢弃。
   - 顶点约定改为**绝对网格坐标** `(0..=h × 0..=w)`：`rsolver` io.rs / validate.rs / backtrack.rs / pieces.rs / aog core.rs 雷达编码（`2r+2, 2c+2`）；Python board.py / validator.py / UI grid_widget.py（绘制与点击映射去 `±1` 偏移）。
   - 转换器收集全部边界望塔；85 个 watchtower 谜题 JSON 以 `puzzles.json` 为权威源迁移 vertices。

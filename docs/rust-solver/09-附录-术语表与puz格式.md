@@ -242,8 +242,8 @@ python scripts/verify_puzzles.py --dir puzzles/official/A --timeout 30
 | `solver/rose/rose_growth.rs` | 584 | 07 |
 | `shapes.rs` | 184 | 02 / 08 |
 | `constraints.rs` | 336 | 08 |
-| `main.rs` | 93 | 01 |
-| `io.rs` | 264 | 01 |
+| `main.rs` | 92 | 01 |
+| `io.rs` | 296 | 01 |
 | `dlx.rs` | 270 | 05 |
 | `types.rs` | 221 | 02 |
 | `solver/mod.rs` | 238 | 01 |

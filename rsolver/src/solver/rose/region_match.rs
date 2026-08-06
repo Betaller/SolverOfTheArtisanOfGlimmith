@@ -346,17 +346,34 @@ pub fn solve_by_region_match(
     // Generate candidates per seed (single-symbol path).
     let mut all_candidates: Vec<Vec<CellSet>> = Vec::new();
     for &seed in &seeds {
+        let t0 = Instant::now();
         let cands = generate_all_candidates(puzzle, seed, all_positions, pre, &symbol_of, symbol_types);
+        if std::env::var("AOG_DEBUG").is_ok() {
+            eprintln!(
+                "rose: seed {} -> {} candidates in {:?}",
+                seed,
+                cands.len(),
+                t0.elapsed()
+            );
+        }
         if cands.is_empty() {
             return None;
         }
         all_candidates.push(cands);
     }
+    if std::env::var("AOG_DEBUG").is_ok() {
+        eprintln!(
+            "rose: candidates per seed: {:?}",
+            all_candidates.iter().map(|c| c.len()).collect::<Vec<_>>()
+        );
+    }
 
-    // Pre-filter by area: each candidate must leave >= 1 cell per other seed.
+    // Pre-filter by area and region-size bounds: each candidate must be within
+    // [range.min, range.max] (or precise) and leave >= 1 cell per other seed.
+    let (min_sz, max_sz) = super::region_size_bounds(puzzle);
     for cands in all_candidates.iter_mut() {
-        let max_for_this = total - (m - 1);
-        cands.retain(|c| c.len() <= max_for_this);
+        let max_for_this = max_sz.min(total - (m - 1));
+        cands.retain(|c| c.len() >= min_sz && c.len() <= max_for_this);
         if cands.is_empty() {
             return None;
         }
@@ -397,7 +414,7 @@ pub fn solve_by_region_match(
         candidates_by_size.push(by_size);
     }
 
-    let min_area_per_region = 1usize.max(n);
+    let min_area_per_region = min_sz.max(n);
     let mut combos: Vec<Vec<usize>> = Vec::new();
     enum_area_combos_bounded(
         total,
@@ -412,6 +429,13 @@ pub fn solve_by_region_match(
 
     let deadline = *start + std::time::Duration::from_millis(timeout_ms);
     let mut region_of: Vec<Option<usize>> = vec![None; h * w];
+    if std::env::var("AOG_DEBUG").is_ok() {
+        eprintln!(
+            "rose: {} area combos (min_area={})",
+            combos.len(),
+            min_area_per_region
+        );
+    }
 
     for combo in &combos {
         if Instant::now() >= deadline {

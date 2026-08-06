@@ -93,6 +93,34 @@ pub fn build_regions(region_of: &[Option<usize>], _h: usize, w: usize) -> Vec<Re
     regions
 }
 
+/// Global region-size bounds from `range` / `precise` rules (1..=usize::MAX
+/// when unconstrained).  Lets region_match prune candidates and area combos so
+/// size-constrained rose puzzles (e.g. range+rose) don't explode combinatorially.
+pub fn region_size_bounds(puzzle: &Puzzle) -> (usize, usize) {
+    let mut min_b = 1usize;
+    let mut max_b = usize::MAX;
+    for r in &puzzle.rules {
+        match r.ctype.as_str() {
+            "precise" => {
+                if let Some(v) = r.params.get("area").and_then(|v| v.as_u64()) {
+                    min_b = v as usize;
+                    max_b = v as usize;
+                }
+            }
+            "range" => {
+                if let Some(v) = r.params.get("min").and_then(|v| v.as_u64()) {
+                    min_b = min_b.max(v as usize);
+                }
+                if let Some(v) = r.params.get("max").and_then(|v| v.as_u64()) {
+                    max_b = max_b.min(v as usize);
+                }
+            }
+            _ => {}
+        }
+    }
+    (min_b, max_b)
+}
+
 /// Accept a candidate solution only if the full independent validator passes.
 pub fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<RegionInfo>> {
     if crate::solver::aog::validate::validate(puzzle, &regions) {
@@ -126,6 +154,9 @@ pub fn solve_rose(
     }
 
     // region_match first (mirrors rose/solver.py:40).
+    if std::env::var("AOG_DEBUG").is_ok() {
+        eprintln!("rose: region_match start (types={} m={})", symbol_types.len(), m);
+    }
     if let Some(regions) = region_match::solve_by_region_match(
         puzzle,
         &pre,

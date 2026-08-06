@@ -51,7 +51,22 @@
 - Rust-only `verify_puzzles.py`（puzzles/official，1258 题）：**1048 / 1258 通过**（较 rose 移植前 rust-only 基准 1040 提升 8 题）。
 - 新增解出且与官方一致：**C4-1、0277、0213、0213nopad**（原 aog 30s 超时/UNSOLVED）；0833（10×11）时解时不（大网格，候选上限敏感）。
 - 纯 rose 语料 30 题中 28 题 Rust 可解；大网格（0804/1433/1434）仍 UNSOLVED（Python 也解不出，无回归）。
-- **router 仍保留 Python 兜底**：Rust 目前解不出的 3 题仍需 Python——1301（brick+area，Rust backtrack 卡死）、1334/1342（range+rose，Rust rose 在预算内解不出）。等 Rust 补齐这三类、且 Rust-only 全量无回归后再删 Python（软门禁）。
+- **router 仍保留 Python 兜底**：Rust-only 基准下 2 题（1301 brick+area、0957 brick+block+rose）解不出，是 **Rust backtrack/pieces 的 brick 短板**（非 rose 问题），Python backtrack 兜底（router 保留 Python 链，实际无回归）。等 Rust 补齐 brick 回溯后再删 Python（软门禁）。
+
+### 2.3 rose 差距对比与优化（2026-08-06）
+
+对比 Python rose 与 Rust rose，找到并修复了 range+rose 差距：
+
+| 题 | Python rose | 优化前 Rust | 优化后 Rust |
+|---|---|---|---|
+| 1334（range+rose, 7×5） | 9.4s | 30s FAIL | **438ms ✓** |
+| 1342（range+rose, 6×6） | 30.9s | 30s FAIL | **865ms ✓** |
+
+**根因**：`region_match` 生成面积组合时 `min_area_per_region=1`，对带尺寸约束的 rose 题组合爆炸（1342 达 **1265 万组合**，内存 ~1GB）；且候选 BFS 20000 上限 + 位集遍历顺序与 Python frozenset 不同，会截断掉合法候选。
+
+**修复**：`region_match` 感知 `range`/`precise` 的全局区域尺寸界（`rose::region_size_bounds`），先按 `[min,max]` 过滤候选、组合枚举 `min_val=max(min,N)`。1342 组合从 1265 万 → **1 个**，1334 → 6 个。另把 `AOG_ROSE_BUDGET_MS` 设为 3s（aog 解 <1s 的纯 rose 后，硬题快速交 rose）。
+
+Rust-only 基准：**1047/1258 通过**（rose 前 1040）。0 个 rose 专属差距；剩余 2 个 Rust-only 缺口均为 brick 回溯短板。
 - Rust-only 全量输出：`results/verify_rust_only_4733f59.txt`（头部标注脚本、commit `4733f59`）。
 
 ## 3. 解 ≠ 官方解（DIFF）分析

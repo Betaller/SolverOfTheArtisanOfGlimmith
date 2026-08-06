@@ -206,8 +206,8 @@ fn is_rose_capable(puzzle: &Puzzle) -> bool {
     !puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "different")
 }
 
-const AOG_ROSE_BUDGET_MS: u64 = 5_000;
-const ROSE_TIMEOUT_MS: u64 = 10_000;
+const AOG_ROSE_BUDGET_MS: u64 = 3_000;
+const ROSE_TIMEOUT_MS: u64 = 30_000;
 
 fn has_area_number_clues(puzzle: &Puzzle) -> bool {
     for r in 0..puzzle.height {

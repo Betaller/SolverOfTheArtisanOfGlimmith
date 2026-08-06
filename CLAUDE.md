@@ -72,12 +72,36 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 
 ## 文档软门禁（Soft Gate）
 
-官方题准则：**官方解是唯一解**。对求解器 / 转换脚本 / 规则校验器 / 规则语义的**任何优化**，合入前必须：
+**门禁总则：每次修改代码，都必须同步更新相关文档。** 只要改了求解器 / 转换脚本 /
+规则校验器 / 规则语义 / 领域模型 / JSON 协议中的任何行为或结构，就要在**同一个提交**
+里带上文档改动；改了文档也一样要顺带检查代码是否需要同步。文档没跟上即视为未完成。
+
+相关文档按修改范围对应（改动涉及哪个就更新哪个）：
+
+| 改动范围 | 必须同步的文档 |
+|---|---|
+| `rsolver/src/**`（求解算法 / 数据结构 / 路由 / 规则实现） | `docs/rust-solver/**` 中对应的那几篇（见下方对照） |
+| `src/**` Python 求解器 / `scripts/**` 转换与生成 | `docs/architecture.md` / `docs/rules-guide.md` / `docs/重构/**` |
+| 规则语义 / 22 条规则定义 | `docs/rules-guide.md` |
+| 官方题扫描 / DIFF / UNSOLVED 变化 / 求解能力变化 | `docs/official-puzzles-status.md` |
+| 外部可观察行为（JSON 格式、CLI、路由顺序） | `README.md` |
+
+`docs/rust-solver/` 系列与 `rsolver/src/` 的对照（源码改动必查对应篇）：
+
+- `solver/mod.rs`（路由 / 答案构建） → `01-总体架构.md`
+- `types.rs` / `grid.rs` / `solver/aog/types.rs`（模型 / 位域） → `02-数据结构.md`
+- 任何规则实现 → `03-规则与代码映射.md`
+- `solver/aog/**` → `04-aog求解器.md`
+- `solver/pieces.rs` / `dlx.rs` → `05-pieces求解器.md`
+- `solver/backtrack.rs` → `06-backtrack求解器.md`
+- `solver/rose/**` → `07-rose求解器.md`
+- `constraints.rs` / `solver/aog/validate.rs` → `08-验证与约束检查.md`
+
+**官方题准则：官方解是唯一解。** 对求解器 / 转换脚本 / 规则校验器 / 规则语义的**任何优化**，
+除上述文档同步外，还必须：
 
 1. 更新 `docs/official-puzzles-status.md`（进度数字、DIFF/UNSOLVED 变化、结论）。
-2. 同步涉及的其他文档（`faq.md` / `rules-guide.md` / `architecture.md` 等）。
-3. 若影响外部可观察行为，同步 `README.md`。
-4. 跑通 `pytest`、`cargo test` 与相关 `verify_puzzles.py` 片段，把结果记入该文档。
+2. 跑通 `pytest`、`cargo test` 与相关 `verify_puzzles.py` 片段，把结果记入该文档。
 
 不满足即视为未完成。全量扫描方式与脚本见该文档 §2。
 

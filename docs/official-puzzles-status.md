@@ -19,6 +19,7 @@
 | 2026-08-06 | 删除 constraints.rs stub（fence/compass/ring 信任缺口修复） | `results/tmp/20260806_82c9132_verify-full.txt` | 1295 题全量 verify 基线 | 1295 − 228 = **1067 通过 / 228 失败** | — | 删除 9 条恒 `true` 的 stub，`build_solution` 与 pieces 改用 `solver/validate::validate` 全量复查。30 题「答案未通过独立验证」→ Rust 内**诚实拒绝**（不再上报错解）。36/36 抽样与 `*-answer` 官方解一致，0 个「合法但不同」；40 抽样 + 10 ring/compass PASS 题 **0 回归**。脚本新增 `matches_official` 比对（DIFF 即失败）。 |
 | 2026-08-06 | 边界望塔修复（watchtower 顶点绝对坐标约定） | `results/tmp/20260806_f1cfa16_watchtower-verify.txt`（专项）+ `results/tmp/20260806_f1cfa16_final-verify.txt`（全量）；二进制 `results/bin/rsolver-f1cfa16-linux-x86_64` | `benchmark_rust_solver.py` | **1070 PASS / 225 FAIL / 0 DIFF** | vs 基线 1067/228/7DIFF，净 **+3 PASS** | 顶点约定改绝对网格坐标 `(0..=h × 0..=w)`，转换器收集全部边界望塔，85 个 watchtower JSON 迁移 vertices。**watchtower DIFF 全部消除（0 DIFF）**，6 道（0543/0544/0662/0663/0800/1144）与官方解一致；专项 50 PASS / 35 FAIL **0 回归**；14 个 PASS→FAIL 均为并行负载临界波动（单跑解出）。 |
 | 2026-08-07 | 搜索前边界推演 + 中搜索形状剪枝 + BF 默认开启（`6169df3`） | `results/bench/20260807_c6cb307_opt-v3-bench.txt` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1046 / 1258** | 较上一进度（1052）波动 -6 | A/B/C 26/27(0) · Zone1 300/312(-1) · Zone2 393/438(-2) · Zone3 327/481(-3)。与基线（`results/bench/20260807_231d8d2_sat-only-bench.txt`）共同 1074 题逐题对比：**0 PASS→FAIL，5 FAIL→PASS**（1270/0749/1329/0875/0795），**无算法回退**；Zone 波动属跨运行临界题在 40s 边界摇摆 + 前轮僵尸进程 CPU 争抢。提升：约束边→边界穿透 + 密封区域即时剪枝 + BF 面积传播默认开启 + ring/brick 预检（0 panic）。212 FAIL = 117 无解 + 73 超时 + 14 OOM + 8 校验失败。脚本新增 `--retry-timeouts`（有 bug 待修）。 |
+| 2026-08-07 | fence 规则搜索中增量剪枝（专用求解器第一波 #1） | `results/bench/20260807_<sha>_fence-midsearch.txt` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1047 / 1258** | +1 | 新增 `solver/fence/` 模块（独立文件夹，仿 `rose/`）：`FenceCellData` 预计算每个 fence 格的 `arm_count`（dihedral 不变量）与 `pattern_dihedral_key`；`check_fence_patterns` 作为无状态守卫挂入 backtrack `dfs` 守卫链（仿 `check_sealed_regions`），`has_fence` 门控让 1046 非 fence 题零开销。核心：4 边界位全定时做 dihedral_key 比对；未全定时用 arm-count 部分检查（`T>k` 或 `F>4-k` 即剪）。与 `c6cb307` 基线逐题对比：**0 回归**，新增 PASS **0829**；**8 道校验失败 → 0**（backtrack 不再产出 fence 错解，失败模式转无解/超时/OOM——正确性修复）。剪枝实测生效（0401：131611 次剪枝 / 167422 步）。fence 子集 171 题 PASS 数未变（127→127），搜索空间仍太大，后续拟叠加边界预推导 + NonBoundary DSU 合并（见 `docs/优化/10-专用求解器方案.md` §B.2）。 |
 
 ---
 
@@ -40,6 +41,10 @@
 | 2026-08-07 | `6169df3` | Zone1 | 300 / 312 | 12 | -1 |
 | 2026-08-07 | `6169df3` | Zone2 | 393 / 438 | 45 | -2 |
 | 2026-08-07 | `6169df3` | Zone3 | 327 / 481 | 154 | -3 |
+| 2026-08-07 | fence-midsearch | A/B/C | 26 / 27 | 1 | 0 |
+| 2026-08-07 | fence-midsearch | Zone1 | 300 / 312 | 12 | 0 |
+| 2026-08-07 | fence-midsearch | Zone2 | 394 / 438 | 44 | +1（0829） |
+| 2026-08-07 | fence-midsearch | Zone3 | 327 / 481 | 154 | 0 |
 
 ---
 
@@ -317,7 +322,14 @@ Zone3/5-inequality 19、Zone3/3-vertex-radar 18、Zone3/8-endgame 18、Zone3/4-d
 **0 回归**。剩余 FAIL 根因：compass/rose/ring 强规则组合搜索空间大、剪枝不足；
 fence/non_block/solitary 等规则在 backtrack 中仍为事后检查而非搜索约束。
 
-### C. 后续计划
+**fence 搜索中增量剪枝（2026-08-07，专用求解器第一波 #1）**：新增 `solver/fence/` 模块，
+`check_fence_patterns` 作为无状态守卫挂入 backtrack `dfs` 守卫链（仿 `check_sealed_regions`），
+`has_fence` 门控零开销。4 边界位全定时做 dihedral_key 比对 + arm-count 部分检查（未全定也剪）。
+vs `6169df3` 基线：**0 回归，+1 PASS（0829）**；**8 道校验失败 → 0**（backtrack 不再产出 fence 错解，
+失败模式转无解/超时/OOM——正确性修复）。fence 子集 171 题 PASS 数未变（127→127），
+搜索空间仍太大；下一步拟叠加 fence 边界预推导（k=0/4 全定 + k=2 对臂已知 1 边即全定 + 外边界级联传播）
++ NonBoundary DSU 合并（确定的非边界两端格并为原子单位，缩小搜索空间）。
+
 0. ~~**评估 Python 求解器去留**~~ **已完成（2026-08-06）**：评估证明 Python 求解器对官方语料无解出价值（历史仅解 5 道且现全由 Rust 解出；206 道失败题定向扫描 Python 0 命中）。已删 Python 求解算法、`default_router` 改 Rust-only、保留 constraints/shapes 共享层与 IndependentValidator，测试与文档同步（见第二部分 C.0 条目）。
 1. ~~修 Rust **brick 回溯短板**（0957/1301）~~ **已完成（2026-08-06）**：砖纹语义修正 + 删除 `check_merge_ok` + area 剪枝，1301/0957 均由 Rust 解出。下一步可做 **Rust-only 全量回归**（router 只走 RustSolver 验证全部官方题），通过后再评估删 Python 求解器（与 C.0 衔接）。
 2. 修回溯内存泄漏（`backtrack._solve_rose_parallel` 守护线程不退出，全量 verify OOM / 1004 300s 不收敛）——全量回归阻塞项。

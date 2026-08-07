@@ -34,6 +34,11 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
     let has_same = puzzle.rules.iter().any(|r| r.ctype == "same");
     let has_block = puzzle.rules.iter().any(|r| r.ctype == "block");
     let has_non_block = puzzle.rules.iter().any(|r| r.ctype == "non_block");
+    // Fence-rule mid-search pruning: pre-compute each fence cell's dihedral
+    // invariant once.  Empty (and has_fence=false) when the puzzle has no
+    // `fence` rule — zero overhead for the 1046 non-fence official puzzles.
+    let fence_cells = crate::solver::fence::build_fence_cells(puzzle);
+    let has_fence = !fence_cells.is_empty();
     let mut state = BacktrackState {
         cell_to_region: vec![None; h * w],
         region_shapes: Vec::new(),
@@ -55,6 +60,8 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
         has_same,
         has_block,
         has_non_block,
+        fence_cells,
+        has_fence,
     };
 
     if std::env::var("AOG_DEBUG").is_ok() { eprintln!("backtrack: start undecided={}", state.undecided_count); }
@@ -108,6 +115,10 @@ pub(crate) struct BacktrackState {
     has_same: bool,
     has_block: bool,
     has_non_block: bool,
+    /// Pre-computed fence-pattern cells for mid-search pruning (empty when no
+    /// `fence` rule).  See `crate::solver::fence`.
+    fence_cells: Vec<crate::solver::fence::FenceCellData>,
+    has_fence: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -436,6 +447,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         if check_watchtowers_ok(state)
             && check_vertex_ring_ok(puzzle, r, c, state)
             && check_sealed_regions(state)
+            && check_fence_ok(puzzle, state)
         {
             if dfs(puzzle, state) {
                 return true;
@@ -471,6 +483,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
     if check_watchtowers_ok(state)
         && check_vertex_ring_ok(puzzle, r, c, state)
         && check_sealed_regions(state)
+        && check_fence_ok(puzzle, state)
     {
         if dfs(puzzle, state) {
             return true;
@@ -548,6 +561,24 @@ fn check_sealed_regions(state: &BacktrackState) -> bool {
     }
 
     true
+}
+
+/// Thin forwarder to `fence::check_fence_patterns`, pulling the search state
+/// fields it needs.  Keeps the `fence` module decoupled from `BacktrackState`
+/// (no cyclic type dependency) and gives the guard chain a uniform
+/// `check_*_ok(puzzle, state)` spelling.  Zero cost when `has_fence` is false
+/// (one boolean check, matches `check_sealed_regions`' `has_shape_rules` gate).
+#[inline]
+fn check_fence_ok(puzzle: &Puzzle, state: &BacktrackState) -> bool {
+    if !state.has_fence {
+        return true;
+    }
+    crate::solver::fence::check_fence_patterns(
+        puzzle,
+        &state.cell_to_region,
+        state.width,
+        &state.fence_cells,
+    )
 }
 
 fn is_undecided(state: &BacktrackState, r: usize, c: usize) -> bool {

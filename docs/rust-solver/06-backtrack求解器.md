@@ -152,6 +152,19 @@ undo 正确；`has_area_rule` 为 false 时全部是 no-op（无 area 规则零�
 >   (6,7) 不同的错解。删掉跳过、`vertex_boundary_count` 的 None/Some 规则直接给出
 >   正确度数后，1301 唯一解 = 官方解。ring 检查同用该计数。
 
+**`check_sealed_regions`**（`backtrack.rs`，2026-08-07 第一波）：无状态守卫，每次
+`frontier_assign` 后从 `region_shapes`+`frontier` 重算（无 undo 逻辑）。当一个区域密封
+（frontier 为空，形状已定）时，立即检查 `different`/`same`/`block`/`non_block`，
+而非等到叶子。`has_different/has_same/has_block/has_non_block` 门控，无形状规则时零开销。
+
+**`check_fence_ok`**（`backtrack.rs`，2026-08-07 专用求解器第一波 #1）：薄转发到
+`solver::fence::check_fence_patterns`，把 fence 规则从事后叶子校验前置为搜索中增量剪枝。
+`has_fence` 门控（无 fence 规则时单 bool 检查即返回）。详见 `solver/fence/`（独立模块，仿 `rose/`）：
+- `FenceCellData` 预计算每格 `arm_count`（dihedral 不变量 = `fp.len()-1`）与 `pattern_dihedral_key`。
+- 4 边界位全定时做 `dihedral_key` 比对（半成品形状的 key 无意义，必须全定）；
+  未全定时用 arm-count 部分检查（`T>k` 或 `F>4-k` 即剪）。
+- 消除了 8 道「校验失败」（backtrack 不再产出 fence 错解），失败模式转无解/超时。
+
 ---
 
 ## 4. 叶子校验：`check_global_constraints`

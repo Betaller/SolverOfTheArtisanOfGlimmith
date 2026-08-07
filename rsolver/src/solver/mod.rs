@@ -2,6 +2,7 @@
 
 pub mod aog;
 pub mod backtrack;
+pub mod fence;
 pub mod pieces;
 pub mod prototypes;
 pub mod rose;

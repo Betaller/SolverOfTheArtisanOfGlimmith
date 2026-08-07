@@ -576,7 +576,11 @@ fn region_boundary_bits(
 }
 
 /// 3x3 fence pattern from boundary bits (center + up/down/left/right).
-fn fence_pattern_shape(bits: [bool; 4]) -> Vec<[usize; 2]> {
+///
+/// `pub(crate)` so the backtrack solver can build the *same* cross mid-search
+/// (in `check_fence_patterns`) and compare `dihedral_key`s byte-for-byte against
+/// this leaf validator — keeping the two constructions from drifting.
+pub(crate) fn fence_pattern_shape(bits: [bool; 4]) -> Vec<[usize; 2]> {
     let mut cells = vec![[1usize, 1usize]];
     if bits[0] {
         cells.push([0, 1]);

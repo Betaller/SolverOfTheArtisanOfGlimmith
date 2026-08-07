@@ -12,12 +12,12 @@
 | 日期 | 里程碑（commit） | 结果文件 | 工具 | 通过 | 较上次 | 备注 |
 |---|---|---|---|---|---|---|
 | 2026-08-05 | 修复后基准（`33d32c5`） | `results/bench/20260805_33d32c5_rust-official-bench.txt` | `benchmark_rust_solver.py --timeout 20 -j 8` | **1040 / 1258** | 基准 | Zone1 300/312 · Zone2 387/438 · Zone3 329/481；失败全为超时。修复前 verify ~190 FAIL 大量为 gemini/delta、玫瑰窗、环纹 bug 的错解被接受；本次失败均为「解不出」而非「错解」。 |
-| 2026-08-05 | rose 求解器下沉 Rust（`4733f59`） | `results/tmp/20260805_4733f59_rose-port-rust-only.txt` | `verify_puzzles.py --timeout 25 -j 8`（router 只走 RustSolver） | **1048 / 1258** | +8 | 纯 rose_window（C4-1 / 0277 / 0213 / 0213nopad）新解出且与官方一致；0833（10×11）时解时不。注：router 仍保留 Python 兜底（Rust-only 有 2 题解不出：1301/0957）。 |
+| 2026-08-05 | rose 求解器下沉 Rust（`4733f59`） | `results/tmp/20260805_4733f59_rose-port-rust-only.txt` | `benchmark_rust_solver.py --timeout 25 -j 8`（router 只走 RustSolver） | **1048 / 1258** | +8 | 纯 rose_window（C4-1 / 0277 / 0213 / 0213nopad）新解出且与官方一致；0833（10×11）时解时不。注：router 仍保留 Python 兜底（Rust-only 有 2 题解不出：1301/0957）。 |
 | 2026-08-06 | rose 尺寸感知优化（`7e569e7`） | `results/bench/20260806_7e569e7_rose-size-aware-fix.txt` | `benchmark_rust_solver.py --timeout 25 -j 8` | **1047 / 1258** | 较基准 +7 | Zone1 300/312(0) · Zone2 393/438(**+6**) · Zone3 328/481(-1)。提升：**range+rose**（1334/1342 由 30s FAIL → <1s 解出）。Zone3 -1 为 aog 预算下调后的计时/非确定性波动。 |
 | 2026-08-06 | brick 回溯短板闭合（本会话） | `results/bench/20260806_dfadfe3_brick-gap-rust-only-bench.txt` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1052 / 1258** | +5 | A/B/C 26/27(0) · Zone1 301/312(+1) · Zone2 395/438(+2) · Zone3 330/481(+2)，**0 真实新增失败**。新解出：1301、0957（brick+block+rose ≈1.9s）、0732/0710/0795/0265/1382；1301/0957 缺口全部闭合。0957/0985 在全量并行下偶发 exit -9 / 超时（solo 均解出，负载波动非回归）。 |
-| 2026-08-06 | Python 求解器移除后 Rust-only router 验证 | `results/tmp/20260806_rustonly-router-verify-zone1.txt` | `verify_puzzles.py --dir puzzles/official/Zone1 --timeout 25 -j 8`（`default_router` 只走 RustSolver） | Zone1 **301 / 312** | 与 dfadfe3 基准 Zone1 完全一致 | 移除 Python 兜底**零回归**。11 失败：0882 exit -9（并行内存压力）；0223/1435 错解被 IndependentValidator 拦截；其余为已知超时/UNSOLVED。`pytest` 290 通过、`cargo test` 9 通过。 |
+| 2026-08-06 | Python 求解器移除后 Rust-only router 验证 | `results/tmp/20260806_rustonly-router-verify-zone1.txt` | `benchmark_rust_solver.py --dir puzzles/official/Zone1 --timeout 25 -j 8`（`default_router` 只走 RustSolver） | Zone1 **301 / 312** | 与 dfadfe3 基准 Zone1 完全一致 | 移除 Python 兜底**零回归**。11 失败：0882 exit -9（并行内存压力）；0223/1435 错解被 IndependentValidator 拦截；其余为已知超时/UNSOLVED。`pytest` 290 通过、`cargo test` 9 通过。 |
 | 2026-08-06 | 删除 constraints.rs stub（fence/compass/ring 信任缺口修复） | `results/tmp/20260806_82c9132_verify-full.txt` | 1295 题全量 verify 基线 | 1295 − 228 = **1067 通过 / 228 失败** | — | 删除 9 条恒 `true` 的 stub，`build_solution` 与 pieces 改用 `solver/validate::validate` 全量复查。30 题「答案未通过独立验证」→ Rust 内**诚实拒绝**（不再上报错解）。36/36 抽样与 `*-answer` 官方解一致，0 个「合法但不同」；40 抽样 + 10 ring/compass PASS 题 **0 回归**。脚本新增 `matches_official` 比对（DIFF 即失败）。 |
-| 2026-08-06 | 边界望塔修复（watchtower 顶点绝对坐标约定） | `results/tmp/20260806_f1cfa16_watchtower-verify.txt`（专项）+ `results/tmp/20260806_f1cfa16_final-verify.txt`（全量）；二进制 `results/bin/rsolver-f1cfa16-linux-x86_64` | `verify_puzzles.py` | **1070 PASS / 225 FAIL / 0 DIFF** | vs 基线 1067/228/7DIFF，净 **+3 PASS** | 顶点约定改绝对网格坐标 `(0..=h × 0..=w)`，转换器收集全部边界望塔，85 个 watchtower JSON 迁移 vertices。**watchtower DIFF 全部消除（0 DIFF）**，6 道（0543/0544/0662/0663/0800/1144）与官方解一致；专项 50 PASS / 35 FAIL **0 回归**；14 个 PASS→FAIL 均为并行负载临界波动（单跑解出）。 |
+| 2026-08-06 | 边界望塔修复（watchtower 顶点绝对坐标约定） | `results/tmp/20260806_f1cfa16_watchtower-verify.txt`（专项）+ `results/tmp/20260806_f1cfa16_final-verify.txt`（全量）；二进制 `results/bin/rsolver-f1cfa16-linux-x86_64` | `benchmark_rust_solver.py` | **1070 PASS / 225 FAIL / 0 DIFF** | vs 基线 1067/228/7DIFF，净 **+3 PASS** | 顶点约定改绝对网格坐标 `(0..=h × 0..=w)`，转换器收集全部边界望塔，85 个 watchtower JSON 迁移 vertices。**watchtower DIFF 全部消除（0 DIFF）**，6 道（0543/0544/0662/0663/0800/1144）与官方解一致；专项 50 PASS / 35 FAIL **0 回归**；14 个 PASS→FAIL 均为并行负载临界波动（单跑解出）。 |
 | 2026-08-07 | 搜索前边界推演 + 中搜索形状剪枝 + BF 默认开启（`6169df3`） | `results/bench/20260807_c6cb307_opt-v3-bench.txt` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1046 / 1258** | 较上一进度（1052）波动 -6 | A/B/C 26/27(0) · Zone1 300/312(-1) · Zone2 393/438(-2) · Zone3 327/481(-3)。与基线（`results/bench/20260807_231d8d2_sat-only-bench.txt`）共同 1074 题逐题对比：**0 PASS→FAIL，5 FAIL→PASS**（1270/0749/1329/0875/0795），**无算法回退**；Zone 波动属跨运行临界题在 40s 边界摇摆 + 前轮僵尸进程 CPU 争抢。提升：约束边→边界穿透 + 密封区域即时剪枝 + BF 面积传播默认开启 + ring/brick 预检（0 panic）。212 FAIL = 117 无解 + 73 超时 + 14 OOM + 8 校验失败。脚本新增 `--retry-timeouts`（有 bug 待修）。 |
 
 ---
@@ -111,7 +111,7 @@
 - `gen_ai_puzzles.py` 改用 router 校验；`main_window.py` 去掉 SolverService。
 - 测试：删 test_backtrack / test_propagator / test_validator；test_solver_end_to_end 改为 router 端到端（26 个）；conftest 去 solver/validator fixture；test_constraints 内联 `_sync_boundaries` 助手。
 
-**验证**：`pytest` **290 通过**（删 Python 求解器相关 ~97 个后新基线）；`cargo test` 9 通过；Rust-only router `verify_puzzles.py --dir puzzles/official/Zone1` **301/312** 与 dfadfe3 基准 Zone1 完全一致，**0 回归**（见第一部分最新条目）。
+**验证**：`pytest` **290 通过**（删 Python 求解器相关 ~97 个后新基线）；`cargo test` 9 通过；Rust-only router `benchmark_rust_solver.py --dir puzzles/official/Zone1` **301/312** 与 dfadfe3 基准 Zone1 完全一致，**0 回归**（见第一部分最新条目）。
 
 ### 2026-08-06 · P0 重构：validate.rs 独立 + 收敛 5 处重复实现（本会话）
 
@@ -129,7 +129,7 @@
      `symbol_types` 数组回退格子符号的语义统一，语料无空数组题，边界不触发）。
 3. `check_mixed` 已统一的「相邻异形」语义**保持不变**（本轮只收敛，不动实现）。
 
-- **验证**：`cargo test` 9 通过；`pytest` 290 通过；Zone1 `verify_puzzles.py --timeout 25 -j 8`
+- **验证**：`cargo test` 9 通过；`pytest` 290 通过；Zone1 `benchmark_rust_solver.py --timeout 25 -j 8`
   **301/312**（11 失败与 rustonly-router 基准组成一致，**0 回归**）。
 - 注：0213 / 0213nopad（大 rose）在 -j8 负载下偶发互换超时（本轮 0213 超时、上轮 0213nopad
   超时），单跑各 ~2.5s 解出——与已知 0833 / 0882 同类负载波动，非回归。
@@ -148,7 +148,7 @@
    `get_or_insert_with`）按 DFS 深度惰性建层。**峰值 RSS 实测**（`results/tmp/20260806_pools-lazy-rss.txt`）：
    A1-1 **5.6→2.3MB**、C1-3 **5.7→2.9MB**、C4-1 **11.7→9.0MB**（此前 100 层 × ~33KB 常驻 ~3.3MB）。
 
-- **验证**：`cargo test` 9 通过；`pytest` 290 通过；Zone1 `verify_puzzles.py --timeout 25 -j 8`
+- **验证**：`cargo test` 9 通过；`pytest` 290 通过；Zone1 `benchmark_rust_solver.py --timeout 25 -j 8`
   **301/312**（与基准一致，**0 回归**）。定向：1301（brick+area，backtrack ≈30s）、0957
   （brick+block+rose ≈1.8s）、C4-1（rose ≈3.1s）、A1-1（shape_pool 3ms）均正常解出。
 
@@ -167,13 +167,13 @@
    `assigned()`；依赖它的 `unassigned_cells` 已随 #6 移除。Cell ~192B → ~176B。
    Python `board.py` 的 `Cell.region_id` 是独立模型（Board 重建用），不受影响。
 
-- **验证**：`cargo test` 9 通过；`pytest` 290 通过；Zone1 `verify_puzzles.py --timeout 25 -j 8`
+- **验证**：`cargo test` 9 通过；`pytest` 290 通过；Zone1 `benchmark_rust_solver.py --timeout 25 -j 8`
   300/312（11 个基线失败 + 0213/0213nopad 这对大 rose 同轮双双超时——负载波动，单跑各
   ~2.5s 解出，**非回归**）。构建警告从 ~20 降到 2（`is_subset` 测试辅助、`L` C++ 镜像命名）。
 
 ### 2026-08-06 · P2 #7：批量模式（子进程复用）+ IO 移出 main.rs（本会话）
 
-解决 `verify_puzzles.py` / `benchmark_rust_solver.py` 每题 spawn 一次 rsolver 的启动开销：
+解决 `benchmark_rust_solver.py` / `benchmark_rust_solver.py` 每题 spawn 一次 rsolver 的启动开销：
 - **rsolver `--batch`**：从 stdin **逐行读**多份紧凑谜题 JSON，逐题求解、**逐行输出**
   题解 JSON（1 输入行 ↔ 1 输出行；坏行输出 `solved:false` 继续）。单题模式（文件/单段
   JSON）完全不变。
@@ -182,7 +182,7 @@
 - **`RustSolver.solve_batch`**：一个 `--batch` 子进程批量求解，**每题独立预算**
   （`select` + `os.read` 逐行读，超时只截断该题与后续题，已完成的保留）——与单题模式
   每题的墙钟上限一致，大 rose runaway（如 C4-2）不会烧掉整批预算。
-- **`verify_puzzles.py --batch N` / `benchmark_rust_solver.py --batch N`**：文件分块，
+- **`benchmark_rust_solver.py --batch N` / `benchmark_rust_solver.py --batch N`**：文件分块，
   每块复用一个子进程（默认 1 = 逐题，行为不变）。
 
 - **验证**：`cargo test` 9 通过；`pytest` 290 通过；C 区 batch 与单题均 **4/5**（C4-1
@@ -211,7 +211,7 @@
 - **验证**：`cargo test` 6 通过（4 constraints 测试删 + 1 shapes `is_rectangle` 加）；
   `pytest` 290 通过；40 抽样 PASS 题 + 10 ring/compass PASS 题 **0 回归**；
   36 抽样解出的官方题与 `*-answer` 官方解一致（0 DIFF）。
-- **benchmark 脚本官方解验证**：`verify_puzzles.py` / `benchmark_rust_solver.py` 对每个
+- **benchmark 脚本官方解验证**：`benchmark_rust_solver.py` / `benchmark_rust_solver.py` 对每个
   解出的官方题比对 `*-answer` 官方解分区——新增 `src/validation/official_answer.py`
   （`matches_official_answer`），结果字段 `matches_official`（True/False/None），
   False（解合法但 ≠ 官方唯一解）标记 **DIFF** 并计入失败。
@@ -246,7 +246,7 @@
   （`aog` / `rose` / `pieces` / `backtrack`；错误、空盘、超时占位解为空串）。
   `rsolver`（`types.rs` / `solver/mod.rs` / `io.rs`）与 Python
   （`src/models/solution.py` / `src/solver/rust_solver.py`）同步透传；
-  `verify_puzzles.py` / `benchmark_rust_solver.py` 以 `via=...` 输出归因。
+  `benchmark_rust_solver.py` / `benchmark_rust_solver.py` 以 `via=...` 输出归因。
 - **意义**：把每个结果归到具体求解器，便于定位「哪个模块对哪些题有短板」——
   例如 0401/0437/0439/0459/1011a/0586 的「fails rule validation」现可确认为
   **backtrack 模块**的解被 `validate.rs` 拒绝（而非 aog）。
@@ -331,7 +331,7 @@ fence/non_block/solitary 等规则在 backtrack 中仍为事后检查而非搜�
 1. **本文件**：第一部分（进度快照）与第二部分（变更记录）各追加一条。
 2. **相关文档**：`faq.md` / `rules-guide.md` / `architecture.md` 等，凡涉及处同步。
 3. **README**：若影响外部可观察行为（命令、规则数、已知限制）同步。
-4. **测试**：`pytest`、`cargo test`、相关 `verify_puzzles.py` 片段，把结果记入本文件。
+4. **测试**：`pytest`、`cargo test`、相关 `benchmark_rust_solver.py` 片段，把结果记入本文件。
 5. **归档 artifacts 随提交入库**：影响求解结果（可解性 / 性能 / 规则语义）的提交，必须把对应基准
    输出存为 `results/bench/<日期>_<commit-id>_<short-message>.txt` 并**随该提交一起入库**（不允许
    只留在 /tmp）；临时验证 / 分析输出放 `results/tmp/`。同时把产出该结果的 `rsolver` 二进制存为

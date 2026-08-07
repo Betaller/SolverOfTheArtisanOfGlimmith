@@ -155,9 +155,15 @@ TAGSolver/
 │   ├── official/             # 官方关卡组合
 │   └── user/                 # 用户自建
 │
-├── scripts/                  # 工具脚本
-│   ├── generate_puzzles.py   # 随机谜题生成器
-│   └── benchmark.py          # 性能基准
+├── scripts/                  # 工具脚本（见 scripts/README.md）
+│   ├── benchmark_rust_solver.py # 官方语料基准 + 全量 verify
+│   ├── convert_archive.py       # 官方存档 → 项目 JSON
+│   ├── convert_answers.py       # 官方解 → 答案文件
+│   ├── convert_puzzles_json_to_aog.py  # 官方存档 → C++ .puz
+│   ├── compare_batch_ansi.py    # C++ batch 日志对比
+│   ├── fix_puz_solutions.py     # 修复 .puz SOLUTION 段
+│   ├── gen_ai_puzzles.py        # AI 测试谜题生成
+│   └── generate_polyominoes.py  # 多连骨牌预计算
 │
 ├── pyproject.toml            # 项目元数据 + 工具配置
 ├── requirements.txt          # 生产依赖

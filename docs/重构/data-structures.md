@@ -160,10 +160,10 @@ struct BacktrackState {
 
 **注意陷阱**:
 - 4 处回滚 continue 点(250-251 之后、254、270 的失败)必须逐一保留 pop/None 复位,是机械改动中最易漏的点。
-- **backtrack.rs 目前没有单测**(`#[cfg(test)]` 只在 `aog/core.rs`;`constraints.rs` 已删 2026-08-06),`cargo test` 跑不通该路径。建议 P0 一并补 3-5 个 backtrack 单测(区域划分/望塔/环砖/边界),否则回归只能靠 Python 侧 `verify_puzzles.py`。
+- **backtrack.rs 目前没有单测**(`#[cfg(test)]` 只在 `aog/core.rs`;`constraints.rs` 已删 2026-08-06),`cargo test` 跑不通该路径。建议 P0 一并补 3-5 个 backtrack 单测(区域划分/望塔/环砖/边界),否则回归只能靠 Python 侧 `benchmark_rust_solver.py`。
 
 **预期收益**:消除每格哈希 + 望塔/环砖检查去重。真实但**天花板有限**——backtrack 是 `solver/mod.rs:30-74` 调度链的最后兜底,多数谜题走不到。故评级"中收益"而非"高收益"。
-**验证**:`cd rsolver && cargo test`(新增单测)+ `scripts/verify_puzzles.py` 全量回归。
+**验证**:`cd rsolver && cargo test`(新增单测)+ `scripts/benchmark_rust_solver.py` 全量回归。
 
 ### P0.5(中风险 · 高收益 · 优先路径):pieces 候选生成去克隆
 
@@ -176,7 +176,7 @@ struct BacktrackState {
 
 **预期收益**:pieces 是调度链中排在 backtrack 之前的优先路径,形状/面积/指南针类谜题直接命中;消除每节点克隆的分配与线性扫描。
 **风险**:中。改动候选生成热路径,需保证生成结果与现状完全一致。
-**验证**:`cargo test`;`scripts/verify_puzzles.py --timeout 30` 对照基准,重点看 shape_pool/area/compass 类谜题。
+**验证**:`cargo test`;`scripts/benchmark_rust_solver.py --timeout 30` 对照基准,重点看 shape_pool/area/compass 类谜题。
 
 ### P1(中-高风险 · 中高收益):Rust `Puzzle` 扁平化 + `Cell` 瘦身
 
@@ -199,7 +199,7 @@ struct BacktrackState {
 
 **预期收益**:内存占用下降 ~3.5×;访问局部性提升;aog 之外的求解器受益。
 **风险**:中-高。动核心模型,波及面含 `grid.rs`/`mod.rs`/`solver/validate.rs`/aog build;Cell 瘦身与 aog build 强耦合,必须全量回归。
-**验证**:`cargo test` + `cargo clippy`;`python -m pytest tests/`;`scripts/verify_puzzles.py --timeout 30`;对照 `scripts/benchmark.py` 基线。
+**验证**:`cargo test` + `cargo clippy`;`python -m pytest tests/`;`scripts/benchmark_rust_solver.py --timeout 30`;对照 `scripts/benchmark.py` 基线。
 
 ### P2(中风险 · 收益存疑 · 必须先测量):Python 回溯复制优化
 
@@ -214,7 +214,7 @@ struct BacktrackState {
 - **别名脆弱性**:成功路径短路返回时不回滚。当前调用方都安全(顶层 `all_positions`(161)成功/失败后均不再用;rose 种子循环的 `sub_unassigned` 每轮重建(127);`_solve_rose_parallel` 各线程独立(562)),但这个安全**依赖调用方不复用**,改 `_search` 时需在 docstring 显式声明该前置不变式。
 
 **前置条件**:先跑 `scripts/benchmark.py` 采样,确认回溯确实占时(而非候选生成)。审查认为 Python 真瓶颈在候选生成(§4 P5),故 P2 很可能是低 ROI。
-**验证**:`python -m pytest tests/`;`scripts/verify_puzzles.py --dir puzzles/official --timeout 30`。
+**验证**:`python -m pytest tests/`;`scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 30`。
 
 ### 不建议动:aog 位域网格
 
@@ -222,7 +222,7 @@ struct BacktrackState {
 
 ## 7. 实施前必读的基线步骤
 
-1. **建立基准**:`cd rsolver && cargo build --release` 后跑 `python scripts/verify_puzzles.py`(30s 超时)与 `python scripts/benchmark.py`,记录全量通过率与耗时。
+1. **建立基准**:`cd rsolver && cargo build --release` 后跑 `python scripts/benchmark_rust_solver.py`(30s 超时)与 `python scripts/benchmark.py`,记录全量通过率与耗时。
 2. 每档改动**独立提交**,便于二分定位回归。
 3. 每档改动后重跑第 1 步,对照基线。
 4. P1 实施前用 `std::mem::size_of::<Cell>()` 实测(当前 192B)确认瘦身后效果。

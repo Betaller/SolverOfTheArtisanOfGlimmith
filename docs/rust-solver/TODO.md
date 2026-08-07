@@ -2,7 +2,7 @@
 
 > 来源：2026-08-06 对 `rsolver/` 全量源码通读 + 文档整理时发现。
 > 处理原则：每项完成时，按 `CLAUDE.md` 门禁**同步更新 `docs/rust-solver/` 对应篇**
-> 并跑通 `cargo test` / `verify_puzzles.py`；改行为（优化）还需更新
+> 并跑通 `cargo test` / `benchmark_rust_solver.py`；改行为（优化）还需更新
 > `docs/official-puzzles-status.md`。
 >
 > **内存专项**：本清单的 P1 #3/#4/#5、P2 #7 以及新增的「aog 形状库爆炸 / rose 候选爆炸」
@@ -110,7 +110,7 @@
 
 ### 7. 批量模式（子进程复用）
 
-- 现状：Python `RustSolver` 每题 spawn 一次 rsolver 进程；`verify_puzzles.py`
+- 现状：Python `RustSolver` 每题 spawn 一次 rsolver 进程；`benchmark_rust_solver.py`
   扫官方 1200+ 题时启动开销累积。
 - 建议：rsolver 支持读多行 JSON、逐题求解、逐行输出，Python 侧起一个进程循环复用。
 - 风险：改子进程协议 + Python 调用方，须兼容单题模式。
@@ -144,9 +144,9 @@
 | 2026-08-06 | P1 #4 `regions_respect_boundaries` 扁平数组 | `mod.rs` 的 `HashMap<(usize,usize),usize>` → `Vec<Option<usize>>` 直接 `r*w+c` 索引。见 `01/08`。 |
 | 2026-08-06 | P1 #5 `Pools`/`PlaceLevel` 惰性分配 | `Pools.place` → `Vec<RefCell<Option<PlaceLevel>>>`，`Pools::place_level(i)` 用 `RefMut::map` + `get_or_insert_with` 按 DFS 深度惰性建层。峰值 RSS：A1-1 5.6→2.3MB、C1-3 5.7→2.9MB、C4-1 11.7→9.0MB（此前 100 层 × ~33KB 常驻 ~3.3MB）。见 `04`、`results/20260806_pools-lazy-rss.txt`。 |
 | 2026-08-06 | P2 #6 死代码清理 | 移除 `apply_line_constraint` 的 `vertical` 参数、`grid::unassigned_cells`/`connected_components`、`polyomino::generate_polyominoes`、aog `dbg_steps`/`slash_check_*`/重复 `has_shape_pool`、`Dlx::search`/`solution_rows`/`header_count`、`CellSet::set_from`/`PreBoundaries::len`、`types::Direction`/`CompassClue::get`、未用参数（`pick_next_cell` puzzle、`check_edge_constraints` regions）；`Solution.steps_taken` 保留兼容并标注废弃；`main.rs` 文档字符串修正。 |
-| 2026-08-06 | P2 #7 批量模式（子进程复用） | rsolver `--batch`（多行 JSON 逐行进出）+ IO 移出 main.rs（新 `io.rs`）+ `RustSolver.solve_batch`（每题独立预算，`select`+`os.read` 分块读，超时只截断该题与后续）+ `verify_puzzles.py`/`benchmark_rust_solver.py` `--batch N`。**局限**：某题超出内部 30s 预算（大 rose runaway）会连带同批后续题超时，精确验证用 `--batch 1`；快题吞吐 ~6×。见 `01`、README。 |
+| 2026-08-06 | P2 #7 批量模式（子进程复用） | rsolver `--batch`（多行 JSON 逐行进出）+ IO 移出 main.rs（新 `io.rs`）+ `RustSolver.solve_batch`（每题独立预算，`select`+`os.read` 分块读，超时只截断该题与后续）+ `benchmark_rust_solver.py`/`benchmark_rust_solver.py` `--batch N`。**局限**：某题超出内部 30s 预算（大 rose runaway）会连带同批后续题超时，精确验证用 `--batch 1`；快题吞吐 ~6×。见 `01`、README。 |
 | 2026-08-06 | P3 #8 `Cell` 结构体拆分（求解状态分离） | 删除 `Cell.region_id`（求解路径死字段，16B）与 `assigned()`（唯一使用者 `grid::unassigned_cells` 已随 #6 移除）；求解归属状态落在各求解器自有结构。Cell ~192B → ~176B。Python `board.py` 的 `Cell.region_id` 是独立模型，不受影响。见 `02`、`docs/重构/data-structures.md`。 |
-| 2026-08-06 | 全量 verify 围栏/罗盘失败根因修复（新增，非清单项） | 全量 verify 暴露 30 题「答案未通过独立验证」（全为 fence/compass/ring/rose 相关）。根因：`constraints.rs` 9 条规则为恒 `true` 的 stub。**删除 `constraints.rs`**，`build_solution`/pieces 改用 `solver/validate::validate` 全量复查。30 题改为 Rust 内诚实拒绝（仍 FAIL 但不再上报错误解）。0 回归，36/36 抽样解与官方解一致。`verify_puzzles.py`/`benchmark_rust_solver.py` 新增官方解比对（`matches_official`，DIFF 即失败）。见 `08`、`docs/official-puzzles-status.md` 第一部分/第二部分、`results/20260806_82c9132_verify-full.txt`。 |
+| 2026-08-06 | 全量 verify 围栏/罗盘失败根因修复（新增，非清单项） | 全量 verify 暴露 30 题「答案未通过独立验证」（全为 fence/compass/ring/rose 相关）。根因：`constraints.rs` 9 条规则为恒 `true` 的 stub。**删除 `constraints.rs`**，`build_solution`/pieces 改用 `solver/validate::validate` 全量复查。30 题改为 Rust 内诚实拒绝（仍 FAIL 但不再上报错误解）。0 回归，36/36 抽样解与官方解一致。`benchmark_rust_solver.py`/`benchmark_rust_solver.py` 新增官方解比对（`matches_official`，DIFF 即失败）。见 `08`、`docs/official-puzzles-status.md` 第一部分/第二部分、`results/20260806_82c9132_verify-full.txt`。 |
 | 2026-08-06 | 边界望塔缺失修复（新增，非清单项） | 用户报告 0800/0543 官方题边界有望塔、JSON 缺失。根因：转换器（`convert_archive.py` 只收集内部行/列）+ 模型（顶点数组内部 `(h-1)×(w-1)`，`build_puzzle` 拒绝边界坐标）**双双丢弃边界望塔**。修复：顶点约定改**绝对网格坐标**（`0..=h × 0..=w`），转换器收集全部边界望塔，85 个 watchtower 谜题 JSON 以 `puzzles.json` 迁移。**watchtower DIFF 全部消除（0 DIFF）**，6 道解出官方解、0985 改诚实超时。0 回归（35 个 watchtower FAIL 全为基线既有）。见 `02`、`08`、`docs/official-puzzles-status.md` 附录 A / 第一部分 / 第二部分、`src/ui/grid_widget.py`。 |
 
 （每完成一项在此登记，并更新顶部总览的状态列。）

@@ -13,7 +13,7 @@ Solver engine: **Rust solver** (`rsolver/`) — a single subprocess speaking JSO
 ```bash
 python src/app.py                       # Qt UI (PySide6)
 python -m pytest tests/ -x --tb=short   # full test suite (~290 tests)
-python scripts/verify_puzzles.py        # verify all puzzles solve (30s timeout each)
+python scripts/benchmark_rust_solver.py --timeout 30   # verify all puzzles (30s timeout each)
 
 ruff check src/ tests/                  # lint (line-length=100)
 ruff format src/ tests/                 # format
@@ -24,7 +24,7 @@ cd rsolver && cargo build --release     # build Rust solver (required by RustSol
 ```
 
 Single test: `python -m pytest tests/unit/test_rules/test_rule_08_area.py -x -q`.
-Single puzzle debug: `python scripts/verify_puzzles.py --dir puzzles/official/A --timeout 30`.
+Single puzzle debug: `python scripts/benchmark_rust_solver.py --dir puzzles/official/A --timeout 30`.
 
 ## Architecture
 
@@ -40,7 +40,7 @@ RustSolver
 
 ### Rust solver
 
-`src/solver/rust_solver.py` spawns `rsolver/target/{release,debug}/rsolver[.exe]`; protocol is puzzle JSON → stdin, solution JSON → stdout. `default_router()` constructs `RustSolver()` eagerly, so the app and `verify_puzzles.py` require the binary to be built (`cargo build --release`).
+`src/solver/rust_solver.py` spawns `rsolver/target/{release,debug}/rsolver[.exe]`; protocol is puzzle JSON → stdin, solution JSON → stdout. `default_router()` constructs `RustSolver()` eagerly, so the app and `benchmark_rust_solver.py` require the binary to be built (`cargo build --release`).
 
 `rsolver/src/solver/mod.rs` dispatches: **aog DFS** (direct port of the C++ reference in `third_party/AoG_Solver`) → **pieces** (DLX exact cover for shape_pool / area clues / constrained compass) → **backtrack** (region-by-region DFS). The aog solver's internal checks are treated as authoritative (`build_solution_trusted`) — no re-validation in Rust.
 
@@ -64,7 +64,7 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 ### Puzzles, scripts, reference projects
 
 - `puzzles/` — JSON corpus: `official/` (zones A/B/C/Zone1-3), `reference/` (converted from other formats), `user/`, `aiGen/`. `data/polyominoes.json` supplies polyomino data.
-- `scripts/` — conversion (`convert_aog_batch.py`, `convert_archive.py`), generation (`gen_ai_puzzles.py`, `generate_polyominoes.py`), benchmarking (`benchmark.py`, `bench_quick.py`).
+- `scripts/` — 基准（`benchmark_rust_solver.py`）、转换（`convert_archive.py`、`convert_answers.py`、`convert_puzzles_json_to_aog.py`、`fix_puz_solutions.py`）、生成（`gen_ai_puzzles.py`、`generate_polyominoes.py`）。各脚本作用见 `scripts/README.md`。
 - `third_party/` — git submodules holding reference solvers used as porting/validation sources (C++ AoG_Solver, Rust aog, JS glimmith-solver, Python TAGSolver, TS shape-helper). Not part of the build.
 - `docs/` — architecture, development, testing, and rules guides (in Chinese). `docs/official-puzzles-status.md` tracks the official-corpus solve status / DIFF / UNSOLVED analysis.
 
@@ -110,7 +110,7 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 除上述文档同步外，还必须：
 
 1. 更新 `docs/official-puzzles-status.md`（进度数字、DIFF/UNSOLVED 变化、结论）。
-2. 跑通 `pytest`、`cargo test` 与相关 `verify_puzzles.py` 片段，把结果记入该文档。
+2. 跑通 `pytest`、`cargo test` 与相关 `benchmark_rust_solver.py` 片段，把结果记入该文档。
 3. **归档 artifacts 随提交入库**（规则见 AGENTS.md「results/ 目录规则」，此处为要点）：
 
    | 必须保留 | 存放位置 | 命名规则 |
@@ -128,4 +128,4 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 
 - End-to-end tests create a puzzle → solve via the router → validate. `tests/conftest.py` has shared fixtures.
 - UI tests use QTest (minimal coverage).
-- Puzzle-wide regression: `scripts/verify_puzzles.py` runs the full `default_router()` chain and independently re-validates each solution.
+- Puzzle-wide regression: `scripts/benchmark_rust_solver.py` runs the full `default_router()` chain and independently re-validates each solution.

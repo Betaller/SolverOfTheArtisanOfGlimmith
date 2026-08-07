@@ -151,8 +151,8 @@ fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<Regi
    - `rsolver/target/release/rsolver puzzles/official/C/C4-1.json`
    - `rsolver/target/release/rsolver puzzles/official/Zone1/7-slash-pack/0277.json`
    - 断言 `solved:true`、`elapsed_ms<5000`、区域集合等于 Python 基准（C4-1 = `[14,12,1,1]` 布局，已实测 Python 解出）。
-3. **语料回归**：`scripts/verify_puzzles.py --rules rose_window`——之前 MATCH 的纯 rose 仍 MATCH（aog 或 rose），0277 等 UNSOLVED 转 solved，无新增 DIFF。
-4. **全量对照**：`verify_puzzles.py` 全量，对照 `docs/official-puzzles-status.md` §2（block 题回归依赖另一窗口的修复合入）。
+3. **语料回归**：`scripts/benchmark_rust_solver.py --rules rose_window`——之前 MATCH 的纯 rose 仍 MATCH（aog 或 rose），0277 等 UNSOLVED 转 solved，无新增 DIFF。
+4. **全量对照**：`benchmark_rust_solver.py` 全量，对照 `docs/official-puzzles-status.md` §2（block 题回归依赖另一窗口的修复合入）。
 5. 更新 `docs/official-puzzles-status.md`（软门禁）。
 
 ## 10. 风险

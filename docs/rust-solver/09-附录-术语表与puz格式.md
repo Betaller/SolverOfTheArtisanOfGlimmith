@@ -213,7 +213,7 @@ AOG_DEBUG=1 ./target/release/rsolver puzzles/official/A/A1-1.json
 ### 4.3 验证一条命令
 
 ```bash
-python scripts/verify_puzzles.py --dir puzzles/official/A --timeout 30
+python scripts/benchmark_rust_solver.py --dir puzzles/official/A --timeout 30
 # 会走 default_router()，即 RustSolver 优先，再独立验证每个解
 ```
 

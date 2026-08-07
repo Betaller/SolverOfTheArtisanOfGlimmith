@@ -5,7 +5,7 @@
 ```powershell
 python src/app.py
 python -m pytest tests/ -x --tb=short
-python scripts/verify_puzzles.py          # all official+user puzzles
+python scripts/benchmark_rust_solver.py --timeout 30   # all official+user puzzles
 ```
 
 ## Commands

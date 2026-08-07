@@ -123,5 +123,5 @@ archive 每个官方题都带 `solution` 字段（紧凑边界网格，stride=3�
 python scripts/convert_archive.py            # 转换官方题（会清空并重写 Zone1-3）
 python scripts/convert_archive.py --dry-run  # 只校验不落盘
 python -m pytest tests/ -x --tb=short       # 全量测试
-python scripts/verify_puzzles.py             # 求解验证（大目录会很久）
+python scripts/benchmark_rust_solver.py             # 求解验证（大目录会很久）
 ```

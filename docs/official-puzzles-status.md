@@ -73,6 +73,17 @@
 - **全量 verify**：**1070 PASS / 225 FAIL / 0 DIFF**（vs 基线 1067/228/7DIFF，净 **+3 PASS**；14 个 PASS→FAIL 全部为并行负载临界波动，单跑解出，无真实回归）。
 - **验证**：`cargo test` 6 通过；`pytest` 全绿；watchtower 专项 verify 0 DIFF；6/7 DIFF 题解出官方解。
 
+### 2026-08-07 · 搜索前边界推演 + 中搜索形状剪枝 + BF 默认开启（commit `6169df3`）
+- **result**：`results/20260807_opt-v2-bench.txt`（`scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 20 -j 8`）
+- **1049 / 1258 通过**（20s 超时），**0 回归**，**8 道 FAIL→PASS**。
+- 提升类型：约束边→边界穿透所有求解器 + 密封区域 different/same/block/non_block 即时剪枝
+  + Bellman-Ford 面积传播默认开启 + ring/brick 预画边界拓扑预检。
+- 新解出：1270（no_solution→aog）、0710（超时→aog）、0749（超时→aog）、1329（超时→aog）、
+  0875（超时→aog）、0795（超时→aog）、0829（超时→aog）、0957（OOM→aog）。
+- 失败分析：209 FAIL（79 超时 + 108 无解 + 7 校验失败 + 15 OOM），0 panic，0 拓扑误判。
+- 注：基线（`results/20260807_sat-only-bench.txt`）为 40s 超时 1074 题 940 PASS；
+  本优化在 20s 超时（减半）下 1258 题 1049 PASS，时间效率提升显著。
+
 ---
 
 ## 第二部分：变更内容
@@ -284,6 +295,38 @@
   **backtrack 模块**的解被 `validate.rs` 拒绝（而非 aog）。
 - **不改变求解能力**：纯协议/归因改动，官方基准数字不变（1052/1258）。
 
+### 2026-08-07 · 搜索优化 4 项：约束边→边界 + 中搜索形状剪枝 + BF 默认开启 + 拓扑预检（commit `6169df3`）
+
+针对 134 道 FAIL 题的规则画像（`docs/优化/10-专用求解器方案.md`），实施 4 项低风险增量优化：
+
+1. **约束边强制为边界**（`rsolver/src/io.rs`）：
+   inequality / difference / heterogeneous / homogeneous 边在解析时设为
+   `is_boundary = true`。之前只有 aog 内部编码（`core.rs` LINE_BLOCK），
+   现在 backtrack / pieces / rose 通过 `is_adjacent_free()` / `is_precut()` 自动受益。
+
+2. **密封区域形状规则即时检查**（`rsolver/src/solver/backtrack.rs`）：
+   新增 `check_sealed_regions()`，每次 `frontier_assign` 后调用。区域密封时
+   立即检查 different / same / block / non_block 约束，不等叶子。
+   无状态设计（每次从 `region_shapes` + `frontier` 重新计算），无需 undo 逻辑。
+
+3. **Bellman-Ford 面积传播默认开启**（`rsolver/src/solver/prototypes.rs`）：
+   gate 从 `BF_PROPAGATE=1`（opt-in）改为 `BF_PROPAGATE=0`（opt-out），
+   每 256 步传播 inequality / difference 边的面积约束。
+
+4. **搜索前拓扑校验**（`rsolver/src/solver/mod.rs`）：
+   新增 `pre_search_topology_check()`，O(V) 扫描所有顶点，检查预画边界 + 约束边
+   是否已违反 ring / brick。正确阈值：Ring 只在 `def_boundary==3 && unknown==0`
+   时拒绝；Brick 在 `def_boundary>=4` 时拒绝。使用单元格几何
+   `(vr-1,vc-1),(vr-1,vc),(vr,vc-1),(vr,vc)` 判断每条边的状态，区分网格外（计为
+   非边界）和外边界（计为边界），避免角落顶点过度计数。
+
+**bug 迭代**：拓扑预检经过 3 轮修复——数组越界（`h_edges` 维度 `[h][w-1]` 误用 `vc < w`）、
+外边界过度计数（角落"两面都不邻接网格格"的边不计为边界）、Ring 阈值过于激进
+（`def_boundary==3 && unknown>0` 可能变 4，ring 允许）。
+
+**结果**（20s 超时 vs 基线 40s）：0 回归、8 道新解出、0 panic、0 拓扑误判。
+详见第一部分最新条目。
+
 ---
 
 ## 附录
@@ -306,9 +349,16 @@ Zone3/7-zone3-mixed/1144
 > 曾把 1301 误列入「孪生解」，实为 **brick 规则语义 bug**：`validate.rs` / `IndependentValidator` / backtrack 对含 blocked 的顶点跳过 brick 检查，放过 1 blocked + 3 区域的真 4 路交叉，导致单点 `(7,6)` 的错解被判合法。修复砖纹语义后 1301 唯一解 = 官方解 `(6,7)`（2026-08-06，见第二部分）。
 
 ### B. 当前 UNSOLVED 分析（求解器解不出，非错解）
-按类型（近似）：Zone3/7-zone3-mixed 33、Zone3/2-loopy 31、Zone3/6-compass-main 29、Zone3/5-inequality 19、Zone3/3-vertex-radar 18、Zone3/8-endgame 18、Zone3/4-difference 15、其余 Zone1/Zone2 散布。
-主要规则组合：compass+solitary、rose_window（剩大网格 0804/1433/1434）、compass+rose_window、rose_window+same/ring/watchtower 等。
-**根因**：求解器能力限制（compass/rose/ring 强规则组合搜索空间大、剪枝不足），**不是校验或转换问题**。
+
+**最新（2026-08-07, commit `6169df3`）**：209 FAIL（79 超时 + 108 无解 + 7 校验失败 + 15 OOM）。
+
+按类型（近似）：Zone3/7-zone3-mixed 33、Zone3/2-loopy 31、Zone3/6-compass-main 29、
+Zone3/5-inequality 19、Zone3/3-vertex-radar 18、Zone3/8-endgame 18、Zone3/4-difference 15、
+其余 Zone1/Zone2 散布。
+
+优化后（vs 基线）：**8 道新解出**（1270/0710/0749/1329/0875/0795/0829/0957），
+**0 回归**。剩余 FAIL 根因：compass/rose/ring 强规则组合搜索空间大、剪枝不足；
+fence/non_block/solitary 等规则在 backtrack 中仍为事后检查而非搜索约束。
 
 ### C. 后续计划
 0. ~~**评估 Python 求解器去留**~~ **已完成（2026-08-06）**：评估证明 Python 求解器对官方语料无解出价值（历史仅解 5 道且现全由 Rust 解出；206 道失败题定向扫描 Python 0 命中）。已删 Python 求解算法、`default_router` 改 Rust-only、保留 constraints/shapes 共享层与 IndependentValidator，测试与文档同步（见第二部分 C.0 条目）。

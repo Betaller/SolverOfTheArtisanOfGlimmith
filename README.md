@@ -126,7 +126,8 @@ rsolver/src/               Rust 求解器
   见该文档；6 道 watchtower DIFF 已于 2026-08-06 修复（边界望塔缺失，见该文档附录 A）。
 - **软门禁**：对求解器 / 转换 / 校验 / 规则语义的每次优化，提交前必须更新该文档（进度 +
   变更各追加一条）、同步相关文档、跑通测试，并把基准结果随提交入库
-  （`results/YYYYMMDD_<short-sha>.txt`）。详见该文档附录 D 与 `CLAUDE.md`。
+  （`results/bench/<日期>_<commit-id>_<short-message>.txt`、二进制 `results/bin/rsolver-<commit-id>-<platform>`）。
+  详见该文档附录 D 与 `CLAUDE.md`。
 
 ## C++ AoG 官方谜题库 (`aog_puzzles/`)
 

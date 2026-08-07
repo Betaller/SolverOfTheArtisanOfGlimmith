@@ -111,11 +111,16 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 
 1. 更新 `docs/official-puzzles-status.md`（进度数字、DIFF/UNSOLVED 变化、结论）。
 2. 跑通 `pytest`、`cargo test` 与相关 `verify_puzzles.py` 片段，把结果记入该文档。
-3. **基准评估结果随提交入库**：影响求解结果（可解性 / 性能 / 规则语义）的提交，必须把对应
-   基准 / 全量扫描输出存为 `results/YYYYMMDD_<short-sha|描述>.txt` 并**随该提交一起入库**
-   （不允许只留在 /tmp）。同时把产出该结果的 `rsolver` 二进制存为
-   `results/bin/rsolver-<short-sha>.<平台>`（如 `rsolver-f1cfa16.linux-x86_64`），保证结果可复现。
-   纯文档、无行为变化的重构等不影响求解结果的提交可豁免。
+3. **归档 artifacts 随提交入库**（规则见 AGENTS.md「results/ 目录规则」，此处为要点）：
+
+   | 必须保留 | 存放位置 | 命名规则 |
+   |---|---|---|
+   | rsolver 可执行文件 | `results/bin/` | `rsolver-<commit-id>-<platform>`，如 `rsolver-f1cfa16-linux-x86_64` |
+   | `benchmark_rust_solver.py` 测试结果 | `results/bench/` | `<日期>_<commit-id>_<short-message>.txt`，如 `20260807_c6cb307_opt-v3-bench.txt` |
+   | 临时测试结果（verify/根因分析等） | `results/tmp/` | 建议 `<日期>_<commit-id>_<short-message>.txt`，不入库 |
+
+   **禁止在 `results/` 根目录散放文件。** `commit-id` 为产生该结果的提交短 sha（7 位）；
+   纯文档、无行为变化的重构等不影响求解结果的提交可豁免基准/二进制要求。
 
 不满足即视为未完成。全量扫描方式与脚本见该文档 §2。
 

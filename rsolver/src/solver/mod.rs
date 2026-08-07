@@ -3,6 +3,7 @@
 pub mod aog;
 pub mod backtrack;
 pub mod pieces;
+pub mod prototypes;
 pub mod rose;
 pub mod validate;
 
@@ -26,6 +27,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             error_message: None,
             regions: Vec::new(),
             rule_results: Default::default(),
+            solver: String::new(),
         };
     }
 
@@ -55,6 +57,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         if let Some(regions) = aog::solve_aog(puzzle, deadline) {
             return build_solution_trusted(regions, &start, puzzle);
         }
+        // fallthrough: aog timed out or found nothing; try the other solvers.
 
         // NEW: pure rose_window puzzles aog couldn't solve quickly → rose solver.
         if rose_capable {
@@ -64,7 +67,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
                 .min(ROSE_TIMEOUT_MS);
             if rose_ms > 0 {
                 if let Some(regions) = rose::solve_rose(puzzle, &start, rose_ms) {
-                    return build_solution(regions, &start, puzzle);
+                    return build_solution(regions, &start, puzzle, "rose");
                 }
             }
         }
@@ -78,6 +81,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
                 error_message: Some("AoG solver only".into()),
                 regions: Vec::new(),
                 rule_results: Default::default(),
+                solver: "aog".to_string(),
             };
         }
     }
@@ -96,7 +100,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             if std::env::var("AOG_DEBUG").is_ok() {
                 eprintln!("solver=pieces regions={}", regions.len());
             }
-            return build_solution(regions, &start, puzzle);
+            return build_solution(regions, &start, puzzle, "pieces");
         }
     }
 
@@ -105,7 +109,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         if std::env::var("AOG_DEBUG").is_ok() {
             eprintln!("solver=backtrack regions={}", regions.len());
         }
-        return build_solution(regions, &start, puzzle);
+        return build_solution(regions, &start, puzzle, "backtrack");
     }
 
     let elapsed = start.elapsed().as_millis() as u64;
@@ -116,6 +120,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         error_message: Some("No solution found".into()),
         regions: Vec::new(),
         rule_results: Default::default(),
+        solver: String::new(),
     }
 }
 
@@ -169,7 +174,7 @@ fn regions_respect_boundaries(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     true
 }
 
-fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle) -> Solution {
+fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle, solver: &str) -> Solution {
     let elapsed = start.elapsed().as_millis() as u64;
     if !regions_respect_boundaries(puzzle, &regions) {
         return Solution::unsolved("Solution found but crosses a pre-drawn boundary");
@@ -188,6 +193,7 @@ fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle) ->
             error_message: Some("Solution found but fails rule validation".into()),
             regions,
             rule_results: HashMap::new(),
+            solver: solver.to_string(),
         };
     }
     let rule_results: HashMap<String, bool> = puzzle
@@ -202,6 +208,7 @@ fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle) ->
         error_message: None,
         regions,
         rule_results,
+        solver: solver.to_string(),
     }
 }
 
@@ -221,6 +228,7 @@ fn build_solution_trusted(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Pu
         error_message: None,
         regions,
         rule_results,
+        solver: "aog".to_string(),
     }
 }
 

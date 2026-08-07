@@ -59,43 +59,56 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
 
 /// Pre-computed edge constraint between two cell positions.
 #[derive(Debug, Clone)]
-struct EdgeAreaConstraint {
-    cell_a: (usize, usize),
-    cell_b: (usize, usize),
-    /// "inequality" (value==1 ⇒ A > B; else B > A) or "difference" (value=D).
-    ctype: EdgeConstraintType,
-    value: Option<i64>,
+pub(crate) struct EdgeAreaConstraint {
+    pub cell_a: (usize, usize),
+    pub cell_b: (usize, usize),
+    pub ctype: EdgeConstraintType,
+    pub value: Option<i64>,
 }
 
-struct BacktrackState {
+impl BacktrackState {
+    pub(crate) fn next_region_id(&self) -> usize { self.next_region_id }
+    pub(crate) fn region_shapes(&self) -> &Vec<Vec<[usize; 2]>> { &self.region_shapes }
+    pub(crate) fn region_size(&self, rid: usize) -> usize {
+        self.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0)
+    }
+    pub(crate) fn is_sealed(&self, rid: usize) -> bool {
+        self.frontier.get(&rid).map(|f| f.is_empty()).unwrap_or(true)
+    }
+    pub(crate) fn cell_region(&self, cell: (usize, usize)) -> Option<usize> {
+        self.cell_to_region[cell.0 * self.width + cell.1]
+    }
+}
+
+pub(crate) struct BacktrackState {
     /// Flat row-major cell → region id (index `r*w+c`); unassigned / blocked = None.
-    cell_to_region: Vec<Option<usize>>,
+    pub(crate) cell_to_region: Vec<Option<usize>>,
     /// Region id → cell list; region ids are a contiguous 0..n prefix, so the
     /// region id is the Vec index (new regions are pushed, undone regions popped).
-    region_shapes: Vec<Vec<[usize; 2]>>,
-    next_region_id: usize,
+    pub(crate) region_shapes: Vec<Vec<[usize; 2]>>,
+    pub(crate) next_region_id: usize,
     /// Grid width (stride for `cell_to_region` row-major indexing).
-    width: usize,
-    steps: u64,
+    pub(crate) width: usize,
+    pub(crate) steps: u64,
     deadline: Instant,
-    area_bounds: AreaBounds,
+    pub(crate) area_bounds: AreaBounds,
     watchtowers: Vec<(Vec<[usize; 2]>, usize)>,
     // Area-clue machinery (zero overhead when the puzzle has no `area` rule).
     fillable: Vec<(usize, usize)>,
     cell_index: Vec<Vec<usize>>,
-    undecided_count: usize,
+    pub(crate) undecided_count: usize,
     region_clue: HashMap<usize, usize>, // rid -> required area from a numbered cell inside
-    frontier: HashMap<usize, HashMap<(usize, usize), usize>>, // rid -> {undecided cell : adjacency count}
+    pub(crate) frontier: HashMap<usize, HashMap<(usize, usize), usize>>, // rid -> {undecided cell : adjacency count}
     has_area_rule: bool,
     /// Pre-computed inequality / difference edge constraints for mid-search pruning.
-    edge_constraints: Vec<EdgeAreaConstraint>,
+    pub(crate) edge_constraints: Vec<EdgeAreaConstraint>,
     has_edge_constraints: bool,
 }
 
 #[derive(Debug, Clone)]
-struct AreaBounds {
-    min_area: usize,
-    max_area: usize,
+pub(crate) struct AreaBounds {
+    pub(crate) min_area: usize,
+    pub(crate) max_area: usize,
 }
 
 /// Collect all inequality / difference edge constraints for mid-search pruning.
@@ -285,6 +298,27 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
     // Edge area constraint pruning: sealed regions force neighbour areas.
     if !check_edge_area_mid_search(state) {
         return false;
+    }
+
+    // Prototype #2: throttled Bellman-Ford (every 256 steps)
+    if state.steps % 256 == 0 {
+        if !crate::solver::prototypes::propagate_area_bounds(
+            &state,
+            &state.edge_constraints,
+            (state.area_bounds.min_area, state.area_bounds.max_area),
+            state.undecided_count,
+        ) {
+            return false;
+        }
+    }
+
+    // Prototype #6: SAT boundary feasibility (every 64 steps)
+    if state.steps % 64 == 0 {
+        if !crate::solver::prototypes::sat_boundary_feasible(
+            puzzle, &state.cell_to_region, state.width,
+        ) {
+            return false;
+        }
     }
 
     let (r, c) = pick_next_cell(puzzle, state);
@@ -766,6 +800,12 @@ fn check_vertex_ring_ok(puzzle: &Puzzle, r: usize, c: usize, state: &BacktrackSt
     ] {
         if vr < 0 || vc < 0 || vr + 1 >= h || vc + 1 >= w {
             continue;
+        }
+        // GF(2) parity: boundary-degree must be even (universal topology constraint).
+        if !crate::solver::prototypes::check_gf2_parity(
+            puzzle, &state.cell_to_region, state.width, vr as usize, vc as usize,
+        ) {
+            return false;
         }
         let (lb, _ub) = vertex_boundary_bounds(puzzle, state, vr as usize, vc as usize);
         // ring: degree 3 already reached → dead.  (ub check not needed: if lb ≥ 3

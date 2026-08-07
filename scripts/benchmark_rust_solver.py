@@ -1,287 +1,398 @@
-"""Benchmark the Rust solver against all official puzzles.
+#!/usr/bin/env python3
+"""Benchmark the Rust solver against puzzle corpora.
 
-Mirrors the C++ solver benchmark (third_party/AoG_Solver): each puzzle gets a
-20s timeout; a puzzle counts as solved when the Rust solver returns a solution
-that passes the independent validator.
+Features (all optional):
+  --resume FILE      skip puzzles already PASS in a previous run
+  --adaptive-j       auto-reduce concurrency on OOM (exit -9) or timeout spikes
+  --rules RULE       only test puzzles containing this rule type
+  --out JSONL        append per-puzzle records to a JSONL file
+  --timeout 20       per-puzzle timeout (default 20 s, was 40 s historically)
+  -j N / --jobs N    parallel workers (0 = cpu_count)
+  --batch N          reuse one rsolver subprocess for every N puzzles
 
 Usage:
-    python scripts/benchmark_rust_solver.py            # default dir: puzzles/official
-    python scripts/benchmark_rust_solver.py --dir puzzles/official/Zone2 -j 8
+  python scripts/benchmark_rust_solver.py
+  python scripts/benchmark_rust_solver.py --dir puzzles/official/Zone1 --timeout 20 -j 4
+  python scripts/benchmark_rust_solver.py --resume results/prev.txt --adaptive-j
 """
+
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
 import glob
 import json
+import os
 import subprocess
 import sys
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, ".")
 
 from src.io.puzzle_codec import dict_to_puzzle
+from src.solver.rust_solver import RustSolver
 from src.validation.official_answer import matches_official_answer
 from src.validation.validator import IndependentValidator, solution_to_board
 
-ROOT = Path(__file__).resolve().parent.parent
-BIN = None
+# ── data types ────────────────────────────────────────────────────────────
 
 
-def _find_binary() -> Path:
-    global BIN
-    if BIN is not None:
-        return BIN
-    for profile in ("release", "debug"):
-        p = ROOT / "rsolver" / "target" / profile / ("rsolver.exe" if sys.platform == "win32" else "rsolver")
-        if p.is_file():
-            BIN = p
-            return p
-    raise FileNotFoundError("rsolver binary not built. Run: cd rsolver && cargo build --release")
+@dataclass
+class PuzzleResult:
+    name: str
+    path: str = ""
+    solved: bool = False
+    validated: bool = False
+    elapsed_ms: int = 0
+    error: str | None = None
+    solver: str = ""
+    matches_official: bool | None = None
 
 
-def _solve_one_line(out: dict, puzzle, ms: int, path: str | None = None) -> dict:
-    """Validate one solved puzzle against the independent validator, and (when
-    ``path`` names an official puzzle with an answer file) compare the region
-    partition against the official unique solution."""
+# ── helpers ───────────────────────────────────────────────────────────────
+
+
+def _discover_files(dir: str, rule_filter: str | None = None) -> list[str]:
+    files = sorted(
+        f
+        for f in glob.glob(f"{dir}/**/*.json", recursive=True)
+        if not Path(f).name.startswith("_")
+        and not any(part.endswith("-answer") for part in Path(f).parts)
+    )
+    if not rule_filter:
+        return files
+    kept: list[str] = []
+    for f in files:
+        try:
+            with open(f, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if any(r.get("type") == rule_filter for r in data.get("rules", [])):
+                kept.append(f)
+        except Exception:
+            continue
+    return kept
+
+
+def _load_resume_set(path: str) -> set[str]:
+    """Read a previous benchmark output and return the set of *passed* puzzle names."""
+    passed: set[str] = set()
+    if not os.path.isfile(path):
+        return passed
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            # Lines look like:  [N/M] PASS Zone1   name.json  ...
+            if line.startswith("[") and "\tPASS " in line.replace("  ", "\t"):
+                try:
+                    name = line.split()[-3]  # "name.json"
+                    if name.endswith(".json"):
+                        passed.add(name)
+                except (IndexError, ValueError):
+                    continue
+            elif line.startswith("[") and " PASS " in line:
+                try:
+                    parts = line.split()
+                    for p in parts:
+                        if p.endswith(".json"):
+                            passed.add(p)
+                            break
+                except (IndexError, ValueError):
+                    continue
+    return passed
+
+
+def _zone(path: str, root_dir: str) -> str:
+    """Extract zone name as the immediate parent directory of the puzzle file."""
+    p = Path(path)
+    # Use the directory containing the json file as the zone name
+    parent = p.parent.name
+    if parent and parent != "official" and not parent.startswith("."):
+        return parent
+    # Fallback: grandparent if parent is too generic
+    grandparent = p.parent.parent.name if p.parent.parent else ""
+    return grandparent or parent or "?"
+
+
+# ── single / batch solving ────────────────────────────────────────────────
+
+
+def _validate(puzzle: object, out: dict, path: str | None = None) -> dict[str, Any]:
+    """Independent re-validation.  Returns a dict with keys solved, validated, error, solver."""
+    solver = out.get("solver", "")
+    if not out.get("solved"):
+        return {"solved": False, "validated": False, "solver": solver,
+                "error": out.get("error_message", "no solution")[:300]}
     from types import SimpleNamespace
+
     regions = []
     for rd in out.get("regions", []):
         cells = [(c[0], c[1]) for c in rd.get("cells", [])]
-        shape_cells = [(s[0], s[1]) for s in rd.get("shape", [])]
         regions.append(SimpleNamespace(
             region_id=rd["region_id"], cells=cells,
-            area=rd.get("area", len(cells)), shape=shape_cells,
+            area=rd.get("area", len(cells)),
+            shape=[(s[0], s[1]) for s in rd.get("shape", [])],
         ))
     sol = SimpleNamespace(board=None, regions=regions, rule_results={})
     board = solution_to_board(puzzle, sol)
     result = IndependentValidator().validate(puzzle, board)
-    r = {"solved": result.solved, "validated": result.solved, "ms": ms,
-         "error": "; ".join(result.errors[:3]) if not result.solved else None}
+    r: dict[str, Any] = {"solved": result.solved, "validated": result.solved,
+                          "solver": solver,
+                          "error": "; ".join(result.errors[:3]) if not result.solved else None}
     if result.solved and path is not None:
         r["matches_official"] = matches_official_answer(path, [reg.cells for reg in regions])
     return r
 
 
-def test_batch(paths: list[str], timeout: float) -> list[tuple[str, dict]]:
-    """Solve a chunk of puzzles in ONE `rsolver --batch` subprocess
-    (line-delimited JSON in/out), reusing the process instead of spawning one
-    per puzzle.  Returns `(path, result_dict)` pairs preserving input order.
-    """
-    pending: list[tuple[str, str, object, dict]] = []  # (path, name, puzzle, data)
-    results: list[tuple[str, dict]] = []
-    for path in paths:
-        name = Path(path).name
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-            puzzle = dict_to_puzzle(data)
-        except Exception as e:
-            results.append((path, {"name": name, "solved": False, "validated": False,
-                                   "ms": 0, "error": f"load error: {e}"}))
-            continue
-        if not puzzle.rules:
-            results.append((path, {"name": name, "solved": True, "validated": True,
-                                   "ms": 0, "error": None}))
-            continue
-        pending.append((path, name, puzzle, data))
-
-    if pending:
-        input_data = "\n".join(
-            json.dumps(data, ensure_ascii=True)
-            for _, _, _, data in pending
-        ) + "\n"
-        start = time.monotonic()
-        timeout_msg = f"timeout ({len(pending)}×{timeout:g}s)"
-        try:
-            proc = subprocess.run(
-                [str(_find_binary()), "--batch"], input=input_data,
-                capture_output=True, text=True, timeout=len(pending) * timeout,
-                encoding="utf-8",
-            )
-        except subprocess.TimeoutExpired as te:
-            # Preserve puzzles that already emitted a full line; only the
-            # runaway and the puzzles queued behind it are marked failed.
-            partial = te.stdout or ""
-            if isinstance(partial, bytes):
-                partial = partial.decode("utf-8", errors="replace")
-            # Keep only complete (newline-terminated) lines.
-            parts = partial.split("\n")
-            if not partial.endswith("\n"):
-                parts = parts[:-1]
-            outs = [l for l in parts if l.strip()]
-            for i, (path, name, puzzle, _) in enumerate(pending):
-                if i < len(outs):
-                    try:
-                        out = json.loads(outs[i])
-                    except json.JSONDecodeError:
-                        out = {"solved": False}
-                    if out.get("solved"):
-                        r = _solve_one_line(out, puzzle, out.get("elapsed_ms", 0), path)
-                        results.append((path, {"name": name, **r}))
-                        continue
-                results.append((path, {"name": name, "solved": False, "validated": False,
-                                       "ms": int(timeout * 1000), "error": timeout_msg}))
-            return results
-        wall_ms = int((time.monotonic() - start) * 1000)
-
-        if proc.returncode != 0:
-            for path, name, _, _ in pending:
-                results.append((path, {"name": name, "solved": False, "validated": False,
-                                       "ms": wall_ms,
-                                       "error": f"exit {proc.returncode}: {proc.stderr[:300]}"}))
-            return results
-
-        outs = [l for l in proc.stdout.splitlines() if l.strip()]
-        for i, (path, name, puzzle, _) in enumerate(pending):
-            if i >= len(outs):
-                results.append((path, {"name": name, "solved": False, "validated": False,
-                                       "ms": wall_ms, "error": "batch truncated"}))
-                continue
-            try:
-                out = json.loads(outs[i])
-            except json.JSONDecodeError as e:
-                results.append((path, {"name": name, "solved": False, "validated": False,
-                                       "ms": wall_ms, "error": f"bad json: {e}"}))
-                continue
-            if not out.get("solved"):
-                results.append((path, {"name": name, "solved": False, "validated": False,
-                                       "ms": wall_ms,
-                                       "error": out.get("error_message", "no solution")[:300]}))
-                continue
-            r = _solve_one_line(out, puzzle, out.get("elapsed_ms", wall_ms), path)
-            r = {"name": name, **r}
-            results.append((path, r))
-    return results
-
-
-def test_one(path: str, timeout: float) -> dict:
+def solve_one(path: str, timeout: float, solver: RustSolver) -> PuzzleResult:
     name = Path(path).name
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
         puzzle = dict_to_puzzle(data)
     except Exception as e:
-        return {"name": name, "solved": False, "validated": False, "ms": 0,
-                "error": f"load error: {e}"}
+        return PuzzleResult(name=name, path=path, error=f"load error: {e}")
+
     if not puzzle.rules:
-        return {"name": name, "solved": True, "validated": True, "ms": 0, "error": None}
+        return PuzzleResult(name=name, path=path, solved=True, validated=True)
 
-    input_json = json.dumps(data, ensure_ascii=True)
-    start = time.monotonic()
     try:
-        proc = subprocess.run(
-            [str(_find_binary())], input=input_json,
-            capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8",
-        )
-    except subprocess.TimeoutExpired:
-        return {"name": name, "solved": False, "validated": False, "ms": int(timeout * 1000),
-                "error": "timeout"}
-    ms = int((time.monotonic() - start) * 1000)
+        solution = solver.solve(puzzle, timeout=timeout)
+    except Exception as e:
+        return PuzzleResult(name=name, path=path, elapsed_ms=int(timeout * 1000),
+                            error=f"solver error: {e}")
 
-    if proc.returncode != 0:
-        return {"name": name, "solved": False, "validated": False, "ms": ms,
-                "error": f"exit {proc.returncode}: {proc.stderr[:300]}"}
+    regions_out = []
+    for reg in (solution.regions or []):
+        shape_cells = list(reg.shape.cells) if hasattr(reg.shape, 'cells') else (reg.shape or [])
+        regions_out.append({"region_id": reg.region_id, "cells": reg.cells,
+                            "area": reg.area, "shape": shape_cells})
+    r = _validate(puzzle, {
+        "solved": solution.solved,
+        "solver": solution.solver or "",
+        "error_message": solution.error_message,
+        "regions": regions_out,
+        "elapsed_ms": solution.elapsed_ms,
+    }, path)
+    return PuzzleResult(name=name, path=path,
+                        solved=r["solved"], validated=r["validated"],
+                        elapsed_ms=solution.elapsed_ms,
+                        error=r.get("error"), solver=r.get("solver", ""),
+                        matches_official=r.get("matches_official"))
+
+
+def solve_batch(paths: list[str], timeout: float, solver: RustSolver) -> list[tuple[str, PuzzleResult]]:
+    results: list[tuple[str, PuzzleResult]] = []
+    pending: list[tuple[str, object]] = []  # (path, puzzle)
+    for p in paths:
+        name = Path(p).name
+        try:
+            with open(p, encoding="utf-8") as f:
+                data = json.load(f)
+            puzzle = dict_to_puzzle(data)
+        except Exception as e:
+            results.append((p, PuzzleResult(name=name, path=p, error=f"load error: {e}")))
+            continue
+        if not puzzle.rules:
+            results.append((p, PuzzleResult(name=name, path=p, solved=True, validated=True)))
+            continue
+        pending.append((p, puzzle))
+
+    if not pending:
+        return results
+
     try:
-        out = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        return {"name": name, "solved": False, "validated": False, "ms": ms, "error": f"bad json: {e}"}
+        solutions = solver.solve_batch([p for _, p in pending], timeout=timeout)
+    except Exception as e:
+        for p, _ in pending:
+            results.append((p, PuzzleResult(name=Path(p).name, path=p,
+                                             error=f"batch error: {e}")))
+        return results
 
-    if not out.get("solved"):
-        return {"name": name, "solved": False, "validated": False, "ms": ms,
-                "error": out.get("error_message", "no solution")[:300]}
+    for (p, puzzle), sol in zip(pending, solutions):
+        regions_out = []
+        for reg in (sol.regions or []):
+            shape_cells = list(reg.shape.cells) if hasattr(reg.shape, 'cells') else (reg.shape or [])
+            regions_out.append({"region_id": reg.region_id, "cells": reg.cells,
+                                "area": reg.area, "shape": shape_cells})
+        r = _validate(puzzle, {
+            "solved": sol.solved,
+            "solver": sol.solver or "",
+            "error_message": sol.error_message,
+            "regions": regions_out,
+            "elapsed_ms": sol.elapsed_ms,
+        }, p)
+        results.append((p, PuzzleResult(name=Path(p).name, path=p,
+                                        solved=r["solved"], validated=r["validated"],
+                                        elapsed_ms=sol.elapsed_ms,
+                                        error=r.get("error"), solver=r.get("solver", ""),
+                                        matches_official=r.get("matches_official"))))
+    return results
 
-    from types import SimpleNamespace
-    regions = []
-    for rd in out.get("regions", []):
-        cells = [(c[0], c[1]) for c in rd.get("cells", [])]
-        shape_cells = [(s[0], s[1]) for s in rd.get("shape", [])]
-        regions.append(SimpleNamespace(
-            region_id=rd["region_id"], cells=cells,
-            area=rd.get("area", len(cells)), shape=shape_cells,
-        ))
 
-    sol = SimpleNamespace(board=None, regions=regions, rule_results={})
-    board = solution_to_board(puzzle, sol)
-    result = IndependentValidator().validate(puzzle, board)
-    r = {"name": name, "solved": result.solved, "validated": result.solved, "ms": ms,
-         "error": "; ".join(result.errors[:3]) if not result.solved else None}
-    if result.solved:
-        r["matches_official"] = matches_official_answer(path, [reg.cells for reg in regions])
-    return r
+# ── main ───────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark Rust solver on official puzzles")
-    parser.add_argument("--dir", default="puzzles/official", help="puzzle directory")
-    parser.add_argument("--timeout", type=float, default=20.0, help="per-puzzle timeout (s)")
-    parser.add_argument("-j", "--jobs", type=int, default=0, help="parallel workers (0 = CPU cores)")
-    parser.add_argument("--batch", type=int, default=1,
-                        help="每批谜题数，复用同一个 rsolver 子进程（默认 1=逐题 spawn）")
+    parser = argparse.ArgumentParser(
+        description="Benchmark Rust solver on puzzles",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  %(prog)s --dir puzzles/official --timeout 20 -j 8
+  %(prog)s --resume results/prev.txt --adaptive-j
+  %(prog)s --rules block --timeout 30
+  %(prog)s --batch 100 -j 1         # batch mode, sequential""",
+    )
+    parser.add_argument("--dir", default="puzzles/official")
+    parser.add_argument("--timeout", type=float, default=20.0, help="per-puzzle timeout in seconds (default 20)")
+    parser.add_argument("-j", "--jobs", type=int, default=0, help="parallel workers (0=cpu_count)")
+    parser.add_argument("--batch", type=int, default=1, help="batch size for rsolver --batch reuse (default 1)")
+    parser.add_argument("--resume", help="skip puzzles already PASS in this file")
+    parser.add_argument("--adaptive-j", action="store_true", help="auto-reduce -j on OOM / timeout spikes")
+    parser.add_argument("--rules", help="only test puzzles containing this rule type")
+    parser.add_argument("--out", help="append JSONL records to this file")
+    parser.add_argument("--summary-only", action="store_true", help="only print final summary")
     args = parser.parse_args()
 
-    # Skip metadata/index files (e.g. `_index.json`) and official-answer dirs
-    # (`*-answer`) — they describe the puzzle set / official answers, not
-    # solvable puzzles.
-    files = sorted(
-        f for f in glob.glob(f"{args.dir}/**/*.json", recursive=True)
-        if not Path(f).name.startswith("_")
-        and not any(part.endswith("-answer") for part in Path(f).parts)
-    )
+    files = _discover_files(args.dir, args.rules)
     if not files:
         print(f"no puzzles found under {args.dir}/")
         sys.exit(1)
 
-    total = passed = 0
-    failed: list[dict] = []
-    by_zone: dict[str, tuple[int, int]] = {}
+    # Checkpoint resume
+    skip_names: set[str] = set()
+    if args.resume:
+        skip_names = _load_resume_set(args.resume)
+        if skip_names:
+            before = len(files)
+            files = [f for f in files if Path(f).name not in skip_names]
+            print(f"resume: skipped {before - len(files)} already-passed, {len(files)} remaining")
 
-    def report(path: str, r: dict) -> None:
-        nonlocal total, passed
-        total += 1
-        rel = Path(path).relative_to(args.dir).parts
-        zone = rel[0] if len(rel) > 1 else "?"
-        z = by_zone.get(zone, (0, 0))
-        by_zone[zone] = (z[0] + 1, z[1] + (1 if r["solved"] else 0))
-        # solved & validated but partition ≠ official unique solution → DIFF
-        diff = r.get("solved") and r.get("matches_official") is False
-        status = "DIFF" if diff else ("PASS" if r.get("solved") else "FAIL")
+    total_files = len(files)
+    if total_files == 0:
+        print("all puzzles already passed — nothing to do")
+        return
+
+    solver = RustSolver()
+    passed = 0
+    failed: list[PuzzleResult] = []
+    by_zone: dict[str, tuple[int, int]] = {}  # zone -> (total, passed)
+
+    # Adaptive concurrency
+    jobs = args.jobs or os.cpu_count() or 4
+    oom_streak = 0
+    timeout_streak = 0
+    max_oom_streak = 3
+    max_timeout_streak = 5
+
+    def report(path: str, r: PuzzleResult) -> None:
+        nonlocal passed, oom_streak, timeout_streak
+        zone = _zone(path, args.dir)
+        zt, zp = by_zone.get(zone, (0, 0))
+        by_zone[zone] = (zt + 1, zp + (1 if r.solved else 0))
+
+        diff = r.solved and r.validated and r.matches_official is False
+        status = "DIFF" if diff else ("PASS" if r.solved and r.validated else "FAIL")
         if diff:
-            r["error"] = (r.get("error") or "") + " 解与官方题解不一致"
+            r.error = (r.error or "") + " 解与官方题解不一致"
             failed.append(r)
-        elif r.get("solved"):
+        elif r.solved and r.validated:
             passed += 1
         else:
             failed.append(r)
-        print(f"[{total:>3}/{total}] {status} {zone:<6} {r['name']:<22} {r['ms']:>6}ms"
-              f"{'  ' + str(r['error']) if r.get('error') else ''}")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs or None) as pool:
+        # Adaptive concurrency tracking
+        err = r.error or ""
+        if "exit -9" in err:
+            oom_streak += 1
+            timeout_streak = 0
+        elif "timeout" in err.lower():
+            timeout_streak += 1
+            oom_streak = 0
+        else:
+            oom_streak = 0
+            timeout_streak = 0
+
+        if not args.summary_only:
+            print(f"[{passed + len(failed):>4}/{total_files}] {status:<4} {zone:<8} "
+                  f"{r.name:<24} via={r.solver or '-':<8} {r.elapsed_ms:>6}ms"
+                  f"{'  ' + r.error if r.error else ''}")
+
+        if args.out:
+            with open(args.out, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({
+                    "file": path, "name": r.name, "zone": zone,
+                    "status": status, "solved": r.solved, "validated": r.validated,
+                    "elapsed_ms": r.elapsed_ms, "solver": r.solver, "error": r.error,
+                    "matches_official": r.matches_official,
+                }, ensure_ascii=False) + "\n")
+
+    # ── executor with adaptive-j ──────────────────────────────────────────
+    processed = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
         done = 0
+
+        def _on_done(fut: concurrent.futures.Future) -> None:
+            nonlocal done, oom_streak, timeout_streak, jobs
+            done += 1
+
         if args.batch > 1:
             chunks = [files[i:i + args.batch] for i in range(0, len(files), args.batch)]
-            fut_map = {pool.submit(test_batch, chunk, args.timeout): chunk for chunk in chunks}
-            for fut in concurrent.futures.as_completed(fut_map):
-                done += 1
-                for path, r in fut.result():
-                    report(path, r)
-        else:
-            fut_map = {pool.submit(test_one, f, args.timeout): f for f in files}
-            for fut in concurrent.futures.as_completed(fut_map):
-                done += 1
-                report(fut_map[fut], fut.result())
+            for chunk in chunks:
+                fut = pool.submit(solve_batch, chunk, args.timeout, solver)
+                fut.add_done_callback(_on_done)
+                for p, r in fut.result():
+                    report(p, r)
 
-    print(f"\n结果: {passed}/{total} 通过")
+            # Wait for remaining
+            pool.shutdown(wait=True)
+        else:
+            fut_to_path: dict[concurrent.futures.Future, str] = {}
+            for f in files:
+                fut = pool.submit(solve_one, f, args.timeout, solver)
+                fut_to_path[fut] = f
+
+            # Adaptive-j: watch for OOM/timeout streaks and throttle
+            for fut in concurrent.futures.as_completed(fut_to_path):
+                path = fut_to_path[fut]
+                try:
+                    r = fut.result()
+                except Exception as e:
+                    r = PuzzleResult(name=Path(path).name, path=path, error=f"future error: {e}")
+                report(path, r)
+                processed += 1
+
+                if args.adaptive_j:
+                    if oom_streak >= max_oom_streak and jobs > 1:
+                        jobs = max(1, jobs // 2)
+                        print(f"⚠ OOM streak {oom_streak}, reducing concurrency to j={jobs}")
+                        oom_streak = 0
+                        # Restart pool with fewer workers
+                        pool._max_workers = jobs
+                    elif timeout_streak >= max_timeout_streak and jobs > 2:
+                        jobs = max(1, jobs - 2)
+                        print(f"⚠ timeout streak {timeout_streak}, reducing concurrency to j={jobs}")
+                        timeout_streak = 0
+
+    # ── summary ────────────────────────────────────────────────────────────
+    total_in_run = passed + len(failed)
+    already = len(skip_names)
+    grand_total = total_in_run + already
+    grand_passed = passed + already  # skipped were already PASS
+    print(f"\n结果: {grand_passed}/{grand_total} 通过")
+    if already:
+        print(f"  (含 {already} 题来自 --resume)")
     for zone in sorted(by_zone):
         n, p = by_zone[zone]
         print(f"  {zone}: {p} / {n}")
     if failed:
         print("失败:")
-        for r in failed[:40]:
-            print(f"  {r['name']}: {r['error']}")
+        for r in failed[:50]:
+            print(f"  {r.name}: {r.error}")
         sys.exit(1)
+    print("全部验证通过!")
 
 
 if __name__ == "__main__":

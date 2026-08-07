@@ -105,15 +105,21 @@ def _load_resume_set(path: str) -> set[str]:
 
 
 def _zone(path: str, root_dir: str) -> str:
-    """Extract zone name as the immediate parent directory of the puzzle file."""
-    p = Path(path)
-    # Use the directory containing the json file as the zone name
-    parent = p.parent.name
-    if parent and parent != "official" and not parent.startswith("."):
-        return parent
-    # Fallback: grandparent if parent is too generic
-    grandparent = p.parent.parent.name if p.parent.parent else ""
-    return grandparent or parent or "?"
+    """Extract zone name.
+
+    For puzzle paths like ``official/Zone1/type/name.json`` this returns
+    ``Zone1``.  Falls back to the immediate parent directory name.
+    """
+    try:
+        rel = str(Path(path).relative_to(root_dir))
+    except ValueError:
+        return Path(path).parent.name or "?"
+    parts = rel.replace("\\", "/").split("/")
+    if len(parts) >= 3 and parts[0] == "official":
+        return parts[1]  # official / Zone1 / type / name.json
+    if len(parts) >= 2:
+        return parts[0]  # top-level folder
+    return parts[0] if parts else "?"
 
 
 # ── single / batch solving ────────────────────────────────────────────────

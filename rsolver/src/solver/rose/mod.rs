@@ -100,19 +100,6 @@ pub fn solve_rose(
         return None;
     }
 
-    // Prototype #5: K=2 bipartite matching fast path
-    if symbol_types.len() == 2 {
-        if let Some(pairs) = crate::solver::prototypes::rose_bipartite_match(puzzle) {
-            if std::env::var("AOG_DEBUG").is_ok() {
-                eprintln!(
-                    "rose: bipartite matched {} pairs (K=2), falling through to region_match",
-                    pairs.len()
-                );
-            }
-            // TODO: use pairs to seed region_match with pre-paired symbols
-        }
-    }
-
     // region_match first (mirrors rose/solver.py:40).
     if std::env::var("AOG_DEBUG").is_ok() {
         eprintln!("rose: region_match start (types={} m={})", symbol_types.len(), m);

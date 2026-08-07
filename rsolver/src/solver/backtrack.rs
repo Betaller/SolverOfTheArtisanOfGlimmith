@@ -300,19 +300,26 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         return false;
     }
 
-    // Prototype #2: throttled Bellman-Ford (every 256 steps)
+    // Bellman-Ford area-constraint propagation (optional, BF_PROPAGATE=1).
+    // Throttled to every 256 steps to keep overhead negligible.
     if state.steps % 256 == 0 {
         if !crate::solver::prototypes::propagate_area_bounds(
-            &state,
+            &state.cell_to_region,
+            &state.region_shapes,
+            &state.frontier,
+            state.next_region_id,
             &state.edge_constraints,
-            (state.area_bounds.min_area, state.area_bounds.max_area),
+            state.area_bounds.min_area,
+            state.area_bounds.max_area,
             state.undecided_count,
+            state.width,
         ) {
             return false;
         }
     }
 
-    // Prototype #6: SAT boundary feasibility (every 64 steps)
+    // SAT-based boundary-graph feasibility (every 64 steps).
+    // Proved +1 net improvement at 20s timeout (solves 0573, 1112, 1261).
     if state.steps % 64 == 0 {
         if !crate::solver::prototypes::sat_boundary_feasible(
             puzzle, &state.cell_to_region, state.width,

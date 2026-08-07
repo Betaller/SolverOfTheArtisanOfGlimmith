@@ -205,6 +205,14 @@ fn build_puzzle(input: &PuzzleJson) -> Result<Puzzle, String> {
                 ctype,
                 value: c.value,
             });
+            // Constraint edges (inequality / difference / heterogeneous /
+            // homogeneous) explicitly require the two cells to be in different
+            // regions, so the edge between them MUST be a boundary.  Setting this
+            // at parse time lets ALL solvers (backtrack / pieces / rose) respect
+            // the constraint through `is_adjacent_free()` / `is_precut()` without
+            // needing solver-specific encoding (aog already does this via
+            // LINE_BLOCK in core.rs).
+            edge.is_boundary = true;
         }
     }
 

@@ -31,6 +31,21 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         };
     }
 
+    // Pre-search: ring / brick constraints may already be violated by pre-drawn
+    // and constraint edges alone, regardless of region assignment.
+    if !pre_search_topology_check(puzzle) {
+        let elapsed = start.elapsed().as_millis() as u64;
+        return Solution {
+            solved: false,
+            steps_taken: 0,
+            elapsed_ms: elapsed,
+            error_message: Some("Pre-drawn boundaries already violate ring/brick".into()),
+            regions: Vec::new(),
+            rule_results: Default::default(),
+            solver: String::new(),
+        };
+    }
+
     // `timeout_ms` is a UNIT budget: each of aog / pieces / backtrack gets the
     // full timeout as its own deadline (not a share of it).  The Python side
     // gives the subprocess enough wall-clock (3×) for all three to run.
@@ -272,4 +287,104 @@ fn has_constrained_compass(puzzle: &Puzzle) -> bool {
         }
     }
     false
+}
+
+/// Pre-search topology check: ring / brick constraints may already be violated
+/// by pre-drawn and constraint edges alone.  O(V) scan catches impossible
+/// puzzles before any solver runs.
+///
+/// For each vertex (vr,vc), the four incident edges are examined.  An edge is a
+/// **definite boundary** when:
+/// - Exactly one of its two adjacent cells exists in the grid (outer border), or
+/// - Both cells exist and the edge is marked `is_boundary` (pre-drawn or
+///   constraint-forced by `io.rs`).
+///
+/// An edge where **neither** adjacent cell exists is outside the grid entirely
+/// (e.g. the "top" edge at a grid corner) — it is NOT a region boundary.
+fn pre_search_topology_check(puzzle: &Puzzle) -> bool {
+    let has_ring = puzzle.rules.iter().any(|r| r.ctype == "ring");
+    let has_brick = puzzle.rules.iter().any(|r| r.ctype == "brick");
+    if !has_ring && !has_brick {
+        return true;
+    }
+    let h = puzzle.height;
+    let w = puzzle.width;
+
+    // Vertex (vr,vc) sits at the corner of four cells:
+    //   tl = (vr-1, vc-1),  tr = (vr-1, vc)
+    //   bl = (vr  , vc-1),  br = (vr  , vc)
+    // Four edges: top(tl-tr), bottom(bl-br), left(tl-bl), right(tr-br).
+    for vr in 0..=h {
+        for vc in 0..=w {
+            let cells = [
+                (vr as isize - 1, vc as isize - 1), // tl
+                (vr as isize - 1, vc as isize),     // tr
+                (vr as isize,     vc as isize - 1), // bl
+                (vr as isize,     vc as isize),     // br
+            ];
+            let edges = [(0usize, 1usize), (2, 3), (0, 2), (1, 3)];
+
+            let hi = h as isize;
+            let wi = w as isize;
+
+            let in_bounds = |i: usize| -> bool {
+                let (r, c) = cells[i];
+                r >= 0 && r < hi && c >= 0 && c < wi
+            };
+
+            // h_edges[r][c] has dims [h][w-1]; edge between (r,c) and (r,c+1).
+            // v_edges[r][c] has dims [h-1][w]; edge between (r,c) and (r+1,c).
+            let is_boundary_edge = |a: usize, b: usize| -> bool {
+                let (r1, c1) = cells[a];
+                let (r2, c2) = cells[b];
+                if r1 == r2 {
+                    let minc = c1.min(c2) as usize;
+                    puzzle.h_edges[r1 as usize][minc].is_boundary
+                } else {
+                    let minr = r1.min(r2) as usize;
+                    puzzle.v_edges[minr][c1 as usize].is_boundary
+                }
+            };
+
+            let mut def_boundary = 0usize;
+            let mut unknown = 0usize;
+
+            for &(ai, bi) in &edges {
+                let a_ok = in_bounds(ai);
+                let b_ok = in_bounds(bi);
+                match (a_ok, b_ok) {
+                    (true, true) => {
+                        if is_boundary_edge(ai, bi) {
+                            def_boundary += 1;
+                        } else {
+                            unknown += 1; // internal edge, not pre-drawn → may or may not be boundary
+                        }
+                    }
+                    (false, false) => {
+                        // outside grid, not a region boundary
+                    }
+                    _ => {
+                        // one cell exists → outer border boundary (definite)
+                        def_boundary += 1;
+                    }
+                }
+            }
+
+            // Only reject when the ring/brick violation is CERTAIN regardless
+            // of how the unknown edges resolve:
+            // - Ring prohibits degree==3 → reject when def_boundary==3 && unknown==0
+            //   (all edges determined, exactly 3).  def_boundary==4 is OK for ring.
+            // - Brick prohibits degree==4 → reject when def_boundary>=4
+            //   (guaranteed ≥4 in final solution).
+            // def_boundary==3 with unknown>0 could become 4 if the unknown edges
+            //   become boundaries → OK for ring, so can't reject.
+            if has_ring && def_boundary == 3 && unknown == 0 {
+                return false;
+            }
+            if has_brick && def_boundary >= 4 {
+                return false;
+            }
+        }
+    }
+    true
 }

@@ -96,6 +96,15 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 - `solver/validate.rs`（完整独立验证器；原 `constraints.rs` 已于 2026-08-06 删除，逻辑并入） → `08-验证与约束检查.md`
 - 拼块（puzzle_piece / shape_pool）优化 → `10-拼块优化方向.md`
 - 拼块 + 玫瑰窗混合优化 → `docs/优化/09-rose-puzzle-piece优化调研.md`
+- 边界推演 / 专用求解器 / 规则组合优化 → `docs/优化/10-专用求解器方案.md`
+
+### 常见陷阱：边数组索引
+
+`h_edges[r][c]` 维度是 `[h][w-1]`（每行 `w` 个格之间有 `w-1` 条水平边），
+`v_edges[r][c]` 维度是 `[h-1][w]`（每列 `h` 个格之间有 `h-1` 条垂直边）。
+**访问 `h_edges` 时，列索引必须 `< w-1`（即 `vc + 1 < w`）；访问 `v_edges` 时，
+行索引必须 `< h-1`（即 `vr + 1 < h`）**。用 `vc < w` 或 `vr < h` 做边界检查
+会越界 panic（exit code 101）。详见 `docs/优化/10-专用求解器方案.md` 附录 B.1。
 
 **官方题准则：官方解是唯一解。** 对求解器 / 转换脚本 / 规则校验器 / 规则语义的**任何优化**，
 除上述文档同步外，还必须：

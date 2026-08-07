@@ -30,6 +30,10 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
     let edge_constraints = collect_edge_constraints(puzzle);
     let has_edge_constraints = !edge_constraints.is_empty();
 
+    let has_different = puzzle.rules.iter().any(|r| r.ctype == "different");
+    let has_same = puzzle.rules.iter().any(|r| r.ctype == "same");
+    let has_block = puzzle.rules.iter().any(|r| r.ctype == "block");
+    let has_non_block = puzzle.rules.iter().any(|r| r.ctype == "non_block");
     let mut state = BacktrackState {
         cell_to_region: vec![None; h * w],
         region_shapes: Vec::new(),
@@ -47,6 +51,10 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
         has_area_rule,
         edge_constraints,
         has_edge_constraints,
+        has_different,
+        has_same,
+        has_block,
+        has_non_block,
     };
 
     if std::env::var("AOG_DEBUG").is_ok() { eprintln!("backtrack: start undecided={}", state.undecided_count); }
@@ -67,16 +75,8 @@ pub(crate) struct EdgeAreaConstraint {
 }
 
 impl BacktrackState {
-    pub(crate) fn next_region_id(&self) -> usize { self.next_region_id }
-    pub(crate) fn region_shapes(&self) -> &Vec<Vec<[usize; 2]>> { &self.region_shapes }
-    pub(crate) fn region_size(&self, rid: usize) -> usize {
-        self.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0)
-    }
     pub(crate) fn is_sealed(&self, rid: usize) -> bool {
         self.frontier.get(&rid).map(|f| f.is_empty()).unwrap_or(true)
-    }
-    pub(crate) fn cell_region(&self, cell: (usize, usize)) -> Option<usize> {
-        self.cell_to_region[cell.0 * self.width + cell.1]
     }
 }
 
@@ -103,6 +103,11 @@ pub(crate) struct BacktrackState {
     /// Pre-computed inequality / difference edge constraints for mid-search pruning.
     pub(crate) edge_constraints: Vec<EdgeAreaConstraint>,
     has_edge_constraints: bool,
+    /// Mid-search shape-rule pruning flags (lazily set once at construction).
+    has_different: bool,
+    has_same: bool,
+    has_block: bool,
+    has_non_block: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -426,7 +431,10 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
             state.region_clue.insert(rid, n as usize);
         }
 
-        if check_watchtowers_ok(state) && check_vertex_ring_ok(puzzle, r, c, state) {
+        if check_watchtowers_ok(state)
+            && check_vertex_ring_ok(puzzle, r, c, state)
+            && check_sealed_regions(state)
+        {
             if dfs(puzzle, state) {
                 return true;
             }
@@ -458,7 +466,10 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         state.region_clue.insert(new_rid, n as usize);
     }
 
-    if check_watchtowers_ok(state) && check_vertex_ring_ok(puzzle, r, c, state) {
+    if check_watchtowers_ok(state)
+        && check_vertex_ring_ok(puzzle, r, c, state)
+        && check_sealed_regions(state)
+    {
         if dfs(puzzle, state) {
             return true;
         }
@@ -472,6 +483,69 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
     state.next_region_id -= 1;
 
     false
+}
+
+/// Mid-search shape-rule pruning: when a region seals (empty frontier, its shape
+/// is final), check different / same / block / non_block immediately instead of
+/// waiting for the leaf.  Returns false if the sealed region violates a rule —
+/// the branch is dead.
+///
+/// Stateless (reads only `region_shapes` and `frontier`) so it needs no undo
+/// logic on backtrack — re-evaluated from scratch after every frontier_assign.
+fn check_sealed_regions(state: &BacktrackState) -> bool {
+    let has_shape_rules = state.has_different
+        || state.has_same
+        || state.has_block
+        || state.has_non_block;
+    if !has_shape_rules {
+        return true;
+    }
+
+    let mut sealed_keys: Vec<String> = Vec::new();
+
+    for rid in 0..state.next_region_id {
+        if !state.is_sealed(rid) {
+            continue;
+        }
+        let shape = match state.region_shapes.get(rid) {
+            Some(s) if !s.is_empty() => s,
+            _ => continue,
+        };
+
+        // block / non_block: check immediately
+        if state.has_block || state.has_non_block {
+            let rect = crate::shapes::is_rectangle(shape);
+            if state.has_block && !rect {
+                return false;
+            }
+            if state.has_non_block && rect {
+                return false;
+            }
+        }
+
+        // different: every sealed shape must be unique
+        // same: every sealed shape must match the first one
+        // (same and different are mutually exclusive per CONFLICTING_RULES)
+        if state.has_different || state.has_same {
+            let key = crate::shapes::dihedral_key(shape);
+            if state.has_different {
+                if sealed_keys.contains(&key) {
+                    return false; // duplicate shape
+                }
+                sealed_keys.push(key);
+            } else if state.has_same {
+                if let Some(ref first) = sealed_keys.first() {
+                    if **first != key {
+                        return false; // mismatch
+                    }
+                } else {
+                    sealed_keys.push(key);
+                }
+            }
+        }
+    }
+
+    true
 }
 
 fn is_undecided(state: &BacktrackState, r: usize, c: usize) -> bool {

@@ -1,17 +1,17 @@
 //! Mathematical optimisation helpers (doc 06/07/08).
 //!
-//! #2 BF_PROPAGATE=1  — Bellman-Ford area-constraint propagation (optional)
+//! #2 BF_PROPAGATE=0  — Bellman-Ford area-constraint propagation (default on)
 //! #3 (always on)     — GF(2) parity check on boundary-degree
 //! #6 (always on)     — SAT-based boundary-graph feasibility check
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::types::*;
 
 // ── Bellman-Ford area propagation (#2, optional) ──────────────────────────
 
 /// Full Bellman-Ford propagation on area-constraint graph.
-/// Gated by `BF_PROPAGATE=1` — enable for Inequality/Difference-heavy puzzles.
+/// Default on; set `BF_PROPAGATE=0` to disable.
 pub fn propagate_area_bounds(
     cell_to_region: &[Option<usize>],
     region_shapes: &[Vec<[usize; 2]>],
@@ -23,7 +23,8 @@ pub fn propagate_area_bounds(
     undecided_count: usize,
     width: usize,
 ) -> bool {
-    if std::env::var("BF_PROPAGATE").is_err() {
+    // Default on; set BF_PROPAGATE=0 to disable.
+    if std::env::var("BF_PROPAGATE").as_deref() == Ok("0") {
         return true;
     }
     if edge_constraints.is_empty() || num_regions <= 1 {

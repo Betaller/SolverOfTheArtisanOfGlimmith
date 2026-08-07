@@ -273,6 +273,17 @@
   失败，**0 回归**）；6 道 DIFF 题经 router 解出且与官方解一致；0985（原 DIFF）加约束后
   30s 超时（不再出错误解）；官方解对 0985 完整约束通过。`cargo test` 6 通过、`pytest` 全绿。
 
+### 2026-08-06 · 题解 JSON 新增 `solver` 字段（结果归因）
+- **改动**：`Solution` 增加 `solver: String`，标出答案出自哪个 Rust 模块
+  （`aog` / `rose` / `pieces` / `backtrack`；错误、空盘、超时占位解为空串）。
+  `rsolver`（`types.rs` / `solver/mod.rs` / `io.rs`）与 Python
+  （`src/models/solution.py` / `src/solver/rust_solver.py`）同步透传；
+  `verify_puzzles.py` / `benchmark_rust_solver.py` 以 `via=...` 输出归因。
+- **意义**：把每个结果归到具体求解器，便于定位「哪个模块对哪些题有短板」——
+  例如 0401/0437/0439/0459/1011a/0586 的「fails rule validation」现可确认为
+  **backtrack 模块**的解被 `validate.rs` 拒绝（而非 aog）。
+- **不改变求解能力**：纯协议/归因改动，官方基准数字不变（1052/1258）。
+
 ---
 
 ## 附录

@@ -165,6 +165,7 @@ class RustSolver(Solver):
                 steps_taken=data.get("steps_taken", 0),
                 elapsed_ms=data.get("elapsed_ms", 0),
                 error_message=data.get("error_message", "No solution"),
+                solver=data.get("solver", ""),
             )
 
         regions: list[RegionInfo] = []
@@ -189,6 +190,7 @@ class RustSolver(Solver):
             steps_taken=data.get("steps_taken", 0),
             elapsed_ms=data.get("elapsed_ms", 0),
             rule_results=data.get("rule_results", {}),
+            solver=data.get("solver", ""),
         )
 
     def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:

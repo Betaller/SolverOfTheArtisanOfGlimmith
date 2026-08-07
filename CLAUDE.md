@@ -94,6 +94,8 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 - `solver/backtrack.rs` → `06-backtrack求解器.md`
 - `solver/rose/**` → `07-rose求解器.md`
 - `solver/validate.rs`（完整独立验证器；原 `constraints.rs` 已于 2026-08-06 删除，逻辑并入） → `08-验证与约束检查.md`
+- 拼块（puzzle_piece / shape_pool）优化 → `10-拼块优化方向.md`
+- 拼块 + 玫瑰窗混合优化 → `docs/优化/09-rose-puzzle-piece优化调研.md`
 
 **官方题准则：官方解是唯一解。** 对求解器 / 转换脚本 / 规则校验器 / 规则语义的**任何优化**，
 除上述文档同步外，还必须：

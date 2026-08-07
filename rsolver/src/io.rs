@@ -115,6 +115,9 @@ struct SolutionJson {
     error_message: Option<String>,
     regions: Vec<RegionJson>,
     rule_results: HashMap<String, bool>,
+    /// Which solver module produced this result (aog / rose / pieces /
+    /// backtrack; empty for errors / empty-grid / timeouts).
+    solver: String,
 }
 
 // ── Board builder ─────────────────────────────────────────────────────────────
@@ -269,6 +272,7 @@ fn solution_to_json(sol: &Solution) -> SolutionJson {
             matched_shape_name: r.matched_shape_name.clone(),
         }).collect(),
         rule_results: sol.rule_results.clone(),
+        solver: sol.solver.clone(),
     }
 }
 

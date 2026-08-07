@@ -49,7 +49,9 @@ RustSolver
 ```
 
 aog 求解器内部检查视为权威（`build_solution_trusted`），Rust 侧不再重验证；rose/pieces/
-backtrack 的答案须过 `solver/validate.rs` 验收门。
+backtrack 的答案须过 `solver/validate.rs` 验收门。每个题解 JSON 带 `solver` 字段标出
+答案出自哪个模块（`aog` / `rose` / `pieces` / `backtrack`），`verify_puzzles.py` /
+`benchmark_rust_solver.py` 以 `via=...` 输出，便于把结果归到具体求解器。
 
 ### 目录结构
 

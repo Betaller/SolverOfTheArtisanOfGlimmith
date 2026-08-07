@@ -164,6 +164,10 @@ pub struct Solution {
     pub error_message: Option<String>,
     pub regions: Vec<RegionInfo>,
     pub rule_results: HashMap<String, bool>,
+    /// Which solver module produced this result (aog / rose / pieces /
+    /// backtrack).  Empty for errors, empty-grid, or timeout placeholders.
+    /// Used by benchmark / verify tooling to attribute results to a module.
+    pub solver: String,
 }
 
 impl Solution {
@@ -175,6 +179,7 @@ impl Solution {
             error_message: Some(msg.into()),
             regions: Vec::new(),
             rule_results: HashMap::new(),
+            solver: String::new(),
         }
     }
 }

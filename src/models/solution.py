@@ -25,6 +25,9 @@ class Solution:
     elapsed_ms: int = 0
     error_message: str | None = None
     rule_results: dict[str, bool] = field(default_factory=dict)
+    # Which Rust solver module produced this result (aog / rose / pieces /
+    # backtrack).  Empty for errors, empty-grid, or timeout placeholders.
+    solver: str = ""
 
     def region_of(self, r: int, c: int) -> RegionInfo | None:
         for reg in self.regions:

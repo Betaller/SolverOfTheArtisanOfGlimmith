@@ -260,6 +260,8 @@ def main() -> None:
     parser.add_argument("--rules", help="only test puzzles containing this rule type")
     parser.add_argument("--out", help="append JSONL records to this file")
     parser.add_argument("--summary-only", action="store_true", help="only print final summary")
+    parser.add_argument("--retry-timeouts", action="store_true",
+                        help="retry timed-out puzzles with -j 2 and 2x timeout (once)")
     args = parser.parse_args()
 
     files = _discover_files(args.dir, args.rules)
@@ -381,6 +383,48 @@ def main() -> None:
                         jobs = max(1, jobs - 2)
                         print(f"⚠ timeout streak {timeout_streak}, reducing concurrency to j={jobs}")
                         timeout_streak = 0
+
+    # ── retry timeouts ─────────────────────────────────────────────────────
+    if args.retry_timeouts:
+        timeout_failed = [r for r in failed if r.error and ("timeout" in r.error.lower() or "timed out" in r.error.lower())]
+        if timeout_failed:
+            retry_timeout = args.timeout * 2
+            retry_jobs = max(1, jobs // 4)  # 8→2, 4→1
+            print(f"\n⏳ retrying {len(timeout_failed)} timeout puzzles "
+                  f"(timeout={retry_timeout}s, j={retry_jobs}) ...")
+            retry_paths = [r.path for r in timeout_failed]
+            retry_passed = 0
+            retry_results: list[PuzzleResult] = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=retry_jobs) as pool2:
+                fut_to_path2: dict[concurrent.futures.Future, str] = {}
+                for f in retry_paths:
+                    fut = pool2.submit(solve_one, f, retry_timeout, solver)
+                    fut_to_path2[fut] = f
+                for fut in concurrent.futures.as_completed(fut_to_path2):
+                    path = fut_to_path2[fut]
+                    try:
+                        r = fut.result()
+                    except Exception as e:
+                        r = PuzzleResult(name=Path(path).name, path=path,
+                                         error=f"future error: {e}")
+                    retry_results.append(r)
+                    # Update existing failed entry if retry succeeded
+                    if r.solved and r.validated:
+                        retry_passed += 1
+                        # Remove from failed list and add to passed
+                        failed[:] = [fr for fr in failed if fr.path != path]
+                        passed += 1
+                        zone = _zone(path, args.dir)
+                        zt, zp = by_zone.get(zone, (0, 0))
+                        by_zone[zone] = (zt, zp + 1)
+                        status = "PASS"
+                    else:
+                        status = "FAIL"
+                    if not args.summary_only:
+                        print(f"[retry] {status:<4} {_zone(path, args.dir):<8} "
+                              f"{Path(path).name:<24} via={r.solver or '-':<8} {r.elapsed_ms:>6}ms"
+                              f"{'  ' + (r.error or '') if r.error else ''}")
+            print(f"retry: {retry_passed}/{len(timeout_failed)} recovered")
 
     # ── summary ────────────────────────────────────────────────────────────
     total_in_run = passed + len(failed)

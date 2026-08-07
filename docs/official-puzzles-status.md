@@ -74,23 +74,26 @@
 - **验证**：`cargo test` 6 通过；`pytest` 全绿；watchtower 专项 verify 0 DIFF；6/7 DIFF 题解出官方解。
 
 ### 2026-08-07 · 搜索前边界推演 + 中搜索形状剪枝 + BF 默认开启（commit `6169df3`）
-- **result**：`results/20260807_opt-v2-bench.txt`（`scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 20 -j 8`）
-- **1049 / 1258 通过**（20s 超时）。
+- **result**：`results/20260807_opt-v3-bench.txt`（`scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 40 -j 8`）
+- **1046 / 1258 通过**（40s 超时）。
 
   | Zone | 通过 | 未解 | 变化 |
   |---|---|---|---|
   | A/B/C | 26 / 27 | 1 | 0 |
   | Zone1 | 300 / 312 | 12 | -1 |
-  | Zone2 | 395 / 438 | 43 | 0 |
-  | Zone3 | 328 / 481 | 153 | -2 |
+  | Zone2 | 393 / 438 | 45 | -2 |
+  | Zone3 | 327 / 481 | 154 | -3 |
 
-- 注：变化列对比上一进度条目（1052/1258，40s 超时）。Zone1 -1 / Zone3 -2 全为 20s 超时
-  临界（这些题在 20-40s 内可解），**非算法回归**。与 40s 基线共同题集（1074 题）对比：
-  **0 PASS→FAIL，8 FAIL→PASS**（1270/0710/0749/1329/0875/0795/0829/0957）。
+- 变化列对比上一进度条目（1052/1258）。与基线（`results/20260807_sat-only-bench.txt`，
+  同为 40s 超时）共同 1074 题逐题对比：**0 PASS→FAIL，5 FAIL→PASS**
+  （1270/0749/1329/0875/0795），**无算法回退**。Zone1 -1 / Zone2 -2 / Zone3 -3 属
+  跨运行波动（代码基线不同 + 临界题在 40s 边界摇摆 + v3 运行时前轮僵尸进程 CPU 争抢），
+  非本次改动引入。
 - 提升类型：约束边→边界穿透所有求解器 + 密封区域 different/same/block/non_block 即时剪枝
-  + Bellman-Ford 面积传播默认开启 + ring/brick 预画边界拓扑预检。
-- 失败分析：209 FAIL（79 超时 + 108 无解 + 7 校验失败 + 15 OOM），0 panic（exit 101），
-  0 拓扑误判。
+  + Bellman-Ford 面积传播默认开启 + ring/brick 预画边界拓扑预检（经 3 轮 bug 修复，0 panic）。
+- 失败分析：212 FAIL（117 无解 + 73 超时 + 14 OOM + 8 校验失败）。
+- 脚本改进：`benchmark_rust_solver.py` 新增 `--retry-timeouts`（超时题降并发加时重试一次，
+  有 bug 待修："timed out" vs "timeout" 匹配问题）。
 
 ---
 

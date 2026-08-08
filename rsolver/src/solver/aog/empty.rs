@@ -204,34 +204,30 @@ pub fn dfs_empty_area(x: i32, y: i32, core: &mut AoGCore, sp: &Vec<Vec<u32>>) {
     }
 
     core.dfs_ctx.block_adj.clear();
+    // Collect once, iterate twice (was two `.cloned().collect()` of the same
+    // source — 白捡 W4, saves one Vec allocation + clone pass per call).
     let pairs: Vec<(Node, Node)> = core
         .dfs_ctx
         .empty_block_line_node_pairs
         .iter()
         .cloned()
         .collect();
-    for (a, b) in pairs {
+    for (a, b) in &pairs {
         core.dfs_ctx
             .block_adj
             .entry(encode_node(a.x, a.y))
             .or_default()
-            .push(b);
+            .push(*b);
         core.dfs_ctx
             .block_adj
             .entry(encode_node(b.x, b.y))
             .or_default()
-            .push(a);
+            .push(*a);
     }
 
     core.dfs_ctx.place_visited.clear();
     core.dfs_ctx.empty_block_line_count = 0;
-    let pairs2: Vec<(Node, Node)> = core
-        .dfs_ctx
-        .empty_block_line_node_pairs
-        .iter()
-        .cloned()
-        .collect();
-    for (a, b) in pairs2 {
+    for (a, b) in &pairs {
         if !core
             .dfs_ctx
             .place_visited

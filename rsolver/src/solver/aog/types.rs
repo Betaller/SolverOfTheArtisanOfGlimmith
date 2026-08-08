@@ -177,6 +177,12 @@ pub struct Config {
     /// have none — `check_radar` is skipped entirely for them (4 useless
     /// `puzzle[vx][vy]` reads per cell expansion saved). (白捡 W3, doc 15 §1.)
     pub has_watchtower: bool,
+    /// Hard upper bound on the number of regions (K). When `Some(k)`, the dfs
+    /// prunes any branch that would place more than `k` regions — the single
+    /// highest-ROI aog pruning (doc 15 §2 A1: 85 FAIL puzzles have K locked).
+    /// Derived in `build`: precise→fillable/N, solitary→clue-cell count,
+    /// rose_window→symbol occurrences per type. (A1, doc 15 §2.)
+    pub max_regions: Option<u32>,
     pub shape_size_lower_bound: i32,
     pub shape_size_upper_bound: i32,
 }
@@ -195,6 +201,7 @@ impl Default for Config {
             no_4_way_intersections: false,
             no_3_way_intersections: false,
             has_watchtower: false,
+            max_regions: None,
             shape_size_lower_bound: -1,
             shape_size_upper_bound: -1,
         }

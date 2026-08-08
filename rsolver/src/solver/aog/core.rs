@@ -603,6 +603,57 @@ impl AoGCore {
             || active.contains("inequality")
             || active.contains("difference");
 
+        // A1 K-bounding: derive a hard upper bound on the number of regions.
+        // When locked, dfs prunes any branch placing more than K regions — the
+        // single highest-ROI aog pruning (doc 15 §2 A1: 85 FAIL have K locked).
+        //   precise   → K = fillable / N   (every region has exact size N)
+        //   solitary  → K = clue-cell count (one_symbol_per_region forces 1
+        //               clue cell per region, so #regions == #clue cells)
+        //   rose_window → K = occurrences per symbol type (each region gets one
+        //               of each type; verified when all type counts are equal)
+        // Only set when exactly one K source is unambiguous; None = unbounded.
+        let fillable: usize = (0..h)
+            .flat_map(|r| (0..w).map(move |c| (r, c)))
+            .filter(|&(r, c)| !puzzle.cells[r][c].blocked)
+            .count();
+        let mut k_candidate: Option<u32> = None;
+        if active.contains("precise") {
+            // precise sets shape_size_lower/upper == N; K = fillable / N.
+            let n = config.shape_size_upper_bound;
+            if n > 0 && (fillable % n as usize) == 0 {
+                k_candidate = Some((fillable / n as usize) as u32);
+            }
+        }
+        if k_candidate.is_none() && active.contains("solitary") {
+            // one_symbol_per_region: each region contains exactly one "clue"
+            // cell (compass / symbol / number / shape_pattern / fence_pattern).
+            // #regions == #clue cells. (Skip area numbers — those are size
+            // hints, not 1-per-region anchors.)
+            let clue_cells = (0..h)
+                .flat_map(|r| (0..w).map(move |c| (r, c)))
+                .filter(|&(r, c)| {
+                    let cell = &puzzle.cells[r][c];
+                    cell.blocked == false
+                        && (cell.compass.is_some()
+                            || cell.symbol.is_some()
+                            || cell.number.is_some()
+                            || cell.shape_pattern.is_some()
+                            || cell.fence_pattern.is_some())
+                })
+                .count();
+            if clue_cells > 0 {
+                k_candidate = Some(clue_cells as u32);
+            }
+        }
+        if k_candidate.is_none() && active.contains("rose_window") && !rose_types.is_empty() {
+            // K = occurrences per symbol type (only valid when all equal).
+            let m = crate::solver::rose::rose_m(puzzle, &rose_types);
+            if m > 0 {
+                k_candidate = Some(m as u32);
+            }
+        }
+        config.max_regions = k_candidate;
+
         // Padded grid: rows/cols 0..=2n+4 (5 border rows/cols).
         let gh = 2 * h + 5;
         let gw = 2 * w + 5;

@@ -860,6 +860,19 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
     if ret == SPECIAL_START_DEFAULT && x == -1 && y == -1 {
         return 0;
     }
+    // A1 K-bounding: prune branches that would place more than K regions.
+    // `index` is 1-based (initial call dfs(1) places the first region), so a
+    // K-region solution completes by placing the K-th region inside dfs(K),
+    // then dfs(K+1) is entered to confirm no start remains — the completion
+    // check above handles that (returns 0 if x==-1). If we reach here at
+    // index > K, a (K+1)-th region would be placed → prune. The check must
+    // run AFTER the completion check so a legitimate K-region finish isn't
+    // rejected. (doc 15 §2 A1.)
+    if let Some(k) = core.config.max_regions {
+        if index > k {
+            return -1;
+        }
+    }
     if crate::aog_debug_enabled() {
         eprintln!("dfs index={} ret={} x={} y={}", index, ret, x, y);
     }

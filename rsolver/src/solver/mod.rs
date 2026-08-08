@@ -78,9 +78,12 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         // NEW: pure rose_window puzzles aog couldn't solve quickly → rose solver.
         if rose_capable {
             let elapsed = start.elapsed().as_millis() as u64;
-            let rose_ms = timeout_ms
-                .saturating_sub(elapsed)
-                .min(ROSE_TIMEOUT_MS);
+            // `timeout_ms` is the sole ceiling — the old `.min(ROSE_TIMEOUT_MS)`
+            // clamp (30s) silently capped rose even when the caller asked for
+            // more, so `--timeout 40` never reached a rose-capable puzzle's
+            // rose phase.  Dropping it makes the unit-budget philosophy apply
+            // uniformly to aog/pieces/backtrack/rose.
+            let rose_ms = timeout_ms.saturating_sub(elapsed);
             if rose_ms > 0 {
                 if let Some(regions) = rose::solve_rose(puzzle, &start, rose_ms) {
                     return build_solution(regions, &start, puzzle, "rose");
@@ -262,7 +265,6 @@ fn is_rose_capable(puzzle: &Puzzle) -> bool {
 }
 
 const AOG_ROSE_BUDGET_MS: u64 = 3_000;
-const ROSE_TIMEOUT_MS: u64 = 30_000;
 
 fn has_area_number_clues(puzzle: &Puzzle) -> bool {
     for r in 0..puzzle.height {

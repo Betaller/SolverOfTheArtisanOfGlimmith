@@ -297,9 +297,13 @@ pub fn parse_puzzle(input: &str) -> Result<Puzzle, String> {
 /// Solve one compact puzzle-JSON line (batch mode).  A malformed line yields an
 /// unsolved `Solution` carrying the error, never a panic — the caller keeps the
 /// 1 input line → 1 output line invariant.
-pub fn solve_json_line(line: &str) -> Solution {
+///
+/// `timeout_ms` is the unit budget each solver part (aog/pieces/backtrack/rose)
+/// receives — threaded from the `RSOLVER_TIMEOUT_MS` env var so the Python
+/// caller's `--timeout` actually reaches the Rust search (was hardcoded 30s).
+pub fn solve_json_line(line: &str, timeout_ms: u64) -> Solution {
     match parse_puzzle(line) {
-        Ok(puzzle) => solver::solve(&puzzle, 30_000), // 30s timeout
+        Ok(puzzle) => solver::solve(&puzzle, timeout_ms),
         Err(e) => Solution::unsolved(e),
     }
 }

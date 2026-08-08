@@ -72,8 +72,8 @@
 rsolver/
 ├── Cargo.toml                    # 依赖：serde / serde_json
 ├── src/
-│   ├── main.rs                   # 入口：读 stdin/argv → 调 io::* → 写 stdout
-│   ├── io.rs                     # JSON 模型、build_puzzle、序列化、--batch 逐行求解
+│   ├── main.rs                   # 入口：读 stdin/argv → resolve_timeout_ms(RSOLVER_TIMEOUT_MS) → 调 io::* → 写 stdout
+│   ├── io.rs                     # JSON 模型、build_puzzle、序列化、--batch 逐行求解（solve_json_line(line, timeout_ms)）
 │   ├── types.rs                  # 领域模型：Puzzle/Cell/Edge/Vertex/Shape/...
 │   ├── grid.rs                   # 网格工具：可填格枚举、相邻判断
 │   ├── shapes.rs                 # 共享形状/面积辅助：dihedral_key / is_rectangle / collect_pool_shapes / area_bounds / rose_symbol_types

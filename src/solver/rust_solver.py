@@ -141,10 +141,32 @@ class RustSolver(Solver):
         self._binary = _find_binary()
 
     # The Rust binary runs three solver parts sequentially (aog → pieces →
-    # backtrack), each of which gets the full unit `timeout` as its own
-    # deadline.  The subprocess therefore needs 3× wall-clock for every part to
-    # use its budget.
+    # backtrack; rose-capable puzzles swap pieces/backtrack for rose), each of
+    # which gets the full unit `timeout` as its own deadline.  The subprocess
+    # therefore needs 3× wall-clock for every part to use its budget.
     RUST_PARTS = 3
+
+    # Wall-clock headroom over the 3× unit budget.  Rust's deadlines are
+    # wall-clock `Instant::now()`; under `-j N` CPU contention a puzzle whose
+    # CPU budget is `timeout` can take more than `timeout` of wall time, so the
+    # zero-slack `3×timeout` subprocess budget would occasionally fire and (in
+    # `--batch` mode) cascade the timeout to the rest of the batch.  20% slack
+    # absorbs that without materially slowing the fast tail.
+    SLACK = 1.2
+
+    def _subprocess_env(self, timeout: float) -> dict[str, str]:
+        """Env for the rsolver subprocess: inherit plus the per-puzzle timeout.
+
+        `RSOLVER_TIMEOUT_MS` is the unit budget (ms) each of aog/pieces/
+        backtrack/rose receives — threading `--timeout` into the Rust search
+        (was hardcoded 30s in main.rs/io.rs, so `--timeout` never reached the
+        solver).  Rust clamps values < 1000 to 1000.
+        """
+        return {**os.environ, "RSOLVER_TIMEOUT_MS": str(int(timeout * 1000))}
+
+    def _wall_budget(self, timeout: float) -> float:
+        """Subprocess wall-clock budget for one puzzle: 3× unit × slack."""
+        return timeout * self.RUST_PARTS * self.SLACK
 
     def _prepare_input(self, puzzle: Puzzle) -> str:
         """Compact single-line puzzle JSON for the Rust subprocess."""
@@ -202,8 +224,9 @@ class RustSolver(Solver):
                 input=input_json,
                 capture_output=True,
                 text=True,
-                timeout=timeout * self.RUST_PARTS,
+                timeout=self._wall_budget(timeout),
                 encoding="utf-8",
+                env=self._subprocess_env(timeout),
             )
         except subprocess.TimeoutExpired:
             return Solution(
@@ -233,14 +256,16 @@ class RustSolver(Solver):
         """Solve many puzzles in ONE rsolver `--batch` subprocess (line-delimited
         JSON in/out), reusing the process instead of spawning one per puzzle.
 
-        Each puzzle gets its own `timeout * RUST_PARTS` wall-clock budget, read
-        line-by-line (so a puzzle whose rose solver exceeds its internal 30s
-        deadline is cut at its budget, exactly as single-puzzle mode does).
+        Each puzzle gets its own wall-clock budget (`timeout * RUST_PARTS *
+        SLACK`), read line-by-line so a puzzle that exceeds its unit `timeout`
+        (threaded via `RSOLVER_TIMEOUT_MS`) is cut at its budget — exactly as
+        single-puzzle mode does.  The slack headroom keeps CPU contention under
+        `-j N` from cascading a single overrun into the rest of the batch.
         Returns one Solution per input puzzle, in order.
         """
         lines = [self._prepare_input(p) for p in puzzles]
         input_data = "\n".join(lines) + "\n"
-        per_puzzle = timeout * self.RUST_PARTS
+        per_puzzle = self._wall_budget(timeout)
         failed = lambda msg: [  # noqa: E731
             Solution(solved=False, error_message=msg) for _ in puzzles
         ]
@@ -253,6 +278,7 @@ class RustSolver(Solver):
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=self._subprocess_env(timeout),
             )
         except FileNotFoundError:
             return failed(f"Rust solver binary not found: {self._binary}")

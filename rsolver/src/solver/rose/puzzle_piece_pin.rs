@@ -26,7 +26,6 @@
 
 use std::collections::HashSet;
 
-use crate::shapes::dihedral_key;
 use crate::types::Puzzle;
 
 use super::cells::CellSet;
@@ -373,12 +372,6 @@ pub fn remainder_per_type(
     } else {
         None
     }
-}
-
-/// Re-export dihedral_key for callers that need to set matched_shape_name.
-#[allow(dead_code)]
-pub fn pattern_key(pattern: &[[usize; 2]]) -> String {
-    dihedral_key(pattern)
 }
 
 #[cfg(test)]

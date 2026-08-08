@@ -585,6 +585,10 @@ impl AoGCore {
         // region to come from the pool.  puzzle_piece puzzles carry a pool
         // array for its markers but allow arbitrary shapes elsewhere.
         config.predefine_shapes_only = active.contains("shape_pool");
+        // W3: gate `check_radar` on whether the puzzle actually has watchtower
+        // vertices (rule present). 1100+ puzzles have none and would otherwise
+        // pay 4 useless puzzle[vx][vy] reads per cell expansion.
+        config.has_watchtower = active.contains("watchtower");
 
         // Collect pool shapes from both the top-level array and the rule params.
         let pool_shapes = crate::shapes::collect_pool_shapes(puzzle);

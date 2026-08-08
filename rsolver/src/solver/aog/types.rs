@@ -167,6 +167,10 @@ pub struct Config {
     pub predefine_shapes_only: bool,
     pub no_4_way_intersections: bool,
     pub no_3_way_intersections: bool,
+    /// Whether the puzzle has any watchtower (radar) vertices. 1100+ puzzles
+    /// have none — `check_radar` is skipped entirely for them (4 useless
+    /// `puzzle[vx][vy]` reads per cell expansion saved). (白捡 W3, doc 15 §1.)
+    pub has_watchtower: bool,
     pub shape_size_lower_bound: i32,
     pub shape_size_upper_bound: i32,
 }
@@ -184,6 +188,7 @@ impl Default for Config {
             predefine_shapes_only: false,
             no_4_way_intersections: false,
             no_3_way_intersections: false,
+            has_watchtower: false,
             shape_size_lower_bound: -1,
             shape_size_upper_bound: -1,
         }

@@ -116,7 +116,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     if has_shape_pool || has_area_clues || has_compass_clues {
         // Try piece-based solver first
         if let Some(regions) = pieces::solve_pieces(puzzle, &start, timeout_ms) {
-            if std::env::var("AOG_DEBUG").is_ok() {
+            if crate::aog_debug_enabled() {
                 eprintln!("solver=pieces regions={}", regions.len());
             }
             return build_solution(regions, &start, puzzle, "pieces");
@@ -125,7 +125,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
 
     // Fallback: backtracking solver
     if let Some(regions) = backtrack::solve_backtrack(puzzle, &start, timeout_ms) {
-        if std::env::var("AOG_DEBUG").is_ok() {
+        if crate::aog_debug_enabled() {
             eprintln!("solver=backtrack regions={}", regions.len());
         }
         return build_solution(regions, &start, puzzle, "backtrack");
@@ -161,7 +161,7 @@ fn regions_respect_boundaries(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
             if puzzle.h_edges[r][c].is_boundary {
                 if let (Some(a), Some(b)) = (rid[r * w + c], rid[r * w + (c + 1)]) {
                     if a == b {
-                        if std::env::var("AOG_DEBUG").is_ok() {
+                        if crate::aog_debug_enabled() {
                             eprintln!(
                                 "boundary-violate h ({},{})-({},{}) same region {}",
                                 r, c, r, c + 1, a
@@ -178,7 +178,7 @@ fn regions_respect_boundaries(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
             if puzzle.v_edges[r][c].is_boundary {
                 if let (Some(a), Some(b)) = (rid[r * w + c], rid[(r + 1) * w + c]) {
                     if a == b {
-                        if std::env::var("AOG_DEBUG").is_ok() {
+                        if crate::aog_debug_enabled() {
                             eprintln!(
                                 "boundary-violate v ({},{})-({},{}) same region {}",
                                 r, c, r + 1, c, a

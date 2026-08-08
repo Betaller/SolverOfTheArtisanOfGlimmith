@@ -113,7 +113,7 @@ fn place_non_predifined_shape(
         if steps % 4096 == 0 && Instant::now() >= core.deadline {
             return -1;
         }
-        if std::env::var("AOG_DEBUG").is_ok() && steps % 100_000 == 0 {
+        if crate::aog_debug_enabled() && steps % 100_000 == 0 {
             eprintln!("aog place steps={} index={} cnt={} stack={}", steps, index, L.current_shape_cnt, L.stack_top);
         }
 
@@ -124,7 +124,7 @@ fn place_non_predifined_shape(
             let temp_y = y + L.current_shape[last].y;
             let tpx = to_puzzle_x(temp_x) as usize;
             let tpy = to_puzzle_y(temp_y) as usize;
-            if std::env::var("AOG_DEBUG").is_ok() {
+            if crate::aog_debug_enabled() {
                 let prev = sp[tpx][tpy];
                 if prev != AREA_NORMAL && prev & SOLVE_AREA_SHAPE_INDEX_BIT != 0 {
                     eprintln!("aog ROLLBACK cell=({},{}) sp={:08x} cnt={} cur={}", tpx, tpy, prev, L.current_shape_cnt, current_size);
@@ -215,7 +215,7 @@ fn place_non_predifined_shape(
             }
 
             let mut shape_index = core.shapes_search(&shape_buf, shape_size);
-            if std::env::var("AOG_DEBUG").is_ok() && shape_size <= 3 {
+            if crate::aog_debug_enabled() && shape_size <= 3 {
                 let g: Vec<String> = shape_buf
                     .iter()
                     .take(shape_size)
@@ -381,7 +381,7 @@ fn place_non_predifined_shape(
                 }
             }
             if ret != -1 {
-                if std::env::var("AOG_DEBUG").is_ok() {
+                if crate::aog_debug_enabled() {
                     for i in 0..L.current_shape_cnt {
                         let nx = to_puzzle_x(x + L.current_shape[i].x) as usize;
                         let ny = to_puzzle_y(y + L.current_shape[i].y) as usize;
@@ -860,7 +860,7 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
     if ret == SPECIAL_START_DEFAULT && x == -1 && y == -1 {
         return 0;
     }
-    if std::env::var("AOG_DEBUG").is_ok() {
+    if crate::aog_debug_enabled() {
         eprintln!("dfs index={} ret={} x={} y={}", index, ret, x, y);
     }
 

@@ -121,7 +121,7 @@ pub fn solve_rose(
     }
 
     // region_match first (mirrors rose/solver.py:40).
-    if std::env::var("AOG_DEBUG").is_ok() {
+    if crate::aog_debug_enabled() {
         eprintln!("rose: region_match start (types={} m={})", symbol_types.len(), m);
     }
     if let Some(regions) = region_match::solve_by_region_match(
@@ -167,7 +167,7 @@ fn solve_rose_with_pin(
     let h = puzzle.height;
     let w = puzzle.width;
     let n_bits = h * w;
-    let dbg = std::env::var("AOG_DEBUG").is_ok();
+    let dbg = crate::aog_debug_enabled();
 
     let anchors = match puzzle_piece_pin::enumerate_pin_candidates(puzzle, symbol_types) {
         Some(a) => {
@@ -184,7 +184,7 @@ fn solve_rose_with_pin(
     let assignments =
         puzzle_piece_pin::enumerate_pin_assignments(puzzle, anchors, symbol_types, m);
 
-    if std::env::var("AOG_DEBUG").is_ok() {
+    if crate::aog_debug_enabled() {
         eprintln!(
             "rose-pp-pin: {} assignments to try (m={})",
             assignments.len(),
@@ -217,7 +217,7 @@ fn solve_rose_with_pin(
             }
         }
 
-        if std::env::var("AOG_DEBUG").is_ok() {
+        if crate::aog_debug_enabled() {
             eprintln!(
                 "rose-pp-pin: assignment {} pinned regions, remainder={} cells m'={}",
                 assignment.pinned.len(),

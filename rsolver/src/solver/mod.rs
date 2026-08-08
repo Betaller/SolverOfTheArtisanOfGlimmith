@@ -250,7 +250,9 @@ fn build_solution_trusted(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Pu
 
 /// True for puzzles the rose solver can attempt — mirrors Python
 /// `RoseSolver.supports` (rose_window present, and neither `same` nor
-/// `different`).  region_match itself bails on shape_pool/puzzle_piece.
+/// `different`).  `puzzle_piece` is allowed: `solve_rose` pre-resolves
+/// `shape_pattern`-pinned regions (see `rose::puzzle_piece_pin`) before
+/// running region_match on the remainder.
 fn is_rose_capable(puzzle: &Puzzle) -> bool {
     let has_rose = puzzle.rules.iter().any(|r| r.ctype == "rose_window");
     if !has_rose {

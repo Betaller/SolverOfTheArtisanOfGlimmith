@@ -241,3 +241,38 @@ if has_puzzle_piece {
 - 与原型 #5（玫瑰二部图）**互补**: 若 K=2，先用二部图匹配配对符号，再放置 puzzle_piece 形状
 - 与原型 #2（Bellman-Ford）**正交**: BF 解决面积约束传播，与形状放置无关
 - 可视为 Shape Bank 约束的**特例路径**: puzzle_piece 本质是「单形状、强锚定的 shape_pool」
+
+---
+
+## 8. 实施结果（方向 4：rose 预钉 shape_pattern 区域，2026-08-08，分支 `rose-pp-pin`）
+
+### 已实现
+
+在 `rsolver/src/solver/rose/puzzle_piece_pin.rs` 新增预钉模块，`rose/mod.rs::solve_rose` 加 puzzle_piece 预钉分支，解除 `region_match.rs:285-291` 的 puzzle_piece/shape_pool 硬禁令。
+
+**算法**（详见 `docs/rust-solver/07-rose求解器.md`）：
+1. `enumerate_pin_candidates`：对每个 shape_pattern 格，枚举 pattern 的 dihedral 变体（≤8）× 合法放置（含锚点、全在网格、不压 blocked、不跨预画边界），符号约束过滤（per-type 计数相等）。
+2. `enumerate_pin_assignments`：多锚点笛卡尔积（互不重叠 + 余数平衡）。
+3. `solve_rose_with_pin`：缩减 all_positions + 算 m' → region_match → 合并预钉区域 → accept_if_valid。m'=1 快速路径（剩余格单连通分量直接成区域，避开 region_match 候选截断）。
+4. **region_match 种子收集修复**：seeds/all_seed_cells 改为只从 `all_positions` 收集（原从全盘 puzzle.cells），使预钉移除符号格后种子数自动 = m'。
+
+### 数据画像修正
+
+调研文档原假设"171 题、backtrack 不理解拼块约束"。实际基准（cd40cab）数据：
+- 171 题：**158 PASS（全 via aog）/ 13 FAIL**。backtrack **0 次触发**（印证 [[rsolver-review-findings-disproven]]，backtrack 在官方语料从不运行）。
+- aog 原生支持 puzzle_piece（`AREA_SHAPE_INDEX_BIT` 增量检查），解出 158 道。
+- 13 FAIL 聚类：4 道 puzzle_piece+rose_window（0732/1098/1099/1100）、3 道 puzzle_piece+brick+ring（OOM）、2 道 +watchtower、4 道其他。
+- 方向 1（改 backtrack）无意义——backtrack 不跑。方向 4（rose 解禁）是正确靶点。
+
+### 收益（puzzle_piece 子集基准，40s timeout，8 并发）
+
+- official puzzle_piece：**159/171（基线 158）→ +1 PASS = 0732**，由 `rose` 解出（3005ms）。
+- **0 回归**（无 PASS→FAIL），1 新解出（0732 FAIL→PASS）。
+- 非官方语料另 +1 rose 解出。
+- homogeneous 伴生 3 道（1098/1099/1100）：预钉 + rose 求剩余，剩余区域碰巧同形则 validate 通过（额外收益），否则拒绝零回归。实测未解出（靠 validate 兜底）。
+
+### 关键技术点
+
+- **shape_pattern 是 dihedral 类**（validate.rs:181-191 比对 `dihedral_key(&region.cells)` vs `dihedral_key(pat)`）——预钉需枚举 dihedral 变体放置，非唯一。0732：2 变体 × 7 放置 = 14 候选，符号约束过滤后 1 个 = 官方解。
+- **rose_m 语义**：m = 全盘每类符号数。预钉后 m' = 剩余每类符号数（须相等，否则非法放置）。
+- **region_match 候选截断**（CANDIDATE_CAP=20000）：m'=1 时大区域候选被截断 → m'=1 快速路径绕过。

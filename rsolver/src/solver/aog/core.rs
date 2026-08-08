@@ -193,7 +193,7 @@ impl AoGCore {
             self.shape_size_by_index.push(size);
             self.next_shape_index += 1;
         }
-        if std::env::var("AOG_DEBUG").is_ok() && insert_success_count != 0 {
+        if crate::aog_debug_enabled() && insert_success_count != 0 {
             let last = &self.shapes[self.shapes.len() - 1];
             eprintln!(
                 "aog shape_insert idx={} nodes={:?} digest={} size={}",
@@ -764,7 +764,7 @@ impl AoGCore {
                 core.shapes_insert(&mut grid, size);
             }
         }
-        if std::env::var("AOG_DEBUG").is_ok() {
+        if crate::aog_debug_enabled() {
             eprintln!(
                 "aog build: h={} w={} has_pool={} pool_shapes={} n_rules={} predef={}",
                 h,

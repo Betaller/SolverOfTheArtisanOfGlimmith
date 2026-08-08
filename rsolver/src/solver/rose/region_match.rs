@@ -384,7 +384,7 @@ pub fn solve_by_region_match(
     for &seed in &seeds {
         let t0 = Instant::now();
         let cands = generate_all_candidates(puzzle, seed, all_positions, pre, &symbol_of, symbol_types);
-        if std::env::var("AOG_DEBUG").is_ok() {
+        if crate::aog_debug_enabled() {
             eprintln!(
                 "rose: seed {} -> {} candidates in {:?}",
                 seed,
@@ -397,7 +397,7 @@ pub fn solve_by_region_match(
         }
         all_candidates.push(cands);
     }
-    if std::env::var("AOG_DEBUG").is_ok() {
+    if crate::aog_debug_enabled() {
         eprintln!(
             "rose: candidates per seed: {:?}",
             all_candidates.iter().map(|c| c.len()).collect::<Vec<_>>()
@@ -465,7 +465,7 @@ pub fn solve_by_region_match(
 
     let deadline = *start + std::time::Duration::from_millis(timeout_ms);
     let mut region_of: Vec<Option<usize>> = vec![None; h * w];
-    if std::env::var("AOG_DEBUG").is_ok() {
+    if crate::aog_debug_enabled() {
         eprintln!(
             "rose: {} area combos (min_area={})",
             combos.len(),

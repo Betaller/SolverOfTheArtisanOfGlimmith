@@ -64,7 +64,7 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
         has_fence,
     };
 
-    if std::env::var("AOG_DEBUG").is_ok() { eprintln!("backtrack: start undecided={}", state.undecided_count); }
+    if crate::aog_debug_enabled() { eprintln!("backtrack: start undecided={}", state.undecided_count); }
     if dfs(puzzle, &mut state) {
         Some(build_regions(&state))
     } else {
@@ -692,14 +692,14 @@ fn check_area_lower_bounds(state: &BacktrackState) -> bool {
         let area = state.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
         if let Some(fr) = state.frontier.get(&rid) {
             if fr.is_empty() && area != n {
-                if std::env::var("AOG_DEBUG").is_ok() {
+                if crate::aog_debug_enabled() {
                     eprintln!("  LB: sealed rid={} area={} n={}", rid, area, n);
                 }
                 return false;
             }
         }
         if area + state.undecided_count < n {
-            if std::env::var("AOG_DEBUG").is_ok() {
+            if crate::aog_debug_enabled() {
                 eprintln!("  LB: capacity rid={} area={} undecided={} n={}", rid, area, state.undecided_count, n);
             }
             return false;

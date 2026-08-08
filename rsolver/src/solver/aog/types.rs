@@ -55,6 +55,15 @@ pub const MAX_STACK_SIZE: usize = MAX_SHAPE_SIZE + 2;
 
 pub const NO_SHAPE_INDEX: u32 = 0xffff_ffff;
 
+/// Hard cap on the shape library (`AoGCore::shapes`) size. Open grids with no
+/// size constraint enumerate unbounded free polyominoes during DFS → OOM
+/// (exit -9) before the aog deadline can fire. When the library reaches this
+/// count, `shapes_insert` refuses new shapes (returns 0); the caller then
+/// `shapes_search`es and, on a miss (`NO_SHAPE_INDEX`), skips the placement —
+/// bounding memory so the deadline triggers instead of the OOM killer.
+/// `0` = disabled (legacy behavior, default). Override via `AOG_SHAPE_CAP` env.
+pub const DEFAULT_SHAPE_CAP: usize = 0;
+
 // ── Small types ──────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]

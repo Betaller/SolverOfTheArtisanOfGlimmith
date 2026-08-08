@@ -245,6 +245,18 @@ fn place_non_predifined_shape(
             } else {
                 core.shapes_insert(&mut shape_buf, shape_size);
                 shape_index = core.shapes_search(&shape_buf, shape_size);
+                if shape_index == NO_SHAPE_INDEX {
+                    // Shape cap exhausted (shapes_insert returned 0) AND the
+                    // shape is not already in the library. Skip this placement
+                    // entirely — never write NO_SHAPE_INDEX (0xffff) into sp,
+                    // which would later index `shape_size_by_index` out of
+                    // bounds and panic in check_nearby_size / check_edge_shape
+                    // / region_size_at. Skipping here is equivalent to "this
+                    // shape is not tried", same as the fail-rollback `continue`
+                    // below (line 355) but needing no sp cleanup, since the sp
+                    // write at line 253 has not yet executed.
+                    continue;
+                }
             }
 
             for i in 0..L.current_shape_cnt {

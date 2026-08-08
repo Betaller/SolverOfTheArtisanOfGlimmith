@@ -123,6 +123,12 @@ impl PreBoundaries {
         self.set.contains(&edge_key(r1, c1, r2, c2))
     }
 
+    /// Whether no pre-drawn boundary edges exist. (白捡 W5: when empty, the grid
+    /// is 4-connected and `can_partition` can short-circuit.)
+    pub fn is_empty(&self) -> bool {
+        self.set.is_empty()
+    }
+
     /// Iterate canonical edges as `[r1, c1, r2, c2]`.
     pub fn iter(&self) -> impl Iterator<Item = [usize; 4]> + '_ {
         self.set.iter().map(|k| {

@@ -1,0 +1,74 @@
+
+=== AOG_SHAPE_CAP=50000 ===
+  0882   exit=   -9 solved=None elapsed=Nonems wall=16294ms [OOM] 
+  0826   exit=   -9 solved=None elapsed=Nonems wall=17449ms [OOM] 
+  0838   exit=   -9 solved=None elapsed=Nonems wall=14197ms [OOM] 
+  0957   exit=    0 solved=True elapsed=2420ms wall=2430ms [PASS] 
+  0606   exit=    0 solved=False elapsed=80042ms wall=80045ms [fail] No solution found
+  0690   exit=    0 solved=False elapsed=40006ms wall=40008ms [fail] No solution found
+  0834   exit=    0 solved=False elapsed=40009ms wall=40018ms [fail] No solution found
+  0969   exit=    0 solved=False elapsed=40017ms wall=40020ms [fail] No solution found
+  0976   exit=    0 solved=False elapsed=40050ms wall=40053ms [fail] No solution found
+  0977   exit=    0 solved=False elapsed=40024ms wall=40027ms [fail] No solution found
+  0978   exit=    0 solved=False elapsed=40008ms wall=40011ms [fail] No solution found
+  0980   exit=    0 solved=False elapsed=40005ms wall=40008ms [fail] No solution found
+  1091   exit=    0 solved=False elapsed=40013ms wall=40016ms [fail] No solution found
+  1215   exit=    0 solved=False elapsed=80064ms wall=80067ms [fail] No solution found
+  1373   exit=    0 solved=False elapsed=40069ms wall=40072ms [fail] No solution found
+  1375   exit=    0 solved=False elapsed=40045ms wall=40047ms [fail] No solution found
+  1378   exit=    0 solved=False elapsed=40007ms wall=40010ms [fail] No solution found
+  0491   exit=    0 solved=False elapsed=40019ms wall=40022ms [fail] No solution found
+  0999   exit=KILLED solved=None elapsed=Nonems wall=110268ms [fail] subprocess timeout (hard kill)
+  0629   exit=    0 solved=False elapsed=40025ms wall=40028ms [fail] No solution found
+  1110   exit=    0 solved=False elapsed=40012ms wall=40015ms [fail] No solution found
+  --- cap=50000: solved=1/21  OOM=3  panic=0
+
+=== AOG_SHAPE_CAP=100000 ===
+  0882   exit=   -9 solved=None elapsed=Nonems wall=14897ms [OOM] 
+  0826   exit=   -9 solved=None elapsed=Nonems wall=15694ms [OOM] 
+  0838   exit=   -9 solved=None elapsed=Nonems wall=13112ms [OOM] 
+  0957   exit=    0 solved=True elapsed=2018ms wall=2028ms [PASS] 
+  0606   exit=    0 solved=False elapsed=80086ms wall=80090ms [fail] No solution found
+  0690   exit=    0 solved=False elapsed=40013ms wall=40017ms [fail] No solution found
+  0834   exit=    0 solved=False elapsed=40020ms wall=40024ms [fail] No solution found
+  0969   exit=    0 solved=False elapsed=40036ms wall=40040ms [fail] No solution found
+  0976   exit=    0 solved=False elapsed=40065ms wall=40068ms [fail] No solution found
+  0977   exit=    0 solved=False elapsed=40055ms wall=40059ms [fail] No solution found
+  0978   exit=    0 solved=False elapsed=40025ms wall=40029ms [fail] No solution found
+  0980   exit=    0 solved=False elapsed=40013ms wall=40017ms [fail] No solution found
+  1091   exit=    0 solved=False elapsed=40035ms wall=40039ms [fail] No solution found
+  1215   exit=    0 solved=False elapsed=80124ms wall=80127ms [fail] No solution found
+  1373   exit=    0 solved=False elapsed=40151ms wall=40155ms [fail] No solution found
+  1375   exit=    0 solved=False elapsed=40094ms wall=40098ms [fail] No solution found
+  1378   exit=    0 solved=False elapsed=40014ms wall=40017ms [fail] No solution found
+  0491   exit=    0 solved=False elapsed=40043ms wall=40047ms [fail] No solution found
+  0999   exit=KILLED solved=None elapsed=Nonems wall=110302ms [fail] subprocess timeout (hard kill)
+  0629   exit=    0 solved=False elapsed=40034ms wall=40038ms [fail] No solution found
+  1110   exit=    0 solved=False elapsed=40030ms wall=40034ms [fail] No solution found
+  --- cap=100000: solved=1/21  OOM=3  panic=0
+
+=== AOG_SHAPE_CAP=200000 ===
+  0882   exit=   -9 solved=None elapsed=Nonems wall=14317ms [OOM] 
+  0826   exit=   -9 solved=None elapsed=Nonems wall=19005ms [OOM] 
+  0838   exit=   -9 solved=None elapsed=Nonems wall=13499ms [OOM] 
+  0957   exit=    0 solved=True elapsed=2379ms wall=2391ms [PASS] 
+  0606   exit=    0 solved=False elapsed=80202ms wall=80213ms [fail] No solution found
+  0690   exit=    0 solved=False elapsed=40042ms wall=40048ms [fail] No solution found
+  0834   exit=    0 solved=False elapsed=40046ms wall=40050ms [fail] No solution found
+  0969   exit=    0 solved=False elapsed=40102ms wall=40109ms [fail] No solution found
+  0976   exit=    0 solved=False elapsed=40158ms wall=40165ms [fail] No solution found
+  0977   exit=    0 solved=False elapsed=40126ms wall=40134ms [fail] No solution found
+  0978   exit=    0 solved=False elapsed=40062ms wall=40067ms [fail] No solution found
+  0980   exit=    0 solved=False elapsed=40039ms wall=40046ms [fail] No solution found
+  1091   exit=    0 solved=False elapsed=40069ms wall=40075ms [fail] No solution found
+  1215   exit=    0 solved=False elapsed=80265ms wall=80271ms [fail] No solution found
+  1373   exit=    0 solved=False elapsed=40303ms wall=40312ms [fail] No solution found
+  1375   exit=    0 solved=False elapsed=40153ms wall=40159ms [fail] No solution found
+  1378   exit=    0 solved=False elapsed=40042ms wall=40047ms [fail] No solution found
+  0491   exit=    0 solved=False elapsed=40093ms wall=40097ms [fail] No solution found
+  0999   exit=KILLED solved=None elapsed=Nonems wall=110223ms [fail] subprocess timeout (hard kill)
+  0629   exit=    0 solved=False elapsed=40083ms wall=40088ms [fail] No solution found
+  1110   exit=    0 solved=False elapsed=40058ms wall=40063ms [fail] No solution found
+  --- cap=200000: solved=1/21  OOM=3  panic=0
+
+written: results/tmp/20260808_shapecap_experiment.json

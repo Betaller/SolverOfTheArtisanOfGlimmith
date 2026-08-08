@@ -305,7 +305,7 @@ fn place_non_predifined_shape(
                     loopy_fail = true;
                     break;
                 }
-                if !check_radar(nxi, nyi, core, sp) {
+                if core.config.has_watchtower && !check_radar(nxi, nyi, core, sp) {
                     radar_fail = true;
                     break;
                 }
@@ -1225,7 +1225,7 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
                     fail3 = true;
                     break;
                 }
-                if !check_radar(pxn as i32, pyn as i32, core, sp) {
+                if core.config.has_watchtower && !check_radar(pxn as i32, pyn as i32, core, sp) {
                     fail3 = true;
                     break;
                 }

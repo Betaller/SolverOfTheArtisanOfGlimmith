@@ -64,7 +64,7 @@ fn solve_singlesymbol(
     w: usize,
     all_positions: &CellSet,
     n_bits: usize,
-    _deadline: Instant,
+    deadline: Instant,
 ) -> Option<Vec<crate::types::RegionInfo>> {
     let mut region_of = vec![None; n_bits];
     let mut region_cells: Vec<CellSet> = vec![CellSet::new(n_bits); m];
@@ -78,7 +78,12 @@ fn solve_singlesymbol(
     }
 
     // Wavefront growth.
+    let mut steps: u64 = 0;
     while !unassigned.is_empty() {
+        steps += 1;
+        if steps % 4096 == 0 && Instant::now() >= deadline {
+            return None;
+        }
         let mut best_cell: Option<usize> = None;
         let mut best_adj: Vec<usize> = Vec::new();
         for idx in unassigned.iter() {
@@ -297,8 +302,17 @@ fn solve_multisymbol(
     w: usize,
     all_positions: &CellSet,
     n_bits: usize,
-    _deadline: Instant,
+    deadline: Instant,
 ) -> Option<Vec<crate::types::RegionInfo>> {
+    // Honor the caller's deadline in every potentially-long loop below. The
+    // previous signature took `_deadline` (unused) — a latent hang that was
+    // masked while region_match always found the solution, but surfaces as a
+    // full-budget spin (RSS flat, no output, deadline never fires) when
+    // region_match returns partial candidates (e.g. after a visited cap bail-out)
+    // and this fallback can't repair them.
+    if Instant::now() >= deadline {
+        return None;
+    }
     let mut boundary_endpoints = CellSet::new(n_bits);
     for [r1, c1, r2, c2] in pre.iter() {
         boundary_endpoints.insert(r1 * w + c1);
@@ -371,8 +385,13 @@ fn solve_multisymbol(
     // Second pass: assign leftovers to smallest compatible region.
     if !unassigned.is_empty() {
         let mut changed = true;
+        let mut pass: u64 = 0;
         while changed {
             changed = false;
+            pass += 1;
+            if pass % 64 == 0 && Instant::now() >= deadline {
+                return None;
+            }
             for idx in unassigned.iter().collect::<Vec<_>>() {
                 let (r, c) = (idx / w, idx % w);
                 let mut candidates: HashSet<usize> = HashSet::new();

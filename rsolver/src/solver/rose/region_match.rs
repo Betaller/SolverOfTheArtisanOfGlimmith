@@ -16,6 +16,29 @@ use super::cells::{CellSet, PreBoundaries};
 pub const CANDIDATE_CAP: usize = 20_000;
 pub const MAX_CANDIDATE_CELLS: usize = 100;
 pub const PER_COMBO_TIMEOUT_MS: u64 = 1_000;
+/// Hard cap on the `visited` dedup set (line ~40). Open rose_window grids
+/// enumerate unbounded distinct regions → OOM (exit -9) before the caller's
+/// deadline can fire (`generate_all_candidates` has no internal time check).
+/// When hit, **bail out** (`break`) and return the partial `results`. The
+/// caller handles gracefully: `match_regions_mrv` may miss the exact cover →
+/// `None` → `solve_rose` falls through to `rose_growth`, which now honors its
+/// deadline (previously `_deadline` was unused → hang). `accept_if_valid` →
+/// `validate::validate` gates acceptance → false-negative only, never
+/// false-positive.
+///
+/// **Do NOT** switch to "stop inserting but keep `contains()`-checking" — that
+/// breaks dedup and enqueues the same region via many paths (exponential
+/// re-processing, visited-OOM → queue-OOM). `break` is safe: the queue is
+/// bounded by `visited` (every enqueued state is inserted first).
+///
+/// Value: 2,000,000. Lower values (200k) regressed rose_window PASS puzzles
+/// (e.g. 0833) whose true-solution regions are discovered late in the BFS —
+/// bailing early dropped them, `match_regions_mrv` failed, and `rose_growth`
+/// (pre-fix) hung. 2M × ~88-104B ≈ 176-208MB — under typical RSS limits yet
+/// high enough to keep nearly all solvable puzzles' full candidate sets. The
+/// 4 historical rose OOM puzzles (0882/0826/0838/0999) had `visited` growing
+/// into the multi-million range; 2M stops them well before OOM.
+pub const VISITED_CAP: usize = 2_000_000;
 
 /// BFS over boundary-compliant connected subsets containing `seed` (cell idx).
 /// Port of `bfs_candidates.generate_all_candidates`.
@@ -65,6 +88,12 @@ pub fn generate_all_candidates(
     let dirs = [(-1i32, 0), (1, 0), (0, -1), (0, 1)];
     while let Some((current, frontier, syms)) = queue.pop_front() {
         if results.len() >= CANDIDATE_CAP {
+            break;
+        }
+        if visited.len() >= VISITED_CAP {
+            // OOM止血: visited 无界增长是 rose OOM 的根因。bail out 返回部分
+            // results（caller graceful，rose_growth 已修 deadline 不再挂死）。
+            // 必须 break，不能"停插入继续检查"（见 VISITED_CAP 注释）。
             break;
         }
         if is_multi {
@@ -578,4 +607,60 @@ fn match_regions_mrv(
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `VISITED_CAP` must exceed `CANDIDATE_CAP` (so the results cap remains the
+    /// normal completeness ceiling) and be bounded (OOM safety).
+    #[test]
+    fn visited_cap_invariants() {
+        assert!(VISITED_CAP > CANDIDATE_CAP);
+        assert!(VISITED_CAP > 0);
+        assert!(VISITED_CAP <= 10_000_000, "VISITED_CAP too high — OOM risk");
+    }
+
+    /// On a tiny grid the BFS exhausts naturally without approaching either cap.
+    /// Guards against a regression where the bail-out `break` is placed before
+    /// `results.push` (emptying the output) or the loop structure is broken.
+    #[test]
+    fn generate_all_candidates_terminates_on_small_grid() {
+        let mut puzzle = crate::types::Puzzle {
+            height: 2,
+            width: 2,
+            cells: vec![
+                vec![crate::types::Cell::new(0, 0), crate::types::Cell::new(0, 1)],
+                vec![crate::types::Cell::new(1, 0), crate::types::Cell::new(1, 1)],
+            ],
+            h_edges: vec![vec![crate::types::Edge::default(); 1]; 2],
+            v_edges: vec![vec![crate::types::Edge::default(); 2]; 1],
+            vertices: vec![],
+            rules: vec![crate::types::Rule {
+                ctype: "rose_window".into(),
+                params: Default::default(),
+            }],
+            shape_pool: vec![],
+            outer_boundaries: vec![],
+        };
+        puzzle.cells[0][0].symbol = Some("A".into());
+        let h = puzzle.height;
+        let w = puzzle.width;
+        let n_bits = h * w;
+        let mut all_positions = CellSet::new(n_bits);
+        for r in 0..h {
+            for c in 0..w {
+                all_positions.insert(r * w + c);
+            }
+        }
+        let pre = PreBoundaries::from_puzzle(&puzzle);
+        let symbol_types = vec!["A".to_string()];
+        let mut symbol_of = HashMap::new();
+        symbol_of.insert(0usize, 0usize);
+        let cands = generate_all_candidates(&puzzle, 0, &all_positions, &pre, &symbol_of, &symbol_types);
+        assert!(!cands.is_empty(), "must return at least the singleton region");
+        assert!(cands.iter().all(|c| c.contains(0)), "every candidate contains the seed");
+        assert!(cands.len() <= CANDIDATE_CAP);
+    }
 }

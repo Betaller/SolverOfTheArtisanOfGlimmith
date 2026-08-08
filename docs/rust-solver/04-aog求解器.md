@@ -50,6 +50,7 @@ pub struct AoGCore {
     shape_digest_index: HashMap<u32, Vec<usize>>, // 摘要 → 候选索引列表
     node_to_shape_index: HashMap<(i32,i32), Vec<usize>>, // 相对坐标 → 形状索引
     next_shape_index: u32,            // 下一个形状类索引
+    shape_cap: usize,                 // 形状库硬上限（0=不限，见 §2.2 末）
     dfs_ctx: DfsContext,              // 空区分析的临时状态
     deadline: Instant,                // 超时
     rose_type_count: usize,           // 玫瑰窗符号类型数
@@ -76,11 +77,37 @@ pub struct AoGCore {
 `shapes_search(shape)` 先按 digest 查 `shape_digest_index`，再逐候选 `eq_shape`
 比对 preview，命中返回 shape_index。
 
-`shapes_insert`（`aog/core.rs:168-192`）把一个 0/1 网格的 **8 种朝向**（4 旋转 × 2 镜像）
+`shapes_insert`（`aog/core.rs:169-193`）把一个 0/1 网格的 **8 种朝向**（4 旋转 × 2 镜像）
 都尝试插入目录，去重后只保留一个类，`next_shape_index` 递增。
 
 > 所以同一形状的不同朝向在目录里是**同一个索引**——这正是“旋转和镜像视为同一形状”
 > 的落地方式。
+
+#### 形状库硬上限（`shape_cap`）—— OOM 止血阀
+
+开放网格 + 无尺寸约束的题（21 道 OOM，全 0 blocked、无 shape_pool/area）会在 DFS 期间
+枚举 1~N 格自由 polyomino，`shapes` 无界增长 → 内存爆炸 → 进程被 SIGKILL（exit -9），
+`deadline` 在内存压力下来不及触发。`shape_cap` 是止血阀：
+
+- **常量**：`DEFAULT_SHAPE_CAP = 0`（`types.rs`，默认关闭=不限，行为与历史一致）；覆盖用
+  `AOG_SHAPE_CAP` env var（实验三档 50k/100k/200k）。`build` 时一次性读入字段（热路径只做
+  字段读，不读 env）。
+- **守卫位置**：`shapes_insert` **顶部**（`core.rs:171`）`if self.shape_cap > 0 && self.shapes.len() >= self.shape_cap { return 0; }`。
+  **必须在 `shapes_insert` 顶部、不能在 `add_shape_to_shapes` 内部**——后者会在 8 次旋转调用
+  中部分插入（如 3/8 个入库、5 个被拒），破坏 dihedral 对称性，导致 `shapes_search` 命中不全、
+  缺失朝向永不进入形状迭代循环 → 可解性回归。顶部 return 0 则**原子拒绝全部 8 个**。
+- **调用点跳过**（`search.rs:248`）：`shapes_insert` 后 `shapes_search` 若返回 `NO_SHAPE_INDEX`
+  （cap 拒绝且形状不在库中），`continue` 跳过该放置。**不可**让 `NO_SHAPE_INDEX (0xffff)` 写入
+  `sp`——下游 `shape_size_by_index[my_key]`（`my_key = (sp & 0xffff0000)>>16 = 0xffff = 65535`）
+  在 6 处（`core.rs:243/251/281/282`、`empty.rs:403`、`search.rs:1332`）越界 panic（exit 101）。
+  实验三档 cap（50k-200k）都远低于 `shapes.len() > 8×65535 ≈ 524k` 的越界转静默阈值，故守卫
+  在所有实验值下都防 panic。
+- **豁免**：`predefine_shapes_only`（仅 `shape_pool` 规则，`core.rs:587`）的题 `shape_cap=0`——
+  其 DFS 不调 `shapes_insert`（`search.rs:1289` 已 `return -1` 短路自由枚举），且 build 时池注册
+  有界。`puzzle_piece`（无 shape_pool）不豁免——3 道 puzzle_piece OOM 正是靠自由枚举爆。
+- **实测**（21 OOM × 3 档）：50k/100k/200k 结果一致，16/21 由 exit -9 转 exit 0（优雅超时），
+  0 panic；仅 1 PASS（0957）。止血≠解出——多数转超时，真正解出需更强剪枝（compass 边界框 /
+  edge_csp）。3 道 rose_window OOM + 0999 不受影响（OOM 在 rose solver，非 aog）。
 
 ### 2.3 `PlaceLevel`（每层搜索的工作区，`aog/types.rs:225-289`）
 

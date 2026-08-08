@@ -27,6 +27,10 @@ pub struct AoGCore {
     pub shape_digest_index: HashMap<u32, Vec<usize>>,
     pub node_to_shape_index: HashMap<(i32, i32), Vec<usize>>,
     pub next_shape_index: u32,
+    /// Hard cap on `shapes.len()`. 0 = unlimited. See `DEFAULT_SHAPE_CAP` /
+    /// `AOG_SHAPE_CAP` env. When hit, `shapes_insert` refuses new shapes and
+    /// the caller skips the placement, bounding memory to avoid OOM.
+    pub shape_cap: usize,
     pub dfs_ctx: DfsContext,
     pub deadline: Instant,
     /// rose_window: number of distinct symbol types (0 = not rose_window).
@@ -163,6 +167,17 @@ impl AoGCore {
     }
 
     pub fn shapes_insert(&mut self, shape: &mut Vec<Vec<u32>>, shape_size: usize) -> u32 {
+        if self.shape_cap > 0 && self.shapes.len() >= self.shape_cap {
+            // Library full: refuse ALL 8 dihedral variants atomically (not
+            // partially — a mid-loop cap in `add_shape_to_shapes` would insert
+            // some rotations and reject others, breaking dihedral symmetry and
+            // causing `shapes_search` to miss the un-inserted orientations).
+            // Caller then `shapes_search`es: if the shape already exists the
+            // placement proceeds normally; if not, it gets `NO_SHAPE_INDEX` and
+            // skips the placement. We never allocate a new `shape_index` here —
+            // doing so would shift indices and break `AREA_SHAPE_INDEX_BIT`.
+            return 0;
+        }
         let mut insert_success_count = 0u32;
         for _ in 0..4 {
             insert_success_count += self.add_shape_to_shapes(self.next_shape_index, shape, shape_size) as u32;
@@ -726,6 +741,17 @@ impl AoGCore {
             shape_digest_index: HashMap::new(),
             node_to_shape_index: HashMap::new(),
             next_shape_index: 1,
+            shape_cap: if config.predefine_shapes_only {
+                // shape_pool puzzles: bounded predefined pool, DFS never calls
+                // shapes_insert (search.rs short-circuits free enumeration), and
+                // build-time pool registration is tiny — never cap.
+                0
+            } else {
+                std::env::var("AOG_SHAPE_CAP")
+                    .ok()
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(DEFAULT_SHAPE_CAP)
+            },
             dfs_ctx: DfsContext::new(h, w),
             deadline,
             rose_type_count: rose_types.len(),
@@ -941,6 +967,7 @@ mod tests {
             shape_digest_index: HashMap::new(),
             node_to_shape_index: HashMap::new(),
             next_shape_index: 1,
+            shape_cap: 0,
             dfs_ctx: crate::solver::aog::types::DfsContext::new(4, 4),
             deadline,
             rose_type_count: 0,
@@ -986,5 +1013,56 @@ mod tests {
         let b = core.shapes_search(&vec![vec![1u32]], 1);
         assert_eq!(a, b);
         assert_ne!(a, NO_SHAPE_INDEX);
+    }
+
+    fn make_core_with_cap(shape_cap: usize) -> AoGCore {
+        let mut core = make_core();
+        core.shape_cap = shape_cap;
+        core
+    }
+
+    #[test]
+    fn test_shape_cap_refuses_new_shapes() {
+        // cap = 1: after the first shapes_insert populates the library (with up
+        // to 8 dihedral entries for one shape), further shapes_insert calls must
+        // return 0 (refused) and shapes_search must report NO_SHAPE_INDEX for a
+        // genuinely new shape.
+        let mut core = make_core_with_cap(1);
+        let mut domino = vec![vec![1u32, 1], vec![0, 0]];
+        let first = core.shapes_insert(&mut domino, 2);
+        assert_ne!(first, 0, "first insert must succeed under cap=1");
+        // A distinct shape (L-tromino) the library has not seen.
+        let mut l = vec![vec![1u32, 1], vec![0, 1]];
+        let refused = core.shapes_insert(&mut l, 2);
+        assert_eq!(refused, 0, "insert beyond cap must return 0");
+        let miss = core.shapes_search(&l, 2);
+        assert_eq!(
+            miss, NO_SHAPE_INDEX,
+            "refused shape must not be found in the capped library"
+        );
+        // The originally inserted shape is still searchable (cap does not evict).
+        let still_found = core.shapes_search(&vec![vec![1u32, 1], vec![0, 0]], 2);
+        assert_ne!(
+            still_found, NO_SHAPE_INDEX,
+            "already-catalogued shape must remain searchable after cap is hit"
+        );
+    }
+
+    #[test]
+    fn test_shape_cap_zero_unlimited() {
+        // cap = 0 means disabled (legacy behavior): several distinct shapes
+        // insert without refusal. All grids are square n×n matching shape_size.
+        let mut core = make_core_with_cap(0);
+        // (grid, shape_size) pairs, each a distinct polyomino class.
+        for (mut s, sz) in [
+            (vec![vec![1u32]], 1),
+            (vec![vec![1u32, 1], vec![0, 0]], 2),
+            (vec![vec![1u32, 1], vec![0, 1]], 2),
+            (vec![vec![1u32, 1, 1], vec![0, 0, 0], vec![0, 0, 0]], 3),
+        ] {
+            let n = core.shapes_insert(&mut s, sz);
+            // At least one orientation is new for each distinct shape.
+            assert_ne!(n, 0, "cap=0 must not refuse any new shape");
+        }
     }
 }

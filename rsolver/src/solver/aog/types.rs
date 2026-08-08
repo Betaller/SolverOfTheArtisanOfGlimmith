@@ -53,6 +53,12 @@ pub const MAX_EXPAND_CANDIDATES: usize = (MAX_SHAPE_SIZE + 2) * 3;
 /// this array with MAX_SHAPE_SIZE but silently overflows for large regions).
 pub const MAX_STACK_SIZE: usize = MAX_SHAPE_SIZE + 2;
 
+/// Cap on the slash-distance tuple space (`sd_ref_len ^ rose_type_count`).
+/// `PlaceLevel::slash_dist_buf` is pre-allocated to this capacity so the
+/// on-demand `resize` (search.rs) never triggers a heap realloc mid-DFS.
+/// (白捡 W7, doc 15 §1.)  Mirrors `SLASH_DIST_TUPLE_CAP` in search.rs.
+pub const SLASH_DIST_TUPLE_CAP: usize = 16_384;
+
 pub const NO_SHAPE_INDEX: u32 = 0xffff_ffff;
 
 /// Hard cap on the shape library (`AoGCore::shapes`) size. Open grids with no
@@ -297,7 +303,7 @@ impl PlaceLevel {
             symbol_loc: None,
             mark_slash: [false; 16],
             slash_node_indexs: [0; 16],
-            slash_dist_buf: Vec::new(),
+            slash_dist_buf: Vec::with_capacity(SLASH_DIST_TUPLE_CAP),
         }
     }
 }

@@ -139,6 +139,33 @@ rose 解出，0 回归）。
 > 对单符号不强制“必须含符号”，只约束连通 + 边界，具体“每区恰好一符号”由后续
 > 覆盖匹配和最终验收保证（区域数 m 恰好等于符号数，覆盖后自然每区一符号）。
 
+#### `visited` 硬上限（OOM 止血）
+
+`generate_all_candidates` 的 `visited: HashSet<CellSet>`（`region_match.rs:40`）去重集
+**无界增长**——开放 rose_window 网格的 BFS 状态空间可达百万级，每条 CellSet ~88-200B，
+→ OOM（exit -9）。`generate_all_candidates` 内部**无 deadline 检查**（仅 caller 有），时间
+deadline 来不及防 OOM。`VISITED_CAP = 2_000_000`（`region_match.rs`）是止血阀：命中即
+`break` bail-out 返回部分 `results`。
+
+- **必须 `break`（bail out）**，不能"停插入继续 `contains` 检查"——后者去重失效致同区域
+  多路径重入→指数爆炸（visited-OOM 换 queue-OOM）。
+- **值选 2M**：200k 会回归 rose_window PASS 题（如 0833——真解候选在 BFS 后期被发现，
+  bail 早丢弃→`match_regions_mrv` 失败→`rose_growth` 挂死）。2M × ~88-104B ≈ 176-208MB
+  （低于 RSS 限制）又大到保住几乎所有可解题的完整候选集。4 道 rose OOM 中 0999 止血成功；
+  0882/0826/0838 仍 OOM（根因在下游 `enum_area_combos_bounded` 无界组合枚举，非 visited）。
+- **caller graceful**：部分 results → `match_regions_mrv` 可能 miss → `None` → `solve_rose`
+  走 `rose_growth` fallback → `accept_if_valid`/`validate::validate` 兜底 → **仅 false-negative，
+  无 false-positive**。
+
+#### `rose_growth` deadline 修复（预存 bug）
+
+`rose_growth.rs` 的 `solve_singlesymbol`/`solve_multisymbol` 原签名 `_deadline: Instant`
+（下划线=未用）——fallback 无时间限制。当 `region_match` 返回部分候选（visited cap bail-out
+后）且 `match_regions_mrv` 失败时，`rose_growth` 会**全预算挂死**（RSS 平、无输出、deadline
+不触发）。修复：`solve_singlesymbol` wavefront 每 4096 步查 deadline；`solve_multisymbol`
+入口 + second-pass 每 64 轮查 deadline；超时 `return None`。这让 visited cap bail-out 安全
+（fallback 不再挂死，超时优雅退出）。
+
 ### 4.2 预过滤
 
 - **面积过滤**：候选面积 ∈ `[range.min, range.max]`（或 precise），

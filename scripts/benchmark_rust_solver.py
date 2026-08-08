@@ -5,7 +5,7 @@ Features (all optional):
   --timeout 20       per-puzzle timeout (default 20 s).  Threaded into the Rust
                      search via RSOLVER_TIMEOUT_MS (was hardcoded 30s in Rust).
   -j N / --jobs N    parallel workers (0 = cpu_count)
-  --batch N          reuse one rsolver subprocess for every N puzzles (default 1)
+  --batch N          reuse one rsolver subprocess for every N puzzles (default 50)
   --out JSONL        append per-puzzle records to a JSONL file
   --rules RULE       only test puzzles containing this rule type
   --zone ZONE        only test puzzles in this zone (Zone1 / A / ...)
@@ -413,10 +413,13 @@ def main() -> None:
     parser.add_argument(
         "--batch",
         type=int,
-        default=1,
-        help="batch size for rsolver --batch reuse (default 1). "
+        default=50,
+        help="batch size for rsolver --batch reuse (default 50). "
+        "Reuses one rsolver subprocess for every N puzzles, cutting spawn "
+        "overhead ~90%% (1258 puzzles → ~25 subprocesses instead of 1258). "
         "Now safe for precise verification: each line is "
-        "time-bounded by RSOLVER_TIMEOUT_MS.",
+        "time-bounded by RSOLVER_TIMEOUT_MS. Use --batch 1 for the legacy "
+        "one-process-per-puzzle behavior (e.g. to isolate OOM/exit-code issues).",
     )
     parser.add_argument("--resume", help="skip puzzles already PASS in this file")
     parser.add_argument(

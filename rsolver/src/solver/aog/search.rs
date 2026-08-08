@@ -17,7 +17,7 @@ use super::empty::{dfs_empty_area, empty_area_check, empty_area_size_range, find
 
 /// Skip the slash-distance prune when the tuple enumeration would be too large
 /// (mirrors dfs.cpp's O(nodes^types) loop, bounded to avoid slowdowns).
-const SLASH_DIST_TUPLE_CAP: usize = 16_384;
+/// The constant lives in types.rs so PlaceLevel can pre-allocate to it.
 
 #[inline]
 fn filter_size_range(mk: &mut [bool], lower: i32, upper: i32, neighbor_size: i32, larger_side: bool) {

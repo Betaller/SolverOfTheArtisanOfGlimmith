@@ -80,6 +80,32 @@ solve_rose(puzzle, start, timeout_ms)
 `accept_if_valid`（`rose/mod.rs:72-75`）用 `solver/validate.rs` 这套**完整独立验证器**
 验收——所以 rose 的解也必须过全规则校验。
 
+### 3.1 puzzle_piece 预钉分支（`puzzle_piece + rose_window`）
+
+`rose/mod.rs::solve_rose` 在检测到 `puzzle_piece` 规则时（门控 `ROSE_PP_PIN`，默认开）走
+`solve_rose_with_pin`（`rose/mod.rs:157-`）。背景：原 `region_match.rs:285-291` 硬拒 puzzle_piece/
+shape_pool 题，导致 0732 等 `puzzle_piece + rose_window` 题 aog 3s 解不出后无路可走。
+
+**机制**（`rose/puzzle_piece_pin.rs`）：
+1. `enumerate_pin_candidates`：对每个 `shape_pattern` 格，枚举 pattern 的 dihedral 变体（≤8）×
+   合法放置（锚点在变体内、全在网格、不压 blocked、不跨预画边界），用符号约束过滤
+  （per-type 计数必须相等，否则剩余无法均分）。
+2. `enumerate_pin_assignments`：多锚点笛卡尔积（互不重叠 + 余数平衡）。
+3. 对每个 assignment：缩减 `all_positions`（移除预钉格）→ 算 `m'`（剩余每类符号数）→
+   调 `region_match(m', reduced_all_positions)` → `merge_pinned` 合并预钉区域 → `accept_if_valid`。
+4. **m'=1 快速路径** `try_single_region`：剩余格若单一 4-连通分量（不跨预画边界）→ 直接成单区域，
+   避开 region_match 的 `CANDIDATE_CAP=20000` 候选截断（大区域候选易被截断）。
+
+**配套修复**：`region_match` 的种子收集（seeds / all_seed_cells）改为只从 `all_positions` 收集
+（原从全盘 `puzzle.cells`），使预钉移除符号格后 `seeds.len() == m'` 自动成立。
+
+**正确性**：shape_pattern 是 dihedral 类（`validate.rs:181-191` 比对 `dihedral_key(&region.cells)`
+vs `dihedral_key(pat)`），预钉区域必须是 pattern 的某个 dihedral 变体放置——由 `accept_if_valid`
+的 puzzle_piece arm 兜底校验。homogeneous 伴生题靠 validate 兜底（剩余区域碰巧同形则通过）。
+
+**收益**（2026-08-08，分支 `rose-pp-pin`）：official puzzle_piece 159/171（基线 158，+1 = 0732 由
+rose 解出，0 回归）。
+
 ---
 
 ## 4. 策略 A：region_match（精确覆盖）

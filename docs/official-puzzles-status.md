@@ -20,6 +20,8 @@
 | 2026-08-06 | 边界望塔修复（watchtower 顶点绝对坐标约定） | `results/tmp/20260806_f1cfa16_watchtower-verify.txt`（专项）+ `results/tmp/20260806_f1cfa16_final-verify.txt`（全量）；二进制 `results/bin/rsolver-f1cfa16-linux-x86_64` | `benchmark_rust_solver.py` | **1070 PASS / 225 FAIL / 0 DIFF** | vs 基线 1067/228/7DIFF，净 **+3 PASS** | 顶点约定改绝对网格坐标 `(0..=h × 0..=w)`，转换器收集全部边界望塔，85 个 watchtower JSON 迁移 vertices。**watchtower DIFF 全部消除（0 DIFF）**，6 道（0543/0544/0662/0663/0800/1144）与官方解一致；专项 50 PASS / 35 FAIL **0 回归**；14 个 PASS→FAIL 均为并行负载临界波动（单跑解出）。 |
 | 2026-08-07 | 搜索前边界推演 + 中搜索形状剪枝 + BF 默认开启（`6169df3`） | `results/bench/20260807_c6cb307_opt-v3-bench.txt` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1046 / 1258** | 较上一进度（1052）波动 -6 | A/B/C 26/27(0) · Zone1 300/312(-1) · Zone2 393/438(-2) · Zone3 327/481(-3)。与基线（`results/bench/20260807_231d8d2_sat-only-bench.txt`）共同 1074 题逐题对比：**0 PASS→FAIL，5 FAIL→PASS**（1270/0749/1329/0875/0795），**无算法回退**；Zone 波动属跨运行临界题在 40s 边界摇摆 + 前轮僵尸进程 CPU 争抢。提升：约束边→边界穿透 + 密封区域即时剪枝 + BF 面积传播默认开启 + ring/brick 预检（0 panic）。212 FAIL = 117 无解 + 73 超时 + 14 OOM + 8 校验失败。脚本新增 `--retry-timeouts`（有 bug 待修）。 |
 | 2026-08-07 | fence 规则搜索中增量剪枝（专用求解器第一波 #1，`cd40cab`） | `results/bench/20260807_cd40cab_fence-midsearch.txt` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1047 / 1258** | +1 | 新增 `solver/fence/` 模块（独立文件夹，仿 `rose/`）：`FenceCellData` 预计算每个 fence 格的 `arm_count`（dihedral 不变量）与 `pattern_dihedral_key`；`check_fence_patterns` 作为无状态守卫挂入 backtrack `dfs` 守卫链（仿 `check_sealed_regions`），`has_fence` 门控让 1046 非 fence 题零开销。核心：4 边界位全定时做 dihedral_key 比对；未全定时用 arm-count 部分检查（`T>k` 或 `F>4-k` 即剪）。与 `c6cb307` 基线逐题对比：**0 回归**，新增 PASS **0829**；**8 道校验失败 → 0**（backtrack 不再产出 fence 错解，失败模式转无解/超时/OOM——正确性修复）。剪枝实测生效（0401：131611 次剪枝 / 167422 步）。fence 子集 171 题 PASS 数未变（127→127），搜索空间仍太大，后续拟叠加边界预推导 + NonBoundary DSU 合并（见 `docs/优化/10-专用求解器方案.md` §B.2）。 |
+| 2026-08-08 | rose 解除 puzzle_piece 禁令 + 预钉 shape_pattern 区域（`rose-pp-pin`） | `results/bench/20260807_bd2f5f5_rose-pp-pin.jsonl` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1050 / 1258** | +3 | 新增 `solver/rose/puzzle_piece_pin.rs`：枚举每个 shape_pattern 格的 dihedral 变体合法放置 + 符号约束过滤 + 多锚点笛卡尔积。`solve_rose` 加预钉分支：缩减 all_positions + m' → region_match → 合并预钉区域 → accept_if_valid；m'=1 快速路径（剩余格单连通分量直接成区域，避开候选截断）。解除 `region_match.rs:285-291` 的 puzzle_piece/shape_pool 硬禁令；修复 region_match 种子收集（seeds/all_seed_cells 改为只从 all_positions 收集，使预钉移除符号格后 seeds==m' 自动成立）。与 `cd40cab` 基线逐题对比：**0 回归**，新解出 **0732**（puzzle_piece+rose_window，via rose 3005ms）；0957/0710 为 aog 临界题波动（非 rose 功劳）。fence 预推导 DSU 方向同期证伪（见 `docs/优化/10-专用求解器方案.md` §3.3 警示框），fence-anchor-bfs 分支未合 main。 |
+| 2026-08-08 | timeout 透传修复 + rose clamp 移除（求解能力变化） | （全量待补，见下） | `benchmark_rust_solver.py --timeout 40 -j 8 --out results/bench/<date>_<sha>.jsonl` | **待全量验证** | — | `main.rs:86`/`io.rs:solve_json_line` 硬编码 `30_000` → `resolve_timeout_ms()` 读 `RSOLVER_TIMEOUT_MS`，`RustSolver` 从 `--timeout` 设入；`solver/mod.rs:83` 移除 `ROSE_TIMEOUT_MS=30_000` 的 `.min()` clamp。**求解能力变化**：`--timeout 40` 此前对 Rust 完全无效（固定 30s），现真正给 aog/pieces/backtrack 各 40s、rose 最多 40s（原 clamp 30s）→ 原 30s 临界 FAIL 的题（尤其 rose-capable Zone3 慢题）可能在 40s 内新解出。**预期 NEW>0、REGRESSION=0**（纯 timeout 修复，无算法改动）。全量基准待跑后回填通过数；快速档可用 `--baseline latest.jsonl --timeout 40 -j 8 --skip-slow`（同口径 timeout，跳过已知慢题）做日常回归。`benchmark_rust_solver.py` 同步新增 `--baseline`/`--zone`/`--skip-slow`/`--skip-slow-threshold`、修复 `--retry-timeouts` 三 bug。 |
 
 ---
 
@@ -45,6 +47,10 @@
 | 2026-08-07 | fence-midsearch | Zone1 | 300 / 312 | 12 | 0 |
 | 2026-08-07 | fence-midsearch | Zone2 | 394 / 438 | 44 | +1（0829） |
 | 2026-08-07 | fence-midsearch | Zone3 | 327 / 481 | 154 | 0 |
+| 2026-08-08 | rose-pp-pin | A/B/C | 26 / 27 | 1 | 0 |
+| 2026-08-08 | rose-pp-pin | Zone1 | 301 / 312 | 11 | +1（0732） |
+| 2026-08-08 | rose-pp-pin | Zone2 | 395 / 438 | 43 | +1（0957，aog 波动） |
+| 2026-08-08 | rose-pp-pin | Zone3 | 328 / 481 | 153 | +1（0710，aog 波动） |
 
 ---
 
@@ -288,6 +294,44 @@
 
 **结果**（20s 超时 vs 基线 40s）：0 回归、8 道新解出、0 panic、0 拓扑误判。
 详见第一部分最新条目。
+
+### 2026-08-08 · rose 解除 puzzle_piece 禁令 + 预钉 shape_pattern 区域（分支 `rose-pp-pin`，commit `bd2f5f5`）
+
+**背景**：puzzle_piece 规则覆盖 171 道官方题，158 PASS（全 via aog）/ 13 FAIL。数据证实 backtrack
+在 puzzle_piece 题 **0 次触发**（aog 原生支持 `AREA_SHAPE_INDEX_BIT`），故"改 backtrack 利用拼块
+约束"方向无意义。13 FAIL 聚类后，4 道 `puzzle_piece + rose_window`（0732/1098/1099/1100）是最明确
+靶点：aog 因 rose-capable 只拿 3s 解不出，rose solver 又在 `region_match.rs:285-291` 硬拒
+puzzle_piece 题。
+
+**改动**：
+1. 新增 `rsolver/src/solver/rose/puzzle_piece_pin.rs`：
+   - `dihedral_variants`：pattern 的 ≤8 个 dihedral 变体去重。
+   - `placements_for_variant`：枚举使锚点落在变体内的合法放置（全在网格、不压 blocked、不跨预画边界）。
+   - `enumerate_pin_candidates`：符号约束过滤（per-type 计数相等）。
+   - `enumerate_pin_assignments`：多锚点笛卡尔积（互不重叠 + 余数平衡）。
+2. `rose/mod.rs::solve_rose` 加 `solve_rose_with_pin` 分支（门控 `ROSE_PP_PIN`，默认开）：
+   预钉 → 缩减 all_positions + 算 m' → region_match → `merge_pinned` 合并 → `accept_if_valid`。
+   m'=1 快速路径 `try_single_region`（剩余格单 4-连通分量直接成区域，避开 region_match
+   `CANDIDATE_CAP=20000` 候选截断）。
+3. 解除 `region_match.rs:285-291` 的 puzzle_piece/shape_pool 硬禁令。
+4. 修复 region_match 种子收集：`seeds` / `all_seed_cells` 改为只从 `all_positions` 收集
+  （原从全盘 `puzzle.cells`），使预钉移除符号格后 `seeds.len() == m'` 自动成立。
+
+**关键发现**：shape_pattern 是 **dihedral 形状类**（`validate.rs:181-191` 比对 `dihedral_key(&region.cells)`
+vs `dihedral_key(pat)`），不固定具体边——预钉需枚举 dihedral 变体放置。0732：2 变体 × 7 放置 = 14 候选，
+符号约束过滤后唯一 1 个 = 官方解（9 格十字含 P1/P2/P3 各 1）。
+
+**验证**：`cargo test` 8 通过（+2 puzzle_piece_pin 测试）；`pytest` 全过；0732 单题 SKIP_AOG 下由 rose
+解出（2 区域）。puzzle_piece 子集基准：official 159/171（基线 158，+1 = 0732，0 回归）。
+
+**结果**（全量 `benchmark_rust_solver.py --timeout 40 -j 8`，与 `cd40cab` 基线逐题对比）：
+**1050 / 1258**（+3），**0 回归**（0 PASS→FAIL）。新解出 0732（via rose 3005ms，rose-pp-pin 直接收益）；
+0957/0710 为 aog 临界题波动（非 rose 功劳，solo 均解出）。FAIL 模式 126 无解 + 71 超时 + 11 OOM，
+**0 校验失败**。详见第一部分最新条目。
+
+**同期证伪**：fence 预推导 DSU 方向（`fence-anchor-bfs` 分支）基于"fence_pattern arm 位 = 具体边
+Boundary"的错误假设，0390 上误判矛盾，未合 main。fence_pattern 是 dihedral 形状类不固定边，DSU 预
+合并不成立。详见 `docs/优化/10-专用求解器方案.md` §3.3 警示框。
 
 ---
 

@@ -6,7 +6,7 @@
 
 | 脚本 | 作用 | 用法 |
 |---|---|---|
-| `benchmark_rust_solver.py` | **官方语料基准 / 全量 verify**：对 `puzzles/official/` 全量跑 rsolver，独立验证答案并比对官方解（`matches_official`），支持并行、`--resume` 断点续跑、`--adaptive-j` 自适应并发、`--retry-timeouts` 超时重试、`--batch` 子进程复用。**取代已删除的 `verify_puzzles.py`**（原默认超时 30s，需用 `--timeout 30` 显式指定） | `python scripts/benchmark_rust_solver.py --dir puzzles/official --timeout 40 -j 8` |
+| `benchmark_rust_solver.py` | **官方语料基准 / 全量 verify**：对 `puzzles/official/` 全量跑 rsolver，独立验证答案并比对官方解（`matches_official`）。`--timeout` 经 `RSOLVER_TIMEOUT_MS` 真正透传到 Rust 搜索（2026-08-08 修复，原硬编码 30s）。支持两档工作流：<br>• **快速档**（日常回归）：`--baseline <prev.jsonl> --timeout 40 -j 8 --skip-slow` — 用**与基线同口径 timeout** 重跑基线 PASS 题（检 REGRESSION）+ 快 FAIL 题（检 NEW），`--skip-slow` 跳过已知慢题提速；并行负载导致的临界题假回归可用 `--retry-timeouts` 或 solo 复查。exit 2=回归、1=失败、0=干净。<br>• **全量档**（提交前）：`--timeout 40 -j 8 --out <date>_<sha>.jsonl`。<br>另支持 `--resume`、`--zone`、`--rules`、`--adaptive-j`、`--retry-timeouts`（已修三 bug）、`--batch N`（已可精确验证） | `python scripts/benchmark_rust_solver.py --baseline results/bench/latest.jsonl --timeout 40 -j 8 --skip-slow` |
 | `compare_batch_ansi.py` | 对比 `batch_run.sh`（C++ AoG_Solver）输出日志与参考 `.ansi` 日志的谜题路径 + 状态序列，用于 C++ 求解器回归 | `python scripts/compare_batch_ansi.py --ref third_party/AoG_Solver/Zone1.ansi --new /tmp/zone1_run.ansi` |
 
 ## 官方语料转换

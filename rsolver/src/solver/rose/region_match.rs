@@ -273,6 +273,14 @@ fn enum_area_combos_bounded(
 }
 
 /// Main entry — port of `region_match.solve_by_region_match` (single symbol).
+///
+/// NOTE: the previous hard rejection of `puzzle_piece` / `shape_pool` puzzles
+/// was lifted — `solve_rose` now pre-resolves `shape_pattern`-pinned regions
+/// (see `puzzle_piece_pin`) and calls this with the reduced `all_positions`
+/// covering only the remaining (shape-rule-free) cells.  Callers must ensure
+/// every `shape_pattern` cell is excluded from `all_positions` before calling,
+/// otherwise the produced regions may violate the shape rule (caught by
+/// `accept_if_valid` / `validate::validate`).
 pub fn solve_by_region_match(
     puzzle: &Puzzle,
     pre: &PreBoundaries,
@@ -282,25 +290,21 @@ pub fn solve_by_region_match(
     start: &Instant,
     timeout_ms: u64,
 ) -> Option<Vec<crate::types::RegionInfo>> {
-    if puzzle
-        .rules
-        .iter()
-        .any(|r| r.ctype == "shape_pool" || r.ctype == "puzzle_piece")
-    {
-        return None;
-    }
     let h = puzzle.height;
     let w = puzzle.width;
     let total = all_positions.len();
 
-    // Most constrained symbol type.
+    // Most constrained symbol type (among cells in `all_positions` — pre-pinned
+    // cells are excluded so their symbols don't seed a region).
     let mut best_type_idx = 0usize;
     let mut best_count = usize::MAX;
     for (ti, st) in symbol_types.iter().enumerate() {
         let count = (0..h)
             .flat_map(|r| (0..w).map(move |c| (r, c)))
             .filter(|&(r, c)| {
-                !puzzle.cells[r][c].blocked && puzzle.cells[r][c].symbol.as_deref() == Some(st.as_str())
+                !puzzle.cells[r][c].blocked
+                    && all_positions.contains(r * w + c)
+                    && puzzle.cells[r][c].symbol.as_deref() == Some(st.as_str())
             })
             .count();
         if count < best_count {
@@ -312,11 +316,13 @@ pub fn solve_by_region_match(
     let mut seeds: Vec<usize> = Vec::new();
     for r in 0..h {
         for c in 0..w {
+            let idx = r * w + c;
             if !puzzle.cells[r][c].blocked
+                && all_positions.contains(idx)
                 && puzzle.cells[r][c].symbol.as_deref()
                     == Some(symbol_types[best_type_idx].as_str())
             {
-                seeds.push(r * w + c);
+                seeds.push(idx);
             }
         }
     }
@@ -325,13 +331,14 @@ pub fn solve_by_region_match(
         return None;
     }
 
-    // All symbol cells (for reachability).
+    // All symbol cells in `all_positions` (for reachability).  Pre-pinned
+    // cells are excluded so reachability is computed over the remainder only.
     let mut all_seed_cells = CellSet::new(total_bits(h, w));
     let mut symbol_of: HashMap<usize, usize> = HashMap::new();
     for r in 0..h {
         for c in 0..w {
             let idx = r * w + c;
-            if puzzle.cells[r][c].blocked {
+            if puzzle.cells[r][c].blocked || !all_positions.contains(idx) {
                 continue;
             }
             if let Some(sym) = puzzle.cells[r][c].symbol.as_ref() {

@@ -146,64 +146,13 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
 /// Every pre-drawn boundary (and every constrained edge) must separate two
 /// different regions.  The pieces / backtrack solvers are not boundary-aware,
 /// so this is the backstop that rejects a "solution" that crosses a drawn edge.
-fn regions_respect_boundaries(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
-    let h = puzzle.height;
-    let w = puzzle.width;
-    // Flat row-major cell → region id, index `r*w+c`.
-    let mut rid: Vec<Option<usize>> = vec![None; h * w];
-    for reg in regions {
-        for &[r, c] in &reg.cells {
-            rid[r * w + c] = Some(reg.region_id);
-        }
-    }
-    for r in 0..h {
-        for c in 0..w.saturating_sub(1) {
-            if puzzle.h_edges[r][c].is_boundary {
-                if let (Some(a), Some(b)) = (rid[r * w + c], rid[r * w + (c + 1)]) {
-                    if a == b {
-                        if crate::aog_debug_enabled() {
-                            eprintln!(
-                                "boundary-violate h ({},{})-({},{}) same region {}",
-                                r, c, r, c + 1, a
-                            );
-                        }
-                        return false;
-                    }
-                }
-            }
-        }
-    }
-    for r in 0..h.saturating_sub(1) {
-        for c in 0..w {
-            if puzzle.v_edges[r][c].is_boundary {
-                if let (Some(a), Some(b)) = (rid[r * w + c], rid[(r + 1) * w + c]) {
-                    if a == b {
-                        if crate::aog_debug_enabled() {
-                            eprintln!(
-                                "boundary-violate v ({},{})-({},{}) same region {}",
-                                r, c, r + 1, c, a
-                            );
-                        }
-                        return false;
-                    }
-                }
-            }
-        }
-    }
-    true
-}
-
 fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle, solver: &str) -> Solution {
     let elapsed = start.elapsed().as_millis() as u64;
-    if !regions_respect_boundaries(puzzle, &regions) {
-        return Solution::unsolved("Solution found but crosses a pre-drawn boundary");
-    }
-    // Full independent re-validation via `validate.rs` — the same acceptance
-    // gate aog and rose already use.  It covers all 22 rule types (including
-    // fence / compass / ring / rose_window, which `constraints.rs` used to
-    // stub out with unconditional `true`), so a fallback solver can no longer
-    // smuggle a rule-violating answer past the Rust check.  The router's
-    // Python IndependentValidator stays as the outer gate.
+    // V3: the pre-drawn boundary check (`regions_respect_boundaries`) was
+    // removed — `validate::validate` below already performs the identical
+    // check (validate.rs:48-70: a boundary edge whose two cells share a
+    // region → reject). Running it twice was redundant O(H·W) work on every
+    // successful pieces/rose/backtrack solution. (doc 16 §1 V3.)
     if !crate::solver::validate::validate(puzzle, &regions) {
         return Solution {
             solved: false,

@@ -140,7 +140,10 @@ impl DancingLinks {
             if self.nodes[c].count < min_count {
                 min_count = self.nodes[c].count;
                 best = Some(c - 1);
-                if min_count == 0 {
+                // D5: a column with count 0 means the branch is dead; count 1
+                // is a forced move — no column can have fewer, so stop scanning.
+                // (doc 16 §2 D5; saves 30-50% of the MRV column scan.)
+                if min_count <= 1 {
                     break;
                 }
             }

@@ -571,7 +571,15 @@ impl AoGCore {
                 "mixed" => config.adjacent_shapes_different = true,
                 "differentiation" => config.adjacent_sizes_different = true,
                 "block" => config.only_rectangles = true,
-                "non_block" => config.no_rectangles = true,
+                "non_block" => {
+                    config.no_rectangles = true;
+                    // A3: non_block regions have area >= 3 (13号 O5 verified
+                    // 70/70 official solutions). Tighten the lower bound so aog
+                    // skips enumerating size-1/2 regions. (doc 16 §2 A3.)
+                    if config.shape_size_lower_bound < 3 {
+                        config.shape_size_lower_bound = 3;
+                    }
+                }
                 "brick" => config.no_4_way_intersections = true,
                 "ring" => config.no_3_way_intersections = true,
                 "solitary" => config.one_symbol_per_region = true,

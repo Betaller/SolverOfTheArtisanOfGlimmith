@@ -480,7 +480,16 @@ fn compass_rec(
         return;
     }
 
-    let max_sz = current.len() + 20; // reasonable cap; actual max should be grid area
+    // D7: precise compass region size upper bound = 1 (compass cell) + cells in
+    // each direction (up+down+left+right). None directions contribute 0 (matching
+    // the count check above, which treats None as "0 cells allowed"). This is far
+    // tighter than the old `current.len() + 20` heuristic and terminates the
+    // placement DFS as soon as the region can't grow further. (doc 16 §2 D7.)
+    let max_sz = 1usize
+        + compass.up.unwrap_or(0) as usize
+        + compass.down.unwrap_or(0) as usize
+        + compass.left.unwrap_or(0) as usize
+        + compass.right.unwrap_or(0) as usize;
     if current.len() >= max_sz {
         return;
     }

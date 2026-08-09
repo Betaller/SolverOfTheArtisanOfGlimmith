@@ -16,6 +16,14 @@ use super::cells::{CellSet, PreBoundaries};
 pub const CANDIDATE_CAP: usize = 20_000;
 pub const MAX_CANDIDATE_CELLS: usize = 100;
 pub const PER_COMBO_TIMEOUT_MS: u64 = 1_000;
+/// Hard cap on the area-combo enumeration (`enum_area_combos_bounded`). For
+/// large m (e.g. 0882 m=22, 0223 m=31), the full combo count is astronomical
+/// (2.2e20, 1.7e28) — pre-collecting them all OOMs before any combo is tried.
+/// This cap stops enumeration after MAX_COMBOS tuples and proceeds with the
+/// partial set (sorted, most-balanced first), letting `match_regions_mrv` try
+/// them. If the solution needs a later combo it's a false-negative (graceful —
+/// `solve_rose` falls through to `rose_growth`). (B-LZ, doc 15 §2 A2.)
+pub const MAX_COMBOS: usize = 50_000;
 /// Hard cap on the `visited` dedup set (line ~40). Open rose_window grids
 /// enumerate unbounded distinct regions → OOM (exit -9) before the caller's
 /// deadline can fire (`generate_all_candidates` has no internal time check).
@@ -297,6 +305,12 @@ fn enum_area_combos_bounded(
     cur: &mut Vec<usize>,
     out: &mut Vec<Vec<usize>>,
 ) {
+    // B-LZ: stop once the combo list reaches MAX_COMBOS — prevents the
+    // astronomical combo counts (0882 m=22 → 2.2e20) from OOMing before any
+    // combo is tried. The partial set (sorted below) is still searched.
+    if out.len() >= MAX_COMBOS {
+        return;
+    }
     if depth == parts - 1 {
         if allowed[depth].contains(&total) && total >= min_val {
             cur.push(total);
@@ -306,6 +320,9 @@ fn enum_area_combos_bounded(
         return;
     }
     for &sz in &allowed[depth] {
+        if out.len() >= MAX_COMBOS {
+            return;
+        }
         if sz < min_val {
             continue;
         }

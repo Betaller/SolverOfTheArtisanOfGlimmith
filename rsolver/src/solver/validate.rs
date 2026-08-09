@@ -17,6 +17,9 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
 
     // Build region->cell lookup and check all fillable cells assigned.
     let mut by_rid: HashMap<usize, Vec<[usize; 2]>> = HashMap::new();
+    // B-V1: flat cell→region-id index for O(1) `region_of` lookups (was O(R·N)
+    // linear scan). Built in the same pass as by_rid; blocked cells stay None.
+    let mut cell_to_rid: Vec<Option<usize>> = vec![None; h * w];
     for r in 0..h {
         for c in 0..w {
             if puzzle.cells[r][c].blocked {
@@ -26,6 +29,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
             for reg in regions {
                 if reg.cells.iter().any(|&[rr, cc]| rr == r && cc == c) {
                     by_rid.entry(reg.region_id).or_default().push([r, c]);
+                    cell_to_rid[r * w + c] = Some(reg.region_id);
                     found = true;
                     break;
                 }
@@ -49,8 +53,8 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     for r in 0..h {
         for c in 0..w.saturating_sub(1) {
             if puzzle.h_edges[r][c].is_boundary {
-                let a = region_of(&by_rid, r, c);
-                let b = region_of(&by_rid, r, c + 1);
+                let a = region_of(&cell_to_rid, r, c, w);
+                let b = region_of(&cell_to_rid, r, c + 1, w);
                 if a.is_some() && b.is_some() && a == b {
                     return false;
                 }
@@ -60,8 +64,8 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     for r in 0..h.saturating_sub(1) {
         for c in 0..w {
             if puzzle.v_edges[r][c].is_boundary {
-                let a = region_of(&by_rid, r, c);
-                let b = region_of(&by_rid, r + 1, c);
+                let a = region_of(&cell_to_rid, r, c, w);
+                let b = region_of(&cell_to_rid, r + 1, c, w);
                 if a.is_some() && b.is_some() && a == b {
                     return false;
                 }
@@ -110,7 +114,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                     for c in 0..w {
                         let cell = &puzzle.cells[r][c];
                         if let Some(n) = cell.number {
-                            if let Some(rid) = region_of(&by_rid, r, c) {
+                            if let Some(rid) = region_of(&cell_to_rid, r, c, w) {
                                 if by_rid[&rid].len() != n as usize {
                                     return false;
                                 }
@@ -132,14 +136,14 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                 }
             }
             "mixed" => {
-                if !adjacent_pairs_satisfy(puzzle, regions, &by_rid, |a, b| {
+                if !adjacent_pairs_satisfy(puzzle, regions, &by_rid, &cell_to_rid, w, |a, b| {
                     shape_key_of[a] != shape_key_of[b]
                 }) {
                     return false;
                 }
             }
             "differentiation" => {
-                if !adjacent_pairs_satisfy(puzzle, regions, &by_rid, |a, b| {
+                if !adjacent_pairs_satisfy(puzzle, regions, &by_rid, &cell_to_rid, w, |a, b| {
                     regions[a].area != regions[b].area
                 }) {
                     return false;
@@ -194,8 +198,8 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                     for c in 0..w {
                         let cell = &puzzle.cells[r][c];
                         if let Some(ref fp) = cell.fence_pattern {
-                            if let Some(rid) = region_of(&by_rid, r, c) {
-                                let bits = region_boundary_bits(puzzle, &by_rid, rid, r, c);
+                            if let Some(rid) = region_of(&cell_to_rid, r, c, w) {
+                                let bits = region_boundary_bits(puzzle, &cell_to_rid, w, rid, r, c);
                                 let pat = fence_pattern_shape(bits);
                                 if dihedral_key(&pat) != dihedral_key(fp) {
                                     return false;
@@ -210,7 +214,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                     for c in 0..w {
                         let cell = &puzzle.cells[r][c];
                         if let Some(ref comp) = cell.compass {
-                            if let Some(rid) = region_of(&by_rid, r, c) {
+                            if let Some(rid) = region_of(&cell_to_rid, r, c, w) {
                                 let cells = &by_rid[&rid];
                                 for (dr, dc, attr) in
                                     [(-1i64, 0i64, 0usize), (1, 0, 1), (0, -1, 2), (0, 1, 3)]
@@ -255,7 +259,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                 }
             }
             "heterogeneous" | "homogeneous" | "inequality" | "difference" => {
-                if !check_edge_constraints(puzzle, &by_rid) {
+                if !check_edge_constraints(puzzle, &by_rid, &cell_to_rid, w) {
                     return false;
                 }
             }
@@ -275,7 +279,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                                 if nr < 0 || nc < 0 || nr >= h as i64 || nc >= w as i64 {
                                     continue;
                                 }
-                                if let Some(rid) = region_of(&by_rid, nr as usize, nc as usize) {
+                                if let Some(rid) = region_of(&cell_to_rid, nr as usize, nc as usize, w) {
                                     distinct.insert(rid);
                                 }
                             }
@@ -296,7 +300,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                 // at (7,6)).  Mirrors the C++ check_tatami and the game.
                 for r in 0..h.saturating_sub(1) {
                     for c in 0..w.saturating_sub(1) {
-                        if count_boundary_edges_at_vertex(puzzle, &by_rid, r as i32, c as i32) == 4 {
+                        if count_boundary_edges_at_vertex(puzzle, &cell_to_rid, w, r as i32, c as i32) == 4 {
                             return false;
                         }
                     }
@@ -311,7 +315,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                 let wi = w as i32;
                 for r in -1..hi {
                     for c in -1..wi {
-                        if count_boundary_edges_at_vertex(puzzle, &by_rid, r, c) == 3 {
+                        if count_boundary_edges_at_vertex(puzzle, &cell_to_rid, w, r, c) == 3 {
                             return false;
                         }
                     }
@@ -324,13 +328,11 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     true
 }
 
-fn region_of(by_rid: &HashMap<usize, Vec<[usize; 2]>>, r: usize, c: usize) -> Option<usize> {
-    for (&rid, cells) in by_rid {
-        if cells.iter().any(|&[rr, cc]| rr == r && cc == c) {
-            return Some(rid);
-        }
-    }
-    None
+/// O(1) cell→region-id lookup via the pre-built `cell_to_rid` index (B-V1).
+/// Was O(R·N) linear scan over `by_rid` — called ~15× per validate, the
+/// dominant cost on large grids. (doc 16 §1 V1.)
+fn region_of(cell_to_rid: &[Option<usize>], r: usize, c: usize, w: usize) -> Option<usize> {
+    cell_to_rid[r * w + c]
 }
 
 /// rose_window: each region contains exactly one of each symbol type.
@@ -417,6 +419,8 @@ fn adjacent_pairs_satisfy(
     puzzle: &Puzzle,
     regions: &[RegionInfo],
     by_rid: &HashMap<usize, Vec<[usize; 2]>>,
+    cell_to_rid: &[Option<usize>],
+    w: usize,
     pred: impl Fn(usize, usize) -> bool,
 ) -> bool {
     let _ = puzzle;
@@ -440,7 +444,7 @@ fn adjacent_pairs_satisfy(
                 if nr >= 0 && nr < puzzle.height as i64 && nc >= 0 && nc < puzzle.width as i64 {
                     let nr = nr as usize;
                     let nc = nc as usize;
-                    if let Some(other) = region_of(by_rid, nr, nc) {
+                    if let Some(other) = region_of(cell_to_rid, nr, nc, w) {
                         if other != *rid {
                             let key = (rid.min(&other), rid.max(&other));
                             let key = (*key.0, *key.1);
@@ -472,6 +476,8 @@ fn adjacent_pairs_satisfy(
 fn check_edge_constraints(
     puzzle: &Puzzle,
     by_rid: &HashMap<usize, Vec<[usize; 2]>>,
+    cell_to_rid: &[Option<usize>],
+    w: usize,
 ) -> bool {
     let area_of = |rid: usize| by_rid.get(&rid).map(|c| c.len());
     let shape_key_of = |rid: usize| -> Option<String> {
@@ -482,8 +488,8 @@ fn check_edge_constraints(
     for r in 0..puzzle.height {
         for c in 0..puzzle.width.saturating_sub(1) {
             if let Some(ref ec) = puzzle.h_edges[r][c].constraint {
-                let a = region_of(by_rid, r, c);
-                let b = region_of(by_rid, r, c + 1);
+                let a = region_of(cell_to_rid, r, c, w);
+                let b = region_of(cell_to_rid, r, c + 1, w);
                 if let (Some(ra), Some(rb)) = (a, b) {
                     if ra == rb || !edge_constraint_ok(ec, ra, rb, &area_of, &shape_key_of) {
                         return false;
@@ -495,8 +501,8 @@ fn check_edge_constraints(
     for r in 0..puzzle.height.saturating_sub(1) {
         for c in 0..puzzle.width {
             if let Some(ref ec) = puzzle.v_edges[r][c].constraint {
-                let a = region_of(by_rid, r, c);
-                let b = region_of(by_rid, r + 1, c);
+                let a = region_of(cell_to_rid, r, c, w);
+                let b = region_of(cell_to_rid, r + 1, c, w);
                 if let (Some(ra), Some(rb)) = (a, b) {
                     if ra == rb || !edge_constraint_ok(ec, ra, rb, &area_of, &shape_key_of) {
                         return false;
@@ -546,13 +552,13 @@ fn edge_constraint_ok(
 /// Boundary bits around a region cell (up, down, left, right) in the solution.
 fn region_boundary_bits(
     puzzle: &Puzzle,
-    by_rid: &HashMap<usize, Vec<[usize; 2]>>,
+    cell_to_rid: &[Option<usize>],
+    w: usize,
     rid: usize,
     r: usize,
     c: usize,
 ) -> [bool; 4] {
     let h = puzzle.height;
-    let w = puzzle.width;
     let mut bits = [false; 4];
     let neighbor = |nr: i64, nc: i64| -> bool {
         if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
@@ -563,7 +569,7 @@ fn region_boundary_bits(
         if puzzle.cells[nr][nc].blocked {
             return true;
         }
-        match region_of(by_rid, nr, nc) {
+        match region_of(cell_to_rid, nr, nc, w) {
             Some(other) => other != rid,
             None => false,
         }
@@ -599,7 +605,8 @@ pub(crate) fn fence_pattern_shape(bits: [bool; 4]) -> Vec<[usize; 2]> {
 
 fn count_boundary_edges_at_vertex(
     puzzle: &Puzzle,
-    by_rid: &HashMap<usize, Vec<[usize; 2]>>,
+    cell_to_rid: &[Option<usize>],
+    w_idx: usize,
     r: i32,
     c: i32,
 ) -> usize {
@@ -612,7 +619,7 @@ fn count_boundary_edges_at_vertex(
         if cell.blocked {
             return None;
         }
-        region_of(by_rid, a.0 as usize, a.1 as usize)
+        region_of(cell_to_rid, a.0 as usize, a.1 as usize, w_idx)
     };
     let mut count = 0;
     // Four edges surrounding vertex (r,c): corner of cells

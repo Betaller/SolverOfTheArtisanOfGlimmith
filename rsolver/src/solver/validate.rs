@@ -480,9 +480,16 @@ fn check_edge_constraints(
     w: usize,
 ) -> bool {
     let area_of = |rid: usize| by_rid.get(&rid).map(|c| c.len());
+    // B-V2: precompute each region's dihedral_key once (was recomputed per-edge
+    // in the closure below — O(edges × region_size) → O(regions × region_size)).
+    // Edge-constraint-dense puzzles (difference/inequality/heterogeneous) see
+    // 50-80% validate speedup. (doc 16 §1 V2.)
+    let rid_to_key: HashMap<usize, String> = by_rid
+        .iter()
+        .map(|(&rid, cells)| (rid, dihedral_key(cells)))
+        .collect();
     let shape_key_of = |rid: usize| -> Option<String> {
-        let cells = by_rid.get(&rid)?;
-        Some(dihedral_key(cells))
+        rid_to_key.get(&rid).cloned()
     };
     // Iterate all edges with constraints.
     for r in 0..puzzle.height {

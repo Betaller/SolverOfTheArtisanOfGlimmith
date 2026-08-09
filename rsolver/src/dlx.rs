@@ -164,8 +164,12 @@ impl DancingLinks {
         row_check: &mut dyn FnMut(&[usize]) -> bool,
         on_solution: &mut dyn FnMut(&[usize]) -> bool,
     ) -> bool {
+        // D9: throttle the deadline check to every 1024 nodes instead of every
+        // node — Instant::now() is a ~20ns vDSO call, unnecessary on every
+        // recursion. search_count is incremented below; check it first so the
+        // very first nodes still get a timely check. (doc 16 §2 D9, -10-25%.)
         if let Some(d) = self.deadline {
-            if Instant::now() >= d {
+            if (self.search_count & 1023) == 0 && Instant::now() >= d {
                 return false;
             }
         }

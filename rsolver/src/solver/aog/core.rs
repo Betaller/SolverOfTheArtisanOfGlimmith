@@ -857,6 +857,23 @@ impl AoGCore {
         if core.rose_type_count > 0 {
             core.config.shape_size_lower_bound =
                 core.config.shape_size_lower_bound.max(core.rose_type_count as i32);
+            // B-RoseK: if all symbol types occur the same count K (= rose_m),
+            // then K regions partition fillable, each >= rose_type_count. The
+            // largest region is at most fillable - (K-1)*rose_type_count (one
+            // region takes the surplus, the other K-1 take their minimum).
+            // This tight UB prevents aog from enumerating huge shapes → OOM.
+            // 0882: 136→73, 0826: 100→66, 0838: 49→36 (official solutions
+            // all within the tight UB). (doc 16 §1 A1.)
+            let m = crate::solver::rose::rose_m(puzzle, &rose_types);
+            if m > 0 {
+                let tight_ub = empty_area_cnt.saturating_sub((m - 1) * core.rose_type_count);
+                if tight_ub > 0 {
+                    let cur = core.config.shape_size_upper_bound;
+                    if cur < 1 || (tight_ub as i32) < cur {
+                        core.config.shape_size_upper_bound = tight_ub as i32;
+                    }
+                }
+            }
         }
         if core.config.predefine_shapes_only {
             let mut lo = usize::MAX;

@@ -107,6 +107,12 @@ pub fn generate_all_candidates(
         if is_multi {
             if syms == all_required {
                 results.push(current.clone());
+                // B-MB: once a region contains all required symbol types, stop
+                // expanding — any larger superset uses more cells with the same
+                // symbols, strictly worse for the exact-cover match. Reduces
+                // visited/queue 10-50× on multi-symbol puzzles (C4-2, 0620,
+                // 1433). (doc 15 §2 A3.)
+                continue;
             }
         } else {
             results.push(current.clone());

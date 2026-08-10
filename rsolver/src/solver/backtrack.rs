@@ -34,6 +34,9 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
     let has_same = puzzle.rules.iter().any(|r| r.ctype == "same");
     let has_block = puzzle.rules.iter().any(|r| r.ctype == "block");
     let has_non_block = puzzle.rules.iter().any(|r| r.ctype == "non_block");
+    // B1: rules the backtracker previously only caught at the leaf (doc 16 §3 B1).
+    let has_solitary = puzzle.rules.iter().any(|r| r.ctype == "solitary");
+    let has_differentiation = puzzle.rules.iter().any(|r| r.ctype == "differentiation");
     // Fence-rule mid-search pruning: pre-compute each fence cell's dihedral
     // invariant once.  Empty (and has_fence=false) when the puzzle has no
     // `fence` rule — zero overhead for the 1046 non-fence official puzzles.
@@ -60,6 +63,9 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
         has_same,
         has_block,
         has_non_block,
+        // B1: mid-search pruning for rules previously only leaf-checked (doc 16 §3 B1).
+        has_solitary,
+        has_differentiation,
         fence_cells,
         has_fence,
     };
@@ -115,6 +121,9 @@ pub(crate) struct BacktrackState {
     has_same: bool,
     has_block: bool,
     has_non_block: bool,
+    /// B1: mid-search pruning for rules previously only leaf-checked (doc 16 §3 B1).
+    has_solitary: bool,
+    has_differentiation: bool,
     /// Pre-computed fence-pattern cells for mid-search pruning (empty when no
     /// `fence` rule).  See `crate::solver::fence`.
     fence_cells: Vec<crate::solver::fence::FenceCellData>,
@@ -127,7 +136,9 @@ pub(crate) struct AreaBounds {
     pub(crate) max_area: usize,
 }
 
-/// Collect all inequality / difference edge constraints for mid-search pruning.
+/// Collect all area/shape edge constraints for mid-search pruning.
+/// B1: extended to include Heterogeneous / Homogeneous (shape-based) in addition
+/// to the original Inequality / Difference (area-based). (doc 16 §3 B1.)
 fn collect_edge_constraints(puzzle: &Puzzle) -> Vec<EdgeAreaConstraint> {
     let mut out = Vec::new();
     let h = puzzle.height;
@@ -136,7 +147,10 @@ fn collect_edge_constraints(puzzle: &Puzzle) -> Vec<EdgeAreaConstraint> {
         for c in 0..w.saturating_sub(1) {
             if let Some(ref ec) = puzzle.h_edges[r][c].constraint {
                 match ec.ctype {
-                    EdgeConstraintType::Inequality | EdgeConstraintType::Difference => {
+                    EdgeConstraintType::Inequality
+                    | EdgeConstraintType::Difference
+                    | EdgeConstraintType::Heterogeneous
+                    | EdgeConstraintType::Homogeneous => {
                         out.push(EdgeAreaConstraint {
                             cell_a: (r, c),
                             cell_b: (r, c + 1),
@@ -153,7 +167,10 @@ fn collect_edge_constraints(puzzle: &Puzzle) -> Vec<EdgeAreaConstraint> {
         for c in 0..w {
             if let Some(ref ec) = puzzle.v_edges[r][c].constraint {
                 match ec.ctype {
-                    EdgeConstraintType::Inequality | EdgeConstraintType::Difference => {
+                    EdgeConstraintType::Inequality
+                    | EdgeConstraintType::Difference
+                    | EdgeConstraintType::Heterogeneous
+                    | EdgeConstraintType::Homogeneous => {
                         out.push(EdgeAreaConstraint {
                             cell_a: (r, c),
                             cell_b: (r + 1, c),
@@ -288,6 +305,27 @@ fn check_edge_area_mid_search(state: &BacktrackState) -> bool {
                 // larger > smaller  ⇒  larger ≥ smaller + 1
                 if larger_sealed && larger_area <= smaller_area {
                     return false;
+                }
+            }
+            // B1: shape-based edge constraints (doc 16 §3 B1).
+            EdgeConstraintType::Heterogeneous => {
+                // delta: adjacent regions must have DIFFERENT shapes.
+                if sealed_a && sealed_b && area_a > 0 && area_b > 0 {
+                    let key_a = crate::shapes::dihedral_key(&state.region_shapes[ra]);
+                    let key_b = crate::shapes::dihedral_key(&state.region_shapes[rb]);
+                    if key_a == key_b {
+                        return false;
+                    }
+                }
+            }
+            EdgeConstraintType::Homogeneous => {
+                // gemini: adjacent regions must have the SAME shape.
+                if sealed_a && sealed_b && area_a > 0 && area_b > 0 {
+                    let key_a = crate::shapes::dihedral_key(&state.region_shapes[ra]);
+                    let key_b = crate::shapes::dihedral_key(&state.region_shapes[rb]);
+                    if key_a != key_b {
+                        return false;
+                    }
                 }
             }
             _ => {}
@@ -446,7 +484,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
 
         if check_watchtowers_ok(state)
             && check_vertex_ring_ok(puzzle, r, c, state)
-            && check_sealed_regions(state)
+            && check_sealed_regions(puzzle, state)
             && check_fence_ok(puzzle, state)
         {
             if dfs(puzzle, state) {
@@ -482,7 +520,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
 
     if check_watchtowers_ok(state)
         && check_vertex_ring_ok(puzzle, r, c, state)
-        && check_sealed_regions(state)
+        && check_sealed_regions(puzzle, state)
         && check_fence_ok(puzzle, state)
     {
         if dfs(puzzle, state) {
@@ -501,22 +539,26 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
 }
 
 /// Mid-search shape-rule pruning: when a region seals (empty frontier, its shape
-/// is final), check different / same / block / non_block immediately instead of
-/// waiting for the leaf.  Returns false if the sealed region violates a rule —
-/// the branch is dead.
+/// is final), check different / same / block / non_block / solitary / differentiation
+/// immediately instead of waiting for the leaf.  Returns false if the sealed region
+/// violates a rule — the branch is dead.
 ///
 /// Stateless (reads only `region_shapes` and `frontier`) so it needs no undo
 /// logic on backtrack — re-evaluated from scratch after every frontier_assign.
-fn check_sealed_regions(state: &BacktrackState) -> bool {
+fn check_sealed_regions(puzzle: &Puzzle, state: &BacktrackState) -> bool {
     let has_shape_rules = state.has_different
         || state.has_same
         || state.has_block
-        || state.has_non_block;
+        || state.has_non_block
+        || state.has_solitary
+        || state.has_differentiation;
     if !has_shape_rules {
         return true;
     }
 
     let mut sealed_keys: Vec<String> = Vec::new();
+    // B1: track sealed region areas for differentiation check (doc 16 §3 B1).
+    let mut sealed_areas: Vec<(usize, usize)> = Vec::new(); // (rid, area)
 
     for rid in 0..state.next_region_id {
         if !state.is_sealed(rid) {
@@ -526,6 +568,7 @@ fn check_sealed_regions(state: &BacktrackState) -> bool {
             Some(s) if !s.is_empty() => s,
             _ => continue,
         };
+        let area = shape.len();
 
         // block / non_block: check immediately
         if state.has_block || state.has_non_block {
@@ -558,11 +601,84 @@ fn check_sealed_regions(state: &BacktrackState) -> bool {
                 }
             }
         }
+
+        // B1: solitary — each sealed region must contain exactly one clue cell
+        // (numbered cell or cell with a symbol). (doc 16 §3 B1.)
+        if state.has_solitary {
+            let clue_count = shape.iter().filter(|&&[r, c]| {
+                puzzle.cells[r][c].number.is_some() || puzzle.cells[r][c].symbol.is_some()
+            }).count();
+            if clue_count != 1 {
+                return false;
+            }
+        }
+
+        // B1: differentiation — accumulate sealed areas for pairwise check below.
+        if state.has_differentiation {
+            sealed_areas.push((rid, area));
+        }
+    }
+
+    // B1: differentiation — adjacent sealed regions must have different areas.
+    // Only executed when at least two regions are sealed. (doc 16 §3 B1.)
+    if state.has_differentiation && sealed_areas.len() >= 2 {
+        let w = state.width;
+        let h = state.cell_to_region.len() / w;
+        for i in 0..sealed_areas.len() {
+            let (rid_a, area_a) = sealed_areas[i];
+            for j in (i + 1)..sealed_areas.len() {
+                let (rid_b, area_b) = sealed_areas[j];
+                if area_a != area_b {
+                    continue; // different areas → OK for differentiation
+                }
+                // Same area — check if the two sealed regions are adjacent.
+                if regions_are_adjacent(state, rid_a, rid_b, w, h) {
+                    return false;
+                }
+            }
+        }
     }
 
     true
 }
 
+/// B1: return true if two regions share at least one non-boundary edge.
+fn regions_are_adjacent(
+    state: &BacktrackState,
+    rid_a: usize,
+    rid_b: usize,
+    w: usize,
+    h: usize,
+) -> bool {
+    let shape_a = match state.region_shapes.get(rid_a) {
+        Some(s) => s,
+        None => return false,
+    };
+    for &[r, c] in shape_a {
+        // Check 4 neighbors
+        if c + 1 < w {
+            if state.cell_to_region[r * w + c + 1] == Some(rid_b) {
+                return true;
+            }
+        }
+        if c > 0 {
+            if state.cell_to_region[r * w + c - 1] == Some(rid_b) {
+                return true;
+            }
+        }
+        if r + 1 < h {
+            if state.cell_to_region[(r + 1) * w + c] == Some(rid_b) {
+                return true;
+            }
+        }
+        if r > 0 {
+            if state.cell_to_region[(r - 1) * w + c] == Some(rid_b) {
+                return true;
+            }
+        }
+    }
+    false
+}
 /// Thin forwarder to `fence::check_fence_patterns`, pulling the search state
 /// fields it needs.  Keeps the `fence` module decoupled from `BacktrackState`
 /// (no cyclic type dependency) and gives the guard chain a uniform

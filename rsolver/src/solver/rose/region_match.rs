@@ -186,23 +186,6 @@ fn can_partition(
     w: usize,
     min_component_cells: usize,
 ) -> bool {
-    // 白捡 W5: when there are no pre-boundaries, the grid is 4-connected (every
-    // remaining cell reachable from any seed) and `remaining` is a single
-    // connected component. So the full BFS below is redundant — it would visit
-    // every cell and confirm one component. 56 rose FAIL puzzles have bnd=0 and
-    // run this 18-62万 clone+BFS ops uselessly per candidate. Skip to the
-    // equivalent fast result. (active = remaining ∩ seed_cells; if no seed in
-    // remaining and remaining non-empty, unreachable → false, same as line ~186.)
-    if pre.is_empty() {
-        let has_seed_in_remaining = remaining.iter().any(|idx| seed_cells.contains(idx));
-        if remaining.is_empty() || has_seed_in_remaining {
-            // Single component of size remaining.len(); pass iff it meets the
-            // min-component-size floor (mirrors the comp_size check below).
-            return min_component_cells <= 1 || remaining.len() >= min_component_cells;
-        }
-        return false;
-    }
-
     let active = {
         let mut s = CellSet::new(remaining.len_bits());
         // `remaining & seed_cells` — iterate the smaller set.

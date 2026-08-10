@@ -874,6 +874,38 @@ impl AoGCore {
             core.config.shape_size_upper_bound = empty_area_cnt as i32;
         }
 
+        // B-CompassUB: when solitary is present (1 compass cell per region, no
+        // double-count), each compass cell's region has a known area lower
+        // bound LB = 1 + max(up+down, left+right) (doc 13 O11). With K regions
+        // (solitary = K = clue-cell count), the tight global UB is:
+        //   global_UB = fillable - sum(LBs) + max(LB)
+        // (one region keeps its max, others freed by their LBs). (doc 16 §1 A2.)
+        if use_compass && config.one_symbol_per_region {
+            let mut total_lb: i32 = 0;
+            let mut max_lb: i32 = 0;
+            let mut k_computed: usize = 0;
+            for r in 0..h {
+                for c in 0..w {
+                    if let Some(ref comp) = puzzle.cells[r][c].compass {
+                        let up = comp.up.unwrap_or(0).max(0) as i32;
+                        let down = comp.down.unwrap_or(0).max(0) as i32;
+                        let left = comp.left.unwrap_or(0).max(0) as i32;
+                        let right = comp.right.unwrap_or(0).max(0) as i32;
+                        let lb = 1 + (up + down).max(left + right);
+                        total_lb += lb;
+                        max_lb = max_lb.max(lb);
+                        k_computed += 1;
+                    }
+                }
+            }
+            if k_computed > 0 {
+                let tight = empty_area_cnt as i32 - total_lb + max_lb;
+                if tight > 0 && (core.config.shape_size_upper_bound < 1 || tight < core.config.shape_size_upper_bound) {
+                    core.config.shape_size_upper_bound = tight;
+                }
+            }
+        }
+
         // only_rectangles (block rule): generate all rectangle shapes into the
         // catalog, mirroring main.cpp's ONLY_RECTANGLES handling.
         if core.config.only_rectangles {

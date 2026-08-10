@@ -2,15 +2,36 @@
 
 use std::time::Instant;
 
-#[derive(Debug, Clone, Default)]
+/// Sentinel value for `DlxNode::row_id` indicating this node is *not* a data
+/// node (root / column header).  Replaces `Option<usize>` to shrink the struct
+/// from 64 to 56 bytes (12.5 %). (doc 16 §2 D6.)
+const NO_ROW: usize = usize::MAX;
+
+#[derive(Debug, Clone)]
 struct DlxNode {
     left: usize,
     right: usize,
     up: usize,
     down: usize,
     col: usize,
-    row_id: Option<usize>,
+    /// `NO_ROW` for root/header nodes; otherwise the placement index.
+    row_id: usize,
     count: usize,
+}
+
+// Manual Default so `row_id` defaults to `NO_ROW` (usize::MAX), not 0.
+impl Default for DlxNode {
+    fn default() -> Self {
+        DlxNode {
+            left: 0,
+            right: 0,
+            up: 0,
+            down: 0,
+            col: 0,
+            row_id: NO_ROW,
+            count: 0,
+        }
+    }
 }
 
 /// Dancing Links solver for exact cover problems.
@@ -74,7 +95,7 @@ impl DancingLinks {
                 up: c,
                 down: hdr_down,
                 col: c,
-                row_id: Some(row_id),
+                row_id,
                 count: 0,
             });
             let idx = self.nodes.len() - 1;
@@ -188,8 +209,8 @@ impl DancingLinks {
         let c_node = col + 1;
         let mut r = self.nodes[c_node].down;
         while r != c_node {
-            let row_id = self.nodes[r].row_id;
-            if let Some(rid) = row_id {
+            let rid = self.nodes[r].row_id;
+            if rid != NO_ROW {
                 partial.push(rid);
 
                 // Incremental check

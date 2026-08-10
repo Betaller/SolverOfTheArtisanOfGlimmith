@@ -264,9 +264,13 @@ fn generate_all_placements(puzzle: &Puzzle, ctx: &SolveContext) -> Vec<Placement
                     continue; // too loosely constrained
                 }
 
-                let results = generate_compass_polyominoes(puzzle, r, c, comp);
+                let mut results = generate_compass_polyominoes(puzzle, r, c, comp);
+                // D8: truncate instead of discarding when too many compass placements
+                // are generated.  The first N placements are still useful; discarding
+                // all of them (old `continue`) skipped DLX entirely for these clues.
+                // (doc 16 §2 D8.)
                 if results.len() > MAX_COMPASS_PLACEMENTS {
-                    continue;
+                    results.truncate(MAX_COMPASS_PLACEMENTS);
                 }
                 for cells in results {
                     let area = cells.len();

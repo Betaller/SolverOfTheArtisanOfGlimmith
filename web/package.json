@@ -5,7 +5,7 @@
   "type": "module",
   "description": "The Artisan of Glimmith — browser UI + WebAssembly solver (rsolver).",
   "scripts": {
-    "build:wasm": "cd ../rsolver && wasm-pack build --target web --out-dir ../web/src/wasm --release",
+    "build:wasm": "cd ../rsolver && cargo build --target wasm32-unknown-unknown --release && wasm-bindgen target/wasm32-unknown-unknown/release/rsolver.wasm --target web --out-dir ../web/src/wasm",
     "data": "node scripts/bundle-puzzles.mjs",
     "dev": "npm run build:wasm && vite",
     "build": "npm run build:wasm && vite build",

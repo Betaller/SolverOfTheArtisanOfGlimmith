@@ -77,6 +77,12 @@ async function main() {
       category,
       url: `data/${id}.json`,
       has_answer: answer != null,
+      height: puzzle.grid?.height ?? 0,
+      width: puzzle.grid?.width ?? 0,
+      rules: (puzzle.rules ?? []).map((r) => r.type),
+      blocked_count: (puzzle.cells ?? []).filter((c) => c.blocked).length,
+      has_boundaries: (puzzle.edges ?? []).some((e) => e.is_boundary),
+      difficulty: puzzle._meta?.archive_difficulty ?? null,
     })
   }
 

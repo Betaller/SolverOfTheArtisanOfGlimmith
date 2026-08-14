@@ -35,8 +35,20 @@ mod wasm_impl {
     /// (milliseconds since the page/worker time origin — monotonic, no wall-clock
     /// jumps). Implements exactly the operations the solver uses: `now()`,
     /// `Add<Duration>`, ordering, and `elapsed()`.
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+    ///
+    /// `f64` has no `Eq`/`Ord` (NaN breaks ordering), but `performance.now()`
+    /// never returns NaN, so we hand-write a total order to match
+    /// `std::time::Instant`'s `Eq + Ord` API.
+    #[derive(Clone, Copy, PartialEq, PartialOrd, Debug)]
     pub struct Instant(f64);
+
+    impl Eq for Instant {}
+
+    impl Ord for Instant {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            self.0.total_cmp(&other.0)
+        }
+    }
 
     impl Instant {
         pub fn now() -> Self {

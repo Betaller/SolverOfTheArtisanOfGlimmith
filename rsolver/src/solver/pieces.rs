@@ -4,7 +4,7 @@
 //! shape pool), builds a DLX matrix (columns = cells), and finds exact cover.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::time::Instant;
+use crate::clock::Instant;
 
 use crate::dlx::DancingLinks;
 use crate::polyomino;

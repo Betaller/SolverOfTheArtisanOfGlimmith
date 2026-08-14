@@ -2,7 +2,7 @@
 //! (dfs.cpp equivalents).
 
 use std::cell::RefMut;
-use std::time::Instant;
+use crate::clock::Instant;
 
 use super::types::*;
 use super::types::{Node, Pools, PlaceLevel};

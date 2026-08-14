@@ -3,7 +3,7 @@
 //! misses.
 
 use std::collections::{HashSet, VecDeque};
-use std::time::Instant;
+use crate::clock::Instant;
 
 use crate::types::Puzzle;
 

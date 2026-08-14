@@ -1,7 +1,7 @@
 //! Core solver state: grid construction, shape catalog, and constraint checks.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use crate::clock::Instant;
 
 use crate::types::*;
 use super::types::*;

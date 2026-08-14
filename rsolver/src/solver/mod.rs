@@ -10,7 +10,7 @@ pub mod validate;
 
 use crate::types::*;
 use std::collections::HashMap;
-use std::time::Instant;
+use crate::clock::Instant;
 
 pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     let start = Instant::now();

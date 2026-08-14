@@ -7,7 +7,7 @@
 //! size constraint" puzzles (e.g. C4-1, 0277).
 
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use crate::clock::Instant;
 
 use crate::types::Puzzle;
 

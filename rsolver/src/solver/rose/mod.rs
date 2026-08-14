@@ -11,7 +11,7 @@ pub mod region_match;
 pub mod rose_growth;
 
 use std::collections::HashMap;
-use std::time::Instant;
+use crate::clock::Instant;
 
 use crate::shapes::rose_symbol_types;
 use crate::types::{Puzzle, RegionInfo};
@@ -195,7 +195,7 @@ fn solve_rose_with_pin(
     let deadline = *start + std::time::Duration::from_millis(timeout_ms);
     for assignment in &assignments {
         // Budget guard: stop trying assignments if we're out of time.
-        if std::time::Instant::now() >= deadline {
+        if crate::clock::Instant::now() >= deadline {
             return None;
         }
 

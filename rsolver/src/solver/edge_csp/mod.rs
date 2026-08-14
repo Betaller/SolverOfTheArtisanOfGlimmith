@@ -38,7 +38,10 @@ struct Snapshot {
 
 /// The edge-variable search state.  All fields are `pub(crate)` so the
 /// propagation submodule (`prop.rs`) can reach them directly.
-pub(crate) struct Solver {
+pub(crate) struct Solver<'a> {
+    /// Borrowed for leaf validation (`validate::validate`) — a completed edge
+    /// assignment is only accepted when it passes the full 22-rule check.
+    pub puzzle: &'a Puzzle,
     pub grid: Grid,
     pub cell_clues: Vec<CellClue>,
     pub edge_clues: Vec<EdgeClue>,
@@ -64,6 +67,7 @@ pub(crate) struct Solver {
     pub comp_cells: Vec<Vec<CellId>>,
     pub in_probing: bool,
     pub has_compass_clue: bool,
+    pub has_palisade_clue: bool,
     pub prop: PropagationState,
     // Edge-selection cache.
     pub growth_edge_count: Vec<usize>,
@@ -77,8 +81,8 @@ pub(crate) struct Solver {
     pub solution_regions: Option<Vec<RegionInfo>>,
 }
 
-impl Solver {
-    fn new(input: Input, deadline: Instant) -> Self {
+impl<'a> Solver<'a> {
+    fn new(input: Input, deadline: Instant, puzzle: &'a Puzzle) -> Self {
         let n = input.grid.num_edges();
         let nc = input.grid.num_cells();
 
@@ -103,8 +107,13 @@ impl Solver {
             .cell_clues
             .iter()
             .any(|c| matches!(c, CellClue::Compass { .. }));
+        let has_palisade_clue = input
+            .cell_clues
+            .iter()
+            .any(|c| matches!(c, CellClue::Palisade { .. }));
 
         let mut solver = Self {
+            puzzle,
             grid: input.grid,
             cell_clues: input.cell_clues,
             edge_clues: input.edge_clues,
@@ -127,6 +136,7 @@ impl Solver {
             comp_cells: Vec::new(),
             in_probing: false,
             has_compass_clue,
+            has_palisade_clue,
             prop: PropagationState::new(diff_clues, nc),
             growth_edge_count: Vec::new(),
             watchtower_vertices,
@@ -417,7 +427,15 @@ impl Solver {
         }
 
         if self.curr_unknown == 0 {
-            self.solution_regions = Some(self.extract_regions());
+            // Leaf: validate the completed edge assignment against the full
+            // 22-rule checker.  Accept only if valid — otherwise backtrack and
+            // keep searching (essential for compass, whose direction counts are
+            // only partially propagated and so the first complete assignment is
+            // often invalid).
+            let regions = self.extract_regions();
+            if crate::solver::validate::validate(self.puzzle, &regions) {
+                self.solution_regions = Some(regions);
+            }
             return;
         }
 
@@ -451,11 +469,10 @@ impl Solver {
 
 /// Entry point: solve via the edge-variable CSP solver.
 ///
-/// The result is re-validated against the full 22-rule `validate::validate`
-/// before being returned, so any assignment that only satisfies the propagated
-/// subset (e.g. compass area but not compass direction counts) is rejected and
-/// the router falls through to the other solvers instead of accepting a wrong
-/// answer.
+/// Solutions are accepted at the leaf only after passing the full 22-rule
+/// `validate::validate` (see `backtrack_edges`), and the returned regions are
+/// re-validated once more as a defensive backstop — so a wrong answer can never
+/// pass; the router falls through to the other solvers instead.
 pub fn solve_edge_csp(
     puzzle: &Puzzle,
     _start: &Instant,
@@ -463,16 +480,9 @@ pub fn solve_edge_csp(
 ) -> Option<Vec<RegionInfo>> {
     let input = adapter::build_input(puzzle);
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    let mut solver = Solver::new(input, deadline);
+    let mut solver = Solver::new(input, deadline, puzzle);
     let regions = solver.solve()?;
-    let ok = crate::solver::validate::validate(puzzle, &regions);
-    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
-        eprintln!("edge_csp: validate={} regions={}", ok, regions.len());
-        for r in &regions {
-            eprintln!("  rid={} area={} cells={:?}", r.region_id, r.area, r.cells);
-        }
-    }
-    if ok {
+    if crate::solver::validate::validate(puzzle, &regions) {
         Some(regions)
     } else {
         None
@@ -496,7 +506,7 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
         "inequality",
         "difference",
     ];
-    const SUPPORTED: [&str; 9] = [
+    const SUPPORTED: [&str; 10] = [
         "ring",
         "brick",
         "watchtower",
@@ -506,6 +516,7 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
         "area",
         "precise",
         "range",
+        "fence",
     ];
     let has_edge = puzzle
         .rules

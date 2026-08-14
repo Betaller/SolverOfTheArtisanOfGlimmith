@@ -32,17 +32,66 @@ pub struct CompassData {
     pub w: Option<usize>,
 }
 
+/// Fence (palisade) clue: how the 4 edges around a cell are cut, up to rotation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PalisadeKind {
+    /// p0: no edges cut.
+    None,
+    /// p1: exactly one edge cut.
+    One,
+    /// p=: two opposite edges cut.
+    Opposite,
+    /// p2: two adjacent edges cut.
+    Adjacent,
+    /// p3: three edges cut.
+    Three,
+    /// p4: all four edges cut.
+    All,
+}
+
+impl PalisadeKind {
+    pub fn cut_count(self) -> usize {
+        match self {
+            Self::None => 0,
+            Self::One => 1,
+            Self::Opposite | Self::Adjacent => 2,
+            Self::Three => 3,
+            Self::All => 4,
+        }
+    }
+
+    /// Returns `(expected_cut_count, edge_mask)` for a given rotation.
+    /// Mask bits follow `cell_edges` order: north=0, south=1, west=2, east=3.
+    /// Rotations go clockwise (north → east → south → west), so the cycle in bit
+    /// positions is [0, 3, 1, 2].
+    pub fn pattern_at_rotation(self, rot: usize) -> (usize, u8) {
+        const CYCLE: [u8; 4] = [0, 3, 1, 2];
+        let bit = |i: usize| -> u8 { 1 << CYCLE[i % 4] };
+        match self {
+            Self::None => (0, 0),
+            Self::One => (1, bit(rot)),
+            Self::Opposite => (2, bit(rot) | bit(rot + 2)),
+            Self::Adjacent => (2, bit(rot) | bit(rot + 1)),
+            Self::Three => (3, 0xF & !bit(rot)),
+            Self::All => (4, 0xF),
+        }
+    }
+}
+
 /// Cell-level clue (at most one per cell in the source model).
 #[derive(Clone, Debug)]
 pub enum CellClue {
     Area { cell: CellId, value: usize },
     Compass { cell: CellId, compass: CompassData },
+    Palisade { cell: CellId, kind: PalisadeKind },
 }
 
 impl CellClue {
     pub fn cell(&self) -> CellId {
         match self {
-            CellClue::Area { cell, .. } | CellClue::Compass { cell, .. } => *cell,
+            CellClue::Area { cell, .. }
+            | CellClue::Compass { cell, .. }
+            | CellClue::Palisade { cell, .. } => *cell,
         }
     }
 }

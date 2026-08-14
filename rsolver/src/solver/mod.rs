@@ -2,6 +2,7 @@
 
 pub mod aog;
 pub mod backtrack;
+pub mod edge_csp;
 pub mod fence;
 pub mod pieces;
 pub mod prototypes;
@@ -47,9 +48,9 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         };
     }
 
-    // `timeout_ms` is a UNIT budget: each of aog / pieces / backtrack gets the
-    // full timeout as its own deadline (not a share of it).  The Python side
-    // gives the subprocess enough wall-clock (3×) for all three to run.
+    // `timeout_ms` is a UNIT budget: each of aog / edge_csp / pieces / backtrack
+    // gets the full timeout as its own deadline (not a share of it).  The Python
+    // side gives the subprocess enough wall-clock (`RUST_PARTS`×) for all to run.
 
     // 0. AoG DFS solver first: direct port of the C++ reference solver.
     // For pure rose_window puzzles aog solves most in <1s but can hang for the
@@ -102,6 +103,17 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
                 rule_results: Default::default(),
                 solver: "aog".to_string(),
             };
+        }
+    }
+
+    // Solver dispatch:
+    // 1. edge_csp post-fallback for edge-constraint-dense puzzles (ring / brick /
+    //    watchtower / compass / inequality / difference) that aog couldn't solve.
+    //    Returns a `build_solution`-validated result (non-trusted: the router's
+    //    `validate::validate` gate re-checks it), so a wrong answer can't pass.
+    if edge_csp::is_edge_csp_capable(puzzle) {
+        if let Some(regions) = edge_csp::solve_edge_csp(puzzle, &start, timeout_ms) {
+            return build_solution(regions, &start, puzzle, "edge_csp");
         }
     }
 

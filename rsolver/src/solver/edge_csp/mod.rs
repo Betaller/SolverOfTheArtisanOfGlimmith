@@ -1,0 +1,536 @@
+//! Edge-variable CSP solver.
+//!
+//! An independent solver for the edge-constraint-dense rules where the
+//! cell-variable aog DFS is a poor fit: `ring`, `brick`, `watchtower`,
+//! `compass`, `inequality`, `difference`.  It maintains an explicit three-state
+//! edge array (`Unknown`/`Cut`/`Uncut`) and runs a fixed-point propagation loop
+//! (vertex-degree, area bounds, clue propagation) plus failed-literal probing,
+//! then a DFS over the remaining unknown edges.
+//!
+//! The internal `EdgeState` array is local to this solver — the global
+//! `Edge.is_boundary` model (52 read sites across the codebase) is untouched.
+//! A completed edge assignment is flood-filled into regions and handed to the
+//! router's `validate::validate` gate via `build_solution`, so a wrong answer
+//! can never pass (the router independently re-verifies every solver's output).
+
+pub mod adapter;
+pub mod grid;
+pub mod prop;
+pub mod types;
+
+use std::collections::{HashSet, VecDeque};
+use std::time::Duration;
+
+use crate::clock::Instant;
+use crate::solver::rose;
+use crate::types::{Puzzle, RegionInfo};
+
+use adapter::Input;
+use grid::Grid;
+use prop::PropagationState;
+use types::*;
+
+/// Snapshot of undo-trail length for backtracking (trail-based restore).
+#[derive(Clone, Copy, Debug)]
+struct Snapshot {
+    edges: usize,
+}
+
+/// The edge-variable search state.  All fields are `pub(crate)` so the
+/// propagation submodule (`prop.rs`) can reach them directly.
+pub(crate) struct Solver {
+    pub grid: Grid,
+    pub cell_clues: Vec<CellClue>,
+    pub edge_clues: Vec<EdgeClue>,
+    pub vertex_clues: Vec<VertexClue>,
+    pub rules: GlobalRules,
+    pub edges: Vec<EdgeState>,
+    /// Undo trail: (edge, previous_state), appended by every `set_edge`.
+    pub changed: Vec<(EdgeId, EdgeState)>,
+    pub is_pre_cut: Vec<bool>,
+    pub eff_min_area: usize,
+    pub eff_max_area: usize,
+    pub total_cells: usize,
+    pub curr_unknown: usize,
+    pub node_count: u64,
+    // Cached component info from the last `build_components`.
+    pub curr_comp_id: Vec<usize>,
+    pub curr_comp_sz: Vec<usize>,
+    pub curr_target_area: Vec<Option<usize>>,
+    // Reusable buffers.
+    pub q_buf: Vec<usize>,
+    pub visited_buf: Vec<bool>,
+    pub can_grow_buf: Vec<bool>,
+    pub comp_cells: Vec<Vec<CellId>>,
+    pub in_probing: bool,
+    pub has_compass_clue: bool,
+    pub prop: PropagationState,
+    // Edge-selection cache.
+    pub growth_edge_count: Vec<usize>,
+    pub watchtower_vertices: HashSet<VertexId>,
+    // Pre-computed cell clue index.
+    pub cell_clues_indexed: Vec<Vec<usize>>,
+    // Deadline / timeout bookkeeping.
+    pub deadline: Instant,
+    pub timed_out: bool,
+    // First solution found.
+    pub solution_regions: Option<Vec<RegionInfo>>,
+}
+
+impl Solver {
+    fn new(input: Input, deadline: Instant) -> Self {
+        let n = input.grid.num_edges();
+        let nc = input.grid.num_cells();
+
+        let mut cell_clues_indexed = vec![vec![]; nc];
+        for (i, clue) in input.cell_clues.iter().enumerate() {
+            cell_clues_indexed[clue.cell()].push(i);
+        }
+
+        let diff_clues: Vec<(EdgeId, usize)> = input
+            .edge_clues
+            .iter()
+            .filter_map(|cl| match cl.kind {
+                EdgeClueKind::Diff { value } => Some((cl.edge, value)),
+                _ => None,
+            })
+            .collect();
+
+        let watchtower_vertices: HashSet<VertexId> =
+            input.vertex_clues.iter().map(|cl| cl.vertex).collect();
+
+        let has_compass_clue = input
+            .cell_clues
+            .iter()
+            .any(|c| matches!(c, CellClue::Compass { .. }));
+
+        let mut solver = Self {
+            grid: input.grid,
+            cell_clues: input.cell_clues,
+            edge_clues: input.edge_clues,
+            vertex_clues: input.vertex_clues,
+            rules: input.rules,
+            edges: vec![EdgeState::Unknown; n],
+            changed: Vec::new(),
+            is_pre_cut: vec![false; n],
+            eff_min_area: input.min_area,
+            eff_max_area: input.max_area,
+            total_cells: 0,
+            curr_unknown: n,
+            node_count: 0,
+            curr_comp_id: Vec::new(),
+            curr_comp_sz: Vec::new(),
+            curr_target_area: Vec::new(),
+            q_buf: Vec::with_capacity(nc),
+            visited_buf: vec![false; nc],
+            can_grow_buf: Vec::new(),
+            comp_cells: Vec::new(),
+            in_probing: false,
+            has_compass_clue,
+            prop: PropagationState::new(diff_clues, nc),
+            growth_edge_count: Vec::new(),
+            watchtower_vertices,
+            cell_clues_indexed,
+            deadline,
+            timed_out: false,
+            solution_regions: None,
+        };
+
+        for &e in &input.pre_cut {
+            solver.mark_pre_cut(e);
+        }
+        solver
+    }
+
+    fn mark_pre_cut(&mut self, e: EdgeId) {
+        self.is_pre_cut[e] = true;
+        if self.edges[e] == EdgeState::Unknown {
+            self.edges[e] = EdgeState::Cut;
+            self.changed.push((e, EdgeState::Unknown));
+        }
+    }
+
+    pub(crate) fn set_edge(&mut self, e: EdgeId, s: EdgeState) -> bool {
+        if self.edges[e] == s {
+            return true;
+        }
+        if self.edges[e] != EdgeState::Unknown {
+            return false;
+        }
+        self.edges[e] = s;
+        self.curr_unknown -= 1;
+        self.changed.push((e, EdgeState::Unknown));
+        true
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            edges: self.changed.len(),
+        }
+    }
+
+    fn restore(&mut self, snap: Snapshot) {
+        while self.changed.len() > snap.edges {
+            let (e, old_state) = self.changed.pop().unwrap();
+            if self.edges[e] != EdgeState::Unknown && old_state == EdgeState::Unknown {
+                self.curr_unknown += 1;
+            }
+            self.edges[e] = old_state;
+        }
+    }
+
+    /// Run `setup` then propagate; always restores.  Returns true iff both
+    /// succeeded (used by failed-literal probing).
+    fn probe(&mut self, setup: impl FnOnce(&mut Self) -> bool) -> bool {
+        let snap = self.snapshot();
+        let ok = setup(self) && self.propagate().is_ok();
+        self.restore(snap);
+        ok
+    }
+
+    #[inline]
+    pub(crate) fn is_sealed(&self, ci: usize) -> bool {
+        ci < self.can_grow_buf.len() && !self.can_grow_buf[ci]
+    }
+
+    #[inline]
+    pub(crate) fn is_growing(&self, ci: usize) -> bool {
+        ci < self.can_grow_buf.len() && self.can_grow_buf[ci]
+    }
+
+    fn check_deadline(&mut self) -> bool {
+        if Instant::now() >= self.deadline {
+            self.timed_out = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Entry: returns the first valid region assignment, or `None` (no solution
+    /// or timed out).  The router re-validates via `validate::validate`.
+    pub fn solve(&mut self) -> Option<Vec<RegionInfo>> {
+        self.total_cells = self.grid.total_existing_cells();
+
+        // Edges adjacent to a blocked/outside cell are outer borders → Cut.
+        for e in 0..self.grid.num_edges() {
+            let (c1, c2) = self.grid.edge_cells(e);
+            if (!self.grid.cell_exists[c1] || !self.grid.cell_exists[c2])
+                && self.edges[e] == EdgeState::Unknown
+            {
+                self.set_edge(e, EdgeState::Cut);
+            }
+        }
+
+        self.curr_unknown = self
+            .edges
+            .iter()
+            .filter(|&&e| e == EdgeState::Unknown)
+            .count();
+
+        // Pre-compute compass clue indices (fast iteration during propagation).
+        if self.has_compass_clue {
+            self.prop.compass_clue_indices = self
+                .cell_clues
+                .iter()
+                .enumerate()
+                .filter_map(|(i, cl)| match cl {
+                    CellClue::Compass { cell, .. } if self.grid.cell_exists[*cell] => Some(i),
+                    _ => None,
+                })
+                .collect();
+        }
+
+        if self.propagate().is_err() {
+            return None;
+        }
+
+        self.backtrack_edges();
+
+        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+            eprintln!(
+                "edge_csp: nodes={} unknown={} solved={} timed_out={}",
+                self.node_count,
+                self.curr_unknown,
+                self.solution_regions.is_some(),
+                self.timed_out
+            );
+        }
+
+        self.solution_regions.take()
+    }
+
+    /// Flood-fill decided-Uncut edges into connected components, then build
+    /// `region_of` and reuse `rose::build_regions` to produce `RegionInfo`.
+    /// Only called when `curr_unknown == 0` (every edge decided).
+    fn extract_regions(&self) -> Vec<RegionInfo> {
+        let n = self.grid.num_cells();
+        let mut comp = vec![usize::MAX; n];
+        let mut num_pieces = 0usize;
+        for c in 0..n {
+            if !self.grid.cell_exists[c] || comp[c] != usize::MAX {
+                continue;
+            }
+            comp[c] = num_pieces;
+            let mut q = VecDeque::new();
+            q.push_back(c);
+            while let Some(cur) = q.pop_front() {
+                for eid in self.grid.cell_edges(cur).into_iter().flatten() {
+                    let (c1, c2) = self.grid.edge_cells(eid);
+                    let other = if c1 == cur { c2 } else { c1 };
+                    if !self.grid.cell_exists[other] || comp[other] != usize::MAX {
+                        continue;
+                    }
+                    if self.edges[eid] != EdgeState::Cut {
+                        comp[other] = num_pieces;
+                        q.push_back(other);
+                    }
+                }
+            }
+            num_pieces += 1;
+        }
+        let mut region_of = vec![None; n];
+        for c in 0..n {
+            if self.grid.cell_exists[c] {
+                region_of[c] = Some(comp[c]);
+            }
+        }
+        rose::build_regions(&region_of, self.grid.rows, self.grid.cols)
+    }
+
+    /// Multi-factor edge selection (target area, sealed/growing, watchtower).
+    fn select_edge(&mut self) -> Option<(EdgeId, i32)> {
+        let num_edges = self.grid.num_edges();
+        if self.curr_comp_id.is_empty() {
+            for e in 0..num_edges {
+                if self.edges[e] == EdgeState::Unknown {
+                    return Some((e, 0));
+                }
+            }
+            return None;
+        }
+
+        let mut best_e = None;
+        let mut best_score = i32::MIN;
+        for e in 0..num_edges {
+            if self.edges[e] != EdgeState::Unknown {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            let sz1 = self.curr_comp_sz[ci1];
+            let sz2 = self.curr_comp_sz[ci2];
+
+            let mut score = 0i32;
+            if let Some(target) = self.curr_target_area[ci1] {
+                score += if sz1 < target { 100 } else { 1 };
+            } else {
+                score += 10;
+            }
+            if let Some(target) = self.curr_target_area[ci2] {
+                score += if sz2 < target { 100 } else { 1 };
+            } else {
+                score += 10;
+            }
+
+            // Cutting would seal a component that still has a target to reach.
+            if ci1 < self.growth_edge_count.len()
+                && self.growth_edge_count[ci1] == 1
+                && self.curr_target_area[ci1].is_some()
+            {
+                score += 75;
+            }
+            if ci2 < self.growth_edge_count.len()
+                && self.growth_edge_count[ci2] == 1
+                && self.curr_target_area[ci2].is_some()
+            {
+                score += 75;
+            }
+
+            let sealed1 = self.is_sealed(ci1);
+            let sealed2 = self.is_sealed(ci2);
+            if sealed1 ^ sealed2 {
+                let other_ci = if sealed1 { ci2 } else { ci1 };
+                if self.curr_target_area[other_ci].is_some() {
+                    score += 50;
+                }
+            }
+
+            // Edge incident to a watchtower vertex.
+            if !self.watchtower_vertices.is_empty() {
+                let (v1, v2) = self.grid.edge_vertices(e);
+                if self.watchtower_vertices.contains(&v1) || self.watchtower_vertices.contains(&v2)
+                {
+                    score += 25;
+                }
+            }
+
+            if score > best_score {
+                best_score = score;
+                best_e = Some((e, score));
+                if score >= 200 {
+                    break;
+                }
+            }
+        }
+        best_e
+    }
+
+    /// Whether to try `Cut` before `Uncut` for the selected edge.
+    fn prefer_cut_first(&self, e: EdgeId) -> bool {
+        if self.curr_comp_id.is_empty() {
+            return true;
+        }
+        let (c1, c2) = self.grid.edge_cells(e);
+        if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+            return true;
+        }
+        let ci1 = self.curr_comp_id[c1];
+        let ci2 = self.curr_comp_id[c2];
+        let sz1 = self.curr_comp_sz[ci1];
+        let sz2 = self.curr_comp_sz[ci2];
+        // A component below its target wants to grow → prefer Uncut.
+        if let Some(target) = self.curr_target_area[ci1] {
+            if sz1 < target {
+                return false;
+            }
+        }
+        if let Some(target) = self.curr_target_area[ci2] {
+            if sz2 < target {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn backtrack_edges(&mut self) {
+        if self.solution_regions.is_some() || self.timed_out {
+            return;
+        }
+        self.node_count += 1;
+        if self.node_count % 1024 == 0 && self.check_deadline() {
+            return;
+        }
+
+        if self.curr_unknown == 0 {
+            self.solution_regions = Some(self.extract_regions());
+            return;
+        }
+
+        let Some((e, _score)) = self.select_edge() else {
+            return;
+        };
+
+        let cut_first = self.prefer_cut_first(e);
+        let order: &[EdgeState; 2] = if cut_first {
+            &[EdgeState::Cut, EdgeState::Uncut]
+        } else {
+            &[EdgeState::Uncut, EdgeState::Cut]
+        };
+
+        for &val in order {
+            if self.solution_regions.is_some() || self.timed_out {
+                return;
+            }
+            let snap = self.snapshot();
+            if !self.set_edge(e, val) {
+                continue;
+            }
+            match self.propagate() {
+                Ok(_) => self.backtrack_edges(),
+                Err(_) => {}
+            }
+            self.restore(snap);
+        }
+    }
+}
+
+/// Entry point: solve via the edge-variable CSP solver.
+///
+/// The result is re-validated against the full 22-rule `validate::validate`
+/// before being returned, so any assignment that only satisfies the propagated
+/// subset (e.g. compass area but not compass direction counts) is rejected and
+/// the router falls through to the other solvers instead of accepting a wrong
+/// answer.
+pub fn solve_edge_csp(
+    puzzle: &Puzzle,
+    _start: &Instant,
+    timeout_ms: u64,
+) -> Option<Vec<RegionInfo>> {
+    let input = adapter::build_input(puzzle);
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut solver = Solver::new(input, deadline);
+    let regions = solver.solve()?;
+    let ok = crate::solver::validate::validate(puzzle, &regions);
+    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+        eprintln!("edge_csp: validate={} regions={}", ok, regions.len());
+        for r in &regions {
+            eprintln!("  rid={} area={} cells={:?}", r.region_id, r.area, r.cells);
+        }
+    }
+    if ok {
+        Some(regions)
+    } else {
+        None
+    }
+}
+
+/// Post-fallback trigger: puzzles whose rules are all in the set this solver
+/// propagates (ring / brick / watchtower / compass / inequality / difference,
+/// plus area numbers and global area bounds).
+///
+/// Rules edge_csp does NOT propagate (rose / shape / fence / boxy / solitary /
+/// size-separation / shape-delta-gemini) are excluded — for those, the search
+/// would only be filtered at the leaf by `validate::validate`, wasting the whole
+/// budget; the dedicated rose / pieces / aog solvers handle them instead.
+pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
+    const EDGE_RULES: [&str; 6] = [
+        "ring",
+        "brick",
+        "watchtower",
+        "compass",
+        "inequality",
+        "difference",
+    ];
+    const SUPPORTED: [&str; 9] = [
+        "ring",
+        "brick",
+        "watchtower",
+        "compass",
+        "inequality",
+        "difference",
+        "area",
+        "precise",
+        "range",
+    ];
+    let has_edge = puzzle
+        .rules
+        .iter()
+        .any(|r| EDGE_RULES.contains(&r.ctype.as_str()));
+    if !has_edge {
+        return false;
+    }
+    puzzle
+        .rules
+        .iter()
+        .all(|r| SUPPORTED.contains(&r.ctype.as_str()))
+}
+
+/// Preempt trigger: ring puzzles with no size constraint (aog OOM risk).
+/// Reserved for iteration 2 (route edge_csp *before* aog for the ring puzzles
+/// aog OOMs on); not yet wired.
+#[allow(dead_code)]
+pub fn is_edge_csp_preempt(puzzle: &Puzzle) -> bool {
+    let has_ring = puzzle.rules.iter().any(|r| r.ctype == "ring");
+    let has_size = puzzle.rules.iter().any(|r| {
+        matches!(
+            r.ctype.as_str(),
+            "precise" | "range" | "area" | "shape_pool" | "puzzle_piece"
+        )
+    });
+    has_ring && !has_size
+}

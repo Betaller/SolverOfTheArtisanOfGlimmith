@@ -175,7 +175,12 @@ fn try_place_id(x: i32, y: i32, value: i32, visited_value: i32, core: &mut AoGCo
     let mut count = value;
     if let Some(neighbors) = core.dfs_ctx.block_adj.get(&key).cloned() {
         for n in neighbors {
-            count += try_place_id(n.x, n.y, !value, visited_value, core);
+            // `1 - value` flips the 0/1 bipartition color. The C++ original uses
+            // `!value` (logical NOT → 0↔1), but Rust's `!` on an i32 is bitwise
+            // NOT (→ -1/-2), which produced negative counts, wrapped the usize
+            // cast, and overflowed `empty_block_line_count` (panic / `unreachable
+            // executed` under wasm).
+            count += try_place_id(n.x, n.y, 1 - value, visited_value, core);
         }
     }
     count

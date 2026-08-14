@@ -64,7 +64,8 @@ TypeScript + Vite + Pinia。纯静态站点，由 GitHub Pages 托管：
   构建 `web/dist` 并发布到 Pages（站点根）；`web/public/trend/` 随站点部署到 `/trend/`。
 - **本地构建 / 开发**：见 [`web/README.md`](web/README.md)。
 
-> 已知边界（MVP）：画板目前是只读渲染（官方题浏览 + 求解），规则 / 边 / 顶点的交互编辑尚未实现。
+> 画板支持完整交互编辑（规则 / 边 / 顶点 / 单元格 / 形状池）；浏览器端求解默认 5s 超时，
+> 官方难题可能「超时未解」，详见 [`web/README.md`](web/README.md)。
 
 ## 求解器架构
 

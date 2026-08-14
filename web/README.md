@@ -11,9 +11,11 @@ web/
 │   ├── worker/solver.worker.ts   # 加载 wasm、在 worker 中求解
 │   ├── worker/solverClient.ts    # 主线程 promise 封装
 │   ├── lib/types.ts              # 与 rsolver 对齐的 JSON 协议类型
-│   ├── lib/codec.ts              # 网格模型 / 区域着色 / 序列化
+│   ├── lib/model.ts              # 网格模型 / 边·顶点索引 / 区域着色
+│   ├── lib/theme.ts              # 主题色 + 22 条规则常量
+│   ├── lib/shapes.ts             # 多联骨牌规范化 / 枚举
 │   ├── store/puzzle.ts           # Pinia：官方解优先，求解器兜底
-│   └── components/               # GridBoard（SVG 画板）/ PuzzleBrowser（题库）
+│   └── components/               # GridCanvas（SVG 画板）/ 工具 / 规则 / 属性 / 题库
 ├── scripts/bundle-puzzles.mjs    # 打包官方题 + 官方解 → public/data/
 └── public/data/                  # 生成物（gitignore，不入库）
 ```
@@ -53,16 +55,17 @@ cd web && npm run dev
 
 ## 部署到 GitHub Pages
 
-推送到 `web-wasm-static-site` 分支即触发 `.github/workflows/deploy.yml`，把
+推送到 `main` 分支即触发 `.github/workflows/deploy.yml`，把
 `web/dist/` 发布到 GitHub Pages。要点：
 
 - `vite.config.ts` 用 `base: './'`（相对路径），兼容 `https://<user>.github.io/<repo>/` 子路径。
 - GitHub Pages 默认以 `application/wasm` 提供 `.wasm`，无需额外配置。
 
-## 已知边界（MVP）
+## 交互编辑与已知边界
 
-- 画板目前是**只读渲染**（官方题浏览 + 求解）；规则/边/顶点的**交互编辑**尚未实现。
-- 渲染覆盖：blocked / number / symbol / 预画边界 / 区域着色；compass、fence/shape
-  pattern 的图形化显示待补。
-- 浏览器默认 5s 超时（`rsolver/src/wasm.rs::WEB_TIMEOUT_MS`），官方难题可能「超时未解」，
-  属预期（离线基准口径为 30s×3 段）。
+- **交互编辑已完整实现**：规则（全部 22 条，precise/range/shape_pool 参数）、边
+  （预画分割线 + heterogeneous/homogeneous/inequality/difference 约束 + 外边界）、
+  顶点（望塔）、单元格（blocked / number / symbol / compass / fence / shape pattern）、
+  形状池编辑，均可在画板或左右面板操作（工具 / 规则配置 / 属性面板）。
+- **已知边界**：浏览器默认 5s 超时（`rsolver/src/wasm.rs::WEB_TIMEOUT_MS`），官方难题
+  可能「超时未解」，属预期（离线基准口径为 30s×3 段）。

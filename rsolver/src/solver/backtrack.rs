@@ -1,7 +1,7 @@
 //! Region-by-region DFS backtracking solver with incremental constraint checking.
 
 use std::collections::{BTreeMap, HashSet};
-use std::time::Instant;
+use crate::clock::Instant;
 
 use crate::grid;
 use crate::types::*;

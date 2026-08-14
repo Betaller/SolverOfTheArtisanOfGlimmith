@@ -8,7 +8,7 @@ pub mod empty;
 pub mod search;
 pub mod types;
 
-use std::time::Instant;
+use crate::clock::Instant;
 
 use crate::types::*;
 use types::*;

@@ -3,9 +3,18 @@ name = "rsolver"
 version = "0.1.0"
 edition = "2021"
 
+# `cdylib` produces the .wasm for the browser build (via wasm-bindgen);
+# `rlib` keeps the native CLI/test linking unchanged.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Only pulled in for the browser build; native CLI/test builds never touch it.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
 
 [profile.release]
 opt-level = 3

@@ -15,32 +15,14 @@
 //! `RSOLVER_TIMEOUT_MS=0` cannot silently turn every puzzle into an instant
 //! timeout.
 //!
-//! The JSON model, puzzle building and serialization live in [`io`]; this entry
-//! point only reads stdin/argv and writes stdout.
-
-mod dlx;
-mod grid;
-mod io;
-mod polyomino;
-mod shapes;
-mod solver;
-mod types;
+//! The JSON model, puzzle building and serialization live in `rsolver::io`; this
+//! entry point only reads stdin/argv and writes stdout.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-/// Cached `AOG_DEBUG` env-var check. The raw `std::env::var("AOG_DEBUG").is_ok()`
-/// is a 50-100ns syscall + `OsString` heap allocation, called on hot DFS paths
-/// (search.rs / core.rs / region_match.rs — 21 sites). This caches the result
-/// in a `OnceLock` after the first read, so every subsequent call is a single
-/// `AtomicUsize` load (~1ns). The env var cannot change mid-process, so caching
-/// is sound. (White-捡 W1, doc 15 §1.)
-pub fn aog_debug_enabled() -> bool {
-    static CACHED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *CACHED.get_or_init(|| std::env::var("AOG_DEBUG").is_ok())
-}
-
-use io::{parse_puzzle, solve_json_line, solution_to_json_text};
+use rsolver::io::{parse_puzzle, solution_to_json_text, solve_json_line};
+use rsolver::solver;
 
 /// Default per-puzzle unit budget (ms) when `RSOLVER_TIMEOUT_MS` is unset or
 /// unparseable.  Matches the historical hardcoded value.

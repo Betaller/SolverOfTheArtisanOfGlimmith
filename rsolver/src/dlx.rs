@@ -1,6 +1,6 @@
 //! Dancing Links (Algorithm X) for exact cover.
 
-use std::time::Instant;
+use crate::clock::Instant;
 
 /// Sentinel value for `DlxNode::row_id` indicating this node is *not* a data
 /// node (root / column header).  Replaces `Option<usize>` to shrink the struct

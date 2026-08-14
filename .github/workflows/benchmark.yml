@@ -1,0 +1,87 @@
+name: Benchmark & trend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write      # commit solver-history.json / PNG / bench log back to main
+  pages: write         # deploy the trend page to GitHub Pages
+  id-token: write
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rsolver
+
+      - name: Build rsolver (release)
+        working-directory: rsolver
+        run: cargo build --release
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install chart dependency
+        run: pip install --quiet matplotlib
+
+      - name: Run official benchmark
+        run: |
+          mkdir -p results/bench
+          LOG="results/bench/$(date +%Y%m%d)_${GITHUB_SHA:0:7}_ci-bench.txt"
+          echo "BENCH_LOG=$LOG" >> "$GITHUB_ENV"
+          # 全量官方题基准（40s 口径，与官方题文档当前基准一致）。退出码非零是
+          # 预期（仍有 FAIL 题），因此 || true；真正失败由后续 append 步骤兜底。
+          python scripts/benchmark_rust_solver.py \
+            --dir puzzles/official --timeout 40 -j 8 --adaptive-j \
+            2>&1 | tee "$LOG" || true
+
+      - name: Update solver history
+        run: |
+          python scripts/solver_history.py append \
+            --log "$BENCH_LOG" \
+            --commit "${GITHUB_SHA:0:7}" \
+            --json docs/solver-history.json
+
+      - name: Render chart
+        run: python scripts/solver_history.py render
+
+      - name: Commit history + chart back to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/solver-history.json docs/solver-history.png "$BENCH_LOG"
+          if git diff --cached --quiet; then
+            echo "no change to commit"
+          else
+            git commit -m "chore(ci): update solver history [skip ci]"
+            git push
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy-pages:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

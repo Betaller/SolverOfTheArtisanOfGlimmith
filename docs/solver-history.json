@@ -1,0 +1,76 @@
+{
+  "unit": "官方谜题 (puzzles/official, 排除 -answer 目录)",
+  "total": 1258,
+  "latest": {
+    "date": "2026-08-14",
+    "commit": "edge-csp-solver",
+    "passed": 1072,
+    "total": 1258,
+    "pct": 85.21
+  },
+  "history": [
+    {
+      "date": "2026-08-05",
+      "commit": "33d32c5",
+      "passed": 1040,
+      "total": 1258,
+      "pct": 82.67
+    },
+    {
+      "date": "2026-08-05",
+      "commit": "4733f59",
+      "passed": 1048,
+      "total": 1258,
+      "pct": 83.31
+    },
+    {
+      "date": "2026-08-06",
+      "commit": "7e569e7",
+      "passed": 1047,
+      "total": 1258,
+      "pct": 83.23
+    },
+    {
+      "date": "2026-08-06",
+      "commit": "dfadfe3",
+      "passed": 1052,
+      "total": 1258,
+      "pct": 83.62
+    },
+    {
+      "date": "2026-08-07",
+      "commit": "6169df3",
+      "passed": 1046,
+      "total": 1258,
+      "pct": 83.15
+    },
+    {
+      "date": "2026-08-07",
+      "commit": "cd40cab",
+      "passed": 1047,
+      "total": 1258,
+      "pct": 83.23
+    },
+    {
+      "date": "2026-08-08",
+      "commit": "bd2f5f5",
+      "passed": 1052,
+      "total": 1258,
+      "pct": 83.62
+    },
+    {
+      "date": "2026-08-08",
+      "commit": "shape-cap-aog",
+      "passed": 1052,
+      "total": 1258,
+      "pct": 83.62
+    },
+    {
+      "date": "2026-08-14",
+      "commit": "edge-csp-solver",
+      "passed": 1072,
+      "total": 1258,
+      "pct": 85.21
+    }
+  ]
+}

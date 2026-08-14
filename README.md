@@ -20,6 +20,23 @@ python scripts/benchmark_rust_solver.py  # 官方题基准（每题 20s 超时�
 
 > `default_router()` 会急切构造 `RustSolver`，因此运行 app 与 `benchmark_rust_solver.py` 之前必须先 `cargo build --release`（二进制在 `rsolver/target/release/rsolver`）。
 
+## 求解能力
+
+官方谜题（`puzzles/official`，1258 题）求解进度，每次 `main` 提交由 CI 全量重跑并自动更新：
+
+![官方题解出](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FBetaller%2FSolverOfTheArtisanOfGlimmith%2Fmain%2Fdocs%2Fsolver-history.json&query=%24.latest.passed&label=%E5%AE%98%E6%96%B9%E9%A2%98%E8%A7%A3%E5%87%BA&color=%232a78d6)
+![占比](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FBetaller%2FSolverOfTheArtisanOfGlimmith%2Fmain%2Fdocs%2Fsolver-history.json&query=%24.latest.pct&label=%E5%8D%A0%E6%AF%94&suffix=%25&color=%232a78d6)
+
+![求解能力变化曲线](docs/solver-history.png)
+
+> 曲线纵轴为缩放后的求解率区间（非 0–100），以突出小幅变化。数据源 `docs/solver-history.json`
+> （历史点由 `docs/official-puzzles-status.md` 里程碑表解析而来，此后每次 `main` 提交由 CI 追加）；
+> 交互版见 [GitHub Pages](https://betaller.github.io/SolverOfTheArtisanOfGlimmith/)。
+
+CI（`.github/workflows/benchmark.yml`）：`main` 提交 → `cargo build --release` → 全量
+`benchmark_rust_solver.py --timeout 40 -j 8 --adaptive-j` → 解析「结果: X/Y 通过」→ 追加
+`docs/solver-history.json` → 重绘 PNG / Pages 页 → `[skip ci]` 提交回 `main` + 部署 Pages。
+
 ## 求解器架构
 
 **Rust 求解器**（`rsolver/`）是唯一求解引擎。Python 侧（`src/solver/`）只保留路由接口与

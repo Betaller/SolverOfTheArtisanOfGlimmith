@@ -54,10 +54,21 @@ function isAutoBoundary(e: EdgeJson): boolean {
   return !!(c1 && c2 && c1.blocked !== c2.blocked)
 }
 
+// In the solution display, an edge between two different assigned regions is a
+// region boundary (mirrors PyQt _on_solution_ready setting is_boundary).
+function separatesRegions(e: EdgeJson): boolean {
+  const c1 = cellAt(p.value, e.r1, e.c1)
+  const c2 = cellAt(p.value, e.r2, e.c2)
+  if (!c1 || !c2 || c1.blocked || c2.blocked) return false
+  const r1 = store.displayRegions?.get(cellKey(e.r1, e.c1))
+  const r2 = store.displayRegions?.get(cellKey(e.r2, e.c2))
+  return r1 != null && r2 != null && r1 !== r2
+}
+
 const boundaryLines = computed(() => {
   const lines: any[] = []
   for (const e of p.value.edges) {
-    if (e.is_boundary || isAutoBoundary(e)) lines.push({ ...edgeEndpoints(e), key: edgeKey(e.r1, e.c1, e.r2, e.c2) })
+    if (e.is_boundary || isAutoBoundary(e) || separatesRegions(e)) lines.push({ ...edgeEndpoints(e), key: edgeKey(e.r1, e.c1, e.r2, e.c2) })
   }
   for (const o of p.value.outer_boundaries ?? []) {
     lines.push({ x1: padding + o.c1 * cellSize.value, y1: padding + o.r1 * cellSize.value, x2: padding + o.c2 * cellSize.value, y2: padding + o.r2 * cellSize.value, key: 'o' + edgeKey(o.r1, o.c1, o.r2, o.c2) })

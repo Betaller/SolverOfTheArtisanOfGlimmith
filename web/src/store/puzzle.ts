@@ -19,6 +19,7 @@ export const usePuzzleStore = defineStore('puzzle', () => {
 
   const solution = ref<SolutionJson | null>(null)
   const officialAnswer = ref<RegionCells[] | null>(null)
+  const showSolution = ref(false)
   const solving = ref(false)
   const solveMessage = ref('就绪')
   const resultHtml = ref('就绪')
@@ -37,8 +38,10 @@ export const usePuzzleStore = defineStore('puzzle', () => {
   const selectedEdge = ref<[number, number, number, number] | null>(null)
   const selectedVertex = ref<[number, number] | null>(null)
 
-  // Official answer takes priority; solver fills the gap.
+  // Answer is only shown after the user clicks 求解. Official answer takes
+  // priority; the WASM solver fills the gap for puzzles without one.
   const displayRegions = computed<Map<string, number> | null>(() => {
+    if (!showSolution.value) return null
     if (officialAnswer.value) return cellRegionMap(officialAnswer.value)
     if (solution.value?.solved) return cellRegionMap(solution.value.regions)
     return null
@@ -54,6 +57,9 @@ export const usePuzzleStore = defineStore('puzzle', () => {
 
   let undoTimer: ReturnType<typeof setTimeout> | null = null
   function markModified() {
+    // Editing invalidates any displayed solution (but not a loaded official answer).
+    solution.value = null
+    showSolution.value = false
     if (undoTimer) clearTimeout(undoTimer)
     undoTimer = setTimeout(snapshot, 300)
   }
@@ -61,7 +67,7 @@ export const usePuzzleStore = defineStore('puzzle', () => {
   function applySnapshot(data: PuzzleJson) {
     Object.assign(puzzle, data)
     solution.value = null
-    officialAnswer.value = null
+    showSolution.value = false
     clearSelection()
   }
 
@@ -87,6 +93,7 @@ export const usePuzzleStore = defineStore('puzzle', () => {
     initialData.value = clone(puzzle)
     solution.value = null
     officialAnswer.value = null
+    showSolution.value = false
     clearSelection()
     undoStack.value = []
     redoStack.value = []
@@ -99,6 +106,7 @@ export const usePuzzleStore = defineStore('puzzle', () => {
     initialData.value = clone(puzzle)
     solution.value = null
     officialAnswer.value = answer
+    showSolution.value = false
     clearSelection()
     undoStack.value = []
     redoStack.value = []
@@ -133,7 +141,13 @@ export const usePuzzleStore = defineStore('puzzle', () => {
   }
 
   async function solve() {
-    if (officialAnswer.value) return // official answer already shown; never re-solve
+    // Official answer: just reveal it (no solver run).
+    if (officialAnswer.value) {
+      showSolution.value = true
+      solveMessage.value = '官方解'
+      resultHtml.value = `官方解<br>区域数: ${officialAnswer.value.length}`
+      return
+    }
     if (!puzzle.rules.length) {
       resultHtml.value = '请至少启用一条规则'
       return
@@ -144,6 +158,7 @@ export const usePuzzleStore = defineStore('puzzle', () => {
       const s = await solvePuzzle(JSON.stringify(puzzle))
       solution.value = s
       if (s.solved) {
+        showSolution.value = true
         solveMessage.value = `求解成功! ${s.elapsed_ms}ms, ${s.regions.length}个区域`
         resultHtml.value = `求解成功!<br>耗时: ${s.elapsed_ms}ms<br>区域数: ${s.regions.length}`
       } else {
@@ -159,7 +174,7 @@ export const usePuzzleStore = defineStore('puzzle', () => {
   }
 
   return {
-    puzzle, name, solution, officialAnswer, solving, solveMessage, resultHtml,
+    puzzle, name, solution, officialAnswer, showSolution, solving, solveMessage, resultHtml,
     mode, currentNumber, currentSymbol, currentCompass,
     selectedCell, selectedEdge, selectedVertex, displayRegions,
     snapshot, markModified, undo, redo, newPuzzle, loadPuzzle, reset, solve,

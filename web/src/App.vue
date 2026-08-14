@@ -36,10 +36,10 @@ function createNew() { store.newPuzzle(newH.value, newW.value); showNew.value = 
       <button @click="store.redo">重做</button>
       <button @click="store.reset">重置</button>
       <h1>格里米斯的工匠 - 求解器</h1>
-      <div class="status" v-if="store.officialAnswer">
+      <div class="status" v-if="store.showSolution && store.officialAnswer">
         <span class="badge official">官方解</span>
       </div>
-      <div class="status" v-else-if="store.solution?.solved">
+      <div class="status" v-else-if="store.showSolution && store.solution?.solved">
         <span class="badge ok">{{ store.solution.solver }} · {{ store.solution.elapsed_ms }}ms</span>
       </div>
     </header>
@@ -64,7 +64,7 @@ function createNew() { store.newPuzzle(newH.value, newW.value); showNew.value = 
       <aside class="right-panel">
         <PropertyPanel />
         <div class="control">
-          <button class="solve-btn" @click="store.solve" :disabled="!!store.officialAnswer">{{ store.solving ? '求解中…' : '求解' }}</button>
+          <button class="solve-btn" @click="store.solve">{{ store.solving ? '求解中…' : '求解' }}</button>
           <button class="reset-btn" @click="store.reset">重置</button>
           <div class="result" v-html="store.resultHtml" />
         </div>

@@ -140,18 +140,18 @@ class RustSolver(Solver):
     def __init__(self) -> None:
         self._binary = _find_binary()
 
-    # The Rust binary runs three solver parts sequentially (aog → pieces →
-    # backtrack; rose-capable puzzles swap pieces/backtrack for rose), each of
+    # The Rust binary runs solver parts sequentially (aog → rose → edge_csp →
+    # pieces → backtrack; edge_csp/rose only fire for capable puzzles), each of
     # which gets the full unit `timeout` as its own deadline.  The subprocess
-    # therefore needs 3× wall-clock for every part to use its budget.
-    RUST_PARTS = 3
+    # therefore needs `RUST_PARTS` × wall-clock for every part to use its budget.
+    RUST_PARTS = 4
 
-    # Wall-clock headroom over the 3× unit budget.  Rust's deadlines are
-    # wall-clock `Instant::now()`; under `-j N` CPU contention a puzzle whose
+    # Wall-clock headroom over the `RUST_PARTS` × unit budget.  Rust's deadlines
+    # are wall-clock `Instant::now()`; under `-j N` CPU contention a puzzle whose
     # CPU budget is `timeout` can take more than `timeout` of wall time, so the
-    # zero-slack `3×timeout` subprocess budget would occasionally fire and (in
-    # `--batch` mode) cascade the timeout to the rest of the batch.  20% slack
-    # absorbs that without materially slowing the fast tail.
+    # zero-slack subprocess budget would occasionally fire and (in `--batch`
+    # mode) cascade the timeout to the rest of the batch.  20% slack absorbs
+    # that without materially slowing the fast tail.
     SLACK = 1.2
 
     def _subprocess_env(self, timeout: float) -> dict[str, str]:
@@ -165,7 +165,7 @@ class RustSolver(Solver):
         return {**os.environ, "RSOLVER_TIMEOUT_MS": str(int(timeout * 1000))}
 
     def _wall_budget(self, timeout: float) -> float:
-        """Subprocess wall-clock budget for one puzzle: 3× unit × slack."""
+        """Subprocess wall-clock budget for one puzzle: `RUST_PARTS` × unit × slack."""
         return timeout * self.RUST_PARTS * self.SLACK
 
     def _prepare_input(self, puzzle: Puzzle) -> str:

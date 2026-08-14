@@ -1,6 +1,9 @@
 # 边变量 CSP 独立求解器方案
 
-> 状态：**设计方案**文档（已决策，待实现）。
+> 状态：**已实现第一迭代**（2026-08-14，`edge-csp-solver` 分支）。
+> 实现详解见 `docs/rust-solver/11-edge-csp求解器.md`。第一迭代覆盖 ring/brick/area/
+> precise/range/inequality/difference（~11 道新解出）；compass/watchtower/differentiation
+> /fence/solitary 留第二迭代。本文件保留为设计方案。
 > 决策来源：`docs/优化/12-优化项价值评估与路线图修订.md` §6.5 架构警告 + 用户决策
 > （2026-08-08：架构不同→创建独立求解器，而非嵌入 aog）。
 > 关联：`11-求解器优化理论总纲.md` §2（范式理论）、`12-优化项价值评估` §3.2 #10（方案B 终极方案）、

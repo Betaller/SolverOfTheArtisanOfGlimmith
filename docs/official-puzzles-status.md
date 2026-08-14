@@ -24,6 +24,7 @@
 | 2026-08-08 | timeout 透传修复 + rose clamp 移除（求解能力变化） | （全量待补，见下） | `benchmark_rust_solver.py --timeout 40 -j 8 --out results/bench/<date>_<sha>.jsonl` | **待全量验证** | — | `main.rs:86`/`io.rs:solve_json_line` 硬编码 `30_000` → `resolve_timeout_ms()` 读 `RSOLVER_TIMEOUT_MS`，`RustSolver` 从 `--timeout` 设入；`solver/mod.rs:83` 移除 `ROSE_TIMEOUT_MS=30_000` 的 `.min()` clamp。**求解能力变化**：`--timeout 40` 此前对 Rust 完全无效（固定 30s），现真正给 aog/pieces/backtrack 各 40s、rose 最多 40s（原 clamp 30s）→ 原 30s 临界 FAIL 的题（尤其 rose-capable Zone3 慢题）可能在 40s 内新解出。**预期 NEW>0、REGRESSION=0**（纯 timeout 修复，无算法改动）。全量基准待跑后回填通过数；快速档可用 `--baseline latest.jsonl --timeout 40 -j 8 --skip-slow`（同口径 timeout，跳过已知慢题）做日常回归。`benchmark_rust_solver.py` 同步新增 `--baseline`/`--zone`/`--skip-slow`/`--skip-slow-threshold`、修复 `--retry-timeouts` 三 bug。 |
 | 2026-08-08 | aog 形状库硬上限（第一波 #1，`shape-cap-aog`） | `results/tmp/20260808_shapecap_default0_regression.jsonl`（cap=0 全量回归）+ `results/tmp/20260808_shapecap_experiment.json`（21 OOM × 3 档 cap 实验） | `benchmark_rust_solver.py --timeout 40 -j 8 --baseline latest.jsonl`（cap=0）+ 直跑二进制 21 OOM 扫描（`scripts/exp_shape_cap.py`，cap=50k/100k/200k） | **cap=0：1052 / 1258 口径不变**（详见备注） | — | 新增 `AoGCore::shape_cap: usize` 字段（`core.rs`）+ `DEFAULT_SHAPE_CAP = 0`（`types.rs`，默认关闭）+ `AOG_SHAPE_CAP` env var。`shapes_insert`（`core.rs:169`）顶部守卫：库满则原子拒绝全部 8 个 dihedral 变体（`return 0`，**不在 `add_shape_to_shapes` 内部做**——否则部分插入破坏对称性）。调用点 `search.rs:248` 加 `if shape_index == NO_SHAPE_INDEX { continue; }`——防止 `NO_SHAPE_INDEX (0xffff)` 写入 `sp` 后在 `shape_size_by_index[65535]` 越界 panic（exit 101，6 处索引点：`core.rs:243/251/281/282`、`empty.rs:403`、`search.rs:1332`）。`predefine_shapes_only`（shape_pool 规则）天然豁免（其 DFS 不调 `shapes_insert`，`search.rs:1289` 已短路）。**cap=0 全量回归**：1 REGRESSION（0685，38441ms→40s 超时，临界负载波动非算法回归，与 c6cb307 基准的 14 道 PASS→FAIL 同性质）+ 1 NEW（0957，OOM→2021ms PASS，已知负载不稳题）。**0 算法回归、0 panic**（cap=0 时 `shape_cap>0` 守卫短路，行为与基准逐字节一致）。**21 OOM 三档实验**（50k/100k/200k）：**16/21 由 exit -9（OOM）转为 exit 0（优雅超时）**——cap 成功止血 aog OOM；3 档结果一致（cap 值不敏感，50k 已够）；**仅新增 1 PASS（0957）**——止血≠解出，多数转为 40s 超时；**3 道 rose_window OOM（0882/0826/0838）+ 1 道 0999（rose+watchtower）不受影响**（OOM 在 rose solver 的 `region_match` visited HashSet，非 aog 形状库——需第一波 #3 rose visited 上限）；**2 道（0606/1215）80s 退出**（40s deadline 在 capped 库上未及时触发，非致命，后续可加 `shape_cap_exhausted` 紧 deadline）。`cargo test` 18 通过（含新增 `test_shape_cap_refuses_new_shapes`/`test_shape_cap_zero_unlimit`）；`pytest` 290 通过。详见 `docs/优化/12-优化项价值评估与路线图修订.md` §3.2 #3、`docs/rust-solver/04-aog求解器.md`。 |
 | 2026-08-08 | rose visited 硬上限 + rose_growth deadline 修复（第一波 #3，`rose-visited-cap`） | `results/tmp/20260808_rose-2m-quick.jsonl`（快速回归）+ 4 rose OOM 专项直跑 | `benchmark_rust_solver.py --baseline latest.jsonl --timeout 40 -j 8 --skip-slow` + 直跑二进制 4 OOM 扫描 | **快速回归口径不变**（详见备注） | — | 两项改动：① `region_match.rs` 加 `VISITED_CAP = 2_000_000`（`visited` HashSet 硬上限，bail-out 返回部分 results 防 OOM）；② `rose_growth.rs` 修复 `_deadline` 未用 bug——`solve_singlesymbol`/`solve_multisymbol` 加 deadline 检查（wavefront 每 4096 步、second-pass 每 64 轮、入口），fallback 不再挂死。**#2 compass 边界框预推导经对抗审查证伪弃做**（bbox 证明"框外格不在 compass 区域"但不能证明"框内格就在 compass 区域"——框内 P 与框外 Q 同属另一区域时强制 is_boundary 破坏合法解；0630 等 13/15 目标题误强边致不可解）。**实测**：0999（rose+watchtower 14×14）OOM→exit 0 止血 ✓；0833（rose_window 10×11）200k cap 时回归（部分候选丢真解→rose_growth 挂死），**2M cap + rose_growth deadline 修复后重新 PASS（9482ms）** ✓；0882/0826/0838 仍 OOM（根因在 `enum_area_combos_bounded` 无界组合枚举，非 visited——另题）。**快速回归 5 REGRESSION 全是 aog 预存非确定性挂死**（0749/0829/0875 的 "LB: sealed" 循环、1329/0795 临界负载波动；0749 在 main 二进制也挂、0829/0875 solo 也挂——均非 rose 改动所致）。0 rose 回归、0 panic。`cargo test` 20、`pytest` 290 通过。详见 `docs/rust-solver/07-rose求解器.md`、`docs/优化/12` §3.2 #2(证伪)/#6。 |
+| 2026-08-14 | edge_csp 边变量 CSP 求解器第一迭代（`edge-csp-solver`） | `results/tmp/20260814_edgecsp-full.jsonl`（全量） | `benchmark_rust_solver.py --timeout 40 -j 8` | **1072 / 1258** | 较 bd2f5f5 基线净 **+20**（14 edge_csp + 7 前序 aog 修复 − 1 flake） | 新增 `solver/edge_csp/`（边变量 CSP，见 `docs/rust-solver/11-edge-csp求解器.md`）：三态边（`Unknown`/`Cut`/`Uncut`）+ 不动点传播（顶点度/面积界/线索）+ failed-literal 探测 + 边 DFS，输出经 `validate::validate` 复查。覆盖 ring/brick/area/precise/range/inequality/difference。**14 道新解出（全过独立验证，solver=edge_csp）**：0421/0507/0592/0637/0638/0894/0979/1131/1132/1134/1382/1400/1404/1411（difference/inequality/ring 系）。**关键正确性修复**：`propagate_bricky_loopy` 数度含**外边框与 blocked 格边**（参考 aog 只数内部边且不叶验 ring/brick，会产边界 T 型错解被 validate 拒——0666 等）。**路由**：后置 fallback（aog/rose 之后、pieces 之前），`is_edge_csp_capable` 排他门控（所有规则 ⊆ {ring,brick,watchtower,compass,inequality,difference,area,precise,range}）；`RustSolver.RUST_PARTS` 3→4。**未做（迭代二）**：compass 方向计数 / watchtower / differentiation 传播、ring OOM 前置拦截。**1333（rose+range，无 edge 规则）PASS→FAIL 与 edge_csp 无关**（`is_edge_csp_capable` 不触发，flake）。`cargo test` 20、`pytest` 290 通过。 |
 
 ---
 
@@ -341,6 +342,34 @@ vs `dihedral_key(pat)`），不固定具体边——预钉需枚举 dihedral 变
 **同期证伪**：fence 预推导 DSU 方向（`fence-anchor-bfs` 分支）基于"fence_pattern arm 位 = 具体边
 Boundary"的错误假设，0390 上误判矛盾，未合 main。fence_pattern 是 dihedral 形状类不固定边，DSU 预
 合并不成立。详见 `docs/优化/10-专用求解器方案.md` §3.3 警示框。
+
+### 2026-08-14 · edge_csp 边变量 CSP 独立求解器第一迭代（`edge-csp-solver`）
+
+按 `docs/优化/14-边变量CSP独立求解器方案.md` 落地第一迭代（`docs/rust-solver/11-edge-csp求解器.md`）：
+
+1. **新增 `solver/edge_csp/` 模块**（types/grid/adapter/prop/mod）：边变量 CSP（`Vec<EdgeState>` 三态边
+   内部维护，**不动全局 `Edge` 的 52 处读取**）。从 `third_party/aog` 1:1 移植传播引擎（顶点度
+   `bricky_loopy`、`build_components` 面积枢纽、`propagate_area_bounds`/`inequality`/`diff`、探测
+   `probe_one_round`/`probe_pair_round`）+ 边 DFS（`select_edge` 多因子评分 + `backtrack_edges`），
+   剥掉 tracing/rose/shape/match 无关部分。入口 `solve_edge_csp` 输出**先过 `validate::validate`
+   复查才返回**（只 false-negative，不 false-positive）。
+2. **关键正确性修复（与参考实现的差异）**：参考 aog 的 `bricky_loopy` 只数内部边、且不在叶节点验证
+   ring/brick；本项目 `validate::count_boundary_edges_at_vertex` 把**外边框与 blocked 格边**也算边界。
+   本移植改 `propagate_bricky_loopy` 按后者语义数度（fillable-非fillable=边界、非fillable-非fillable
+   ≠边界），否则 ring 题会先找到"9 单格"等带边界 T 型的错误解被验证器拒（0666）。同时补 ring+brick
+   组合（度≤2）分支（参考 `else if` 只跑 loopy）。
+3. **路由**：后置 fallback（`is_edge_csp_capable` 排他门控，只对规则 ⊆ {ring,brick,watchtower,compass,
+   inequality,difference,area,precise,range} 触发），插在 aog/rose 之后、pieces 之前。`solve_edge_csp`
+   返回 None 走回退（不 `return build_solution` 吞兜底）。`RustSolver.RUST_PARTS` 3→4（子进程墙钟覆盖
+   4 段 unit 预算）。
+4. **未做（迭代二）**：compass 方向计数 / watchtower / differentiation / fence / solitary 传播、ring OOM
+   前置拦截（`is_edge_csp_preempt` 已定义未接入）。
+
+**验证**：`cargo test` 20、`pytest` 290 通过。**结果**（全量 `benchmark_rust_solver.py --timeout 40 -j 8`，
+1258 题）：**1072 / 1258**；**14 道新解出**（全过独立验证，`solver=edge_csp`）——0421/0507/0592/0637/0638/
+0894/0979/1131/1132/1134/1382/1400/1404/1411（difference/inequality/ring 系，aog 40s 超时后 edge_csp
+<13s 解出）。较 bd2f5f5 基线净 +20（14 edge_csp + 7 前序 aog 修复 − 1 flake）。**1333（rose+range，无
+edge 规则）PASS→FAIL 与 edge_csp 无关**（`is_edge_csp_capable` 不触发，flake）。
 
 ---
 

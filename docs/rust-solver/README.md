@@ -14,13 +14,14 @@
 ## 0. 一分钟看懂这个求解器
 
 `rsolver` 是一个**命令行子进程**：标准输入喂一份谜题 JSON，标准输出吐一份题解 JSON。
-它内部串联了 **4 个求解算法**，按顺序尝试，谁先出答案就用谁：
+它内部串联了 **5 个求解算法**，按顺序尝试，谁先出答案就用谁：
 
 ```
 谜题 JSON ──► 路由 solve() ──┬─► ① AoG DFS     （形状放置 + 强力剪枝，主力）
                              ├─► ② Rose        （纯玫瑰窗专用）
-                             ├─► ③ Pieces(DLX) （形状池 / 面积数字 / 罗盘 → 精确覆盖）
-                             └─► ④ Backtrack   （区域回溯，兜底）
+                             ├─► ③ EdgeCSP     （边变量 CSP：ring/brick/compass/不等式/差值）
+                             ├─► ④ Pieces(DLX) （形状池 / 面积数字 / 罗盘 → 精确覆盖）
+                             └─► ⑤ Backtrack   （区域回溯，兜底）
                                         │
                                         ▼
                              独立验证 → 题解 JSON
@@ -28,8 +29,9 @@
 
 - ① `aog`：把 C++ 参考求解器 **1:1 移植**，对**绝大多数**官方题最快。
 - ② `rose`：专治 aog 超时的“无尺寸约束玫瑰窗题”。
-- ③ `pieces`：把“放形状”变成**精确覆盖**问题，用 Dancing Links 求解。
-- ④ `backtrack`：最简单可靠的回溯，兜底一切。
+- ③ `edge_csp`：**边变量 CSP**，显式三态边 + 传播-探测-回溯，治 ring/brick/compass/inequality/difference 边约束密集题。
+- ④ `pieces`：把“放形状”变成**精确覆盖**问题，用 Dancing Links 求解。
+- ⑤ `backtrack`：最简单可靠的回溯，兜底一切。
 - 任何答案都必须通过**独立验证器**（`solver/validate.rs`）才允许上报，防止错误答案“走私”出去。
 
 ---
@@ -46,6 +48,7 @@
 | [06-backtrack求解器](06-backtrack求解器.md) | 区域回溯：逐格归属、增量约束、叶子校验 | ★★☆ | 最朴素的解法是什么？ |
 | [07-rose求解器](07-rose求解器.md) | 玫瑰窗：region_match 精确覆盖 + rose_growth 生长修复 | ★★★ | 玫瑰窗题怎么解？ |
 | [08-验证与约束检查](08-验证与约束检查.md) | `solver/validate.rs`（全 22 规则）/ 边界尊重，两套校验各管什么 | ★★☆ | 错误答案怎么被拦下的？ |
+| [11-edge-csp求解器](11-edge-csp求解器.md) | 边变量 CSP：三态边 + 传播-探测-回溯，ring/brick/compass/inequality/difference | ★★★ | 边约束密集题怎么解？ |
 | [09-附录-术语表与puz格式](09-附录-术语表与puz格式.md) | 术语表、`.puz` ASCII 格式、位域常量表、调试环境变量 | ★☆☆ | 这些图例/常量什么意思？ |
 | [10-拼块优化方向](10-拼块优化方向.md) | puzzle_piece 拼块规则优化：171 题分类、当前路径瓶颈、5 个方向 | ★★★ | 拼块题怎么更快？ |
 | [../优化/09-rose-puzzle-piece优化调研.md](../优化/09-rose-puzzle-piece优化调研.md) | puzzle_piece + rose_window 混合优化：10 题分析、搜索空间 10⁶ 缩减、4 阶段实施 | ★★★ | 拼块和玫瑰窗怎么合力？ |
@@ -89,8 +92,14 @@ rsolver/
 │       │   ├── search.rs         #   dfs() 主递归 + 形状放置迭代 DFS
 │       │   ├── empty.rs          #   空区分析 + 起手选择
 │       │   └── types.rs          #   常量、PlaceLevel、Pools、位域定义
-│       ├── pieces.rs             # ③ Pieces(DLX) 精确覆盖求解器
-│       ├── backtrack.rs          # ④ 区域回溯求解器
+│       ├── pieces.rs             # ④ Pieces(DLX) 精确覆盖求解器
+│       ├── backtrack.rs          # ⑤ 区域回溯求解器
+│       ├── edge_csp/             # ③ 边变量 CSP 求解器（三态边 + 传播-探测-回溯）
+│       │   ├── mod.rs            #   Solver 结构 + 搜索 + solve_edge_csp 入口
+│       │   ├── types.rs          #   EdgeState / 线索 / 规则
+│       │   ├── grid.rs           #   边索引几何
+│       │   ├── adapter.rs        #   Puzzle → edge_csp 输入
+│       │   └── prop.rs           #   传播循环 + 各传播器
 │       └── rose/                 # ② 玫瑰窗求解器（Python 移植）
 │           ├── mod.rs            #   solve_rose 入口 / 符号类型 / M
 │           ├── cells.rs          #   CellSet 位集、PreBoundaries

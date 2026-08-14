@@ -1,6 +1,6 @@
 //! Region-by-region DFS backtracking solver with incremental constraint checking.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use crate::clock::Instant;
 
 use crate::grid;
@@ -54,8 +54,8 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
         fillable: fillable.clone(),
         cell_index,
         undecided_count: fillable.len(),
-        region_clue: HashMap::new(),
-        frontier: HashMap::new(),
+        region_clue: Vec::new(),
+        frontier: Vec::new(),
         has_area_rule,
         edge_constraints,
         has_edge_constraints,
@@ -89,7 +89,7 @@ pub(crate) struct EdgeAreaConstraint {
 
 impl BacktrackState {
     pub(crate) fn is_sealed(&self, rid: usize) -> bool {
-        self.frontier.get(&rid).map(|f| f.is_empty()).unwrap_or(true)
+        self.frontier.get(rid).map(|f| f.is_empty()).unwrap_or(true)
     }
 }
 
@@ -110,8 +110,12 @@ pub(crate) struct BacktrackState {
     fillable: Vec<(usize, usize)>,
     cell_index: Vec<Vec<usize>>,
     pub(crate) undecided_count: usize,
-    region_clue: HashMap<usize, usize>, // rid -> required area from a numbered cell inside
-    pub(crate) frontier: HashMap<usize, HashMap<(usize, usize), usize>>, // rid -> {undecided cell : adjacency count}
+    // N1: deterministic Vec/BTreeMap replace HashMap — rid is a contiguous
+    // 0..n index (regions are pushed/popped), so Vec indexing is both faster
+    // and (unlike HashMap RandomState) deterministic.  This is the root-cause
+    // fix for the "LB: sealed" non-deterministic hang (doc 17 §3 P0-1).
+    region_clue: Vec<Option<usize>>, // rid -> required area from a numbered cell inside
+    pub(crate) frontier: Vec<BTreeMap<(usize, usize), usize>>, // rid -> {undecided cell : adjacency count}
     has_area_rule: bool,
     /// Pre-computed inequality / difference edge constraints for mid-search pruning.
     pub(crate) edge_constraints: Vec<EdgeAreaConstraint>,
@@ -254,12 +258,12 @@ fn check_edge_area_mid_search(state: &BacktrackState) -> bool {
         let area_b = state.region_shapes.get(rb).map(|s| s.len()).unwrap_or(0);
         let sealed_a = state
             .frontier
-            .get(&ra)
+            .get(ra)
             .map(|f| f.is_empty())
             .unwrap_or(true);
         let sealed_b = state
             .frontier
-            .get(&rb)
+            .get(rb)
             .map(|f| f.is_empty())
             .unwrap_or(true);
 
@@ -441,7 +445,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         // numbered cells with different targets).
         let new_area = region_area + 1;
         let mut area_clue_ok = true;
-        let prev_clue = state.region_clue.get(&rid).copied();
+        let prev_clue = state.region_clue.get(rid).copied().flatten();
         if let Some(n) = cell.number {
             if new_area > n as usize {
                 area_clue_ok = false;
@@ -479,7 +483,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         state.undecided_count -= 1;
         frontier_assign(state, r, c, rid);
         if let Some(n) = cell.number {
-            state.region_clue.insert(rid, n as usize);
+            state.region_clue[rid] = Some(n as usize);
         }
 
         if check_watchtowers_ok(state)
@@ -498,10 +502,10 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         frontier_unassign(state, r, c, rid);
         match prev_clue {
             Some(m) => {
-                state.region_clue.insert(rid, m);
+                state.region_clue[rid] = Some(m);
             }
             None => {
-                state.region_clue.remove(&rid);
+                state.region_clue[rid] = None;
             }
         }
     }
@@ -512,10 +516,13 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
     state.next_region_id += 1;
     state.cell_to_region[r * w + c] = Some(new_rid);
     state.region_shapes.push(vec![[r, c]]);
+    // N1: keep region_clue / frontier in lock-step with region_shapes (Vec push/pop).
+    state.region_clue.push(None);
+    state.frontier.push(BTreeMap::new());
     state.undecided_count -= 1;
     frontier_assign(state, r, c, new_rid);
     if let Some(n) = cell.number {
-        state.region_clue.insert(new_rid, n as usize);
+        state.region_clue[new_rid] = Some(n as usize);
     }
 
     if check_watchtowers_ok(state)
@@ -530,9 +537,10 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
 
     state.cell_to_region[r * w + c] = None;
     state.region_shapes.pop();
+    state.region_clue.pop();
+    state.frontier.pop();
     state.undecided_count += 1;
     frontier_unassign(state, r, c, new_rid);
-    state.region_clue.remove(&new_rid);
     state.next_region_id -= 1;
 
     false
@@ -756,10 +764,10 @@ fn pick_next_cell(puzzle: &Puzzle, state: &BacktrackState) -> (usize, usize) {
     if state.has_area_rule {
         let mut best: Option<(usize, usize)> = None;
         let mut best_idx = usize::MAX;
-        for (&rid, &n) in &state.region_clue {
+        for (rid, n) in state.region_clue.iter().enumerate().filter_map(|(rid, n)| n.map(|n| (rid, n))) {
             let area = state.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
             if area < n {
-                if let Some(fr) = state.frontier.get(&rid) {
+                if let Some(fr) = state.frontier.get(rid) {
                     for &cell in fr.keys() {
                         if is_undecided(state, cell.0, cell.1) {
                             let i = state.cell_index[cell.0][cell.1];
@@ -804,9 +812,9 @@ fn check_area_lower_bounds(state: &BacktrackState) -> bool {
     if !state.has_area_rule {
         return true;
     }
-    for (&rid, &n) in &state.region_clue {
+    for (rid, n) in state.region_clue.iter().enumerate().filter_map(|(rid, n)| n.map(|n| (rid, n))) {
         let area = state.region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
-        if let Some(fr) = state.frontier.get(&rid) {
+        if let Some(fr) = state.frontier.get(rid) {
             if fr.is_empty() && area != n {
                 if crate::aog_debug_enabled() {
                     eprintln!("  LB: sealed rid={} area={} n={}", rid, area, n);
@@ -829,7 +837,7 @@ fn frontier_assign(state: &mut BacktrackState, r: usize, c: usize, rid: usize) {
     if !state.has_area_rule {
         return;
     }
-    if let Some(fr) = state.frontier.get_mut(&rid) {
+    if let Some(fr) = state.frontier.get_mut(rid) {
         fr.remove(&(r, c));
     }
     for (dr, dc) in [(1i64, 0i64), (-1, 0), (0, 1i64), (0, -1i64)] {
@@ -843,10 +851,10 @@ fn frontier_assign(state: &mut BacktrackState, r: usize, c: usize, rid: usize) {
             continue;
         }
         if is_undecided(state, nru, ncu) {
-            *state.frontier.entry(rid).or_default().entry((nru, ncu)).or_insert(0) += 1;
+            *state.frontier[rid].entry((nru, ncu)).or_insert(0) += 1;
         } else if let Some(nrid) = state.cell_to_region[nru * state.width + ncu] {
             if nrid != rid {
-                if let Some(fr) = state.frontier.get_mut(&nrid) {
+                if let Some(fr) = state.frontier.get_mut(nrid) {
                     if let Some(cnt) = fr.get_mut(&(r, c)) {
                         *cnt -= 1;
                         if *cnt == 0 {
@@ -875,7 +883,7 @@ fn frontier_unassign(state: &mut BacktrackState, r: usize, c: usize, rid: usize)
             continue;
         }
         if is_undecided(state, nru, ncu) {
-            if let Some(fr) = state.frontier.get_mut(&rid) {
+            if let Some(fr) = state.frontier.get_mut(rid) {
                 if let Some(cnt) = fr.get_mut(&(nru, ncu)) {
                     *cnt -= 1;
                     if *cnt == 0 {
@@ -885,7 +893,7 @@ fn frontier_unassign(state: &mut BacktrackState, r: usize, c: usize, rid: usize)
             }
         } else if let Some(nrid) = state.cell_to_region[nru * state.width + ncu] {
             if nrid != rid {
-                *state.frontier.entry(nrid).or_default().entry((r, c)).or_insert(0) += 1;
+                *state.frontier[nrid].entry((r, c)).or_insert(0) += 1;
             }
         }
     }
@@ -895,7 +903,7 @@ fn frontier_unassign(state: &mut BacktrackState, r: usize, c: usize, rid: usize)
         .filter(|&&(nr, nc)| state.cell_to_region[nr * state.width + nc] == Some(rid))
         .count();
     if count > 0 {
-        state.frontier.entry(rid).or_default().insert((r, c), count);
+        state.frontier[rid].insert((r, c), count);
     }
 }
 

@@ -4,8 +4,6 @@
 //! #3 (always on)     — GF(2) parity check on boundary-degree
 //! #6 (always on)     — SAT-based boundary-graph feasibility check
 
-use std::collections::HashMap;
-
 use crate::types::*;
 
 // ── Bellman-Ford area propagation (#2, optional) ──────────────────────────
@@ -15,7 +13,7 @@ use crate::types::*;
 pub fn propagate_area_bounds(
     cell_to_region: &[Option<usize>],
     region_shapes: &[Vec<[usize; 2]>],
-    frontier: &HashMap<usize, HashMap<(usize, usize), usize>>,
+    frontier: &Vec<std::collections::BTreeMap<(usize, usize), usize>>,
     num_regions: usize,
     edge_constraints: &[super::backtrack::EdgeAreaConstraint],
     min_area: usize,
@@ -35,7 +33,7 @@ pub fn propagate_area_bounds(
     let mut ub = vec![usize::MAX; num_regions];
     for rid in 0..num_regions {
         let area = region_shapes.get(rid).map(|s| s.len()).unwrap_or(0);
-        let sealed = frontier.get(&rid).map(|f| f.is_empty()).unwrap_or(true);
+        let sealed = frontier.get(rid).map(|f| f.is_empty()).unwrap_or(true);
         let slack = if sealed { 0 } else { undecided_count };
         lb[rid] = area;
         ub[rid] = (area + slack).min(max_area).max(min_area);

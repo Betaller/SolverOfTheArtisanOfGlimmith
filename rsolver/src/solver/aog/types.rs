@@ -68,6 +68,10 @@ pub const NO_SHAPE_INDEX: u32 = 0xffff_ffff;
 /// `shapes_search`es and, on a miss (`NO_SHAPE_INDEX`), skips the placement —
 /// bounding memory so the deadline triggers instead of the OOM killer.
 /// `0` = disabled (legacy behavior, default). Override via `AOG_SHAPE_CAP` env.
+///
+/// Kept at 0 (off) by default: enabling it (50k) turns 16/21 OOM → graceful
+/// timeout but regresses ~12 aog puzzles whose search legitimately exceeds 50k
+/// library entries — a net negative.  Override per-puzzle via `AOG_SHAPE_CAP`.
 pub const DEFAULT_SHAPE_CAP: usize = 0;
 
 // ── Small types ──────────────────────────────────────────────────────────────

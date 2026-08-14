@@ -531,17 +531,23 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
         .all(|r| SUPPORTED.contains(&r.ctype.as_str()))
 }
 
-/// Preempt trigger: ring puzzles with no size constraint (aog OOM risk).
-/// Reserved for iteration 2 (route edge_csp *before* aog for the ring puzzles
-/// aog OOMs on); not yet wired.
+/// Preempt trigger: edge-constraint puzzles with no size constraint (precise /
+/// range / shape_pool / puzzle_piece) let aog's free shape library grow
+/// unboundedly → OOM (exit -9).
+///
+/// Reserved, not wired: `DEFAULT_SHAPE_CAP = 50k` already turns those OOMs into
+/// graceful aog timeouts, letting the *post*-fallback edge_csp run — so a pre-aog
+/// preempt is redundant (and would just reattribute small edge puzzles to
+/// edge_csp with no solve gain).  Revisit only if the shape cap proves
+/// insufficient.
 #[allow(dead_code)]
 pub fn is_edge_csp_preempt(puzzle: &Puzzle) -> bool {
-    let has_ring = puzzle.rules.iter().any(|r| r.ctype == "ring");
+    let has_edge = is_edge_csp_capable(puzzle);
     let has_size = puzzle.rules.iter().any(|r| {
         matches!(
             r.ctype.as_str(),
-            "precise" | "range" | "area" | "shape_pool" | "puzzle_piece"
+            "precise" | "range" | "shape_pool" | "puzzle_piece"
         )
     });
-    has_ring && !has_size
+    has_edge && !has_size
 }

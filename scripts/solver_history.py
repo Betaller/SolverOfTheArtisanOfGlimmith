@@ -8,8 +8,9 @@
          docs/solver-history.json。
   append 解析一次 benchmark 日志里的 ``结果: X/Y 通过`` 汇总行，追加一个数据点。
   render 读取 docs/solver-history.json，生成：
-         - docs/solver-history.png   （README 内嵌曲线，matplotlib）
-         - site/index.html           （GitHub Pages 交互页，内联 SVG + hover）
+         - docs/solver-history.png                 （README 内嵌曲线，matplotlib）
+         - web/public/trend/index.html             （内联 SVG + hover，随 wasm 站
+                                                     部署到 Pages 的 /trend/）
 
 JSON schema：
 
@@ -40,7 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_JSON = REPO_ROOT / "docs" / "solver-history.json"
 DEFAULT_PNG = REPO_ROOT / "docs" / "solver-history.png"
-DEFAULT_HTML = REPO_ROOT / "site" / "index.html"
+DEFAULT_HTML = REPO_ROOT / "web" / "public" / "trend" / "index.html"
 DEFAULT_MD = REPO_ROOT / "docs" / "official-puzzles-status.md"
 
 OFFICIAL_TOTAL = 1258  # 官方题基准口径（puzzles/official 排除 -answer）

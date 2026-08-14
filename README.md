@@ -31,11 +31,12 @@ python scripts/benchmark_rust_solver.py  # 官方题基准（每题 20s 超时�
 
 > 曲线纵轴为缩放后的求解率区间（非 0–100），以突出小幅变化。数据源 `docs/solver-history.json`
 > （历史点由 `docs/official-puzzles-status.md` 里程碑表解析而来，此后每次 `main` 提交由 CI 追加）；
-> 交互版见 [GitHub Pages](https://betaller.github.io/SolverOfTheArtisanOfGlimmith/)。
+> 交互版见 [GitHub Pages /trend/](https://betaller.github.io/SolverOfTheArtisanOfGlimmith/trend/)。
 
 CI（`.github/workflows/benchmark.yml`）：`main` 提交 → `cargo build --release` → 全量
 `benchmark_rust_solver.py --timeout 40 -j 8 --adaptive-j` → 解析「结果: X/Y 通过」→ 追加
-`docs/solver-history.json` → 重绘 PNG / Pages 页 → `[skip ci]` 提交回 `main` + 部署 Pages。
+`docs/solver-history.json` → 重绘 PNG 与 `/trend/` 页 → `[skip ci]` 提交回 `main`。`/trend/` 页写入
+`web/public/trend/index.html`，由仓库现有的 wasm `deploy.yml`（`web/dist` → Pages 根）随站点一起部署。
 
 ## 求解器架构
 

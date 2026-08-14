@@ -19,7 +19,3 @@ rsolver/target/
 
 # verify/log output
 verify_all*.log
-
-
-# derived Pages output (deployed from CI artifact, not committed)
-site/

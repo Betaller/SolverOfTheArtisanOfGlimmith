@@ -6,9 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write      # commit solver-history.json / PNG / bench log back to main
-  pages: write         # deploy the trend page to GitHub Pages
-  id-token: write
+  contents: write   # commit solver-history.json / PNG / trend HTML / bench log back to main
 
 concurrency:
   group: benchmark
@@ -63,25 +61,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/solver-history.json docs/solver-history.png "$BENCH_LOG"
+          git add docs/solver-history.json docs/solver-history.png web/public/trend/index.html "$BENCH_LOG"
           if git diff --cached --quiet; then
             echo "no change to commit"
           else
             git commit -m "chore(ci): update solver history [skip ci]"
             git push
           fi
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-  deploy-pages:
-    needs: benchmark
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4

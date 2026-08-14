@@ -57,9 +57,11 @@ export const usePuzzleStore = defineStore('puzzle', () => {
 
   let undoTimer: ReturnType<typeof setTimeout> | null = null
   function markModified() {
-    // Editing invalidates any displayed solution (but not a loaded official answer).
+    // Editing invalidates both the displayed solution and the loaded official
+    // answer (the board no longer matches the canonical partition).
     solution.value = null
     showSolution.value = false
+    officialAnswer.value = null
     if (undoTimer) clearTimeout(undoTimer)
     undoTimer = setTimeout(snapshot, 300)
   }

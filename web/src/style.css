@@ -106,6 +106,7 @@ input[type="number"], input[type="text"] { width: 100%; }
 .shape-list { list-style: none; padding: 0; margin: 8px 0; max-height: 200px; overflow-y: auto; }
 .shape-list li { padding: 4px 6px; font-size: 12px; cursor: pointer; border-radius: 4px; }
 .shape-list li:hover { background: #343b47; }
+.shape-list li.selected { background: var(--accent); color: #fff; }
 
 /* puzzle browser */
 .puzzle-browser .row { margin: 4px 0; }

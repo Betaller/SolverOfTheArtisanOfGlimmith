@@ -30,14 +30,16 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - uses: jetli/wasm-pack-action@v0.4
-        with:
-          version: latest
+      # build:wasm runs `cargo build --target wasm32-unknown-unknown` + `wasm-bindgen`.
+      # Pin wasm-bindgen-cli to the exact version resolved in Cargo.lock.
+      - name: Install wasm-bindgen-cli
+        run: |
+          VERSION=$(grep -A1 'name = "wasm-bindgen"' rsolver/Cargo.lock | grep -m1 version | cut -d'"' -f2)
+          cargo install wasm-bindgen-cli --version "$VERSION"
 
-      # `npm install` (not `npm ci`) until a package-lock.json is committed.
       - name: Install web dependencies
         working-directory: web
-        run: npm install
+        run: npm ci
 
       - name: Bundle puzzle data
         working-directory: web

@@ -8,6 +8,7 @@ const emit = defineEmits<{ (e: 'save', shapes: [number, number][][]): void; (e: 
 
 const shapes = ref<[number, number][][]>(props.shapes.map((s) => [...s]))
 const drawing = ref<[number, number][]>([])
+const selectedIndex = ref<number | null>(null)
 
 function addShape() {
   if (!drawing.value.length) return
@@ -16,7 +17,12 @@ function addShape() {
   shapes.value.push(normalize(drawing.value))
   drawing.value = []
 }
-function removeShape(i: number) { shapes.value.splice(i, 1) }
+function removeSelected() {
+  if (selectedIndex.value != null && selectedIndex.value < shapes.value.length) {
+    shapes.value.splice(selectedIndex.value, 1)
+    selectedIndex.value = null
+  }
+}
 function cellsDesc(s: [number, number][]): string {
   return [...s].sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(([r, c]) => `(${r},${c})`).join(', ')
 }
@@ -35,10 +41,10 @@ function cellsDesc(s: [number, number][]): string {
       </div>
       <h4>形状池列表</h4>
       <ul class="shape-list">
-        <li v-for="(s, i) in shapes" :key="i" @click="removeShape(i)">形状{{ i + 1 }} (面积={{ s.length }}): [{{ cellsDesc(s) }}]</li>
+        <li v-for="(s, i) in shapes" :key="i" :class="{ selected: selectedIndex === i }" @click="selectedIndex = i">形状{{ i + 1 }} (面积={{ s.length }}): [{{ cellsDesc(s) }}]</li>
       </ul>
       <div class="btn-row">
-        <button @click="removeShape(shapes.length - 1)">删除选中</button>
+        <button :disabled="selectedIndex == null" @click="removeSelected">删除选中</button>
       </div>
       <div class="btn-row right">
         <button class="ok" @click="emit('save', shapes)">确定</button>

@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { usePuzzleStore } from '../store/puzzle'
 import { colors, P_COLORS, REGION_COLORS, RULE_NAMES, FENCE_EDGES } from '../lib/theme'
-import { cellKey, edgeKey, edgeBetween, cellAt, vertexAt, makeConstraint } from '../lib/model'
+import { cellKey, edgeKey, vertexAt, makeConstraint } from '../lib/model'
 import type { CellJson, EdgeJson, PuzzleJson } from '../lib/types'
 
 const store = usePuzzleStore()
@@ -31,11 +31,26 @@ function edgeEndpoints(e: { r1: number; c1: number; r2: number; c2: number }) {
   return { x1: padding + e.c1 * cellSize.value, y1: y, x2: padding + (e.c1 + 1) * cellSize.value, y2: y }
 }
 
+// O(1) cell/edge indexes — canvas lookups run per-edge/per-cell, so linear
+// `cellAt`/`edgeBetween` scans (model.ts) would be O(HW × edges) on large grids.
+const cellIndex = computed(() => {
+  const m = new Map<string, CellJson>()
+  for (const c of p.value.cells) m.set(cellKey(c.row, c.col), c)
+  return m
+})
+const edgeIndex = computed(() => {
+  const m = new Map<string, EdgeJson>()
+  for (const e of p.value.edges) m.set(edgeKey(e.r1, e.c1, e.r2, e.c2), e)
+  return m
+})
+const getCell = (r: number, c: number): CellJson | undefined => cellIndex.value.get(cellKey(r, c))
+const getEdge = (r1: number, c1: number, r2: number, c2: number): EdgeJson | undefined => edgeIndex.value.get(edgeKey(r1, c1, r2, c2))
+
 // ── render models ────────────────────────────────────────────────────────────
 const cells = computed(() => {
   const out: any[] = []
   for (let r = 0; r < h.value; r++) for (let c = 0; c < w.value; c++) {
-    const cell = cellAt(p.value, r, c)
+    const cell = getCell(r, c)
     const blocked = !!cell?.blocked
     const ri = store.displayRegions?.get(cellKey(r, c))
     const fv = fenceDiamondValue(cell?.fence_pattern)
@@ -51,16 +66,16 @@ const cells = computed(() => {
 })
 
 function isAutoBoundary(e: EdgeJson): boolean {
-  const c1 = cellAt(p.value, e.r1, e.c1)
-  const c2 = cellAt(p.value, e.r2, e.c2)
+  const c1 = getCell(e.r1, e.c1)
+  const c2 = getCell(e.r2, e.c2)
   return !!(c1 && c2 && c1.blocked !== c2.blocked)
 }
 
 // In the solution display, an edge between two different assigned regions is a
 // region boundary (mirrors PyQt _on_solution_ready setting is_boundary).
 function separatesRegions(e: EdgeJson): boolean {
-  const c1 = cellAt(p.value, e.r1, e.c1)
-  const c2 = cellAt(p.value, e.r2, e.c2)
+  const c1 = getCell(e.r1, e.c1)
+  const c2 = getCell(e.r2, e.c2)
   if (!c1 || !c2 || c1.blocked || c2.blocked) return false
   const r1 = store.displayRegions?.get(cellKey(e.r1, e.c1))
   const r2 = store.displayRegions?.get(cellKey(e.r2, e.c2))
@@ -81,8 +96,8 @@ const boundaryLines = computed(() => {
 const gridLines = computed(() => {
   const lines: any[] = []
   for (const e of p.value.edges) {
-    const c1 = cellAt(p.value, e.r1, e.c1)
-    const c2 = cellAt(p.value, e.r2, e.c2)
+    const c1 = getCell(e.r1, e.c1)
+    const c2 = getCell(e.r2, e.c2)
     if (c1 && c2 && !c1.blocked && !c2.blocked) {
       const r1 = store.displayRegions?.get(cellKey(e.r1, e.c1))
       const r2 = store.displayRegions?.get(cellKey(e.r2, e.c2))
@@ -227,7 +242,7 @@ function vertexPairToEdge(v1: [number, number], v2: [number, number]): [number, 
 }
 
 function toggleEdgeBoundary(e: [number, number, number, number]) {
-  const edge = edgeBetween(p.value, ...e)
+  const edge = getEdge(...e)
   if (edge) { edge.is_boundary = !edge.is_boundary; store.markModified() }
 }
 function toggleOuter(o: [number, number, number, number]) {
@@ -248,7 +263,7 @@ function clearCellProps(cell: CellJson) {
   cell.shape_pattern = undefined; cell.fence_pattern = undefined
 }
 function toggleBlocked(r: number, c: number) {
-  const cell = cellAt(p.value, r, c)
+  const cell = getCell(r, c)
   if (!cell) return
   cell.blocked = !cell.blocked
   if (cell.blocked) clearCellProps(cell)
@@ -256,7 +271,7 @@ function toggleBlocked(r: number, c: number) {
   store.markModified()
 }
 function paintBlocked(r: number, c: number, blocked: boolean) {
-  const cell = cellAt(p.value, r, c)
+  const cell = getCell(r, c)
   if (cell && cell.blocked !== blocked) { cell.blocked = blocked; if (blocked) clearCellProps(cell); store.markModified() }
 }
 
@@ -300,20 +315,20 @@ function onMouseDown(e: MouseEvent) {
     return
   }
   if (store.mode === 'number' && cell) {
-    const c = cellAt(p.value, cell[0], cell[1])
+    const c = getCell(cell[0], cell[1])
     if (c && store.currentNumber != null) { c.number = store.currentNumber; store.markModified() }
     inlineNumber.value = ''
     store.selectCell(cell[0], cell[1])
     return
   }
   if (store.mode === 'symbol' && cell) {
-    const c = cellAt(p.value, cell[0], cell[1])
+    const c = getCell(cell[0], cell[1])
     if (c) { c.symbol = store.currentSymbol ?? undefined; store.markModified() }
     store.selectCell(cell[0], cell[1])
     return
   }
   if (store.mode === 'compass' && cell) {
-    const c = cellAt(p.value, cell[0], cell[1])
+    const c = getCell(cell[0], cell[1])
     if (c) { c.compass = store.currentCompass ?? undefined; store.markModified() }
     store.selectCell(cell[0], cell[1])
     return
@@ -372,7 +387,7 @@ function onKey(e: KeyboardEvent) {
   if (k === 'Escape') { store.clearSelection(); inlineNumber.value = ''; return }
   if (k === 'Delete' || k === 'Backspace') {
     if (store.selectedCell) {
-      const c = cellAt(p.value, store.selectedCell[0], store.selectedCell[1])
+      const c = getCell(store.selectedCell[0], store.selectedCell[1])
       if (c && !c.blocked) { clearCellProps(c); store.markModified() }
     }
     return
@@ -382,7 +397,7 @@ function onKey(e: KeyboardEvent) {
   if (modeKeys[k.toLowerCase()]) { store.mode = modeKeys[k.toLowerCase()]; return }
   if (store.mode === 'number' && store.selectedCell && /^[0-9]$/.test(k)) {
     inlineNumber.value += k
-    const c = cellAt(p.value, store.selectedCell[0], store.selectedCell[1])
+    const c = getCell(store.selectedCell[0], store.selectedCell[1])
     if (c) { c.number = parseInt(inlineNumber.value); store.markModified() }
   }
 }
@@ -401,9 +416,9 @@ function moveSelection(k: string) {
 
 // ── context menu actions ─────────────────────────────────────────────────────
 function ctxToggleBlocked() { if (ctxMenu.value?.cell) toggleBlocked(ctxMenu.value.cell[0], ctxMenu.value.cell[1]); ctxMenu.value = null }
-function ctxClearNumber() { if (ctxMenu.value?.cell) { const c = cellAt(p.value, ...ctxMenu.value.cell); if (c) { c.number = undefined; store.markModified() } } ctxMenu.value = null }
-function ctxClearSymbol() { if (ctxMenu.value?.cell) { const c = cellAt(p.value, ...ctxMenu.value.cell); if (c) { c.symbol = undefined; store.markModified() } } ctxMenu.value = null }
-function ctxClearCellAll() { if (ctxMenu.value?.cell) { const c = cellAt(p.value, ...ctxMenu.value.cell); if (c && !c.blocked) { clearCellProps(c); store.markModified() } } ctxMenu.value = null }
+function ctxClearNumber() { if (ctxMenu.value?.cell) { const c = getCell(...ctxMenu.value.cell); if (c) { c.number = undefined; store.markModified() } } ctxMenu.value = null }
+function ctxClearSymbol() { if (ctxMenu.value?.cell) { const c = getCell(...ctxMenu.value.cell); if (c) { c.symbol = undefined; store.markModified() } } ctxMenu.value = null }
+function ctxClearCellAll() { if (ctxMenu.value?.cell) { const c = getCell(...ctxMenu.value.cell); if (c && !c.blocked) { clearCellProps(c); store.markModified() } } ctxMenu.value = null }
 function ctxToggleCellBoundary() {
   if (ctxMenu.value?.cell) {
     const [r, c] = ctxMenu.value.cell
@@ -414,11 +429,11 @@ function ctxToggleCellBoundary() {
 }
 function ctxToggleEdge() { if (ctxMenu.value?.edge) toggleEdgeBoundary(ctxMenu.value.edge); ctxMenu.value = null }
 function ctxSetConstraint(type: string, value?: number) {
-  if (ctxMenu.value?.edge) { const e = edgeBetween(p.value, ...ctxMenu.value.edge); if (e) { e.constraint = makeConstraint(type as any, value); store.markModified() } }
+  if (ctxMenu.value?.edge) { const e = getEdge(...ctxMenu.value.edge); if (e) { e.constraint = makeConstraint(type as any, value); store.markModified() } }
   ctxMenu.value = null
 }
 function ctxClearConstraint() {
-  if (ctxMenu.value?.edge) { const e = edgeBetween(p.value, ...ctxMenu.value.edge); if (e) { e.constraint = undefined; store.markModified() } }
+  if (ctxMenu.value?.edge) { const e = getEdge(...ctxMenu.value.edge); if (e) { e.constraint = undefined; store.markModified() } }
   ctxMenu.value = null
 }
 function ctxClearWatchtower() {
@@ -530,7 +545,7 @@ const selEdge = computed(() => store.selectedEdge ? edgeEndpoints({ r1: store.se
 
     <div v-if="ctxMenu" class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @mousedown.stop @contextmenu.prevent>
       <template v-if="ctxMenu.kind === 'cell'">
-        <button v-if="cellAt(p, ctxMenu.cell![0], ctxMenu.cell![1])?.blocked" @click="ctxToggleBlocked">取消障碍</button>
+        <button v-if="getCell(ctxMenu.cell![0], ctxMenu.cell![1])?.blocked" @click="ctxToggleBlocked">取消障碍</button>
         <button v-else @click="ctxToggleBlocked">设为障碍格</button>
         <hr />
         <button @click="ctxClearNumber">清除数字</button>
@@ -546,7 +561,7 @@ const selEdge = computed(() => store.selectedEdge ? edgeEndpoints({ r1: store.se
         <button @click="ctxSetConstraint('homogeneous')">设双生 (=)</button>
         <button @click="ctxSetConstraint('inequality')">设不等号 (箭头)</button>
         <button @click="ctxSetConstraint('difference', 1)">设差值</button>
-        <template v-if="edgeBetween(p, ...ctxMenu.edge!)?.constraint">
+        <template v-if="getEdge(...ctxMenu.edge!)?.constraint">
           <hr /><button @click="ctxClearConstraint">清除约束</button>
         </template>
       </template>

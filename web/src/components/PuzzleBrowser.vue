@@ -72,6 +72,7 @@ function select(e: Entry) {
   fetch(`${import.meta.env.BASE_URL}${e.url}`)
     .then((r) => r.json())
     .then((b: BundledPuzzle) => store.loadPuzzle(b.puzzle, e.id, b.answer))
+    .catch((err) => console.error('加载题目失败:', e.id, err))
 }
 
 onMounted(async () => {

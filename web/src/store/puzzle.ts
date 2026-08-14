@@ -1,7 +1,7 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { CompassJson, EdgeJson, PuzzleJson, RegionCells, RegionJson, SolutionJson } from '../lib/types'
-import { cellRegionMap, emptyPuzzle } from '../lib/model'
+import { cellRegionMap, emptyPuzzle, normalizePuzzle } from '../lib/model'
 import { solvePuzzle } from '../worker/solverClient'
 
 export interface Selection {
@@ -101,7 +101,7 @@ export const usePuzzleStore = defineStore('puzzle', () => {
   }
 
   function loadPuzzle(p: PuzzleJson, puzzleName: string, answer: RegionCells[] | null = null) {
-    Object.assign(puzzle, clone(p))
+    Object.assign(puzzle, clone(normalizePuzzle(p)))
     name.value = puzzleName
     initialData.value = clone(puzzle)
     solution.value = null

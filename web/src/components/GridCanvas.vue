@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { usePuzzleStore } from '../store/puzzle'
-import { colors, P_COLORS, REGION_COLORS, RULE_NAMES } from '../lib/theme'
+import { colors, P_COLORS, REGION_COLORS, RULE_NAMES, FENCE_EDGES } from '../lib/theme'
 import { cellKey, edgeKey, edgeBetween, cellAt, vertexAt, makeConstraint } from '../lib/model'
 import type { CellJson, EdgeJson, PuzzleJson } from '../lib/types'
 
@@ -38,11 +38,13 @@ const cells = computed(() => {
     const cell = cellAt(p.value, r, c)
     const blocked = !!cell?.blocked
     const ri = store.displayRegions?.get(cellKey(r, c))
+    const fv = fenceDiamondValue(cell?.fence_pattern)
     out.push({
       r, c, x: cellX(c), y: cellY(r), blocked,
       fill: blocked ? colors.cell_blocked_bg : (ri != null ? REGION_COLORS[ri % REGION_COLORS.length] : colors.cell_bg_null),
       number: cell?.number, symbol: cell?.symbol, compass: cell?.compass,
-      shapePattern: cell?.shape_pattern, fencePattern: cell?.fence_pattern,
+      shapePattern: cell?.shape_pattern,
+      fence: fv ? fenceSegments(fv, cellX(c) + cellSize.value / 2, cellY(r) + cellSize.value / 2, cellSize.value) : null,
     })
   }
   return out
@@ -133,6 +135,32 @@ function shapeCells(pattern: [number, number][] | null | undefined): { r: number
   const minR = Math.min(...pattern.map(([r]) => r))
   const minC = Math.min(...pattern.map(([, c]) => c))
   return pattern.map(([r, c]) => ({ r: r - minR, c: c - minC }))
+}
+
+// Fence: recover the F-value from the stored 3x3 directional pattern
+// (up/down/left/right bits), matching PyQt _fence_diamond.
+function fenceDiamondValue(cells: [number, number][] | null | undefined): string | null {
+  if (!cells || !cells.length) return null
+  const has = (r: number, c: number) => cells.some(([rr, cc]) => rr === r && cc === c)
+  const up = has(0, 1), down = has(2, 1), left = has(1, 0), right = has(1, 2)
+  const count = [up, down, left, right].filter(Boolean).length
+  if (count === 0) return 'F0'
+  if (count === 1) return 'F1'
+  if (count === 2) return (up && down) || (left && right) ? 'F2' : 'F7'
+  if (count === 3) return 'F3'
+  return 'F4'
+}
+
+function fenceSegments(fval: string, cx: number, cy: number, size: number) {
+  const [nw, ne, sw, se] = FENCE_EDGES[fval]
+  const r = size * 0.35
+  const t = { x: cx, y: cy - r }, rp = { x: cx + r, y: cy }, b = { x: cx, y: cy + r }, l = { x: cx - r, y: cy }
+  return [
+    { present: !!nw, x1: t.x, y1: t.y, x2: l.x, y2: l.y },
+    { present: !!ne, x1: t.x, y1: t.y, x2: rp.x, y2: rp.y },
+    { present: !!sw, x1: l.x, y1: l.y, x2: b.x, y2: b.y },
+    { present: !!se, x1: rp.x, y1: rp.y, x2: b.x, y2: b.y },
+  ]
 }
 
 // ── interaction state ────────────────────────────────────────────────────────
@@ -456,6 +484,10 @@ const selEdge = computed(() => store.selectedEdge ? edgeEndpoints({ r1: store.se
           </g>
           <g v-if="c.shapePattern">
             <rect v-for="(s, i) in shapeCells(c.shapePattern)" :key="i" :x="c.x + s.c * cellSize * 0.2 + cellSize*0.2" :y="c.y + s.r * cellSize * 0.2 + cellSize*0.2" :width="cellSize*0.2 - 1" :height="cellSize*0.2 - 1" rx="1" :fill="colors.shape_mini_fill" :stroke="colors.shape_mini_pen" />
+          </g>
+          <g v-if="c.fence">
+            <line v-for="(s, i) in c.fence" :key="i" :x1="s.x1" :y1="s.y1" :x2="s.x2" :y2="s.y2" :stroke="s.present ? '#2a1a08' : 'rgba(80,60,30,0.7)'" :stroke-width="s.present ? 1.8 : 1" :stroke-dasharray="s.present ? undefined : '3,3'" />
+            <circle :cx="c.x + cellSize/2" :cy="c.y + cellSize/2" :r="cellSize*0.09" fill="#2a1a08" />
           </g>
         </g>
       </g>

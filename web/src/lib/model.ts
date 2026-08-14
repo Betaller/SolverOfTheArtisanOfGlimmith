@@ -25,6 +25,39 @@ export function cellAt(p: PuzzleJson, r: number, c: number): CellJson | undefine
   return p.cells.find((x) => x.row === r && x.col === c)
 }
 
+/**
+ * Ensure a puzzle carries the FULL cell/edge/vertex grid. Official corpus JSON
+ * stores `edges`/`vertices` sparsely (often empty) and only `cells` + rules +
+ * `outer_boundaries`; the Rust solver and Python Board synthesize the full grid
+ * and overlay the sparse boundary/constraint/watchtower data. Mirror that here
+ * so the canvas always has every edge to draw (grid lines, region borders).
+ */
+export function normalizePuzzle(p: PuzzleJson): PuzzleJson {
+  const h = p.grid.height
+  const w = p.grid.width
+
+  const cellMap = new Map(p.cells.map((c) => [cellKey(c.row, c.col), c]))
+  const cells: CellJson[] = []
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) cells.push(cellMap.get(cellKey(r, c)) ?? { row: r, col: c })
+
+  const edgeMap = new Map(p.edges.map((e) => [edgeKey(e.r1, e.c1, e.r2, e.c2), e]))
+  const edges: EdgeJson[] = []
+  for (let r = 0; r < h; r++) for (let c = 0; c + 1 < w; c++) {
+    const k = edgeKey(r, c, r, c + 1)
+    edges.push(edgeMap.get(k) ?? { r1: r, c1: c, r2: r, c2: c + 1 })
+  }
+  for (let r = 0; r + 1 < h; r++) for (let c = 0; c < w; c++) {
+    const k = edgeKey(r, c, r + 1, c)
+    edges.push(edgeMap.get(k) ?? { r1: r, c1: c, r2: r + 1, c2: c })
+  }
+
+  const vertexMap = new Map(p.vertices.map((v) => [vertexKey(v.row, v.col), v]))
+  const vertices: VertexJson[] = []
+  for (let r = 0; r <= h; r++) for (let c = 0; c <= w; c++) vertices.push(vertexMap.get(vertexKey(r, c)) ?? { row: r, col: c })
+
+  return { ...p, cells, edges, vertices }
+}
+
 export function edgeBetween(p: PuzzleJson, r1: number, c1: number, r2: number, c2: number): EdgeJson | undefined {
   const k = edgeKey(r1, c1, r2, c2)
   return p.edges.find((e) => edgeKey(e.r1, e.c1, e.r2, e.c2) === k)

@@ -110,7 +110,10 @@ fn place_non_predifined_shape(
         L.stack_top -= 1;
 
         steps += 1;
-        if steps % 4096 == 0 && Instant::now() >= core.deadline {
+        // N3: 4096→256 — each pop can trigger a full empty_area_check (O(cells²)),
+        // so 4096 steps between deadline checks lets the search overshoot the
+        // budget by seconds.  256 checks much sooner (doc 17 §4.2 N3).
+        if steps % 256 == 0 && Instant::now() >= core.deadline {
             return -1;
         }
         if crate::aog_debug_enabled() && steps % 100_000 == 0 {
@@ -857,6 +860,13 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
     }
 
     let (ret, x, y) = find_special_start_area(core, sp);
+    // N6: find_special_start_area runs an 11-stage full-board scan chain that
+    // can take seconds; re-check the deadline afterwards so the search aborts
+    // promptly instead of treating a timed-out scan as a "no special area"
+    // result (which would wrongly return 0 = complete). (doc 17 §4.1 A3.)
+    if Instant::now() >= core.deadline {
+        return -1;
+    }
     if ret == SPECIAL_START_DEFAULT && x == -1 && y == -1 {
         return 0;
     }

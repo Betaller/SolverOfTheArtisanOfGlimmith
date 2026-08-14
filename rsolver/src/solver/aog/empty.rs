@@ -2,6 +2,7 @@
 
 use super::types::*;
 use super::types::{CompassStates, Node};
+use std::time::Instant;
 
 use super::core::{AoGCore};
 
@@ -330,8 +331,17 @@ pub fn empty_area_check(core: &mut AoGCore, sp: &Vec<Vec<u32>>) -> bool {
         return false;
     }
     dfs_group_mark(core);
+    let mut checked = 0usize;
     for x in 1..=core.n_row as i32 {
         for y in 1..=core.n_col as i32 {
+            checked += 1;
+            // N2: bail on deadline inside the O(cells²) flood-fill scan so a
+            // single shape placement can't overshoot the budget by seconds.
+            // Returning false prunes safely — the search is already past its
+            // deadline and would fail anyway (doc 17 §4.1 A1).
+            if checked % 256 == 0 && Instant::now() >= core.deadline {
+                return false;
+            }
             let px = to_puzzle_x(x) as usize;
             let py = to_puzzle_y(y) as usize;
             if core.puzzle[px][py] != AREA_BLOCK

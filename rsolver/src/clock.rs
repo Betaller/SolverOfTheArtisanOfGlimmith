@@ -56,7 +56,10 @@ mod wasm_impl {
         }
 
         pub fn elapsed(&self) -> Duration {
-            Duration::from_secs_f64((performance_now() - self.0) / 1000.0)
+            // `.max(0.0)` guards against a negative/NaN delta (from_secs_f64
+            // panics on those); performance.now() is monotonic so this is purely
+            // defensive.
+            Duration::from_secs_f64(((performance_now() - self.0).max(0.0)) / 1000.0)
         }
     }
 

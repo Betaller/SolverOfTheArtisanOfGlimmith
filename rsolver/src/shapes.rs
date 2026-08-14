@@ -150,7 +150,91 @@ pub fn area_bounds(puzzle: &Puzzle) -> (usize, usize) {
         }
     }
 
+    // B2: cap max_a by the size of the largest connected component of fillable
+    // cells that is NOT cut by pre-drawn boundary edges.  A region cannot cross
+    // an is_boundary edge, so any candidate placement must fit inside a single
+    // component.  Puzzles with many boundary edges (e.g. 5976 edge constraints)
+    // can see max_a shrink dramatically. (doc 16 §3 B2.)
+    max_a = max_a.min(max_precut_component_size(puzzle));
+
     (min_a, max_a)
+}
+
+/// B2: size of the largest connected component of fillable cells connected via
+/// non-boundary edges.  Pre-drawn boundaries partition the fillable grid into
+/// components; a region can never be larger than its component. (doc 16 §3 B2.)
+fn max_precut_component_size(puzzle: &Puzzle) -> usize {
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let total = h * w;
+    let mut visited = vec![false; total];
+    let mut max_comp = 0usize;
+
+    for r in 0..h {
+        for c in 0..w {
+            let start = r * w + c;
+            if puzzle.cells[r][c].blocked || visited[start] {
+                continue;
+            }
+
+            // DFS over non-boundary edges (stack-allocated for speed).
+            let mut stack = vec![(r, c)];
+            visited[start] = true;
+            let mut comp_size = 0usize;
+
+            while let Some((cr, cc)) = stack.pop() {
+                comp_size += 1;
+
+                // Right: (cr, cc) ↔ (cr, cc+1)
+                if cc + 1 < w
+                    && !puzzle.h_edges[cr][cc].is_boundary
+                    && !puzzle.cells[cr][cc + 1].blocked
+                {
+                    let idx = cr * w + cc + 1;
+                    if !visited[idx] {
+                        visited[idx] = true;
+                        stack.push((cr, cc + 1));
+                    }
+                }
+                // Left: (cr, cc-1) ↔ (cr, cc)
+                if cc > 0
+                    && !puzzle.h_edges[cr][cc - 1].is_boundary
+                    && !puzzle.cells[cr][cc - 1].blocked
+                {
+                    let idx = cr * w + cc - 1;
+                    if !visited[idx] {
+                        visited[idx] = true;
+                        stack.push((cr, cc - 1));
+                    }
+                }
+                // Down: (cr, cc) ↔ (cr+1, cc)
+                if cr + 1 < h
+                    && !puzzle.v_edges[cr][cc].is_boundary
+                    && !puzzle.cells[cr + 1][cc].blocked
+                {
+                    let idx = (cr + 1) * w + cc;
+                    if !visited[idx] {
+                        visited[idx] = true;
+                        stack.push((cr + 1, cc));
+                    }
+                }
+                // Up: (cr-1, cc) ↔ (cr, cc)
+                if cr > 0
+                    && !puzzle.v_edges[cr - 1][cc].is_boundary
+                    && !puzzle.cells[cr - 1][cc].blocked
+                {
+                    let idx = (cr - 1) * w + cc;
+                    if !visited[idx] {
+                        visited[idx] = true;
+                        stack.push((cr - 1, cc));
+                    }
+                }
+            }
+
+            max_comp = max_comp.max(comp_size);
+        }
+    }
+    max_comp
 }
 
 /// Symbol types from the `rose_window` rule params, else the sorted distinct

@@ -2,7 +2,7 @@
 
 use super::types::*;
 use super::types::{CompassStates, Node};
-use std::time::Instant;
+use crate::clock::Instant;
 
 use super::core::{AoGCore};
 

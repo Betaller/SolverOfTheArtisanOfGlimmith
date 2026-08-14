@@ -33,6 +33,32 @@ pub struct Input {
     pub max_area: usize,
 }
 
+/// Map a `fence_pattern` (a 3x3 cross: centre `[1,1]` + cut-edge markers
+/// `[0,1]`=up / `[2,1]`=down / `[1,0]`=left / `[1,2]`=right) to a `PalisadeKind`.
+/// Returns `None` for a malformed pattern (safe: just loses pruning).
+fn palisade_kind(fp: &[[usize; 2]]) -> Option<PalisadeKind> {
+    let has = |cell: [usize; 2]| fp.contains(&cell);
+    let up = has([0, 1]);
+    let down = has([2, 1]);
+    let left = has([1, 0]);
+    let right = has([1, 2]);
+    let cuts = [up, down, left, right].iter().filter(|&&b| b).count();
+    match cuts {
+        0 => Some(PalisadeKind::None),
+        1 => Some(PalisadeKind::One),
+        4 => Some(PalisadeKind::All),
+        3 => Some(PalisadeKind::Three),
+        2 => {
+            if (up && down) || (left && right) {
+                Some(PalisadeKind::Opposite)
+            } else {
+                Some(PalisadeKind::Adjacent)
+            }
+        }
+        _ => None,
+    }
+}
+
 pub fn build_input(puzzle: &Puzzle) -> Input {
     let h = puzzle.height;
     let w = puzzle.width;
@@ -68,6 +94,11 @@ pub fn build_input(puzzle: &Puzzle) -> Input {
                         w: comp.left.map(|v| v as usize),
                     },
                 });
+            }
+            if let Some(fp) = &cell.fence_pattern {
+                if let Some(kind) = palisade_kind(fp) {
+                    cell_clues.push(CellClue::Palisade { cell: cid, kind });
+                }
             }
         }
     }

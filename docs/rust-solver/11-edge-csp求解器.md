@@ -1,6 +1,6 @@
 # edge_csp 边变量 CSP 求解器
 
-> 状态：**已实现**（第一迭代，2026-08-14）。
+> 状态：**已实现**（第一迭代 2026-08-14 已合入 main；第二迭代 2026-08-14 进行中）。
 > 对应设计：`docs/优化/14-边变量CSP独立求解器方案.md`。
 > 源码：`rsolver/src/solver/edge_csp/`。
 > 参考实现：`third_party/aog`（lifthrasiir 原生 Rust 边变量求解器，~8000 行）。
@@ -13,8 +13,14 @@ failed-literal 探测）+ 边 DFS。它不碰全局 `Edge.is_boundary`（52 处�
 输出经路由器 `validate::validate` 全量复查后才接受。
 
 **第一迭代覆盖规则**：`ring` / `brick` / `area`（数字）/ `precise` / `range` /
-`inequality` / `difference`。**尚未覆盖**：`compass`（方向计数）/ `watchtower` /
-`differentiation` / `fence` / `solitary`（第二迭代）。
+`inequality` / `difference`（14 道新解出）。
+
+**第二迭代新增**：`fence`（围栏/palisade 旋转枚举）+ `compass` 方向计数基础 +
+**叶节点内部验证**（`validate` 通过才 save，继续搜）。fence 新增 4 道
+（0923fix/0924fix/0903/0628）。
+
+**尚未覆盖（迭代三）**：`watchtower` / `differentiation` / `solitary` / `block`
+/`non_block`；compass 桥/网关强制（大 compass 题）；ring OOM 前置拦截。
 
 ---
 
@@ -52,7 +58,8 @@ rsolver/src/solver/edge_csp/
 | `Edge.constraint` `Inequality(value)` | `EdgeClueKind::Inequality{smaller_first}` | `smaller_first = value != Some(1)`（`value==1` ⇒ 首端点更大） |
 | `Edge.constraint` `Difference(value)` | `EdgeClueKind::Diff{value}` | 面积差 |
 | `Edge.is_boundary` | 预切边（`Cut`） | 约束边在 `io.rs` 已设 `is_boundary=true`，故自动 Cut |
-| `Vertex.watchtower` | `VertexClue` | 仅用于 select_edge 评分（值本身迭代二用） |
+| `Cell.fence_pattern`（3×3 十字） | `CellClue::Palisade{kind}` | `palisade_kind`：中心 `[1,1]` + 标记 `[0,1]`up/`[2,1]`down/`[1,0]`left/`[1,2]`right → `PalisadeKind`（None/One/Opposite/Adjacent/Three/All） |
+| `Vertex.watchtower` | `VertexClue` | 仅用于 select_edge 评分（值本身迭代三用） |
 
 `heterogeneous`/`homogeneous`（异生/双生，形状 delta/gemini）**不移植**——边已 Cut，
 形状关系由路由器验证器兜底。`cell_exists = !blocked`（blocked 格当空区）。
@@ -142,11 +149,23 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
 3. **`is_edge_csp_capable` 必须排他**：若对含 rose/shape 的题也触发，edge_csp 会在巨大
    搜索空间里找不存在的"满足未传播规则"的解，烧光预算。
 
-## 7. 第二迭代（未做）
+## 7. 第二迭代（已实现：内部验证 + compass + fence）
 
-- `prop/compass.rs` + `propagate_compass_in_components`（方向计数，compass 43 FAIL）。
-- `prop/watchtower.rs`（顶点配置枚举，watchtower 35 FAIL）。
+- **内部叶节点验证**（P0）：`Solver` 存 `&'a Puzzle`，`backtrack_edges` 在
+  `curr_unknown==0` 时 `extract_regions` 后先 `validate::validate` 通过才 save，
+  否则继续回溯搜下一个（替代第一迭代的"首个解"入口验证）。是 compass/fence 的
+  前置（它们的部分传播会产出中间无效解）。
+- **compass 方向计数基础**（P1）：`propagate_compass`（0 方向邻边强制 Cut）+
+  `propagate_compass_in_components`（组件方向计数 + 到限 Cut/缺限单网关 Uncut +
+  两两相容 + 边界框剪生长边）。**大 compass 题仍超时**（需桥/网关强制，迭代三）。
+- **fence 围栏**（P2）：`palisade_kind`（3×3 十字 → `PalisadeKind`）+
+  `propagate_palisade_constraints`（4 旋转枚举取交集强制边）；`SUPPORTED` 加 `fence`。
+  **新增 4 道**：0923fix / 0924fix / 0903 / 0628。
+
+## 8. 第三迭代（未做）
+
+- `prop/watchtower.rs`（顶点配置枚举，watchtower 33 FAIL）。
+- compass 桥/网关强制（Tarjan 桥 ~45 行自包含 + 单网关边强制，大 compass 题）。
 - `propagate_size_separation`（differentiation）+ `propagate_boxy_nonboxy`（block/non_block）。
-- `is_edge_csp_preempt` 前置接入（ring OOM 15 道，aog 现仍 exit -9 抢先）。
-- 内部验证（叶节点 `validate` 通过才 save，无效继续搜）替代当前"首个解"入口验证，
-  使 compass 题能越过方向计数错误的中间解。
+- `is_edge_csp_preempt` 前置接入（ring OOM，aog 现仍 exit -9 抢先，需与 shape cap 默认启用联动）。
+

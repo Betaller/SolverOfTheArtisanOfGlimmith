@@ -4,6 +4,17 @@
 
 谜题核心目标：把矩形网格划分为多个连通区域，使得**所有区域内外的线索条件**（单元格 / 边 / 顶点 / 全局）都得到满足。共 **22 条规则**（见 [规则支持](#规则支持)）。
 
+## 目录
+
+- [快速开始](#快速开始)
+- [求解能力与官方题库](#求解能力与官方题库)
+- [静态网站](#静态网站)
+- [求解器架构](#求解器架构)
+- [规则支持](#规则支持)
+- [参考项目](#参考项目)
+- [文档索引](#文档索引)
+- [开发](#开发)
+
 ## 快速开始
 
 ```bash
@@ -20,9 +31,9 @@ python scripts/benchmark_rust_solver.py  # 官方题基准（每题 20s 超时�
 
 > `default_router()` 会急切构造 `RustSolver`，因此运行 app 与 `benchmark_rust_solver.py` 之前必须先 `cargo build --release`（二进制在 `rsolver/target/release/rsolver`）。
 
-## 求解能力
+## 求解能力与官方题库
 
-官方谜题（`puzzles/official`，1258 题）求解进度，每次 `main` 提交由 CI 全量重跑并自动更新：
+官方谜题（`puzzles/official`，1258 题）求解进度，每次 `main` 提交由 CI 全量重跑、自动更新：
 
 ![官方题解出](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FBetaller%2FSolverOfTheArtisanOfGlimmith%2Fmain%2Fdocs%2Fsolver-history.json&query=%24.latest.passed&label=%E5%AE%98%E6%96%B9%E9%A2%98%E8%A7%A3%E5%87%BA&color=%232a78d6)
 ![占比](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FBetaller%2FSolverOfTheArtisanOfGlimmith%2Fmain%2Fdocs%2Fsolver-history.json&query=%24.latest.pct&label=%E5%8D%A0%E6%AF%94&suffix=%25&color=%232a78d6)
@@ -30,13 +41,30 @@ python scripts/benchmark_rust_solver.py  # 官方题基准（每题 20s 超时�
 ![求解能力变化曲线](docs/solver-history.png)
 
 > 曲线纵轴为缩放后的求解率区间（非 0–100），以突出小幅变化。数据源 `docs/solver-history.json`
-> （历史点由 `docs/official-puzzles-status.md` 里程碑表解析而来，此后每次 `main` 提交由 CI 追加）；
-> 交互版见 [GitHub Pages /trend/](https://betaller.github.io/SolverOfTheArtisanOfGlimmith/trend/)。
+> （历史点由 `docs/official-puzzles-status.md` 里程碑表解析，此后由 CI 追加）；交互版见
+> [GitHub Pages `/trend/`](https://betaller.github.io/SolverOfTheArtisanOfGlimmith/trend/)。
 
-CI（`.github/workflows/benchmark.yml`）：`main` 提交 → `cargo build --release` → 全量
-`benchmark_rust_solver.py --timeout 40 -j 8 --adaptive-j` → 解析「结果: X/Y 通过」→ 追加
-`docs/solver-history.json` → 重绘 PNG 与 `/trend/` 页 → `[skip ci]` 提交回 `main`。`/trend/` 页写入
-`web/public/trend/index.html`，由仓库现有的 wasm `deploy.yml`（`web/dist` → Pages 根）随站点一起部署。
+- **CI 流程**（[`.github/workflows/benchmark.yml`](.github/workflows/benchmark.yml)）：`main` 提交 →
+  `cargo build --release` → 全量 `benchmark_rust_solver.py --timeout 40 -j 8 --adaptive-j` →
+  解析「结果: X/Y 通过」→ 追加 `docs/solver-history.json` → 重绘 PNG 与 `/trend/` 页 → `[skip ci]` 提交回 `main`。
+- **详细进度 / DIFF / UNSOLVED / 软门禁**：见 [`docs/official-puzzles-status.md`](docs/official-puzzles-status.md)。
+  官方解是唯一解；对求解器 / 转换 / 校验 / 规则语义的每次优化，须按该文档附录 D 与 `CLAUDE.md`
+  的软门禁同步文档，并把基准结果归档入库（`results/bench/…`、`results/bin/…`）。
+
+## 静态网站
+
+浏览器内求解器：`rsolver`（Rust）编译为 WebAssembly，在 Web Worker 中运行；前端 Vue 3 +
+TypeScript + Vite + Pinia。纯静态站点，由 GitHub Pages 托管：
+
+- **在线地址**：<https://betaller.github.io/SolverOfTheArtisanOfGlimmith/>
+- **求解趋势页**：[`/trend/`](https://betaller.github.io/SolverOfTheArtisanOfGlimmith/trend/)
+- **求解策略**：官方题直接渲染 `*-answer` 官方解（**不调用求解器**）；无官方解的题 / 用户自建题
+  交给 WASM 求解器（浏览器默认 5s 超时）。
+- **部署**：[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) 在 push 到 `main` 时
+  构建 `web/dist` 并发布到 Pages（站点根）；`web/public/trend/` 随站点部署到 `/trend/`。
+- **本地构建 / 开发**：见 [`web/README.md`](web/README.md)。
+
+> 已知边界（MVP）：画板目前是只读渲染（官方题浏览 + 求解），规则 / 边 / 顶点的交互编辑尚未实现。
 
 ## 求解器架构
 
@@ -59,17 +87,18 @@ RustSolver
 ### Rust 求解器（`rsolver/`）
 
 子进程协议：谜题 JSON → stdin，题解 JSON → stdout（`rsolver --batch` 支持多行输入逐行输出，
-`RustSolver.solve_batch` 复用一个子进程批量求解）。内部按顺序尝试 4 个算法，先出答案者胜：
+`RustSolver.solve_batch` 复用一个子进程批量求解）。内部按顺序尝试多个算法，先出答案者胜：
 
 ```
 ① AoG DFS（主力，C++ 参考求解器的 1:1 移植 + 剪枝）→ ② Rose（纯玫瑰窗）
-→ ③ Pieces/DLX（形状池 / 面积 / 罗盘 → 精确覆盖）→ ④ Backtrack（逐区域 DFS，兜底）
+→ ③ edge_csp（边变量 CSP）→ ④ Pieces/DLX（形状池 / 面积 / 罗盘 → 精确覆盖）
+→ ⑤ Backtrack（逐区域 DFS，兜底）
 ```
 
 aog 求解器内部检查视为权威（`build_solution_trusted`），Rust 侧不再重验证；rose/pieces/
 backtrack 的答案须过 `solver/validate.rs` 验收门。每个题解 JSON 带 `solver` 字段标出
-答案出自哪个模块（`aog` / `rose` / `pieces` / `backtrack`），`benchmark_rust_solver.py`
-以 `via=...` 输出，便于把结果归到具体求解器。
+答案出自哪个模块（`aog` / `rose` / `edge_csp` / `pieces` / `backtrack`），
+`benchmark_rust_solver.py` 以 `via=...` 输出，便于把结果归到具体求解器。
 
 ### 目录结构
 
@@ -86,6 +115,7 @@ rsolver/src/               Rust 求解器
 ├── solver/
 │   ├── aog/               AoG DFS（C++ 移植）
 │   ├── rose/              玫瑰窗（cells / region_match / rose_growth）
+│   ├── edge_csp/          边变量 CSP（三态边 + 不动点传播）
 │   ├── pieces.rs + dlx.rs 精确覆盖
 │   └── backtrack.rs       区域回溯
 └── constraints.rs / types.rs / grid.rs / polyomino.rs
@@ -132,41 +162,6 @@ rsolver/src/               Rust 求解器
 | 超大网格精确覆盖 | 11×11 以上形状池候选数可能超 10 万，超时 |
 | 复杂组合 | compass / rose / ring 强规则组合剪枝不足，仍有个别题解不出 |
 | 预定义分割线 + 玫瑰窗 | 复杂预切玫瑰窗题耗时较长 |
-
-## 官方题库与求解状态
-
-官方题库（`puzzles/official/`，**1258 题**）的求解进度、DIFF / UNSOLVED 分析、根因结论与
-后续计划，统一维护在 **`docs/official-puzzles-status.md`**。要点：
-
-- 官方解是**唯一解**是准则；历史上的「求解器解 ≠ 官方解」绝大多数是转换/校验 bug，已修复
-  （gemini/delta 边约束、玫瑰窗检测、环纹边框 T 型、brick/形状规则语义等）。
-- 当前 Rust-only 全量基准 **1052/1258 通过**（最新 commit `dfadfe3`），详细数字与 zone 分布
-  见该文档；6 道 watchtower DIFF 已于 2026-08-06 修复（边界望塔缺失，见该文档附录 A）。
-- **软门禁**：对求解器 / 转换 / 校验 / 规则语义的每次优化，提交前必须更新该文档（进度 +
-  变更各追加一条）、同步相关文档、跑通测试，并把基准结果随提交入库
-  （`results/bench/<日期>_<commit-id>_<short-message>.txt`、二进制 `results/bin/rsolver-<commit-id>-<platform>`）。
-  详见该文档附录 D 与 `CLAUDE.md`。
-
-## C++ AoG 官方谜题库 (`aog_puzzles/`)
-
-`aog_puzzles/` 存放从官方存档 `third_party/archiveofglimmith.github.io/puzzles.json`
-生成的 **C++ AoG_Solver `.puz` 格式**谜题（**1231 个**，`aog_puzzles/<zone>/<type>/<id>.puz`），
-可直接用于参考求解器 `third_party/AoG_Solver` 的批量验证：
-
-```bash
-python scripts/convert_puzzles_json_to_aog.py   # 重新生成到 aog_puzzles/
-cd third_party/AoG_Solver && ./batch_run.sh ../aog_puzzles/Zone1   # 批量求解验证
-python scripts/compare_batch_ansi.py --ref third_party/AoG_Solver/Zone1.ansi \
-    --new <batch_run输出>     # 对比谜题路径与状态 (correct/timeout/...)
-```
-
-**生成逻辑**：archive 的 `puzzle_grid` / `solution` 本身就是游戏原生的 .puz 网格，只是每行
-尾随空格被裁剪。转换器逐行补齐到 C++ 解析器所需的宽度：节点行补到 `3*width+1` 字符；区域行
-按解析器 `size` 增长规则补齐（罗盘 `U...` 单元格会撑宽行，裁剪会导致越界读取甚至段错误）；
-`SHAPE` 每行补齐到最大宽度（C++ 按「最后一行长度」取尺寸，行宽不均会丢格子）。
-
-验证结果与官方 batch 日志一致：**Zone1 312/312、Zone2 438/438、Zone3 479-481/481**
-（残余差异均为 10s 超时边界的机器计时抖动，谜题解均与官方解一致）。
 
 ## 参考项目
 

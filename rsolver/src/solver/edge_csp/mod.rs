@@ -539,7 +539,7 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
         "inequality",
         "difference",
     ];
-    const SUPPORTED: [&str; 10] = [
+    const SUPPORTED: [&str; 13] = [
         "ring",
         "brick",
         "watchtower",
@@ -550,6 +550,9 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
         "precise",
         "range",
         "fence",
+        "differentiation",
+        "block",
+        "non_block",
     ];
     let has_edge = puzzle
         .rules

@@ -130,7 +130,11 @@ pub struct VertexClue {
 pub struct GlobalRules {
     pub bricky: bool,
     pub loopy: bool,
-    // Read once size-separation propagation lands (iteration 2).
-    #[allow(dead_code)]
+    /// `differentiation` (size_separation): adjacent pieces must have different
+    /// cell counts. Consumed by `propagate_size_separation`.
     pub size_separation: bool,
+    /// `block` (boxy): all pieces must be rectangular.
+    pub boxy: bool,
+    /// `non_block` (non_boxy): no piece may be rectangular.
+    pub non_boxy: bool,
 }

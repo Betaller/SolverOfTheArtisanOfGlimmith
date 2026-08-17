@@ -1,6 +1,6 @@
 # edge_csp 边变量 CSP 求解器
 
-> 状态：**已实现**（第一/二/三/四/五迭代已合入 main，PR #33/#37/#39/#41/#43；第六迭代 compass 放置枚举 2026-08-17）。
+> 状态：**已实现**（第一/二/三/四/五/六迭代已合入 main，PR #33/#37/#39/#41/#43/#45；第七迭代 differentiation + boxy/non_boxy 传播 2026-08-17）。
 > 对应设计：`docs/优化/14-边变量CSP独立求解器方案.md`。
 > 源码：`rsolver/src/solver/edge_csp/`。
 > 参考实现：`third_party/aog`（lifthrasiir 原生 Rust 边变量求解器，~8000 行）。
@@ -228,9 +228,26 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   过验证 + 匹配官方）。1140fix 也解出但是 iter4 已解的 flaky 临界题。
   0 真回归（1148 baseline-PASS 快扫 0 回归）。
 
-## 12. 第七迭代（未做）
+## 12. 第七迭代（已实现：differentiation + boxy/non_boxy 传播）
 
-- `propagate_size_separation`（differentiation）+ `propagate_boxy_nonboxy`（block/non_block）。
+- **`propagate_size_separation`**（`prop.rs`）：移植参考 `area.rs:370-485`。
+  `differentiation`（相邻区域面积不同）：建 `sealed_neighbor_sizes[ci]`（相邻已 sealed
+  或有固定 target 的组件的最终面积）→ Unknown 合并边若合并后面积等于某 sealed 邻居→强
+  Cut；当前/target 面积被禁且仅剩 1 条 Unknown 生长边→强 Uncut。
+- **`check_size_separation_sealed_pairs`**：两 sealed 等面积组件跨 Cut 边→矛盾（area.rs:1244-1265）。
+- **`propagate_boxy_nonboxy`**（`prop.rs`）：移植参考 `area.rs:904-1001`。`block`（boxy：
+  区域须矩形）/`non_block`（non_boxy：区域不可矩形）。矩形判定 = `cell_count == bbox_w*bbox_h`。
+  sealed 非矩形(boxy)/矩形(non_boxy)→Err；growing 有填不满的洞(boxy)→Err；growing 恰 1 可填洞
+  (non_boxy)→强 Cut 防矩形化。
+- `GlobalRules` 加 `boxy`/`non_boxy` 字段；`is_edge_csp_capable` 的 SUPPORTED 加
+  `differentiation`/`block`/`non_block`。
+- **新增 3 道** via edge_csp（均 non_block+companion，过验证 + 匹配官方）：0690/0971/0984。
+  differentiation 0 新解（propagator sound 但目标题未破）。boxy(block) 0 目标题（FAIL 集中
+  block 题均带 rose/different/solitary，`is_edge_csp_capable` 仍排他）。
+  0 真回归（2 假回归 0265/0875 经隔离重跑仍解）。
+
+## 13. 第八迭代（未做）
+
 - rose 范式迁移（`docs/优化/20` P2：pair.rs 对分支接进 edge_csp）。
   注：rose 伴生剪枝债 R1 已证伪（`docs/优化` 分支 `rose-companion-r1`）——rose 候选受
   ring 预切边限制 max≤8 无法覆盖 total，范式错配非剪枝可救，必须走 P2 边传播。

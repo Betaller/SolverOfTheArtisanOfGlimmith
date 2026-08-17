@@ -9,7 +9,7 @@
 use super::types::*;
 use super::parity_uf::ParityUF;
 use super::Solver;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 /// Reusable buffers and caches owned by the propagation subsystem.
 pub(crate) struct PropagationState {
@@ -594,6 +594,14 @@ impl<'a> Solver<'a> {
             progress |= self.propagate_compass_in_components(num_comp)?;
             progress |= self.propagate_compass_placement_enumeration()?;
         }
+        if self.rules.size_separation {
+            progress |= self.propagate_size_separation(num_comp)?;
+        }
+        if self.rules.boxy || self.rules.non_boxy {
+            progress |= self.propagate_boxy_nonboxy(num_comp)?;
+        }
+        // Final sealed-pair size-separation contradiction check.
+        self.check_size_separation_sealed_pairs(num_comp)?;
 
         Ok(progress)
     }
@@ -2761,6 +2769,271 @@ impl<'a> Solver<'a> {
         for &e in &forced_uncuts {
             if self.edges[e] == EdgeState::Unknown {
                 if !self.set_edge(e, EdgeState::Uncut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+        Ok(progress)
+    }
+
+    /// Size-separation (`differentiation`) propagation — port of
+    /// `third_party/aog area.rs::propagate_size_separation` (370-485).
+    ///
+    /// Adjacent pieces must have different cell counts. Propagates by:
+    /// 1. Building `sealed_neighbor_sizes[ci]` — sizes of adjacent components
+    ///    whose final size is known (sealed, or growing with a fixed target).
+    /// 2. For each Unknown growth edge, if merging the two components would
+    ///    produce a size equal to a sealed neighbor's size → force Cut.
+    /// 3. For a growing component whose current/target size is forbidden (equals
+    ///    a sealed neighbor) → if exactly 1 Unknown growth edge remains, force
+    ///    it Uncut (must grow away from the forbidden size); if 0 → Err.
+    fn propagate_size_separation(&mut self, num_comp: usize) -> Result<bool, ()> {
+        if !self.rules.size_separation {
+            return Ok(false);
+        }
+        // Step 1: sealed_neighbor_sizes[ci].
+        let mut sealed_neighbor_sizes: Vec<HashSet<usize>> = vec![HashSet::new(); num_comp];
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            if self.is_sealed(ci1) {
+                sealed_neighbor_sizes[ci2].insert(self.curr_comp_sz[ci1]);
+            } else if ci1 < self.curr_target_area.len() {
+                if let Some(t) = self.curr_target_area[ci1] {
+                    sealed_neighbor_sizes[ci2].insert(t);
+                }
+            }
+            if self.is_sealed(ci2) {
+                sealed_neighbor_sizes[ci1].insert(self.curr_comp_sz[ci2]);
+            } else if ci2 < self.curr_target_area.len() {
+                if let Some(t) = self.curr_target_area[ci2] {
+                    sealed_neighbor_sizes[ci1].insert(t);
+                }
+            }
+        }
+
+        let mut progress = false;
+
+        // Step 2: merge-conflict forcing (Unknown edge → Cut if merged size forbidden).
+        let mut merge_conflict_cuts: Vec<EdgeId> = Vec::new();
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Unknown {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            let merged_sz = self.curr_comp_sz[ci1] + self.curr_comp_sz[ci2];
+            if sealed_neighbor_sizes[ci1].contains(&merged_sz)
+                || sealed_neighbor_sizes[ci2].contains(&merged_sz)
+            {
+                merge_conflict_cuts.push(e);
+            }
+        }
+        for e in merge_conflict_cuts {
+            if self.edges[e] == EdgeState::Unknown {
+                if !self.set_edge(e, EdgeState::Cut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+
+        // Step 3: forbidden-size checks.
+        let mut forbidden_uncuts: Vec<EdgeId> = Vec::new();
+        for ci in 0..num_comp {
+            let forbidden = &sealed_neighbor_sizes[ci];
+            if forbidden.is_empty() {
+                continue;
+            }
+            if self.is_sealed(ci) {
+                if forbidden.contains(&self.curr_comp_sz[ci]) {
+                    return Err(());
+                }
+            } else {
+                if ci < self.curr_target_area.len() {
+                    if let Some(t) = self.curr_target_area[ci] {
+                        if forbidden.contains(&t) {
+                            return Err(());
+                        }
+                    }
+                }
+                if forbidden.contains(&self.curr_comp_sz[ci]) {
+                    // Current size forbidden → must grow.
+                    let mut unk_count = 0usize;
+                    let mut last_unk: Option<EdgeId> = None;
+                    if ci < self.prop.growth_edges.len() {
+                        for &e in &self.prop.growth_edges[ci] {
+                            if self.edges[e] == EdgeState::Unknown {
+                                unk_count += 1;
+                                last_unk = Some(e);
+                            }
+                        }
+                    }
+                    if unk_count == 0 {
+                        return Err(());
+                    }
+                    if unk_count == 1 {
+                        forbidden_uncuts.push(last_unk.unwrap());
+                    }
+                }
+            }
+        }
+        for e in forbidden_uncuts {
+            if self.edges[e] == EdgeState::Unknown {
+                if !self.set_edge(e, EdgeState::Uncut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+        Ok(progress)
+    }
+
+    /// Final sealed-pair size-separation contradiction check — port of
+    /// `third_party/aog area.rs:1244-1265`. For each Cut edge between two
+    /// SEALED components of equal size → contradiction (adjacent equal-size
+    /// pieces violate differentiation).
+    fn check_size_separation_sealed_pairs(&self, num_comp: usize) -> Result<(), ()> {
+        if !self.rules.size_separation {
+            return Ok(());
+        }
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            if self.is_growing(ci1) || self.is_growing(ci2) {
+                continue;
+            }
+            if self.curr_comp_sz[ci1] == self.curr_comp_sz[ci2] {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Boxy (`block`) / non-boxy (`non_block`) propagation — port of
+    /// `third_party/aog area.rs::propagate_boxy_nonboxy` (904-1001).
+    ///
+    /// A piece is rectangular iff `cell_count == bbox_size`
+    /// (`bbox_w * bbox_h` over its cells' row/col extents).
+    /// - **boxy**: sealed non-rectangle → Err; growing with holes it can't fill → Err.
+    /// - **non_boxy**: sealed rectangle → Err; growing with exactly 1 hole it could
+    ///   fill → force Cut on edges to that hole (prevent rectangle formation).
+    fn propagate_boxy_nonboxy(&mut self, num_comp: usize) -> Result<bool, ()> {
+        if !self.rules.boxy && !self.rules.non_boxy {
+            return Ok(false);
+        }
+        let mut progress = false;
+        let (mut min_r, mut max_r, mut min_c, mut max_c) = (
+            vec![self.grid.rows; num_comp],
+            vec![0; num_comp],
+            vec![self.grid.cols; num_comp],
+            vec![0; num_comp],
+        );
+        for ci in 0..num_comp {
+            for &c in &self.comp_cells[ci] {
+                let (r, col) = self.grid.cell_pos(c);
+                min_r[ci] = min_r[ci].min(r);
+                max_r[ci] = max_r[ci].max(r);
+                min_c[ci] = min_c[ci].min(col);
+                max_c[ci] = max_c[ci].max(col);
+            }
+        }
+
+        let mut non_boxy_cuts: Vec<EdgeId> = Vec::new();
+        for ci in 0..num_comp {
+            let cell_count = self.curr_comp_sz[ci];
+            if cell_count == 0 {
+                continue;
+            }
+            let bbox_w = max_r[ci] - min_r[ci] + 1;
+            let bbox_h = max_c[ci] - min_c[ci] + 1;
+            let bbox_size = bbox_w * bbox_h;
+            let is_rect = cell_count == bbox_size;
+
+            if self.is_sealed(ci) {
+                if self.rules.non_boxy && is_rect {
+                    return Err(());
+                }
+                if self.rules.boxy && !is_rect {
+                    return Err(());
+                }
+            } else {
+                let max_possible = if ci < self.prop.curr_max_area.len() {
+                    self.prop.curr_max_area[ci]
+                } else {
+                    continue;
+                };
+                if self.rules.boxy && cell_count < bbox_size && bbox_size > max_possible {
+                    return Err(());
+                }
+                if self.rules.non_boxy && cell_count < bbox_size {
+                    let holes = bbox_size - cell_count;
+                    if holes == 1 && max_possible >= bbox_size {
+                        for &c in &self.comp_cells[ci] {
+                            let (r, col) = self.grid.cell_pos(c);
+                            for (dr, dc) in [(-1isize, 0), (1, 0), (0, -1), (0, 1)] {
+                                let nr = r as isize + dr;
+                                let nc = col as isize + dc;
+                                if nr < 0
+                                    || nr >= self.grid.rows as isize
+                                    || nc < 0
+                                    || nc >= self.grid.cols as isize
+                                {
+                                    continue;
+                                }
+                                let nid = self.grid.cell_id(nr as usize, nc as usize);
+                                if !self.grid.cell_exists[nid] || self.curr_comp_id[nid] == ci {
+                                    continue;
+                                }
+                                let (hr, hc) = self.grid.cell_pos(nid);
+                                if hr >= min_r[ci]
+                                    && hr <= max_r[ci]
+                                    && hc >= min_c[ci]
+                                    && hc <= max_c[ci]
+                                {
+                                    if let Some(e) = self.grid.edge_between(c, nid) {
+                                        if self.edges[e] == EdgeState::Unknown {
+                                            non_boxy_cuts.push(e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for e in non_boxy_cuts {
+            if self.edges[e] == EdgeState::Unknown {
+                if !self.set_edge(e, EdgeState::Cut) {
                     return Err(());
                 }
                 progress = true;

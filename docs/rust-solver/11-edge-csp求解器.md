@@ -1,6 +1,6 @@
 # edge_csp 边变量 CSP 求解器
 
-> 状态：**已实现**（第一/二迭代已合入 main，PR #33/#37；第三迭代 2026-08-14 进行中）。
+> 状态：**已实现**（第一/二/三迭代已合入 main，PR #33/#37/#39；第四迭代 watchtower 传播 2026-08-17）。
 > 对应设计：`docs/优化/14-边变量CSP独立求解器方案.md`。
 > 源码：`rsolver/src/solver/edge_csp/`。
 > 参考实现：`third_party/aog`（lifthrasiir 原生 Rust 边变量求解器，~8000 行）。
@@ -173,11 +173,37 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   （后置 fallback 会接着跑）、cap 关时 moot，且只会把小块题重归因到 edge_csp 而无解出增益。
   **结论：OOM 止血需更精准手段（如 deadline 触发式 cap），50k 一刀切不可取。**
 
-## 9. 第四迭代（未做）
+## 9. 第四迭代（已实现：watchtower 顶点传播）
 
-- `prop/watchtower.rs`（顶点配置枚举，watchtower 33 FAIL）。
+- **watchtower 传播**（`prop.rs::propagate_watchtower`）：移植参考
+  `third_party/aog/src/solver/propagation/watchtower.rs`，接入不动点循环（`!vertex_clues.is_empty()`
+  门控，在 `area_bounds` 之后跑）。两遍：
+  - **Pass A（component-ID）**：`curr_comp_id` 已填充时，数每个 watchtower 顶点
+    周围 2×2 的 distinct sealed/growing 组件 → `[min_distinct, max_distinct]` 区间。
+    `value` 越界→矛盾；`max_distinct==value && comp_count>1` 时强制不同组件间的
+    Unknown 边 `Cut`。
+  - **Pass B（edge-count）**：数 2×2 内部 4 边的 Cut/Unknown。cycle(4格)：
+    `pieces=max(1,k)`；`value==1` 精确（强制 Uncut），`value≥2` 下界（强制 Cut 达 value）。
+    tree(2-3格)：`pieces=1+k`；`value==2` 下界，`value==1/≥3` 精确。处理 double-touching
+    （区域经两路径触顶点只算一次）。
+- **value==1 启动优化**（`mod.rs::solve`）：内部顶点（4 格全在）`value==1` 预先强制
+  4 条内部边 Uncut（Pass B 只在已有 cut 时行动，此优化主动解 `value==1⇒0 cut`）。
+- `VertexClue.value` 不再 dead_code；`grid::vertex_pos` 逆映射 helper 新增。
+- **新增 4 道** via edge_csp：0405 / 0419 / 0983 / 1140fix（均过验证 + 匹配官方解）。
+  0 回归（1148 baseline-PASS 全量快扫 + 3 个"假回归"经隔离重跑确认是 aog 抖动/系统噪声，
+  均无 watchtower、propagator 不触发）。
+
+## 10. 第五迭代（未做）
+
+- `propagate_vertex_edge_parity`（ParityUF 全局 XOR 约束，watchtower.rs:330-533）——
+  第四迭代只移植了 `propagate_watchtower`（A+B pass），未移植 parity 传播器与
+  `probe_watchtower_vertex_configs`（顶点配置枚举探测）。若第四迭代收益不够，
+  这两个是增量补强（全局奇偶约束 + 启动枚举强制）。
 - compass 放置枚举（组件合并版，纯 compass 0445/0469/1395b 需此 + 桥/网关）。
 - `propagate_size_separation`（differentiation）+ `propagate_boxy_nonboxy`（block/non_block）。
-- rose 伴生剪枝债（R1 复用 backtrack 检查，`docs/优化/18`）+ rose 范式迁移（`docs/优化/20`）。
-- pieces compass 枚举 `unwrap_or(0)` bug（`docs/优化/20`：spec<4 过度剪枝）。
+- rose 范式迁移（`docs/优化/20` P2：pair.rs 对分支接进 edge_csp）。
+  注：rose 伴生剪枝债 R1 已证伪（`docs/优化` 分支 `rose-companion-r1`）——rose 候选受
+  ring 预切边限制 max≤8 无法覆盖 total，范式错配非剪枝可救，必须走 P2 边传播。
+- pieces compass 枚举 `unwrap_or(0)` bug（`docs/优化/20`：spec<4 过度剪枝；分支
+  `pieces-compass-fix` 已修但 0 新解，未合）。
 

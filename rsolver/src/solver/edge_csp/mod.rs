@@ -251,6 +251,38 @@ impl<'a> Solver<'a> {
                 .collect();
         }
 
+        // Watchtower value==1 startup optimization (port of reference
+        // `apply_watchtower_value_one_optimization`): an interior vertex (all 4
+        // cells exist) with value==1 means all 4 cells are the same region → all
+        // 4 internal edges are Uncut. Force them now so the propagator's Pass B
+        // (which only acts when a cut already exists) doesn't leave them Unknown.
+        // Border value==1 vertices are left for Pass B (their tree topology means
+        // pieces = 1 + k, and value==1 ⇒ k==0 is handled there).
+        if !self.vertex_clues.is_empty() {
+            let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
+            for clue in self.vertex_clues.clone() {
+                if clue.value != 1 {
+                    continue;
+                }
+                let (vi, vj) = self.grid.vertex_pos(clue.vertex);
+                let cell_opts = self.grid.vertex_cells(vi, vj);
+                // Interior = all 4 cells exist.
+                let all_exist = cell_opts.iter().all(|c| c.map_or(false, |cid| self.grid.cell_exists[cid]));
+                if !all_exist {
+                    continue;
+                }
+                for &(a_idx, b_idx) in &cell_pair_indices {
+                    if let (Some(a), Some(b)) = (cell_opts[a_idx], cell_opts[b_idx]) {
+                        if let Some(eid) = self.grid.edge_between(a, b) {
+                            if self.edges[eid] == EdgeState::Unknown {
+                                self.set_edge(eid, EdgeState::Uncut);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if self.propagate().is_err() {
             return None;
         }

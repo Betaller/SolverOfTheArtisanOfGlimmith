@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use crate::clock::Instant;
 
 use crate::shapes::rose_symbol_types;
-use crate::types::{Puzzle, RegionInfo};
+use crate::types::{ModuleOutcome, Puzzle, RegionInfo};
 
 use cells::{CellSet, PreBoundaries};
 
@@ -83,11 +83,15 @@ pub fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<
 /// For `puzzle_piece + rose_window` puzzles, pre-resolves the
 /// `shape_pattern`-pinned regions first (see `puzzle_piece_pin`), then runs
 /// region_match on the remaining cells with a reduced `m`.
+///
+/// Returns `ModuleOutcome`: a candidate that `accept_if_valid` rejected is
+/// surfaced as `ValidationFailed` (previously folded into `None` and lost —
+/// doc 23 §3.3).  `None` means no candidate was produced at all.
 pub fn solve_rose(
     puzzle: &Puzzle,
     start: &Instant,
     timeout_ms: u64,
-) -> Option<Vec<RegionInfo>> {
+) -> ModuleOutcome {
     let h = puzzle.height;
     let w = puzzle.width;
     let mut all_positions = CellSet::new(h * w);
@@ -102,7 +106,7 @@ pub fn solve_rose(
     let symbol_types = rose_symbol_types(puzzle);
     let m = rose_m(puzzle, &symbol_types);
     if symbol_types.is_empty() || m == 0 {
-        return None;
+        return ModuleOutcome::None;
     }
 
     let has_puzzle_piece = puzzle.rules.iter().any(|r| r.ctype == "puzzle_piece");
@@ -113,48 +117,87 @@ pub fn solve_rose(
         .map(|v| v == "0")
         .unwrap_or(false);
     if has_puzzle_piece && pp_pin_enabled {
-        if let Some(regions) = solve_rose_with_pin(puzzle, &pre, &symbol_types, m, &all_positions, start, timeout_ms) {
-            return Some(regions);
+        // `solve_rose_with_pin` returns its own `ModuleOutcome`; on Solved we
+        // return, otherwise we record whether it was a validation failure for
+        // the final outcome decision, then fall through.
+        let mut validation_failed = false;
+        match solve_rose_with_pin(puzzle, &pre, &symbol_types, m, &all_positions, start, timeout_ms) {
+            ModuleOutcome::Solved(regions) => return ModuleOutcome::Solved(regions),
+            ModuleOutcome::ValidationFailed => validation_failed = true,
+            ModuleOutcome::None => {}
         }
         // Pin path failed → fall through to the plain path (which will likely
         // also fail for puzzle_piece, but rose_growth is a last resort).
+        return rose_plain_and_growth(
+            puzzle, &pre, &symbol_types, m, &all_positions,
+            start, timeout_ms, validation_failed,
+        );
     }
 
+    rose_plain_and_growth(
+        puzzle, &pre, &symbol_types, m, &all_positions,
+        start, timeout_ms, false,
+    )
+}
+
+/// region_match then rose_growth fallback, with `accept_if_valid` gating each
+/// candidate.  `validation_failed_in` carries forward any earlier pin-path
+/// validation failure so the final outcome can be `ValidationFailed` when no
+/// path produced an accepted solution.
+fn rose_plain_and_growth(
+    puzzle: &Puzzle,
+    pre: &PreBoundaries,
+    symbol_types: &[String],
+    m: usize,
+    all_positions: &CellSet,
+    start: &Instant,
+    timeout_ms: u64,
+    mut validation_failed_in: bool,
+) -> ModuleOutcome {
     // region_match first (mirrors rose/solver.py:40).
     if crate::aog_debug_enabled() {
         eprintln!("rose: region_match start (types={} m={})", symbol_types.len(), m);
     }
     if let Some(regions) = region_match::solve_by_region_match(
         puzzle,
-        &pre,
-        &symbol_types,
+        pre,
+        symbol_types,
         m,
-        &all_positions,
+        all_positions,
         start,
         timeout_ms,
     ) {
-        if let Some(ok) = accept_if_valid(regions, puzzle) {
-            return Some(ok);
+        match accept_if_valid(regions, puzzle) {
+            Some(ok) => return ModuleOutcome::Solved(ok),
+            None => validation_failed_in = true,
         }
     }
     // rose_growth fallback (mirrors rose/solver.py:47).
     if let Some(regions) = super::rose::rose_growth::solve_rose_growth(
         puzzle,
-        &pre,
-        &symbol_types,
+        pre,
+        symbol_types,
         m,
-        &all_positions,
+        all_positions,
         start,
         timeout_ms,
     ) {
-        if let Some(ok) = accept_if_valid(regions, puzzle) {
-            return Some(ok);
+        match accept_if_valid(regions, puzzle) {
+            Some(ok) => return ModuleOutcome::Solved(ok),
+            None => validation_failed_in = true,
         }
     }
-    None
+    if validation_failed_in {
+        ModuleOutcome::ValidationFailed
+    } else {
+        ModuleOutcome::None
+    }
 }
 
 /// Pre-pin `shape_pattern` regions, then run region_match on the remainder.
+///
+/// Returns `ModuleOutcome`; `accept_if_valid` rejections are tracked and, if
+/// no assignment yielded an accepted solution, surfaced as `ValidationFailed`.
 fn solve_rose_with_pin(
     puzzle: &Puzzle,
     pre: &PreBoundaries,
@@ -163,7 +206,7 @@ fn solve_rose_with_pin(
     all_positions: &CellSet,
     start: &Instant,
     timeout_ms: u64,
-) -> Option<Vec<RegionInfo>> {
+) -> ModuleOutcome {
     let h = puzzle.height;
     let w = puzzle.width;
     let n_bits = h * w;
@@ -178,7 +221,7 @@ fn solve_rose_with_pin(
         }
         None => {
             if dbg { eprintln!("rose-pp-pin: enumerate_pin_candidates returned None"); }
-            return None;
+            return ModuleOutcome::None;
         }
     };
     let assignments =
@@ -192,11 +235,12 @@ fn solve_rose_with_pin(
         );
     }
 
+    let mut validation_failed = false;
     let deadline = *start + std::time::Duration::from_millis(timeout_ms);
     for assignment in &assignments {
         // Budget guard: stop trying assignments if we're out of time.
         if crate::clock::Instant::now() >= deadline {
-            return None;
+            break;
         }
 
         // Remainder per-type count (must be balanced → that's the new m').
@@ -234,8 +278,9 @@ fn solve_rose_with_pin(
         if m_remainder == 1 {
             if let Some(single) = try_single_region(puzzle, pre, &reduced, symbol_types, w) {
                 let merged = merge_pinned(single, assignment, w);
-                if let Some(ok) = accept_if_valid(merged, puzzle) {
-                    return Some(ok);
+                match accept_if_valid(merged, puzzle) {
+                    Some(ok) => return ModuleOutcome::Solved(ok),
+                    None => validation_failed = true,
                 }
             }
             // else fall through to region_match (may still find it via MRV).
@@ -247,7 +292,7 @@ fn solve_rose_with_pin(
         // count only if each region has one per type — the standard rose model).
         let remaining_ms = timeout_ms.saturating_sub(start.elapsed().as_millis() as u64);
         if remaining_ms == 0 {
-            return None;
+            break;
         }
         let rose_regions = region_match::solve_by_region_match(
             puzzle,
@@ -263,11 +308,16 @@ fn solve_rose_with_pin(
         // Merge: rose_regions + pinned regions (each pinned region gets a
         // fresh region_id above the rose ids).
         let merged = merge_pinned(rose_regions, assignment, w);
-        if let Some(ok) = accept_if_valid(merged, puzzle) {
-            return Some(ok);
+        match accept_if_valid(merged, puzzle) {
+            Some(ok) => return ModuleOutcome::Solved(ok),
+            None => validation_failed = true,
         }
     }
-    None
+    if validation_failed {
+        ModuleOutcome::ValidationFailed
+    } else {
+        ModuleOutcome::None
+    }
 }
 
 /// Fast path for m' == 1: if the remaining cells form a single 4-connected

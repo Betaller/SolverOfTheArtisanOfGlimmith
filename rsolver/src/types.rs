@@ -154,6 +154,79 @@ pub struct RegionInfo {
     pub matched_shape_name: Option<String>,
 }
 
+/// Outcome of a single solver module's attempt (replaces the old
+/// `Option<Vec<RegionInfo>>` return of `solve_*`).  Carries just enough to tell
+/// the dispatcher *why* the module gave up — `ValidationFailed` is the bit that
+/// was previously lost: aog / rose / edge_csp find a candidate that their own
+/// `validate::validate` rejects, but the old `None` folded it together with a
+/// genuine "searched everything, no solution".  That distinction is what the
+/// FAIL root-cause analysis (doc 21) needs.
+///
+/// `timeout` vs `exhausted` is NOT decided here: the module does not know
+/// whether it stopped because the deadline fired or because the search space
+/// ran out.  The dispatcher in `solver/mod.rs` resolves that with
+/// `Instant::now() >= deadline` (an approximation — see doc 23 §3.4; precise
+/// deadline-hit signaling is deferred to the deadline-blindspot cleanup).
+#[derive(Debug, Clone)]
+pub enum ModuleOutcome {
+    /// Found a solution that passed the module's own validation.
+    Solved(Vec<RegionInfo>),
+    /// Found a candidate region assignment but `validate::validate` rejected it
+    /// (the module's model is too loose; it produced a false candidate).
+    ValidationFailed,
+    /// No solution found — search ran out (or hit the deadline; the dispatcher
+    /// splits these two based on the wall clock).
+    None,
+}
+
+impl ModuleOutcome {
+    /// `true` only for `Solved`.
+    pub fn is_solved(&self) -> bool {
+        matches!(self, ModuleOutcome::Solved(_))
+    }
+
+    /// Extract the regions if `Solved`, else `None`.
+    pub fn regions(self) -> Option<Vec<RegionInfo>> {
+        match self {
+            ModuleOutcome::Solved(r) => Some(r),
+            _ => None,
+        }
+    }
+}
+
+/// Terminal status of one solver-module attempt, as recorded in the solution's
+/// `attempts` trace.  The dispatcher maps `ModuleOutcome` + the wall clock into
+/// one of these (see `solver::mod::classify`).
+///
+/// Variants are serialized snake_case by `io::AttemptJson` for the JSON
+/// protocol (doc 23 §3.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolverStatus {
+    Success,
+    Timeout,
+    Exhausted,
+    ValidationFailed,
+    NotAttempted,
+    Error,
+}
+
+/// One entry in a solution's per-module trace (doc 23).
+///
+/// `elapsed_ms` is the module's *own* wall-clock (from entering the module to
+/// returning), NOT cumulative — the gap between consecutive modules' elapsed
+/// sums and the total `Solution.elapsed_ms` is the `is_*_capable` checks,
+/// `build_solution` validation, and other inter-module bookkeeping.
+#[derive(Debug, Clone)]
+pub struct SolverAttempt {
+    /// "aog" | "rose" | "edge_csp" | "pieces" | "backtrack"
+    pub solver: String,
+    pub status: SolverStatus,
+    pub elapsed_ms: u64,
+    /// Optional detail (e.g. validation error summary, "no rose_window" for
+    /// not_attempted).  `None` when there is nothing worth saying.
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Solution {
     pub solved: bool,
@@ -168,6 +241,12 @@ pub struct Solution {
     /// backtrack).  Empty for errors, empty-grid, or timeout placeholders.
     /// Used by benchmark / verify tooling to attribute results to a module.
     pub solver: String,
+    /// Per-module trace: one entry per solver module the dispatch considered
+    /// (including `not_attempted` ones), in dispatch order.  Lets a result
+    /// answer "which solvers ran, how long each took, why each failed, and
+    /// which one finally solved it" (doc 23).  Empty for the empty-grid and
+    /// pre-search-topology early returns (no module ran).
+    pub attempts: Vec<SolverAttempt>,
 }
 
 impl Solution {
@@ -180,6 +259,7 @@ impl Solution {
             regions: Vec::new(),
             rule_results: HashMap::new(),
             solver: String::new(),
+            attempts: Vec::new(),
         }
     }
 }

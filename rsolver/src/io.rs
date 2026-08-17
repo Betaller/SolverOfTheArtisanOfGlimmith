@@ -107,6 +107,16 @@ struct RegionJson {
     matched_shape_name: Option<String>,
 }
 
+/// One entry in a solution's per-module attempt trace (doc 23). Serialized
+/// snake_case so the Python side maps `status` straight onto its `AttemptStatus`.
+#[derive(Debug, Serialize)]
+struct AttemptJson {
+    solver: String,
+    status: String,
+    elapsed_ms: u64,
+    note: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct SolutionJson {
     solved: bool,
@@ -118,6 +128,11 @@ struct SolutionJson {
     /// Which solver module produced this result (aog / rose / pieces /
     /// backtrack; empty for errors / empty-grid / timeouts).
     solver: String,
+    /// Per-module trace: which solvers ran, how long each took, why each
+    /// failed, and which one finally solved it (doc 23).  Empty for the
+    /// empty-grid and pre-search-topology early returns.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    attempts: Vec<AttemptJson>,
 }
 
 // ── Board builder ─────────────────────────────────────────────────────────────
@@ -281,6 +296,25 @@ fn solution_to_json(sol: &Solution) -> SolutionJson {
         }).collect(),
         rule_results: sol.rule_results.clone(),
         solver: sol.solver.clone(),
+        attempts: sol.attempts.iter().map(|a| AttemptJson {
+            solver: a.solver.clone(),
+            status: status_to_snake(a.status).to_string(),
+            elapsed_ms: a.elapsed_ms,
+            note: a.note.clone(),
+        }).collect(),
+    }
+}
+
+/// Map `SolverStatus` to its snake_case JSON string (matches the Python
+/// `AttemptStatus` enum values — doc 23 §3.5/§3.6).
+fn status_to_snake(s: SolverStatus) -> &'static str {
+    match s {
+        SolverStatus::Success => "success",
+        SolverStatus::Timeout => "timeout",
+        SolverStatus::Exhausted => "exhausted",
+        SolverStatus::ValidationFailed => "validation_failed",
+        SolverStatus::NotAttempted => "not_attempted",
+        SolverStatus::Error => "error",
     }
 }
 

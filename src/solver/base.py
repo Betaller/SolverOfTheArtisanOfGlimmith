@@ -5,10 +5,9 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
 from src.models.puzzle import Puzzle
-from src.models.solution import Solution
+from src.models.solution import AttemptStatus, Solution, SolverAttempt
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +24,11 @@ class Solver(ABC):
         return True
 
 
-@dataclass
-class SolverAttempt:
-    solver_name: str
-    solved: bool
-    elapsed_ms: int
-    steps: int
-    error: str | None = None
+# `SolverAttempt` now lives in `src.models.solution` (doc 23): one shared
+# dataclass for both the L1 Python-router trace (`SolverRouter._attempts`) and
+# the L2 Rust-module trace (`Solution.attempts`).  It is re-exported here so
+# existing `from src.solver.base import SolverAttempt` imports keep working.
+__all__ = ["Solver", "SolverRouter", "SolverAttempt", "default_router"]
 
 
 class SolverRouter:
@@ -81,24 +78,27 @@ class SolverRouter:
                 if sol.solved and not self._verify_answer(solver, puzzle, sol, label):
                     # wrong answer → try the next solver
                     self._attempts.append(SolverAttempt(
-                        solver_name=solver.name, solved=False,
+                        solver=solver.name,
+                        status=AttemptStatus.VALIDATION_FAILED,
                         elapsed_ms=elapsed, steps=sol.steps_taken,
-                        error=self._last_verify_error,
+                        note=self._last_verify_error,
                     ))
                     continue
                 self._attempts.append(SolverAttempt(
-                    solver_name=solver.name, solved=sol.solved,
+                    solver=solver.name,
+                    status=AttemptStatus.SUCCESS if sol.solved else AttemptStatus.EXHAUSTED,
                     elapsed_ms=elapsed, steps=sol.steps_taken,
-                    error=sol.error_message,
+                    note=sol.error_message if not sol.solved else None,
                 ))
                 if sol.solved:
                     sol.elapsed_ms = int((time.monotonic() - start) * 1000)
                     return sol
             except Exception as e:
                 self._attempts.append(SolverAttempt(
-                    solver_name=solver.name, solved=False,
+                    solver=solver.name,
+                    status=AttemptStatus.ERROR,
                     elapsed_ms=int((time.monotonic() - t0) * 1000),
-                    steps=0, error=str(e),
+                    steps=0, note=str(e),
                 ))
 
         return Solution(
@@ -106,7 +106,7 @@ class SolverRouter:
             steps_taken=sum(a.steps for a in self._attempts),
             elapsed_ms=int((time.monotonic() - start) * 1000),
             error_message=" / ".join(
-                f"[{a.solver_name}] {a.error or '无解'}" for a in self._attempts
+                f"[{a.solver}] {a.error or '无解'}" for a in self._attempts
             ),
         )
 

@@ -53,7 +53,7 @@ class TestRouterValidationFallback:
             sol = router.route(_puzzle(), timeout=10, puzzle_name="test.puz")
         assert sol.solved
         assert len(sol.regions) == 1
-        names = [a.solver_name for a in router.attempts]
+        names = [a.solver for a in router.attempts]
         assert names == ["bad", "good"]
         assert router.attempts[0].solved is False
         assert router.attempts[1].solved is True

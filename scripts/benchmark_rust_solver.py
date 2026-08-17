@@ -70,6 +70,9 @@ class PuzzleResult:
     error: str | None = None
     solver: str = ""
     matches_official: bool | None = None
+    # Per-module attempt trace (doc 23): list of {solver,status,elapsed_ms,note}.
+    # Empty for load errors / rule-less puzzles / old binaries without the field.
+    attempts: list[dict[str, object]] = field(default_factory=list)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────
@@ -234,6 +237,35 @@ def _zone(path: str, root_dir: str) -> str:
 # ── single / batch solving ────────────────────────────────────────────────
 
 
+def _attempts_to_dicts(attempts: list) -> list[dict[str, object]]:
+    """Serialize a `Solution.attempts` trace to plain dicts for JSONL (doc 23).
+
+    Each `SolverAttempt` carries an `AttemptStatus` enum; store its `.value`
+    string so the JSONL stays human-readable and stable across renames.
+    """
+    out: list[dict[str, object]] = []
+    for a in attempts or []:
+        status = a.status.value if hasattr(a.status, "value") else str(a.status)
+        out.append({
+            "solver": a.solver,
+            "status": status,
+            "elapsed_ms": a.elapsed_ms,
+            "note": a.note,
+        })
+    return out
+
+
+def _attempt_chain_str(attempts: list[dict[str, object]]) -> str:
+    """Compact one-line rendering of the attempt chain for the console row:
+    `aog:timeout→rose:success`.  Returns '' when there is no trace."""
+    if not attempts:
+        return ""
+    return "→".join(
+        f"{a['solver']}:{a['status']}" for a in attempts
+        if a.get("status") != "not_attempted"
+    )
+
+
 def _validate(puzzle: object, out: dict, path: str | None = None) -> dict[str, Any]:
     """Independent re-validation.  Returns a dict with keys solved, validated, error, solver."""
     solver = out.get("solver", "")
@@ -316,6 +348,7 @@ def solve_one(path: str, timeout: float, solver: RustSolver) -> PuzzleResult:
         error=r.get("error"),
         solver=r.get("solver", ""),
         matches_official=r.get("matches_official"),
+        attempts=_attempts_to_dicts(solution.attempts),
     )
 
 
@@ -385,6 +418,7 @@ def solve_batch(
                     error=r.get("error"),
                     solver=r.get("solver", ""),
                     matches_official=r.get("matches_official"),
+                    attempts=_attempts_to_dicts(sol.attempts),
                 ),
             )
         )
@@ -576,9 +610,11 @@ def main() -> None:
             timeout_streak = 0
 
         if not args.summary_only:
+            chain = _attempt_chain_str(r.attempts)
+            via = chain or (r.solver or "-")
             print(
                 f"[{passed + len(failed):>4}/{total_files}] {status:<4} {zone:<8} "
-                f"{r.name:<24} via={r.solver or '-':<8} {r.elapsed_ms:>6}ms"
+                f"{r.name:<24} via={via:<24} {r.elapsed_ms:>6}ms"
                 f"{'  ' + r.error if r.error else ''}"
             )
 
@@ -597,6 +633,7 @@ def main() -> None:
                             "solver": r.solver,
                             "error": r.error,
                             "matches_official": r.matches_official,
+                            "attempts": r.attempts,
                         },
                         ensure_ascii=False,
                     )

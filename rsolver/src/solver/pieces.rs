@@ -34,11 +34,11 @@ const MAX_COMPASS_PLACEMENTS: usize = 2000;
 /// matches the Python ExactCoverSolver threshold (max(targets) <= 12).
 const MAX_AREA_TARGET: usize = 12;
 
-pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Option<Vec<RegionInfo>> {
+pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> ModuleOutcome {
     let deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
 
     if !has_clues(puzzle) && puzzle.shape_pool.is_empty() {
-        return None; // fall back to backtrack
+        return ModuleOutcome::None; // fall back to backtrack
     }
 
     let ctx = build_context(puzzle);
@@ -46,9 +46,9 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Optio
 
     if placements.is_empty() {
         if ctx.num_cells == 0 {
-            return Some(Vec::new());
+            return ModuleOutcome::Solved(Vec::new());
         }
-        return None;
+        return ModuleOutcome::None;
     }
 
     // Build DLX
@@ -66,6 +66,11 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Optio
     // puzzle (routed here through a synthesized rectangle pool) land on a
     // *valid* rectangle partition instead of the first (usually trivial
     // all-1×1) one.
+    //
+    // `reconstruct_and_validate` already validates each candidate inside the
+    // callback, so `result` only ever holds a *validated* solution — there is
+    // no `ValidationFailed` to surface here (unlike aog / edge_csp, whose
+    // internal validate failure is exposed via `ModuleOutcome`).
     let mut result: Option<Vec<RegionInfo>> = None;
     let mut partial: Vec<usize> = Vec::new();
     let mut row_check = |_partial: &[usize]| true;
@@ -80,7 +85,10 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Optio
     };
     dlx.search_with_check(0, &mut partial, &mut row_check, &mut on_solution);
 
-    result
+    match result {
+        Some(regions) => ModuleOutcome::Solved(regions),
+        None => ModuleOutcome::None,
+    }
 }
 
 fn has_clues(puzzle: &Puzzle) -> bool {

@@ -64,6 +64,9 @@ impl<'a> Solver<'a> {
                 progress |= self.propagate_palisade_constraints()?;
             }
             progress |= self.propagate_area_bounds()?;
+            if !self.vertex_clues.is_empty() {
+                progress |= self.propagate_watchtower()?;
+            }
 
             if !progress {
                 // Failed-literal detection: probe unknown edges / edge pairs.
@@ -1686,5 +1689,245 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(false)
+    }
+
+    /// Propagate watchtower (vertex) clues — port of
+    /// `third_party/aog/src/solver/propagation/watchtower.rs::propagate_watchtower`.
+    ///
+    /// For a vertex surrounded by N existing cells with E internal edges:
+    ///   - N=4, E=4 (2×2 block, one cycle): pieces = max(1, k) where k = cut edges
+    ///   - N=2..3 (tree): pieces = 1 + k
+    ///   - N=1: always 1 piece (no edges to propagate)
+    ///
+    /// value=2 and value=3 on cycles allow more than the minimum cuts because a
+    /// piece reaching the vertex via two different paths (double-touching, e.g.
+    /// around a hole) is counted once. Only value=1 enforces exact cut counts on
+    /// cycles. value=v constrains the required number of cut edges accordingly.
+    ///
+    /// Two passes:
+    ///   **Pass A (component-ID)** — when `curr_comp_id` is populated (after
+    ///   `build_components`), counts distinct sealed/growing components touching
+    ///   the vertex to get a `[min_distinct, max_distinct]` range; contradiction
+    ///   if `value` is outside it, and force `Cut` on Unknown edges between
+    ///   different components when `max_distinct == value`.
+    ///   **Pass B (edge-count)** — counts Cut/Unknown among the 4 internal edges
+    ///   and forces the remaining Unknowns to reach the required cut count.
+    pub(crate) fn propagate_watchtower(&mut self) -> Result<bool, ()> {
+        if self.vertex_clues.is_empty() {
+            return Ok(false);
+        }
+        let mut progress = false;
+        // Adjacent cell pairs in the 2×2 layout: (TL,TR), (TL,BL), (TR,BR), (BL,BR).
+        let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
+
+        // === Pass A: component-ID-based (distinct region counting) ===
+        if !self.curr_comp_id.is_empty() {
+            // Collect (is_err, forced_cuts) per clue to avoid borrow conflicts.
+            let comp_id_results: Vec<(bool, Vec<EdgeId>)> = self
+                .vertex_clues
+                .iter()
+                .map(|clue| {
+                    let (vi, vj) = self.grid.vertex_pos(clue.vertex);
+                    let cell_opts = self.grid.vertex_cells(vi, vj);
+                    let value = clue.value;
+
+                    let cells: Vec<CellId> = cell_opts
+                        .iter()
+                        .copied()
+                        .flatten()
+                        .filter(|&cid| self.grid.cell_exists[cid])
+                        .collect();
+                    let n = cells.len();
+                    if n == 0 || value > n || (n == 1 && value > 1) {
+                        return (false, vec![]); // caught by edge-based pass
+                    }
+
+                    // Deduplicate component IDs (at most 4 cells).
+                    let mut comp_arr = [usize::MAX; 4];
+                    let mut comp_count = 0usize;
+                    for &c in &cells {
+                        let ci = self.curr_comp_id[c];
+                        if !comp_arr[..comp_count].contains(&ci) {
+                            comp_arr[comp_count] = ci;
+                            comp_count += 1;
+                        }
+                    }
+                    let mut num_sealed = 0usize;
+                    for &ci in &comp_arr[..comp_count] {
+                        if self.is_sealed(ci) {
+                            num_sealed += 1;
+                        }
+                    }
+                    let num_growing = comp_count - num_sealed;
+
+                    let min_distinct = num_sealed + if num_growing > 0 { 1 } else { 0 };
+                    let max_distinct = comp_count;
+
+                    let is_err = value < min_distinct || value > max_distinct;
+
+                    let mut forced_cuts = Vec::new();
+                    if max_distinct == value && comp_count > 1 {
+                        for &(a_idx, b_idx) in &cell_pair_indices {
+                            if let (Some(a), Some(b)) = (cell_opts[a_idx], cell_opts[b_idx]) {
+                                if !self.grid.cell_exists[a] || !self.grid.cell_exists[b] {
+                                    continue;
+                                }
+                                if self.curr_comp_id[a] != self.curr_comp_id[b] {
+                                    if let Some(eid) = self.grid.edge_between(a, b) {
+                                        if self.edges[eid] == EdgeState::Unknown {
+                                            forced_cuts.push(eid);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    (is_err, forced_cuts)
+                })
+                .collect();
+
+            for (is_err, _) in &comp_id_results {
+                if *is_err {
+                    return Err(());
+                }
+            }
+            for (_, forced_cuts) in &comp_id_results {
+                for &eid in forced_cuts {
+                    if !self.set_edge(eid, EdgeState::Cut) {
+                        return Err(());
+                    }
+                    progress = true;
+                }
+            }
+        }
+
+        // === Pass B: edge-count-based ===
+        let constraints: Vec<(usize, usize, usize, Vec<EdgeId>, bool)> = self
+            .vertex_clues
+            .iter()
+            .filter_map(|clue| {
+                let (vi, vj) = self.grid.vertex_pos(clue.vertex);
+                let cell_opts = self.grid.vertex_cells(vi, vj);
+                let value = clue.value;
+
+                let n = cell_opts
+                    .iter()
+                    .copied()
+                    .flatten()
+                    .filter(|&cid| self.grid.cell_exists[cid])
+                    .count();
+                if n == 0 || (n == 1 && value == 1) {
+                    return None; // nothing to propagate
+                }
+                if value > n {
+                    return Some((vi, vj, value, vec![], false));
+                }
+                if n == 1 {
+                    return Some((vi, vj, value, vec![], false));
+                }
+
+                let mut edge_ids = Vec::new();
+                for &(a_idx, b_idx) in &cell_pair_indices {
+                    if let (Some(a_cid), Some(b_cid)) = (cell_opts[a_idx], cell_opts[b_idx]) {
+                        if self.grid.cell_exists[a_cid] && self.grid.cell_exists[b_cid] {
+                            if let Some(eid) = self.grid.edge_between(a_cid, b_cid) {
+                                edge_ids.push(eid);
+                            }
+                        }
+                    }
+                }
+                let is_cycle = n == 4 && edge_ids.len() == 4;
+                Some((vi, vj, value, edge_ids, is_cycle))
+            })
+            .collect();
+
+        for (_vi, _vj, value, edge_ids, is_cycle) in constraints {
+            if edge_ids.is_empty() && value > 1 {
+                return Err(());
+            }
+            if edge_ids.is_empty() {
+                continue;
+            }
+            let mut n_cut = 0usize;
+            let mut unk = Vec::new();
+            for &eid in &edge_ids {
+                match self.edges[eid] {
+                    EdgeState::Cut => n_cut += 1,
+                    EdgeState::Unknown => unk.push(eid),
+                    EdgeState::Uncut => {}
+                }
+            }
+
+            if is_cycle {
+                // 4 cells, 4 edges, one cycle: pieces = max(1, k).
+                if value == 1 {
+                    // exact: k ≥ 2 always gives ≥ 2 pieces.
+                    if n_cut >= 2 {
+                        return Err(());
+                    }
+                    if n_cut == 1 && !unk.is_empty() {
+                        for eid in unk {
+                            if !self.set_edge(eid, EdgeState::Uncut) {
+                                return Err(());
+                            }
+                            progress = true;
+                        }
+                    }
+                } else {
+                    // value >= 2: lower bound only (double-touching allows k > value).
+                    if n_cut + unk.len() < value {
+                        return Err(());
+                    }
+                    if n_cut + unk.len() == value && !unk.is_empty() {
+                        for eid in unk {
+                            if !self.set_edge(eid, EdgeState::Cut) {
+                                return Err(());
+                            }
+                            progress = true;
+                        }
+                    }
+                }
+            } else {
+                // Tree (2 or 3 cells): pieces = 1 + k.
+                let needed_k = value.saturating_sub(1);
+                if value == 2 {
+                    // lower bound only
+                    if n_cut + unk.len() < needed_k {
+                        return Err(());
+                    }
+                    if n_cut + unk.len() == needed_k && !unk.is_empty() {
+                        for eid in unk {
+                            if !self.set_edge(eid, EdgeState::Cut) {
+                                return Err(());
+                            }
+                            progress = true;
+                        }
+                    }
+                } else {
+                    // value == 1 or value >= 3: exact cuts
+                    if n_cut > needed_k {
+                        return Err(());
+                    }
+                    if n_cut == needed_k && !unk.is_empty() {
+                        for eid in unk {
+                            if !self.set_edge(eid, EdgeState::Uncut) {
+                                return Err(());
+                            }
+                            progress = true;
+                        }
+                    } else if n_cut + unk.len() < needed_k {
+                        return Err(());
+                    } else if n_cut + unk.len() == needed_k && !unk.is_empty() {
+                        for eid in unk {
+                            if !self.set_edge(eid, EdgeState::Cut) {
+                                return Err(());
+                            }
+                            progress = true;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(progress)
     }
 }

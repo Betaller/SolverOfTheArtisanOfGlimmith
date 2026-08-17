@@ -115,9 +115,9 @@ pub struct EdgeClue {
 #[derive(Clone, Debug)]
 pub struct VertexClue {
     pub vertex: VertexId,
-    // Read once watchtower propagation lands (iteration 2); collected now for
-    // the `watchtower_vertices` edge-selection cache.
-    #[allow(dead_code)]
+    /// Number of distinct regions touching this vertex (1..=4). A region that
+    /// touches the vertex via two cells (double-touching, e.g. around a hole)
+    /// counts once. Consumed by `propagate_watchtower`.
     pub value: usize,
 }
 

@@ -123,6 +123,12 @@ impl Grid {
         i * (self.cols + 1) + j
     }
 
+    /// Inverse of `vertex`: recover the grid point `(i,j)` from a `VertexId`.
+    #[inline]
+    pub fn vertex_pos(&self, v: VertexId) -> (usize, usize) {
+        (v / (self.cols + 1), v % (self.cols + 1))
+    }
+
     /// The two endpoint vertices of an edge, sorted: `.0 < .1`.
     pub fn edge_vertices(&self, e: EdgeId) -> (VertexId, VertexId) {
         let (is_h, r, c) = self.decode_edge(e);

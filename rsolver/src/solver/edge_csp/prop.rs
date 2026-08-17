@@ -8,6 +8,7 @@
 
 use super::types::*;
 use super::Solver;
+use std::collections::VecDeque;
 
 /// Reusable buffers and caches owned by the propagation subsystem.
 pub(crate) struct PropagationState {
@@ -1113,6 +1114,24 @@ impl<'a> Solver<'a> {
             }
         }
 
+        // Bridge/gateway forcing (skip during probing to avoid per-probe overhead).
+        if !self.in_probing {
+            let mut compass_per_comp: Vec<Vec<(CellId, CompassData)>> = vec![Vec::new(); num_comp];
+            for &cl_idx in &self.prop.compass_clue_indices {
+                if let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] {
+                    let ci = self.curr_comp_id[*cell];
+                    if ci != usize::MAX && ci < num_comp {
+                        compass_per_comp[ci].push((*cell, *compass));
+                    }
+                }
+            }
+            self.force_compass_via_bridges_and_gateways(
+                &compass_per_comp,
+                &mut cut_ef,
+                &mut uncut_ef,
+            )?;
+        }
+
         for e in cut_ef {
             if self.edges[e] == EdgeState::Unknown {
                 if !self.set_edge(e, EdgeState::Cut) {
@@ -1130,6 +1149,341 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(progress)
+    }
+
+    /// Bridge/articulation-point based path forcing + single-gateway-edge forcing
+    /// for growing components with unsatisfied compass directions.  Ported from
+    /// `third_party/aog/src/solver/propagation/compass.rs:71`.
+    fn force_compass_via_bridges_and_gateways(
+        &mut self,
+        compass_per_comp: &[Vec<(CellId, CompassData)>],
+        compass_cut_ef: &mut Vec<EdgeId>,
+        compass_uncut_ef: &mut Vec<EdgeId>,
+    ) -> Result<(), ()> {
+        for &ci in &self.prop.growing_list {
+            if compass_per_comp[ci].is_empty() {
+                continue;
+            }
+
+            // Collect unsatisfied directions: (dir_idx, target, compass_row, compass_col).
+            let mut unsatisfied: Vec<(usize, usize, isize, isize)> = Vec::new();
+            for &(cell, compass) in &compass_per_comp[ci] {
+                let (cr, cc) = self.grid.cell_pos(cell);
+                let (cri, cci) = (cr as isize, cc as isize);
+                let mut counts = [0usize; 4];
+                for &c in &self.comp_cells[ci] {
+                    let (pr, pc) = self.grid.cell_pos(c);
+                    let dr = pr as isize - cri;
+                    let dc = pc as isize - cci;
+                    if dr < 0 {
+                        counts[0] += 1;
+                    }
+                    if dr > 0 {
+                        counts[1] += 1;
+                    }
+                    if dc > 0 {
+                        counts[2] += 1;
+                    }
+                    if dc < 0 {
+                        counts[3] += 1;
+                    }
+                }
+                for &(val, idx) in &[
+                    (compass.n, 0usize),
+                    (compass.s, 1),
+                    (compass.e, 2),
+                    (compass.w, 3),
+                ] {
+                    let Some(v) = val else { continue };
+                    if counts[idx] < v {
+                        unsatisfied.push((idx, v, cri, cci));
+                    }
+                }
+            }
+            if unsatisfied.is_empty() {
+                continue;
+            }
+
+            // Build reachable subgraph from CI via non-Cut edges (BFS).
+            let nc = self.grid.num_cells();
+            let mut local_id = vec![usize::MAX; nc];
+            let mut local_cells: Vec<CellId> = Vec::new();
+            let mut queue: VecDeque<CellId> = VecDeque::new();
+            for &c in &self.comp_cells[ci] {
+                if local_id[c] == usize::MAX {
+                    local_id[c] = local_cells.len();
+                    local_cells.push(c);
+                    queue.push_back(c);
+                }
+            }
+            while let Some(cur) = queue.pop_front() {
+                for eid in self.grid.cell_edges(cur).into_iter().flatten() {
+                    if self.edges[eid] == EdgeState::Cut {
+                        continue;
+                    }
+                    let (c1, c2) = self.grid.edge_cells(eid);
+                    let other = if c1 == cur { c2 } else { c1 };
+                    if !self.grid.cell_exists[other] {
+                        continue;
+                    }
+                    if local_id[other] == usize::MAX {
+                        local_id[other] = local_cells.len();
+                        local_cells.push(other);
+                        queue.push_back(other);
+                    }
+                }
+            }
+
+            let n_local = local_cells.len();
+            if n_local <= 1 {
+                continue;
+            }
+
+            // Direction-reachability contradiction check.
+            for &(dir_idx, v, cri, cci) in &unsatisfied {
+                let reachable_dir = local_cells
+                    .iter()
+                    .filter(|&&c| {
+                        let (pr, pc) = self.grid.cell_pos(c);
+                        match dir_idx {
+                            0 => (pr as isize) < cri,
+                            1 => (pr as isize) > cri,
+                            2 => (pc as isize) > cci,
+                            3 => (pc as isize) < cci,
+                            _ => false,
+                        }
+                    })
+                    .count();
+                if reachable_dir < v {
+                    return Err(());
+                }
+            }
+
+            // Build adjacency for the reachable subgraph.
+            let mut adj: Vec<Vec<(usize, EdgeId)>> = vec![Vec::new(); n_local];
+            for (li, &c) in local_cells.iter().enumerate() {
+                for eid in self.grid.cell_edges(c).into_iter().flatten() {
+                    if self.edges[eid] == EdgeState::Cut {
+                        continue;
+                    }
+                    let (c1, c2) = self.grid.edge_cells(eid);
+                    let other = if c1 == c { c2 } else { c1 };
+                    let lj = local_id[other];
+                    if lj == usize::MAX {
+                        continue;
+                    }
+                    adj[li].push((lj, eid));
+                }
+            }
+
+            // Tarjan bridge detection.
+            let bridges = Self::find_bridges_in_subgraph(&adj, n_local);
+
+            // Force Uncut on Unknown bridges that separate CI cells from cells
+            // needed for an unsatisfied direction.
+            for bridge_eid in bridges {
+                if self.edges[bridge_eid] != EdgeState::Unknown {
+                    continue;
+                }
+                let mut ci_side = vec![false; n_local];
+                let mut bfs: VecDeque<usize> = VecDeque::new();
+                for (i, &c) in local_cells.iter().enumerate() {
+                    if self.curr_comp_id[c] == ci {
+                        ci_side[i] = true;
+                        bfs.push_back(i);
+                    }
+                }
+                while let Some(u) = bfs.pop_front() {
+                    for &(v, eid) in &adj[u] {
+                        if eid == bridge_eid {
+                            continue;
+                        }
+                        if !ci_side[v] {
+                            ci_side[v] = true;
+                            bfs.push_back(v);
+                        }
+                    }
+                }
+
+                let mut force_uncut = false;
+                'dir_check: for &(dir_idx, v, cri, cci) in &unsatisfied {
+                    let mut ci_side_count = 0usize;
+                    let mut other_side_count = 0usize;
+                    for (i, &cell) in local_cells.iter().enumerate() {
+                        let cell_comp = self.curr_comp_id[cell];
+                        if cell_comp != ci && cell_comp != usize::MAX {
+                            continue;
+                        }
+                        let (pr, pc) = self.grid.cell_pos(cell);
+                        let in_dir = match dir_idx {
+                            0 => (pr as isize) < cri,
+                            1 => (pr as isize) > cri,
+                            2 => (pc as isize) > cci,
+                            3 => (pc as isize) < cci,
+                            _ => false,
+                        };
+                        if in_dir {
+                            if ci_side[i] {
+                                ci_side_count += 1;
+                            } else {
+                                other_side_count += 1;
+                            }
+                        }
+                    }
+                    if ci_side_count < v && other_side_count > 0 {
+                        force_uncut = true;
+                        break 'dir_check;
+                    }
+                }
+                if force_uncut {
+                    compass_uncut_ef.push(bridge_eid);
+                }
+            }
+
+            // Single-gateway-edge forcing (skip if pending forced cuts — the
+            // reachable subgraph would be stale).
+            if !compass_cut_ef.is_empty() {
+                continue;
+            }
+
+            // Fresh CI membership via current Uncut edges.
+            let mut is_fresh_ci = vec![false; n_local];
+            {
+                let mut fc_bfs: VecDeque<usize> = VecDeque::new();
+                for li in 0..n_local {
+                    if self.curr_comp_id[local_cells[li]] == ci {
+                        is_fresh_ci[li] = true;
+                        fc_bfs.push_back(li);
+                    }
+                }
+                while let Some(u) = fc_bfs.pop_front() {
+                    for &(vj, eid) in &adj[u] {
+                        if is_fresh_ci[vj] {
+                            continue;
+                        }
+                        if self.edges[eid] == EdgeState::Uncut {
+                            is_fresh_ci[vj] = true;
+                            fc_bfs.push_back(vj);
+                        }
+                    }
+                }
+            }
+
+            // For each unsatisfied direction, backward BFS from non-CI dir-cells;
+            // any Unknown edge from CI to a reachable cell is a gateway edge.
+            for &(dir_idx, _v, cri, cci) in &unsatisfied {
+                let mut visited_local = vec![false; n_local];
+                let mut bfs: VecDeque<usize> = VecDeque::new();
+                for li in 0..n_local {
+                    if is_fresh_ci[li] {
+                        continue;
+                    }
+                    let c = local_cells[li];
+                    if self.curr_comp_id[c] != usize::MAX {
+                        continue;
+                    }
+                    let (pr, pc) = self.grid.cell_pos(c);
+                    let in_dir = match dir_idx {
+                        0 => (pr as isize) < cri,
+                        1 => (pr as isize) > cri,
+                        2 => (pc as isize) > cci,
+                        3 => (pc as isize) < cci,
+                        _ => false,
+                    };
+                    if in_dir {
+                        visited_local[li] = true;
+                        bfs.push_back(li);
+                    }
+                }
+                if bfs.is_empty() {
+                    continue;
+                }
+                while let Some(u) = bfs.pop_front() {
+                    for &(vj, _eid) in &adj[u] {
+                        if visited_local[vj] {
+                            continue;
+                        }
+                        if is_fresh_ci[vj] {
+                            continue;
+                        }
+                        if self.curr_comp_id[local_cells[vj]] != usize::MAX {
+                            continue;
+                        }
+                        visited_local[vj] = true;
+                        bfs.push_back(vj);
+                    }
+                }
+
+                let mut gateway_edges: Vec<EdgeId> = Vec::new();
+                for li in 0..n_local {
+                    if !is_fresh_ci[li] {
+                        continue;
+                    }
+                    for &(vj, eid) in &adj[li] {
+                        if !visited_local[vj] {
+                            continue;
+                        }
+                        if self.edges[eid] != EdgeState::Unknown {
+                            continue;
+                        }
+                        gateway_edges.push(eid);
+                    }
+                }
+                if gateway_edges.len() == 1 {
+                    compass_uncut_ef.push(gateway_edges[0]);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Iterative Tarjan bridge detection on a local subgraph.
+    /// `adj[u]` is a list of `(neighbor_local_id, EdgeId)`.
+    fn find_bridges_in_subgraph(adj: &[Vec<(usize, EdgeId)>], n_local: usize) -> Vec<EdgeId> {
+        let mut disc = vec![usize::MAX; n_local];
+        let mut low = vec![0usize; n_local];
+        let mut parent_edge: Vec<Option<EdgeId>> = vec![None; n_local];
+        let mut timer = 0usize;
+        let mut bridges: Vec<EdgeId> = Vec::new();
+        let mut dfs_stack: Vec<(usize, usize)> = Vec::new();
+
+        for root in 0..n_local {
+            if disc[root] != usize::MAX {
+                continue;
+            }
+            disc[root] = timer;
+            low[root] = timer;
+            timer += 1;
+            dfs_stack.push((root, 0));
+
+            while !dfs_stack.is_empty() {
+                let (u, adj_idx) = *dfs_stack.last().unwrap();
+                if adj_idx < adj[u].len() {
+                    let (v, eid) = adj[u][adj_idx];
+                    dfs_stack.last_mut().unwrap().1 += 1;
+                    if disc[v] == usize::MAX {
+                        parent_edge[v] = Some(eid);
+                        disc[v] = timer;
+                        low[v] = timer;
+                        timer += 1;
+                        dfs_stack.push((v, 0));
+                    } else if Some(eid) != parent_edge[u] {
+                        low[u] = low[u].min(disc[v]);
+                    }
+                } else {
+                    dfs_stack.pop();
+                    if let Some(&(p, _)) = dfs_stack.last() {
+                        low[p] = low[p].min(low[u]);
+                        if let Some(eid) = parent_edge[u] {
+                            if low[u] > disc[p] {
+                                bridges.push(eid);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        bridges
     }
 
     /// Fence (palisade) propagation: enumerate the rotations compatible with the

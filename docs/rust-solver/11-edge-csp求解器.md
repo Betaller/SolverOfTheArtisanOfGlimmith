@@ -1,6 +1,6 @@
 # edge_csp 边变量 CSP 求解器
 
-> 状态：**已实现**（第一迭代 2026-08-14 已合入 main；第二迭代 2026-08-14 进行中）。
+> 状态：**已实现**（第一/二迭代已合入 main，PR #33/#37；第三迭代 2026-08-14 进行中）。
 > 对应设计：`docs/优化/14-边变量CSP独立求解器方案.md`。
 > 源码：`rsolver/src/solver/edge_csp/`。
 > 参考实现：`third_party/aog`（lifthrasiir 原生 Rust 边变量求解器，~8000 行）。
@@ -162,10 +162,22 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   `propagate_palisade_constraints`（4 旋转枚举取交集强制边）；`SUPPORTED` 加 `fence`。
   **新增 4 道**：0923fix / 0924fix / 0903 / 0628。
 
-## 8. 第三迭代（未做）
+## 8. 第三迭代（已实现：compass 桥/网关；OOM 止血调研已回退）
+
+- **compass 桥/网关强制**（P1，`docs/优化/20`）：`force_compass_via_bridges_and_gateways`
+  （可达子图 + Tarjan 桥 + 单网关边强制 Uncut）+ `find_bridges_in_subgraph`（迭代 Tarjan）。
+  新解出 0621（compass+difference ~3s）。
+- **OOM 止血调研（已回退，净负）**（P0，`docs/优化/18`）：`DEFAULT_SHAPE_CAP` 0→50k 试验
+  发现 16/21 OOM→优雅超时但**回归 ~12 道 aog 题**（其搜索合法超过 50k 库条目）→ 默认保持
+  0（注释存档于 `aog/types.rs`）。`is_edge_csp_preempt` 细化但**不接入**——cap 开时冗余
+  （后置 fallback 会接着跑）、cap 关时 moot，且只会把小块题重归因到 edge_csp 而无解出增益。
+  **结论：OOM 止血需更精准手段（如 deadline 触发式 cap），50k 一刀切不可取。**
+
+## 9. 第四迭代（未做）
 
 - `prop/watchtower.rs`（顶点配置枚举，watchtower 33 FAIL）。
-- compass 桥/网关强制（Tarjan 桥 ~45 行自包含 + 单网关边强制，大 compass 题）。
+- compass 放置枚举（组件合并版，纯 compass 0445/0469/1395b 需此 + 桥/网关）。
 - `propagate_size_separation`（differentiation）+ `propagate_boxy_nonboxy`（block/non_block）。
-- `is_edge_csp_preempt` 前置接入（ring OOM，aog 现仍 exit -9 抢先，需与 shape cap 默认启用联动）。
+- rose 伴生剪枝债（R1 复用 backtrack 检查，`docs/优化/18`）+ rose 范式迁移（`docs/优化/20`）。
+- pieces compass 枚举 `unwrap_or(0)` bug（`docs/优化/20`：spec<4 过度剪枝）。
 

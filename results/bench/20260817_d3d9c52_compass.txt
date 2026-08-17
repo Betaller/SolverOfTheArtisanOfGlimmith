@@ -1,0 +1,5 @@
+edge_csp 第六迭代：compass 放置枚举（commit d3d9c52）
+基准：iter5 全量 1081/1258
+新增：1 道 via edge_csp（0445，纯 compass 25 格，was OOM → 73s 解出）
+回归：0 真回归（1148 快扫 0 回归）
+结果: 1082 / 1258 通过

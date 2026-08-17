@@ -592,6 +592,7 @@ impl<'a> Solver<'a> {
         progress |= self.propagate_diff_clues(num_comp)?;
         if self.has_compass_clue {
             progress |= self.propagate_compass_in_components(num_comp)?;
+            progress |= self.propagate_compass_placement_enumeration()?;
         }
 
         Ok(progress)
@@ -2346,5 +2347,425 @@ impl<'a> Solver<'a> {
 
         self.in_probing = saved;
         total_forced
+    }
+
+    /// DFS for compass placement enumeration — port of
+    /// `third_party/aog area.rs::compass_placement_dfs` (2129-2213).
+    ///
+    /// Enumerates all valid connected component merges via include/exclude
+    /// branching on the smallest-index frontier component. Returns `true` if
+    /// the result set overflowed (too many placements → caller skips forcing).
+    fn compass_placement_dfs(
+        current_mask: u32,
+        frontier_mask: u32,
+        excluded_mask: u32,
+        counts: [usize; 4],
+        size: usize,
+        comp_dir_counts: &[[usize; 4]],
+        comp_sizes: &[usize],
+        adj_mask: &[u32],
+        limits: &[Option<usize>; 4],
+        min_a: usize,
+        max_a: usize,
+        max_placements: usize,
+        results: &mut Vec<u32>,
+    ) -> bool {
+        // Record if the current merged set is a valid placement (size ≥ min_a
+        // AND every specified direction hit exactly).
+        if size >= min_a {
+            let satisfied = (0..4).all(|d| limits[d].map_or(true, |v| counts[d] == v));
+            if satisfied {
+                results.push(current_mask);
+                if results.len() >= max_placements {
+                    return true; // overflow
+                }
+            }
+        }
+
+        if size >= max_a || frontier_mask == 0 {
+            return false;
+        }
+
+        // Pick the smallest-index frontier component.
+        let v = frontier_mask.trailing_zeros() as usize;
+        let v_bit = 1u32 << v;
+        let rest = frontier_mask & !v_bit;
+
+        // Branch 1: include component v.
+        let new_counts = [
+            counts[0] + comp_dir_counts[v][0],
+            counts[1] + comp_dir_counts[v][1],
+            counts[2] + comp_dir_counts[v][2],
+            counts[3] + comp_dir_counts[v][3],
+        ];
+        let new_size = size + comp_sizes[v];
+        let exceeds = (0..4).any(|d| limits[d].map_or(false, |lim| new_counts[d] > lim));
+        if !exceeds && new_size <= max_a {
+            let new_current = current_mask | v_bit;
+            let new_frontier = rest | (adj_mask[v] & !new_current & !excluded_mask);
+            if Self::compass_placement_dfs(
+                new_current,
+                new_frontier,
+                excluded_mask,
+                new_counts,
+                new_size,
+                comp_dir_counts,
+                comp_sizes,
+                adj_mask,
+                limits,
+                min_a,
+                max_a,
+                max_placements,
+                results,
+            ) {
+                return true;
+            }
+        }
+
+        // Branch 2: exclude component v.
+        Self::compass_placement_dfs(
+            current_mask,
+            rest,
+            excluded_mask | v_bit,
+            counts,
+            size,
+            comp_dir_counts,
+            comp_sizes,
+            adj_mask,
+            limits,
+            min_a,
+            max_a,
+            max_placements,
+            results,
+        )
+    }
+
+    /// Compass placement enumeration — port of
+    /// `third_party/aog area.rs::propagate_compass_placement_enumeration`
+    /// (1742-2124). For each compass clue whose component max_area ≤ 12, build
+    /// fresh local components (global Uncut flood-fill), enumerate all valid
+    /// connected merges satisfying the direction limits via DFS, then force
+    /// Cut/Uncut on Unknown growth edges based on the intersection (in_all) and
+    /// union (in_any) of valid placements. Self-gates on `in_probing`.
+    fn propagate_compass_placement_enumeration(&mut self) -> Result<bool, ()> {
+        const MAX_AREA_THRESHOLD: usize = 12;
+        const MAX_REACHABLE_COMPS: usize = 16;
+        const MAX_PLACEMENTS: usize = 500;
+
+        if self.in_probing {
+            return Ok(false);
+        }
+        if !self.has_compass_clue {
+            return Ok(false);
+        }
+
+        let mut forced_cuts: Vec<EdgeId> = Vec::new();
+        let mut forced_uncuts: Vec<EdgeId> = Vec::new();
+
+        // Compass clues (cell, compass) — use the precomputed index for speed.
+        let compass_entries: Vec<(CellId, CompassData)> = self
+            .prop
+            .compass_clue_indices
+            .iter()
+            .filter_map(|&i| match &self.cell_clues[i] {
+                CellClue::Compass { cell, compass } if self.grid.cell_exists[*cell] => {
+                    Some((*cell, *compass))
+                }
+                _ => None,
+            })
+            .collect();
+
+        'outer: for &(cell, compass) in &compass_entries {
+            let ci = if cell < self.curr_comp_id.len() {
+                self.curr_comp_id[cell]
+            } else {
+                usize::MAX
+            };
+            if ci == usize::MAX {
+                continue;
+            }
+            if self.is_sealed(ci) {
+                continue;
+            }
+            let max_a = if ci < self.prop.curr_max_area.len() {
+                self.prop.curr_max_area[ci]
+            } else {
+                continue;
+            };
+            let min_a = if ci < self.prop.curr_min_area.len() {
+                self.prop.curr_min_area[ci]
+            } else {
+                continue;
+            };
+            if max_a > MAX_AREA_THRESHOLD {
+                continue;
+            }
+
+            let (cr, cc) = self.grid.cell_pos(cell);
+            let (cri, cci) = (cr as isize, cc as isize);
+            // Compass limits [N, S, E, W].
+            let limits = [compass.n, compass.s, compass.e, compass.w];
+
+            // Bounding box from compass constraints (tightest possible).
+            let bbox_min_r = limits[0].map_or(0isize, |v| cri - v as isize).max(0);
+            let bbox_max_r = limits[1]
+                .map_or(self.grid.rows as isize - 1, |v| cri + v as isize)
+                .min(self.grid.rows as isize - 1);
+            let bbox_min_c = limits[3].map_or(0isize, |v| cci - v as isize).max(0);
+            let bbox_max_c = limits[2]
+                .map_or(self.grid.cols as isize - 1, |v| cci + v as isize)
+                .min(self.grid.cols as isize - 1);
+
+            let n = self.grid.num_cells();
+            // Step 1: BFS reachable cells from compass cell via non-Cut edges, in bbox.
+            let mut cell_in_reachable = vec![false; n];
+            let mut reachable_cells: Vec<CellId> = Vec::new();
+            {
+                cell_in_reachable[cell] = true;
+                reachable_cells.push(cell);
+                let mut bfs_q: VecDeque<CellId> = VecDeque::new();
+                bfs_q.push_back(cell);
+                while let Some(cur) = bfs_q.pop_front() {
+                    for eid in self.grid.cell_edges(cur).into_iter().flatten() {
+                        if self.edges[eid] == EdgeState::Cut {
+                            continue;
+                        }
+                        let (c1, c2) = self.grid.edge_cells(eid);
+                        let other = if c1 == cur { c2 } else { c1 };
+                        if !self.grid.cell_exists[other] || cell_in_reachable[other] {
+                            continue;
+                        }
+                        let (pr, pc) = self.grid.cell_pos(other);
+                        if (pr as isize) < bbox_min_r
+                            || (pr as isize) > bbox_max_r
+                            || (pc as isize) < bbox_min_c
+                            || (pc as isize) > bbox_max_c
+                        {
+                            continue;
+                        }
+                        cell_in_reachable[other] = true;
+                        reachable_cells.push(other);
+                        bfs_q.push_back(other);
+                    }
+                }
+            }
+
+            // Step 2: group reachable cells into fresh local components via CURRENT
+            // Uncut edges. IMPORTANT: follow Uncut edges GLOBALLY (beyond bbox) so a
+            // cell committed to an outside piece drags that piece in — prevents false
+            // forced-uncuts. The compass cell ends up in local component 0.
+            let mut local_comp_of = vec![usize::MAX; n];
+            let mut local_comps: Vec<Vec<CellId>> = Vec::new();
+            for &start in &reachable_cells {
+                if local_comp_of[start] != usize::MAX {
+                    continue;
+                }
+                if local_comps.len() >= MAX_REACHABLE_COMPS {
+                    continue 'outer;
+                }
+                let lc = local_comps.len();
+                let mut lcomp_cells = vec![start];
+                local_comp_of[start] = lc;
+                let mut q: VecDeque<CellId> = VecDeque::new();
+                q.push_back(start);
+                while let Some(cur) = q.pop_front() {
+                    for eid in self.grid.cell_edges(cur).into_iter().flatten() {
+                        if self.edges[eid] != EdgeState::Uncut {
+                            continue;
+                        }
+                        let (c1, c2) = self.grid.edge_cells(eid);
+                        let other = if c1 == cur { c2 } else { c1 };
+                        if !self.grid.cell_exists[other] || local_comp_of[other] != usize::MAX {
+                            continue;
+                        }
+                        local_comp_of[other] = lc;
+                        lcomp_cells.push(other);
+                        q.push_back(other);
+                    }
+                }
+                local_comps.push(lcomp_cells);
+            }
+
+            // Ensure compass cell is in local component 0 (swap if needed).
+            let compass_lc = local_comp_of[cell];
+            if compass_lc != 0 {
+                local_comps.swap(0, compass_lc);
+                for &c in &local_comps[0] {
+                    local_comp_of[c] = 0;
+                }
+                for &c in &local_comps[compass_lc] {
+                    local_comp_of[c] = compass_lc;
+                }
+            }
+
+            let num_rc = local_comps.len();
+            if num_rc > MAX_REACHABLE_COMPS {
+                continue 'outer;
+            }
+
+            // Check if local comp 0 can still grow (Unknown edges to other local comps).
+            let can_grow = local_comps[0].iter().any(|&c| {
+                self.grid.cell_edges(c).into_iter().flatten().any(|eid| {
+                    if self.edges[eid] != EdgeState::Unknown {
+                        return false;
+                    }
+                    let (c1, c2) = self.grid.edge_cells(eid);
+                    let other = if c1 == c { c2 } else { c1 };
+                    cell_in_reachable[other]
+                        && local_comp_of[other] != 0
+                        && local_comp_of[other] != usize::MAX
+                })
+            });
+            let has_outside_growth = local_comps[0].iter().any(|&c| {
+                self.grid.cell_edges(c).into_iter().flatten().any(|eid| {
+                    if self.edges[eid] != EdgeState::Unknown {
+                        return false;
+                    }
+                    let (c1, c2) = self.grid.edge_cells(eid);
+                    let other = if c1 == c { c2 } else { c1 };
+                    self.grid.cell_exists[other] && !cell_in_reachable[other]
+                })
+            });
+            if !can_grow && !has_outside_growth {
+                continue;
+            }
+
+            // Per-component directional counts and sizes.
+            let mut comp_dir_counts = vec![[0usize; 4]; num_rc];
+            let mut comp_sizes = vec![0usize; num_rc];
+            for (lc, lcomp) in local_comps.iter().enumerate() {
+                for &c in lcomp {
+                    let (pr, pc) = self.grid.cell_pos(c);
+                    let dr = pr as isize - cri;
+                    let dc = pc as isize - cci;
+                    if dr < 0 {
+                        comp_dir_counts[lc][0] += 1; // N
+                    }
+                    if dr > 0 {
+                        comp_dir_counts[lc][1] += 1; // S
+                    }
+                    if dc > 0 {
+                        comp_dir_counts[lc][2] += 1; // E
+                    }
+                    if dc < 0 {
+                        comp_dir_counts[lc][3] += 1; // W
+                    }
+                    comp_sizes[lc] += 1;
+                }
+            }
+
+            // Base-count feasibility check on comp 0.
+            for d in 0..4 {
+                if let Some(v) = limits[d] {
+                    if comp_dir_counts[0][d] > v {
+                        return Err(());
+                    }
+                }
+            }
+
+            // Component adjacency bitmask via Unknown edges (iterate ALL cells in
+            // each local comp, including outside-bbox ones from global flood-fill).
+            let mut adj_mask = vec![0u32; num_rc];
+            for lc in 0..num_rc {
+                for ci in 0..local_comps[lc].len() {
+                    let c = local_comps[lc][ci];
+                    for eid in self.grid.cell_edges(c).into_iter().flatten() {
+                        if self.edges[eid] != EdgeState::Unknown {
+                            continue;
+                        }
+                        let (c1, c2) = self.grid.edge_cells(eid);
+                        let other = if c1 == c { c2 } else { c1 };
+                        if !self.grid.cell_exists[other] {
+                            continue;
+                        }
+                        let l2 = local_comp_of[other];
+                        if l2 == usize::MAX || l2 == lc {
+                            continue;
+                        }
+                        adj_mask[lc] |= 1u32 << l2;
+                    }
+                }
+            }
+
+            // Enumerate valid connected merges via DFS (local comp 0 = mandatory start).
+            let mut valid_placements: Vec<u32> = Vec::new();
+            let overflow = Self::compass_placement_dfs(
+                1u32,
+                adj_mask[0],
+                0u32,
+                comp_dir_counts[0],
+                comp_sizes[0],
+                &comp_dir_counts,
+                &comp_sizes,
+                &adj_mask,
+                &limits,
+                min_a,
+                max_a,
+                MAX_PLACEMENTS,
+                &mut valid_placements,
+            );
+            if overflow {
+                continue 'outer;
+            }
+            if valid_placements.is_empty() {
+                return Err(());
+            }
+
+            // Intersection (in_all) + union (in_any) over valid placements.
+            let mut in_all: u32 = u32::MAX;
+            let mut in_any: u32 = 0;
+            for &m in &valid_placements {
+                in_all &= m;
+                in_any |= m;
+            }
+            in_all &= !1u32; // local comp 0 always merged
+
+            // Force Cut/Uncut on Unknown growth edges from local comp 0.
+            for &c in &local_comps[0] {
+                for eid in self.grid.cell_edges(c).into_iter().flatten() {
+                    if self.edges[eid] != EdgeState::Unknown {
+                        continue;
+                    }
+                    let (c1, c2) = self.grid.edge_cells(eid);
+                    let other = if c1 == c { c2 } else { c1 };
+                    if !self.grid.cell_exists[other] {
+                        continue;
+                    }
+                    if !cell_in_reachable[other] {
+                        forced_cuts.push(eid); // outside bbox → Cut
+                        continue;
+                    }
+                    let lj = local_comp_of[other];
+                    if lj == usize::MAX || lj == 0 {
+                        continue;
+                    }
+                    let bit = 1u32 << lj;
+                    if in_all & bit != 0 {
+                        forced_uncuts.push(eid);
+                    } else if in_any & bit == 0 {
+                        forced_cuts.push(eid);
+                    }
+                }
+            }
+        }
+
+        let mut progress = false;
+        for &e in &forced_cuts {
+            if self.edges[e] == EdgeState::Unknown {
+                if !self.set_edge(e, EdgeState::Cut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+        for &e in &forced_uncuts {
+            if self.edges[e] == EdgeState::Unknown {
+                if !self.set_edge(e, EdgeState::Uncut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+        Ok(progress)
     }
 }

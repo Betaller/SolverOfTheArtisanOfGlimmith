@@ -15,6 +15,7 @@
 
 pub mod adapter;
 pub mod grid;
+pub mod parity_uf;
 pub mod prop;
 pub mod types;
 

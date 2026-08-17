@@ -3,10 +3,10 @@
   "total": 1258,
   "latest": {
     "date": "2026-08-17",
-    "commit": "d3d9c52",
-    "passed": 1082,
+    "commit": "150005f",
+    "passed": 1085,
     "total": 1258,
-    "pct": 86.01
+    "pct": 86.25
   },
   "history": [
     {
@@ -99,6 +99,13 @@
       "passed": 1082,
       "total": 1258,
       "pct": 86.01
+    },
+    {
+      "date": "2026-08-17",
+      "commit": "150005f",
+      "passed": 1085,
+      "total": 1258,
+      "pct": 86.25
     }
   ]
 }

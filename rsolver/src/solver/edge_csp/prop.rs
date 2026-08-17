@@ -7,6 +7,7 @@
 //! inequality/difference clue propagation, and failed-literal probing.
 
 use super::types::*;
+use super::parity_uf::ParityUF;
 use super::Solver;
 use std::collections::VecDeque;
 
@@ -56,6 +57,9 @@ impl<'a> Solver<'a> {
 
             if self.rules.bricky || self.rules.loopy {
                 progress |= self.propagate_bricky_loopy()?;
+            }
+            if !self.vertex_clues.is_empty() {
+                progress |= self.propagate_vertex_edge_parity()?;
             }
             if self.has_compass_clue {
                 progress |= self.propagate_compass()?;
@@ -1929,5 +1933,418 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(progress)
+    }
+
+    /// Edge-level parity propagation for watchtower vertices — port of
+    /// `third_party/aog watchtower.rs::propagate_vertex_edge_parity`.
+    ///
+    /// For each watchtower vertex with a **deterministic** cut-count parity,
+    /// builds pairwise XOR constraints between its unknown edges and propagates
+    /// them globally through a Union-Find. Parity is only fixed for:
+    ///   - cycle (4 cells): value==4 (k=4, parity 0); value≤3 skipped (double-
+    ///     touching makes k ∈ {value..4}, parity unfixed).
+    ///   - tree (2-3 cells): value∈{1,3,4} (k = value-1 fixed); value==2 skipped
+    ///     (k ∈ {1,2}, parity unfixed).
+    ///
+    /// When a constraint has 0 unknowns → check parity; 1 unknown → force it;
+    /// 2 unknowns → `uf.union` with XOR. Phase 2 reduces 3+-unknown constraints
+    /// using pairs already in the same UF component. Phase 3 cascades known edge
+    /// values through the UF to resolve remaining unknowns.
+    pub(crate) fn propagate_vertex_edge_parity(&mut self) -> Result<bool, ()> {
+        if self.vertex_clues.is_empty() {
+            return Ok(false);
+        }
+        let ne = self.grid.num_edges();
+        let pair_idx: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
+
+        // Collect vertex constraints: (edge_ids, required_parity).
+        let constraints: Vec<(Vec<EdgeId>, u8)> = self
+            .vertex_clues
+            .iter()
+            .filter_map(|clue| {
+                let (vi, vj) = self.grid.vertex_pos(clue.vertex);
+                let cell_opts = self.grid.vertex_cells(vi, vj);
+                let n = cell_opts
+                    .iter()
+                    .copied()
+                    .flatten()
+                    .filter(|&cid| self.grid.cell_exists[cid])
+                    .count();
+                if n < 2 {
+                    return None;
+                }
+                let is_cycle = n == 4;
+                let required_k = if is_cycle {
+                    if clue.value <= 1 {
+                        return None; // k ∈ {0,1}, parity not fixed
+                    }
+                    if clue.value <= 3 {
+                        return None; // k ∈ {value,..4}, parity not fixed (double-touching)
+                    }
+                    clue.value
+                } else {
+                    if clue.value == 2 {
+                        return None; // k ∈ {1,2}, parity not fixed
+                    }
+                    clue.value.saturating_sub(1)
+                };
+                let mut edge_ids: Vec<EdgeId> = Vec::new();
+                for &(a, b) in &pair_idx {
+                    if let (Some(ca), Some(cb)) = (cell_opts[a], cell_opts[b]) {
+                        if self.grid.cell_exists[ca] && self.grid.cell_exists[cb] {
+                            if let Some(eid) = self.grid.edge_between(ca, cb) {
+                                edge_ids.push(eid);
+                            }
+                        }
+                    }
+                }
+                if edge_ids.len() < 2 {
+                    return None;
+                }
+                Some((edge_ids, (required_k & 1) as u8))
+            })
+            .collect();
+
+        if constraints.is_empty() {
+            return Ok(false);
+        }
+
+        let mut uf = ParityUF::new(ne);
+        // ev: 0=Uncut, 1=Cut, 2=Unknown
+        let mut ev: Vec<u8> = self
+            .edges
+            .iter()
+            .map(|&e| match e {
+                EdgeState::Cut => 1,
+                EdgeState::Uncut => 0,
+                EdgeState::Unknown => 2,
+            })
+            .collect();
+
+        // Forced edges to apply after the UF analysis (collected to avoid borrow
+        // conflicts with `uf` / `ev`).
+        let mut forced: Vec<(EdgeId, EdgeState)> = Vec::new();
+
+        // Phase 1: build UF from pairwise constraints (0, 1, or 2 unknowns).
+        for (edge_ids, parity) in &constraints {
+            let mut kx = 0u8;
+            let mut unks: Vec<EdgeId> = Vec::new();
+            for &e in edge_ids {
+                if ev[e] <= 1 {
+                    kx ^= ev[e];
+                } else {
+                    unks.push(e);
+                }
+            }
+            match unks.len() {
+                0 => {
+                    if kx != *parity {
+                        return Err(());
+                    }
+                }
+                1 => {
+                    let v = kx ^ parity;
+                    ev[unks[0]] = v;
+                    forced.push((
+                        unks[0],
+                        if v == 1 { EdgeState::Cut } else { EdgeState::Uncut },
+                    ));
+                }
+                2 => {
+                    uf.union(unks[0], unks[1], kx ^ parity)?;
+                }
+                _ => {}
+            }
+        }
+
+        // Phase 2: resolve 3+-unknown constraints using UF pairs already merged.
+        for (edge_ids, parity) in &constraints {
+            let mut kx = 0u8;
+            let mut unks: Vec<EdgeId> = Vec::new();
+            for &e in edge_ids {
+                if ev[e] <= 1 {
+                    kx ^= ev[e];
+                } else {
+                    unks.push(e);
+                }
+            }
+            if unks.len() < 3 {
+                continue;
+            }
+            let target = kx ^ parity;
+            'outer: for i in 0..unks.len() {
+                for j in (i + 1)..unks.len() {
+                    let (r1, p1) = uf.find(unks[i]);
+                    let (r2, p2) = uf.find(unks[j]);
+                    if r1 == r2 {
+                        let xij = p1 ^ p2;
+                        let rem: Vec<EdgeId> = unks
+                            .iter()
+                            .enumerate()
+                            .filter(|(idx, _)| *idx != i && *idx != j)
+                            .map(|(_, &e)| e)
+                            .collect();
+                        if rem.len() == 1 {
+                            let v = target ^ xij;
+                            ev[rem[0]] = v;
+                            forced.push((
+                                rem[0],
+                                if v == 1 { EdgeState::Cut } else { EdgeState::Uncut },
+                            ));
+                        } else if rem.len() == 2 {
+                            uf.union(rem[0], rem[1], target ^ xij)?;
+                        }
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        // Phase 3: cascade known edge values through the UF to resolve unknowns.
+        let mut rv: Vec<Option<u8>> = vec![None; ne];
+        for e in 0..ne {
+            if ev[e] > 1 {
+                continue;
+            }
+            let (root, p) = uf.find(e);
+            let r = p ^ ev[e];
+            if let Some(ex) = rv[root] {
+                if ex != r {
+                    return Err(());
+                }
+            } else {
+                rv[root] = Some(r);
+            }
+        }
+        for e in 0..ne {
+            if ev[e] <= 1 {
+                continue;
+            }
+            let (root, p) = uf.find(e);
+            if let Some(r) = rv[root] {
+                let v = p ^ r;
+                ev[e] = v;
+                forced.push((e, if v == 1 { EdgeState::Cut } else { EdgeState::Uncut }));
+            }
+        }
+
+        if forced.is_empty() {
+            return Ok(false);
+        }
+        let mut progress = false;
+        for (eid, st) in forced {
+            if !self.set_edge(eid, st) {
+                return Err(());
+            }
+            progress = true;
+        }
+        Ok(progress)
+    }
+
+    /// Iterative vertex-level watchtower config probing — port of
+    /// `third_party/aog watchtower.rs::probe_watchtower_vertex_configs`.
+    ///
+    /// **Disabled (dead code):** benchmarked on the 85-puzzle watchtower set,
+    /// it added **0 new solves** beyond the parity propagator
+    /// (`propagate_vertex_edge_parity`) — the parity UF already captures the
+    /// forcible edges. Kept as dead code (`#[allow(dead_code)]`) for future
+    /// compass+watchtower puzzles where config enumeration may add value; not
+    /// wired into `solve()` to avoid the startup enumeration cost.
+    ///
+    /// For each watchtower vertex, enumerate all valid Cut/Uncut configurations
+    /// of its unknown internal edges (bitmask over ≤4 unknowns). If an edge is
+    /// Cut in *all* surviving configs → force Cut; Uncut in all → force Uncut.
+    /// Contradiction (0 surviving) → restore this iteration. Loops until no
+    /// progress. Called once at solver startup (before the main `propagate`),
+    /// not in the fixed-point loop.
+    ///
+    /// `possible_ks` per vertex (valid cut counts):
+    ///   - loopy cycle: value==2 → k=2 only (k=3 forbidden by loopy, k=4
+    ///     uncertain); else none.
+    ///   - non-loopy cycle: value==2 → {2,3,4}; value==3 → {3,4}; else {value}
+    ///     (double-touching allows k > value).
+    ///   - tree: k = value-1.
+    #[allow(dead_code)]
+    pub(crate) fn probe_watchtower_vertex_configs(&mut self) -> usize {
+        if self.in_probing {
+            return 0;
+        }
+        let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
+        let is_loopy = self.rules.loopy;
+        let mut total_forced = 0usize;
+        let saved = self.in_probing;
+        self.in_probing = true;
+
+        loop {
+            let snap_iteration = self.snapshot();
+
+            let vertex_info: Vec<(Vec<usize>, Vec<EdgeId>)> = self
+                .vertex_clues
+                .iter()
+                .filter_map(|clue| {
+                    let (vi, vj) = self.grid.vertex_pos(clue.vertex);
+                    let value = clue.value;
+                    let cell_opts = self.grid.vertex_cells(vi, vj);
+                    let n = cell_opts
+                        .iter()
+                        .copied()
+                        .flatten()
+                        .filter(|&cid| self.grid.cell_exists[cid])
+                        .count();
+                    if n == 0 || n == 1 {
+                        return None;
+                    }
+                    let is_cycle = n == 4;
+                    let possible_ks: Vec<usize> = if is_cycle {
+                        if is_loopy {
+                            match value {
+                                2 => vec![2],
+                                _ => vec![],
+                            }
+                        } else {
+                            match value {
+                                2 => vec![2, 3, 4],
+                                3 => vec![3, 4],
+                                _ => vec![value],
+                            }
+                        }
+                    } else {
+                        vec![value.saturating_sub(1)]
+                    };
+                    if possible_ks.is_empty() {
+                        return None;
+                    }
+                    if possible_ks.iter().all(|&k| k == 0) {
+                        return None;
+                    }
+                    let mut edge_ids: Vec<EdgeId> = Vec::new();
+                    for &(a_idx, b_idx) in &cell_pair_indices {
+                        if let (Some(a), Some(b)) = (cell_opts[a_idx], cell_opts[b_idx]) {
+                            if self.grid.cell_exists[a] && self.grid.cell_exists[b] {
+                                if let Some(eid) = self.grid.edge_between(a, b) {
+                                    edge_ids.push(eid);
+                                }
+                            }
+                        }
+                    }
+                    if edge_ids.len() < 2 {
+                        return None;
+                    }
+                    Some((possible_ks, edge_ids))
+                })
+                .collect();
+
+            if vertex_info.is_empty() {
+                break;
+            }
+
+            let mut made_progress = false;
+
+            for (possible_ks, edge_ids) in &vertex_info {
+                let states: Vec<EdgeState> = edge_ids.iter().map(|&e| self.edges[e]).collect();
+                let n_cut = states.iter().filter(|&&s| s == EdgeState::Cut).count();
+                let n_unk = states.iter().filter(|&&s| s == EdgeState::Unknown).count();
+
+                let any_achievable = possible_ks
+                    .iter()
+                    .any(|&k| k >= n_cut && k.saturating_sub(n_cut) <= n_unk);
+                if !any_achievable {
+                    break; // contradiction this iteration
+                }
+                let all_satisfied = possible_ks.iter().all(|&k| n_cut == k);
+                if all_satisfied {
+                    continue;
+                }
+                if n_unk > 4 || n_unk == 0 {
+                    continue;
+                }
+
+                let unk_indices: Vec<usize> = states
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, &s)| s == EdgeState::Unknown)
+                    .map(|(i, _)| i)
+                    .collect();
+                let nm = unk_indices.len();
+                let mut edge_cut_count: Vec<usize> = vec![0; nm];
+                let mut total_surviving = 0usize;
+
+                for &k in possible_ks {
+                    let remaining = k.saturating_sub(n_cut);
+                    if remaining > n_unk {
+                        continue;
+                    }
+                    if remaining == 0 {
+                        total_surviving += 1;
+                    } else {
+                        for mask in 0u32..(1u32 << nm) {
+                            if mask.count_ones() as usize != remaining {
+                                continue;
+                            }
+                            let ok = self.probe(|s| {
+                                for (bit, &idx) in unk_indices.iter().enumerate() {
+                                    let val = if (mask >> bit) & 1 == 1 {
+                                        EdgeState::Cut
+                                    } else {
+                                        EdgeState::Uncut
+                                    };
+                                    if !s.set_edge(edge_ids[idx], val) {
+                                        return false;
+                                    }
+                                }
+                                true
+                            });
+                            if ok {
+                                total_surviving += 1;
+                                for (bit, _) in unk_indices.iter().enumerate() {
+                                    if (mask >> bit) & 1 == 1 {
+                                        edge_cut_count[bit] += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if total_surviving == 0 {
+                    self.restore(snap_iteration);
+                    total_forced = 0;
+                    made_progress = false;
+                    break;
+                }
+
+                let snap_before_force = self.snapshot();
+                let mut forced_here = 0usize;
+                for (bit, &idx) in unk_indices.iter().enumerate() {
+                    if self.edges[edge_ids[idx]] != EdgeState::Unknown {
+                        continue;
+                    }
+                    if edge_cut_count[bit] == total_surviving {
+                        let _ = self.set_edge(edge_ids[idx], EdgeState::Cut);
+                        total_forced += 1;
+                        forced_here += 1;
+                    } else if edge_cut_count[bit] == 0 {
+                        let _ = self.set_edge(edge_ids[idx], EdgeState::Uncut);
+                        total_forced += 1;
+                        forced_here += 1;
+                    }
+                }
+                if forced_here > 0 {
+                    if self.propagate().is_err() {
+                        self.restore(snap_before_force);
+                        total_forced -= forced_here;
+                    } else {
+                        made_progress = true;
+                    }
+                }
+            }
+
+            if !made_progress {
+                break;
+            }
+        }
+
+        self.in_probing = saved;
+        total_forced
     }
 }

@@ -16,13 +16,18 @@ use types::{Pools, SOLVE_AREA_BIT};
 
 use self::core::AoGCore;
 
-/// Solve a puzzle with the AoG DFS. Returns regions on success.
-pub fn solve_aog(puzzle: &Puzzle, deadline: Instant) -> Option<Vec<RegionInfo>> {
+/// Solve a puzzle with the AoG DFS.
+///
+/// Returns `ModuleOutcome` so the dispatcher can distinguish a genuine
+/// "searched everything, no solution" (`None`) from "found a candidate but
+/// `validate` rejected it" (`ValidationFailed`) — the latter was previously
+/// folded into `None` and lost (doc 23 §3.3).
+pub fn solve_aog(puzzle: &Puzzle, deadline: Instant) -> ModuleOutcome {
     let mut core = match AoGCore::build(puzzle, deadline) {
         Some(c) => c,
         None => {
             eprintln!("aog: build returned None");
-            return None;
+            return ModuleOutcome::None;
         }
     };
     let mut sp = core.make_solve_puzzle();
@@ -32,11 +37,11 @@ pub fn solve_aog(puzzle: &Puzzle, deadline: Instant) -> Option<Vec<RegionInfo>> 
         let regions = extract_regions(&core, &sp, puzzle);
         if !crate::solver::validate::validate(puzzle, &regions) {
             eprintln!("aog: internal validation rejected solution ({} regions)", regions.len());
-            return None;
+            return ModuleOutcome::ValidationFailed;
         }
-        Some(regions)
+        ModuleOutcome::Solved(regions)
     } else {
-        None
+        ModuleOutcome::None
     }
 }
 

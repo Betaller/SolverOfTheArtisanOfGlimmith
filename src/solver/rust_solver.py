@@ -12,7 +12,7 @@ from pathlib import Path
 from src.io.puzzle_codec import puzzle_to_dict
 from src.models.board import Board, Shape
 from src.models.puzzle import Puzzle
-from src.models.solution import RegionInfo, Solution
+from src.models.solution import RegionInfo, Solution, SolverAttempt
 from src.solver.base import Solver
 
 
@@ -181,6 +181,7 @@ class RustSolver(Solver):
 
     def _parse_solution(self, data: dict, puzzle: Puzzle) -> Solution:
         """Turn one solution-JSON dict into a Solution."""
+        attempts = self._parse_attempts(data.get("attempts", []))
         if not data.get("solved"):
             return Solution(
                 solved=False,
@@ -188,6 +189,7 @@ class RustSolver(Solver):
                 elapsed_ms=data.get("elapsed_ms", 0),
                 error_message=data.get("error_message", "No solution"),
                 solver=data.get("solver", ""),
+                attempts=attempts,
             )
 
         regions: list[RegionInfo] = []
@@ -213,7 +215,29 @@ class RustSolver(Solver):
             elapsed_ms=data.get("elapsed_ms", 0),
             rule_results=data.get("rule_results", {}),
             solver=data.get("solver", ""),
+            attempts=attempts,
         )
+
+    @staticmethod
+    def _parse_attempts(raw: list) -> list[SolverAttempt]:
+        """Parse the Rust `attempts` JSON array into `SolverAttempt` objects.
+
+        Tolerant of missing/old binaries that emit no `attempts` field: returns
+        an empty list then, so downstream UI/benchmark code degrades gracefully.
+        """
+        from src.models.solution import AttemptStatus
+
+        out: list[SolverAttempt] = []
+        for a in raw or []:
+            if not isinstance(a, dict):
+                continue
+            out.append(SolverAttempt(
+                solver=a.get("solver", ""),
+                status=AttemptStatus.parse(a.get("status", "")),
+                elapsed_ms=int(a.get("elapsed_ms", 0) or 0),
+                note=a.get("note"),
+            ))
+        return out
 
     def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
         input_json = self._prepare_input(puzzle)

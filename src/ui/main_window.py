@@ -28,6 +28,48 @@ from src.ui.solver_runner import SolverThread
 from src.ui.theme import MODE_COLORS
 
 
+# Status → (label, color) for the attempts table.  Matches `AttemptStatus`
+# values; unknown statuses fall back to a neutral grey.
+_ATTEMPT_STATUS_STYLE: dict[str, tuple[str, str]] = {
+    "success": ("成功", "#059669"),
+    "timeout": ("超时", "#DC2626"),
+    "exhausted": ("无解", "#64748B"),
+    "validation_failed": ("校验失败", "#DC2626"),
+    "not_attempted": ("未尝试", "#94A3B8"),
+    "error": ("错误", "#DC2626"),
+}
+
+
+def _attempts_html(solution: Solution) -> str:
+    """Render the per-module attempt trace as a compact RichText table (doc 23).
+
+    Returns '' when there is no trace (empty list — e.g. old-binary results or
+    trivial empty-grid solutions), so the surrounding result panel is unchanged.
+    """
+    if not solution.attempts:
+        return ""
+    rows = []
+    for a in solution.attempts:
+        label, color = _ATTEMPT_STATUS_STYLE.get(
+            a.status.value, (a.status.value, "#64748B")
+        )
+        note = a.note or ""
+        rows.append(
+            f"<tr>"
+            f"<td style='padding:1px 8px;'>{a.solver}</td>"
+            f"<td style='padding:1px 8px; color:{color};'>{label}</td>"
+            f"<td style='padding:1px 8px;'>{a.elapsed_ms}ms</td>"
+            f"<td style='padding:1px 8px; color:#94A3B8;'>{note}</td>"
+            f"</tr>"
+        )
+    return (
+        "<br><span style='color:#64748B; font-size:11px;'>求解器链:</span>"
+        "<table style='font-size:11px; margin-top:2px;'>"
+        + "".join(rows)
+        + "</table>"
+    )
+
+
 class NewPuzzleDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -629,6 +671,7 @@ class MainWindow(QMainWindow):
                 f'<span style="color: #64748B;">耗时:</span> {solution.elapsed_ms}ms<br>'
                 f'<span style="color: #64748B;">搜索步数:</span> {solution.steps_taken}<br>'
                 f'<span style="color: #64748B;">区域数:</span> {len(solution.regions)}'
+                f'{_attempts_html(solution)}'
             )
             self._result_label.setTextFormat(Qt.TextFormat.RichText)
         else:
@@ -639,6 +682,7 @@ class MainWindow(QMainWindow):
                 f'<b style="color: #DC2626; font-size: 14px;">求解失败</b><br>'
                 f'<span style="color: #64748B;">原因:</span> {solution.error_message or "无解"}<br>'
                 f'<span style="color: #64748B;">耗时:</span> {solution.elapsed_ms}ms'
+                f'{_attempts_html(solution)}'
             )
             self._result_label.setTextFormat(Qt.TextFormat.RichText)
 

@@ -30,6 +30,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             regions: Vec::new(),
             rule_results: Default::default(),
             solver: String::new(),
+            attempts: Vec::new(),
         };
     }
 
@@ -45,12 +46,17 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             regions: Vec::new(),
             rule_results: Default::default(),
             solver: String::new(),
+            attempts: Vec::new(),
         };
     }
 
     // `timeout_ms` is a UNIT budget: each of aog / edge_csp / pieces / backtrack
     // gets the full timeout as its own deadline (not a share of it).  The Python
     // side gives the subprocess enough wall-clock (`RUST_PARTS`×) for all to run.
+
+    // Per-module attempt trace (doc 23).  Built up as each module is tried; on
+    // success it is attached to the returned `Solution`.
+    let mut attempts: Vec<SolverAttempt> = Vec::new();
 
     // 0. AoG DFS solver first: direct port of the C++ reference solver.
     // For pure rose_window puzzles aog solves most in <1s but can hang for the
@@ -71,8 +77,20 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     };
     if !puzzle.rules.is_empty() {
         let deadline = start + std::time::Duration::from_millis(aog_budget);
-        if let Some(regions) = aog::solve_aog(puzzle, deadline) {
-            return build_solution_trusted(regions, &start, puzzle);
+        let aog_start = Instant::now();
+        let outcome = aog::solve_aog(puzzle, deadline);
+        let elapsed = aog_start.elapsed().as_millis() as u64;
+        match outcome {
+            ModuleOutcome::Solved(regions) => {
+                attempts.push(SolverAttempt {
+                    solver: "aog".into(),
+                    status: SolverStatus::Success,
+                    elapsed_ms: elapsed,
+                    note: None,
+                });
+                return build_solution_trusted(regions, &start, puzzle, attempts);
+            }
+            _ => record_module_with_elapsed("aog", outcome, deadline, elapsed, &mut attempts),
         }
         // fallthrough: aog timed out or found nothing; try the other solvers.
 
@@ -86,10 +104,27 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             // uniformly to aog/pieces/backtrack/rose.
             let rose_ms = timeout_ms.saturating_sub(elapsed);
             if rose_ms > 0 {
-                if let Some(regions) = rose::solve_rose(puzzle, &start, rose_ms) {
-                    return build_solution(regions, &start, puzzle, "rose");
+                let rose_deadline = start + std::time::Duration::from_millis(timeout_ms);
+                let rose_start = Instant::now();
+                let outcome = rose::solve_rose(puzzle, &start, rose_ms);
+                let r_elapsed = rose_start.elapsed().as_millis() as u64;
+                match outcome {
+                    ModuleOutcome::Solved(regions) => {
+                        attempts.push(SolverAttempt {
+                            solver: "rose".into(),
+                            status: SolverStatus::Success,
+                            elapsed_ms: r_elapsed,
+                            note: None,
+                        });
+                        return build_solution(regions, &start, puzzle, "rose", attempts);
+                    }
+                    _ => record_module_with_elapsed("rose", outcome, rose_deadline, r_elapsed, &mut attempts),
                 }
+            } else {
+                attempts.push(not_attempted("rose", "aog consumed the full budget"));
             }
+        } else {
+            attempts.push(not_attempted("rose", "puzzle is not rose-capable"));
         }
 
         if std::env::var("AOG_ONLY").is_ok() {
@@ -102,8 +137,13 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
                 regions: Vec::new(),
                 rule_results: Default::default(),
                 solver: "aog".to_string(),
+                attempts,
             };
         }
+    } else {
+        // No rules: aog / rose never run (they need rule-driven search).
+        attempts.push(not_attempted("aog", "no rules"));
+        attempts.push(not_attempted("rose", "no rules"));
     }
 
     // Solver dispatch:
@@ -112,9 +152,24 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     //    Returns a `build_solution`-validated result (non-trusted: the router's
     //    `validate::validate` gate re-checks it), so a wrong answer can't pass.
     if edge_csp::is_edge_csp_capable(puzzle) {
-        if let Some(regions) = edge_csp::solve_edge_csp(puzzle, &start, timeout_ms) {
-            return build_solution(regions, &start, puzzle, "edge_csp");
+        let ec_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        let ec_start = Instant::now();
+        let outcome = edge_csp::solve_edge_csp(puzzle, &start, timeout_ms);
+        let elapsed = ec_start.elapsed().as_millis() as u64;
+        match outcome {
+            ModuleOutcome::Solved(regions) => {
+                attempts.push(SolverAttempt {
+                    solver: "edge_csp".into(),
+                    status: SolverStatus::Success,
+                    elapsed_ms: elapsed,
+                    note: None,
+                });
+                return build_solution(regions, &start, puzzle, "edge_csp", attempts);
+            }
+            _ => record_module_with_elapsed("edge_csp", outcome, ec_deadline, elapsed, &mut attempts),
         }
+    } else {
+        attempts.push(not_attempted("edge_csp", "puzzle is not edge_csp-capable"));
     }
 
     // Solver dispatch:
@@ -127,20 +182,50 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
 
     if has_shape_pool || has_area_clues || has_compass_clues {
         // Try piece-based solver first
-        if let Some(regions) = pieces::solve_pieces(puzzle, &start, timeout_ms) {
-            if crate::aog_debug_enabled() {
-                eprintln!("solver=pieces regions={}", regions.len());
+        let p_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        let p_start = Instant::now();
+        let outcome = pieces::solve_pieces(puzzle, &start, timeout_ms);
+        let elapsed = p_start.elapsed().as_millis() as u64;
+        match outcome {
+            ModuleOutcome::Solved(regions) => {
+                if crate::aog_debug_enabled() {
+                    eprintln!("solver=pieces regions={}", regions.len());
+                }
+                attempts.push(SolverAttempt {
+                    solver: "pieces".into(),
+                    status: SolverStatus::Success,
+                    elapsed_ms: elapsed,
+                    note: None,
+                });
+                return build_solution(regions, &start, puzzle, "pieces", attempts);
             }
-            return build_solution(regions, &start, puzzle, "pieces");
+            _ => record_module_with_elapsed("pieces", outcome, p_deadline, elapsed, &mut attempts),
         }
+    } else {
+        attempts.push(not_attempted("pieces", "no shape_pool / area / compass clues"));
     }
 
     // Fallback: backtracking solver
-    if let Some(regions) = backtrack::solve_backtrack(puzzle, &start, timeout_ms) {
-        if crate::aog_debug_enabled() {
-            eprintln!("solver=backtrack regions={}", regions.len());
+    {
+        let b_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        let b_start = Instant::now();
+        let outcome = backtrack::solve_backtrack(puzzle, &start, timeout_ms);
+        let elapsed = b_start.elapsed().as_millis() as u64;
+        match outcome {
+            ModuleOutcome::Solved(regions) => {
+                if crate::aog_debug_enabled() {
+                    eprintln!("solver=backtrack regions={}", regions.len());
+                }
+                attempts.push(SolverAttempt {
+                    solver: "backtrack".into(),
+                    status: SolverStatus::Success,
+                    elapsed_ms: elapsed,
+                    note: None,
+                });
+                return build_solution(regions, &start, puzzle, "backtrack", attempts);
+            }
+            _ => record_module_with_elapsed("backtrack", outcome, b_deadline, elapsed, &mut attempts),
         }
-        return build_solution(regions, &start, puzzle, "backtrack");
     }
 
     let elapsed = start.elapsed().as_millis() as u64;
@@ -152,13 +237,64 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         regions: Vec::new(),
         rule_results: Default::default(),
         solver: String::new(),
+        attempts,
+    }
+}
+
+// ── per-module attempt recording (doc 23) ─────────────────────────────────────
+
+/// Map a non-success `ModuleOutcome` to a `SolverStatus` and push an attempt
+/// carrying the caller-computed `elapsed_ms`.  `timeout` vs `exhausted` is split
+/// by comparing the wall clock to `deadline` — an approximation (doc 23 §3.4):
+/// a module that naturally exhausted right at the deadline is mislabeled
+/// `timeout`.  Precise deadline-hit signaling is deferred to the
+/// deadline-blindspot cleanup (doc 17).
+fn record_module_with_elapsed(
+    name: &str,
+    outcome: ModuleOutcome,
+    deadline: Instant,
+    elapsed_ms: u64,
+    attempts: &mut Vec<SolverAttempt>,
+) {
+    let status = match outcome {
+        ModuleOutcome::ValidationFailed => SolverStatus::ValidationFailed,
+        ModuleOutcome::None => {
+            if Instant::now() >= deadline {
+                SolverStatus::Timeout
+            } else {
+                SolverStatus::Exhausted
+            }
+        }
+        ModuleOutcome::Solved(_) => SolverStatus::Success,
+    };
+    attempts.push(SolverAttempt {
+        solver: name.to_string(),
+        status,
+        elapsed_ms,
+        note: None,
+    });
+}
+
+/// Build a `not_attempted` entry with a short reason.
+fn not_attempted(name: &str, reason: &str) -> SolverAttempt {
+    SolverAttempt {
+        solver: name.to_string(),
+        status: SolverStatus::NotAttempted,
+        elapsed_ms: 0,
+        note: Some(reason.to_string()),
     }
 }
 
 /// Every pre-drawn boundary (and every constrained edge) must separate two
 /// different regions.  The pieces / backtrack solvers are not boundary-aware,
 /// so this is the backstop that rejects a "solution" that crosses a drawn edge.
-fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle, solver: &str) -> Solution {
+fn build_solution(
+    regions: Vec<RegionInfo>,
+    start: &Instant,
+    puzzle: &Puzzle,
+    solver: &str,
+    mut attempts: Vec<SolverAttempt>,
+) -> Solution {
     let elapsed = start.elapsed().as_millis() as u64;
     // V3: the pre-drawn boundary check (`regions_respect_boundaries`) was
     // removed — `validate::validate` below already performs the identical
@@ -166,6 +302,15 @@ fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle, so
     // region → reject). Running it twice was redundant O(H·W) work on every
     // successful pieces/rose/backtrack solution. (doc 16 §1 V3.)
     if !crate::solver::validate::validate(puzzle, &regions) {
+        // The module returned a candidate that the global validator rejects.
+        // Patch the just-pushed `success` attempt → `validation_failed` so the
+        // trace tells the truth (the module found something, but it was wrong).
+        if let Some(last) = attempts.last_mut() {
+            if last.solver == solver && last.status == SolverStatus::Success {
+                last.status = SolverStatus::ValidationFailed;
+                last.note = Some("candidate failed validate::validate".into());
+            }
+        }
         return Solution {
             solved: false,
             steps_taken: 0,
@@ -174,6 +319,7 @@ fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle, so
             regions,
             rule_results: HashMap::new(),
             solver: solver.to_string(),
+            attempts,
         };
     }
     let rule_results: HashMap<String, bool> = puzzle
@@ -189,12 +335,18 @@ fn build_solution(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle, so
         regions,
         rule_results,
         solver: solver.to_string(),
+        attempts,
     }
 }
 
 /// Solution builder for the AoG solver, whose internal constraint checks are
 /// authoritative (the C++ solver enforces every rule during the search).
-fn build_solution_trusted(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Puzzle) -> Solution {
+fn build_solution_trusted(
+    regions: Vec<RegionInfo>,
+    start: &Instant,
+    puzzle: &Puzzle,
+    attempts: Vec<SolverAttempt>,
+) -> Solution {
     let elapsed = start.elapsed().as_millis() as u64;
     let rule_results: HashMap<String, bool> = puzzle
         .rules
@@ -209,6 +361,7 @@ fn build_solution_trusted(regions: Vec<RegionInfo>, start: &Instant, puzzle: &Pu
         regions,
         rule_results,
         solver: "aog".to_string(),
+        attempts,
     }
 }
 

@@ -6,11 +6,14 @@ use crate::clock::Instant;
 use crate::grid;
 use crate::types::*;
 
-/// DFS backtracking with constraints. Returns regions if solved.
-pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Option<Vec<RegionInfo>> {
+/// DFS backtracking with constraints. Returns `ModuleOutcome` (always `Solved`
+/// or `None` — backtrack does not surface `ValidationFailed`; its incremental
+/// checks keep the partial assignment rule-consistent, so a returned solution
+/// is already valid).
+pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> ModuleOutcome {
     let fillable = grid::fillable_cells(puzzle);
     if fillable.is_empty() {
-        return Some(Vec::new());
+        return ModuleOutcome::Solved(Vec::new());
     }
 
     // Budget relative to this solver's own start (the caller passes an equal
@@ -72,9 +75,9 @@ pub fn solve_backtrack(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Op
 
     if crate::aog_debug_enabled() { eprintln!("backtrack: start undecided={}", state.undecided_count); }
     if dfs(puzzle, &mut state) {
-        Some(build_regions(&state))
+        ModuleOutcome::Solved(build_regions(&state))
     } else {
-        None
+        ModuleOutcome::None
     }
 }
 

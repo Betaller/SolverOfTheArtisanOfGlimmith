@@ -101,6 +101,12 @@ backtrack 的答案须过 `solver/validate.rs` 验收门。每个题解 JSON 带
 答案出自哪个模块（`aog` / `rose` / `edge_csp` / `pieces` / `backtrack`），
 `benchmark_rust_solver.py` 以 `via=...` 输出，便于把结果归到具体求解器。
 
+题解 JSON 另带 `attempts` 数组（doc 23，可选字段，空则不输出）：per-module 求解链，每条
+`{solver, status, elapsed_ms, note}`，`status` 六态（`success` / `timeout` / `exhausted` /
+`validation_failed` / `not_attempted` / `error`）。回答「各求解器耗时多少、为何失败、由谁
+解出」。如 C4-1 的链是 `aog:timeout → rose:success`。五个 `solve_*` 的返回类型因此从
+`Option<Vec<RegionInfo>>` 改为 `ModuleOutcome`（区分「无解」与「校验失败」）。
+
 ### 目录结构
 
 ```

@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use crate::clock::Instant;
 use crate::solver::rose;
-use crate::types::{Puzzle, RegionInfo};
+use crate::types::{ModuleOutcome, Puzzle, RegionInfo};
 
 use adapter::Input;
 use grid::Grid;
@@ -510,15 +510,17 @@ pub fn solve_edge_csp(
     puzzle: &Puzzle,
     _start: &Instant,
     timeout_ms: u64,
-) -> Option<Vec<RegionInfo>> {
+) -> ModuleOutcome {
     let input = adapter::build_input(puzzle);
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut solver = Solver::new(input, deadline, puzzle);
-    let regions = solver.solve()?;
+    let Some(regions) = solver.solve() else {
+        return ModuleOutcome::None;
+    };
     if crate::solver::validate::validate(puzzle, &regions) {
-        Some(regions)
+        ModuleOutcome::Solved(regions)
     } else {
-        None
+        ModuleOutcome::ValidationFailed
     }
 }
 

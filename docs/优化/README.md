@@ -45,6 +45,15 @@
 | [12-优化项价值评估与路线图修订](12-优化项价值评估与路线图修订.md) | 4 agent 对 19 优化项的量化收益交叉验证、去重、依赖图、修订后全局排序 | 各优化项实际能解几道题？哪些已落地/价值清零？先做哪个？ |
 | [13-官方语料二级结论](13-官方语料二级结论.md) | 官方 1229 题归纳的 15 条规则语义结论 + 14 条求解器可用二级结论（按价值排序），附验证数据、compass 面积界推导、5 条解析陷阱、已证伪清单 | 官方题有哪些可利用的统计规律？compass 面积界怎么算？哪些归纳陷阱曾导致假结论？ |
 | [14-边变量CSP独立求解器方案](14-边变量CSP独立求解器方案.md) | 架构不同→独立求解器决策（非嵌入aog）、完整~8000行移植范围、内部三态Edge、混合前置+后置路由、SolitaryGrower证伪同步、分阶段实施 | 为什么不嵌入aog？新求解器移植多大？放路由链哪？ |
+| [15-求解器优化新发现](15-求解器优化新发现.md) | 第二轮4维度22个新优化点：7白捡项(env缓存/编译profile/check_radar守卫等)、3高ROI算法(K-bounding 85题/惰性组合/多符号剪枝)、compass连通性下界闭式解、rose伴生规则28 NOSOL根因、2否定假设 | aog常数因子能怎么压？K为何没用？rose NOSOL根因？ |
+| [16-求解器优化新发现第二轮](16-求解器优化新发现第二轮.md) | 第三轮4维度22个新优化点：validate region_of O((HW)²)→O(1)、DLX row_check未用/附加列锚定、aog尺寸界没用K/compass LB(rose OOM根因)、backtrack缺4规则剪枝、参考求解器小技术细节(loop_closure/delta_gemini/ParityUF) | validate为何慢？DLX基础设施闲置？aog尺寸界为何松？ |
+| [17-挂死根因与deadline盲区](17-挂死根因与deadline盲区.md) | "LB:sealed"根因(backtrack HashMap非确定,非aog死循环)、deadline盲区(empty_area_check无deadline+4096粒度)、7新优化点(HashMap→Vec/aog deadline/统一工具)、修正记忆误判 | 挂死真正根因？deadline为何不触发？aog盲区在哪？ |
+| [18-第五轮调研-edge-csp第二迭代与剩余FAIL深挖](18-第五轮调研-edge-csp第二迭代与剩余FAIL深挖.md) | 3 agent 深挖：19道OOM是配置非算法(DEFAULT_SHAPE_CAP=0+preempt未接线)、rose 50道缺"伴生规则剪枝"债S1、fence 38道需 palisade 传播迁入 edge_csp；edge_csp 第二迭代路线(内部验证→compass→watchtower→differentiation/boxy) | OOM 为何是配置问题？rose 最大缺口？edge_csp 第二迭代怎么做？ |
+| [19-类型题专用求解器方向](19-类型题专用求解器方向.md) | 2 agent 重扫 22 规则×6 求解器覆盖矩阵：唯一值得新建专用求解器的是形状同一性三兄弟 same/different/mixed(~21道，仅 same 有参考 solve_match 可移植)；homogeneous/non_block 落点扩 edge_csp+aog 补丁 | 还有哪些规则需要专用求解器？same/different/mixed 怎么解？ |
+| [20-第六轮调研-rose与compass核心算法重构](20-第六轮调研-rose与compass核心算法重构.md) | 2 agent+参考求解器实测：rose 与 compass 收敛到 edge_csp 边传播宿主；参考 pair.rs 4/6 纯 rose 秒解(0-0.4s vs 本项目40s超时)；compass"桥/网关强制"是最高ROI最小改动 | rose/compass 为什么要范式迁移而非独立求解器？最高ROI改动是什么？ |
+| [21-剩余FAIL硬度分类与优化天花板](21-剩余FAIL硬度分类与优化天花板.md) | 第七轮综合(capstone)：186 FAIL 五档分类(①配置bug19 ②传播缺口~25 ③范式错配rose55+fence ④形状同一性~21 ⑤根本难~40)；PASS 天花板 ~1120-1160；P0-P6 路线图；watchtower 双触碰语义补挖 | 还剩什么、能解多少、按什么顺序做？优化天花板在哪？ |
+| [22-数学建模专用求解器方向](22-数学建模专用求解器方向.md) | 2 agent：可建模 10 条规则(ring/brick/watchtower/compass/area/precise/range/difference/inequality/fence)；正确形态=edge_csp 传播内核全局代数补全(~950行)非独立模块；SAT/ILP 不划算(连通 O(HW²)) | 哪些题型可数学建模？为什么不做独立 SAT/ILP 求解器？ |
+| [23-求解器返回信息完善方案](23-求解器返回信息完善方案.md) | 求解结果透出 per-module 求解器清单/耗时/失败原因：Rust Solution 加 attempts[SolverAttempt{status,elapsed_ms,note}]，JSON→Python→UI/benchmark 三层，ModuleOutcome 枚举替代 Option 返回，失败六态分类 | 每道题各求解器各耗时多少？为何失败(超时/无解/校验失败)？由谁解出？ |
 
 ---
 

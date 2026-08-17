@@ -1,0 +1,5 @@
+edge_csp 第四迭代：watchtower 顶点传播（commit dbe2f65）
+基准：iter3b 全量 1075/1258（20260814_edgecsp-iter3b-full.jsonl）
+新增：4 道 via edge_csp（0405/0419/0983/1140fix，均 validate + match official）
+回归：0 真回归（1148 baseline-PASS 快扫 0 回归；3 假回归 1270/0749/0875 无 watchtower + 隔离重跑仍解）
+结果: 1079 / 1258 通过

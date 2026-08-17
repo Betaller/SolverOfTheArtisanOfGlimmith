@@ -1,0 +1,5 @@
+edge_csp 第七迭代：differentiation + boxy/non_boxy 传播（commit 150005f）
+基准：iter6 全量 1082/1258
+新增：3 道 via edge_csp（0690/0971/0984，均 non_block+companion）
+回归：0 真回归（2 假回归 0265/0875 隔离重跑仍解）
+结果: 1085 / 1258 通过

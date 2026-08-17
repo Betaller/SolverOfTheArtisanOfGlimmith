@@ -1,6 +1,6 @@
 # edge_csp 边变量 CSP 求解器
 
-> 状态：**已实现**（第一/二/三/四迭代已合入 main，PR #33/#37/#39/#41；第五迭代 watchtower parity 传播 2026-08-17）。
+> 状态：**已实现**（第一/二/三/四/五迭代已合入 main，PR #33/#37/#39/#41/#43；第六迭代 compass 放置枚举 2026-08-17）。
 > 对应设计：`docs/优化/14-边变量CSP独立求解器方案.md`。
 > 源码：`rsolver/src/solver/edge_csp/`。
 > 参考实现：`third_party/aog`（lifthrasiir 原生 Rust 边变量求解器，~8000 行）。
@@ -211,13 +211,31 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
 - **新增 2 道** via edge_csp（较第四迭代）：0983 / 1000（均过验证 + 匹配官方）。
   0 真回归（2 假回归 0749/1270 无 watchtower + 隔离重跑仍解）。
 
-## 11. 第六迭代（未做）
+## 11. 第六迭代（已实现：compass 放置枚举）
 
-- compass 放置枚举（组件合并版，纯 compass 0445/0469/1395b 需此 + 桥/网关）。
+- **`propagate_compass_placement_enumeration`** + **`compass_placement_dfs`**
+  （`prop.rs`）：移植参考 `area.rs::propagate_compass_placement_enumeration`
+  （1742-2124）+ `compass_placement_dfs`（2129-2213），接入 `propagate_compass_in_components`
+  之后。对每个 `max_area ≤ 12` 的 compass 线索：
+  1. BFS 从 compass 格经非 Cut 边可达、限方向界 bbox 内的格。
+  2. **全局 Uncut flood-fill** 建新鲜局部组件（关键：跨 bbox 跟 Uncut 边，已 committed
+     到外部区域的格拖整片进来——防误强 Uncut）。
+  3. DFS 枚举所有合法连通合并（include/exclude 分支，最小索引前沿优先），方向计数精确
+     满足 + 尺寸界。cap：`MAX_AREA_THRESHOLD=12`/`MAX_REACHABLE_COMPS=16`/`MAX_PLACEMENTS=500`。
+  4. `in_all`（每解都在）→ 强 Uncut；`in_any`（无解在）+ bbox 外 → 强 Cut。
+  - 自门控 `in_probing`（昂贵，探测时跳过）；复用 `build_components` 的 `curr_min/max_area`。
+- **新增 1 道** via edge_csp：0445（11×11 纯 compass 25 格，was OOM exit -9 → 73s 解出，
+  过验证 + 匹配官方）。1140fix 也解出但是 iter4 已解的 flaky 临界题。
+  0 真回归（1148 baseline-PASS 快扫 0 回归）。
+
+## 12. 第七迭代（未做）
+
 - `propagate_size_separation`（differentiation）+ `propagate_boxy_nonboxy`（block/non_block）。
 - rose 范式迁移（`docs/优化/20` P2：pair.rs 对分支接进 edge_csp）。
   注：rose 伴生剪枝债 R1 已证伪（`docs/优化` 分支 `rose-companion-r1`）——rose 候选受
   ring 预切边限制 max≤8 无法覆盖 total，范式错配非剪枝可救，必须走 P2 边传播。
 - pieces compass 枚举 `unwrap_or(0)` bug（`docs/优化/20`：spec<4 过度剪枝；分支
   `pieces-compass-fix` 已修但 0 新解，未合）。
+- 纯 compass 0469/1395b 仍 FAIL（大单方向值 W=7/N=8/S=57 超 `MAX_AREA_THRESHOLD=12` 跳过，
+  需桥/网关或调阈值；1395b 的 S=57 大列靠 bridge/gateway）。
 

@@ -456,27 +456,27 @@ fn compass_rec(
     compass: &CompassClue,
     results: &mut Vec<Vec<[usize; 2]>>,
 ) {
-    // Check if any direction exceeds its compass value
-    if counts[0] > compass.up.unwrap_or(0) as usize
-        || counts[1] > compass.down.unwrap_or(0) as usize
-        || counts[2] > compass.right.unwrap_or(0) as usize
-        || counts[3] > compass.left.unwrap_or(0) as usize
+    // Check if any direction exceeds its compass value.  `None` = unspecified
+    // (no constraint in that direction) — NOT "0 cells" (the I/O layer maps a
+    // JSON `-1` to `None`, and a real `0` to `Some(0)`).  The old `unwrap_or(0)`
+    // treated `None` as "exactly 0" and over-pruned every spec<4 compass. (doc 20)
+    if compass.up.map_or(false, |v| counts[0] > v as usize)
+        || compass.down.map_or(false, |v| counts[1] > v as usize)
+        || compass.right.map_or(false, |v| counts[2] > v as usize)
+        || compass.left.map_or(false, |v| counts[3] > v as usize)
     {
         return;
     }
 
-    // Check if all specified directions are exactly satisfied
-    // (Note: in our format, 0 means "not specified" BUT ONLY if the compass is from the I/O layer
-    //  For compass clues, all values default to 0, meaning "no constraint in that direction")
-    let all_satisfied = compass.up.unwrap_or(0) == counts[0] as i64
-        && compass.down.unwrap_or(0) == counts[1] as i64
-        && compass.right.unwrap_or(0) == counts[2] as i64
-        && compass.left.unwrap_or(0) == counts[3] as i64;
+    // Check if all *specified* directions are exactly satisfied (`None` = no
+    // constraint = trivially satisfied).
+    let all_satisfied = compass.up.map_or(true, |v| v == counts[0] as i64)
+        && compass.down.map_or(true, |v| v == counts[1] as i64)
+        && compass.right.map_or(true, |v| v == counts[2] as i64)
+        && compass.left.map_or(true, |v| v == counts[3] as i64);
 
     if all_satisfied && current.len() > 1 {
         results.push(current.clone());
-        // Continue: can grow in unspecified... but in our format all values are specified
-        // as 0 (meaning "exactly 0") or non-zero. So if all_satisfied, we're done.
         return;
     }
 
@@ -485,15 +485,23 @@ fn compass_rec(
     }
 
     // D7: precise compass region size upper bound = 1 (compass cell) + cells in
-    // each direction (up+down+left+right). None directions contribute 0 (matching
-    // the count check above, which treats None as "0 cells allowed"). This is far
-    // tighter than the old `current.len() + 20` heuristic and terminates the
-    // placement DFS as soon as the region can't grow further. (doc 16 §2 D7.)
-    let max_sz = 1usize
-        + compass.up.unwrap_or(0) as usize
-        + compass.down.unwrap_or(0) as usize
-        + compass.left.unwrap_or(0) as usize
-        + compass.right.unwrap_or(0) as usize;
+    // each specified direction.  Only valid when *all four* directions are
+    // specified; any `None` leaves that axis unbounded, so the region may span
+    // the whole grid.  The old `unwrap_or(0)` under-capped (treated `None` as 0)
+    // and rejected valid placements with cells in unspecified directions.
+    let all_specified = compass.up.is_some()
+        && compass.down.is_some()
+        && compass.left.is_some()
+        && compass.right.is_some();
+    let max_sz = if all_specified {
+        1usize
+            + compass.up.unwrap() as usize
+            + compass.down.unwrap() as usize
+            + compass.left.unwrap() as usize
+            + compass.right.unwrap() as usize
+    } else {
+        puzzle.height * puzzle.width
+    };
     if current.len() >= max_sz {
         return;
     }

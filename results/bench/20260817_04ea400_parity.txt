@@ -1,0 +1,5 @@
+edge_csp 第五迭代：watchtower parity 传播（commit 04ea400）
+基准：iter4 全量 1079/1258
+新增：2 道 via edge_csp（0983/1000，均 validate + match official）
+回归：0 真回归（2 假回归 0749/1270 无 watchtower + 隔离重跑仍解）
+结果: 1081 / 1258 通过

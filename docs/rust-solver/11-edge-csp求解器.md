@@ -1,6 +1,6 @@
 # edge_csp 边变量 CSP 求解器
 
-> 状态：**已实现**（第一/二/三迭代已合入 main，PR #33/#37/#39；第四迭代 watchtower 传播 2026-08-17）。
+> 状态：**已实现**（第一/二/三/四迭代已合入 main，PR #33/#37/#39/#41；第五迭代 watchtower parity 传播 2026-08-17）。
 > 对应设计：`docs/优化/14-边变量CSP独立求解器方案.md`。
 > 源码：`rsolver/src/solver/edge_csp/`。
 > 参考实现：`third_party/aog`（lifthrasiir 原生 Rust 边变量求解器，~8000 行）。
@@ -193,12 +193,26 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   0 回归（1148 baseline-PASS 全量快扫 + 3 个"假回归"经隔离重跑确认是 aog 抖动/系统噪声，
   均无 watchtower、propagator 不触发）。
 
-## 10. 第五迭代（未做）
+## 10. 第五迭代（已实现：watchtower parity 传播）
 
-- `propagate_vertex_edge_parity`（ParityUF 全局 XOR 约束，watchtower.rs:330-533）——
-  第四迭代只移植了 `propagate_watchtower`（A+B pass），未移植 parity 传播器与
-  `probe_watchtower_vertex_configs`（顶点配置枚举探测）。若第四迭代收益不够，
-  这两个是增量补强（全局奇偶约束 + 启动枚举强制）。
+- **`propagate_vertex_edge_parity`**（`prop.rs`）：移植参考
+  `watchtower.rs::propagate_vertex_edge_parity`（330-533），接入不动点循环
+  （`!vertex_clues.is_empty()` 门控，在 `bricky_loopy` 之后）。新增独立
+  `parity_uf.rs`（移植 `third_party/aog/src/uf.rs`，ParityUF XOR 并查集）。
+  - 对每个 cut-count 奇偶**确定**的 watchtower 顶点，建未知内部边之间的成对 XOR
+    约束，全局经并查集传播。奇偶只在以下确定：cycle(4格) 仅 value==4（k=4）；
+    tree(2-3格) value∈{1,3,4}（k=value-1）。value≤3(cycle)/==2(tree) 因 double-
+    touching 使 k 不定而跳过。
+  - 三阶段：① 0/1/2 未知约束 → 校验/强制/union；② 3+ 未知约束用已在同 UF 分量的
+    对约简；③ 已知边值经 UF 级联解剩余未知。
+- **`probe_watchtower_vertex_configs`**（移植，但**禁用为 dead code**）：顶点配置
+  枚举探测。实测在 85 题 watchtower 集上**较 parity 传播器 0 增量解**——parity UF
+  已捕获可强制边。保留 `#[allow(dead_code)]` 供未来 compass+watchtower 题用。
+- **新增 2 道** via edge_csp（较第四迭代）：0983 / 1000（均过验证 + 匹配官方）。
+  0 真回归（2 假回归 0749/1270 无 watchtower + 隔离重跑仍解）。
+
+## 11. 第六迭代（未做）
+
 - compass 放置枚举（组件合并版，纯 compass 0445/0469/1395b 需此 + 桥/网关）。
 - `propagate_size_separation`（differentiation）+ `propagate_boxy_nonboxy`（block/non_block）。
 - rose 范式迁移（`docs/优化/20` P2：pair.rs 对分支接进 edge_csp）。

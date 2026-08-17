@@ -57,6 +57,26 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // full budget on "no size constraint" ones — give it a short budget, then
     // hand the rest to the rose solver.
     let rose_capable = is_rose_capable(puzzle);
+
+    // ROSE_ONLY: bypass aog entirely and hand the full unit budget to the rose
+    // solver. Used to isolate R1 companion-rule pruning (rose region_match)
+    // from the aog 40s wall that normally blocks rose from ever running on
+    // rose+companion puzzles. Debug/diagnostic only — not a production path.
+    if std::env::var("ROSE_ONLY").is_ok() && rose_capable {
+        if let Some(regions) = rose::solve_rose(puzzle, &start, timeout_ms) {
+            return build_solution(regions, &start, puzzle, "rose");
+        }
+        let elapsed = start.elapsed().as_millis() as u64;
+        return Solution {
+            solved: false,
+            steps_taken: 0,
+            elapsed_ms: elapsed,
+            error_message: Some("rose solver only".into()),
+            regions: Vec::new(),
+            rule_results: Default::default(),
+            solver: "rose".to_string(),
+        };
+    }
     let aog_budget = if rose_capable {
         AOG_ROSE_BUDGET_MS.min(timeout_ms)
     } else {

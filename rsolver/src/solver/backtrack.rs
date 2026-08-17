@@ -196,7 +196,7 @@ fn compute_area_bounds(puzzle: &Puzzle) -> AreaBounds {
     AreaBounds { min_area, max_area }
 }
 
-fn collect_watchtowers(puzzle: &Puzzle) -> Vec<(Vec<[usize; 2]>, usize)> {
+pub(crate) fn collect_watchtowers(puzzle: &Puzzle) -> Vec<(Vec<[usize; 2]>, usize)> {
     let h = puzzle.height;
     let w = puzzle.width;
     let mut result = Vec::new();
@@ -486,7 +486,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
             state.region_clue[rid] = Some(n as usize);
         }
 
-        if check_watchtowers_ok(state)
+        if watchtowers_ok(&state.cell_to_region, state.width, &state.watchtowers)
             && check_vertex_ring_ok(puzzle, r, c, state)
             && check_sealed_regions(puzzle, state)
             && check_fence_ok(puzzle, state)
@@ -525,7 +525,7 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
         state.region_clue[new_rid] = Some(n as usize);
     }
 
-    if check_watchtowers_ok(state)
+    if watchtowers_ok(&state.cell_to_region, state.width, &state.watchtowers)
         && check_vertex_ring_ok(puzzle, r, c, state)
         && check_sealed_regions(puzzle, state)
         && check_fence_ok(puzzle, state)
@@ -908,11 +908,15 @@ fn frontier_unassign(state: &mut BacktrackState, r: usize, c: usize, rid: usize)
 }
 
 /// Incremental watchtower check: no vertex should already have more distinct regions than its target.
-fn check_watchtowers_ok(state: &BacktrackState) -> bool {
-    for &(ref cells, target) in &state.watchtowers {
+pub(crate) fn watchtowers_ok(
+    cell_to_region: &[Option<usize>],
+    width: usize,
+    watchtowers: &[(Vec<[usize; 2]>, usize)],
+) -> bool {
+    for &(ref cells, target) in watchtowers {
         let mut pieces = Vec::new();
         for &[r, c] in cells {
-            if let Some(p) = state.cell_to_region[r * state.width + c] {
+            if let Some(p) = cell_to_region[r * width + c] {
                 if !pieces.contains(&p) {
                     pieces.push(p);
                 }
@@ -933,9 +937,10 @@ fn check_watchtowers_ok(state: &BacktrackState) -> bool {
 ///
 /// Blocked cells are treated as empty space (blocked-blocked = no boundary,
 /// blocked-region = boundary), mirroring `vertex_boundary_count`.
-fn vertex_boundary_bounds(
+pub(crate) fn vertex_boundary_bounds(
     puzzle: &Puzzle,
-    state: &BacktrackState,
+    cell_to_region: &[Option<usize>],
+    width: usize,
     vr: usize,
     vc: usize,
 ) -> (usize, usize) {
@@ -967,7 +972,7 @@ fn vertex_boundary_bounds(
         if puzzle.cells[au][bu].blocked {
             Some(CellState::Blocked)
         } else {
-            match state.cell_to_region[au * state.width + bu] {
+            match cell_to_region[au * width + bu] {
                 Some(rid) => Some(CellState::Assigned(rid)),
                 None => Some(CellState::Unassigned),
             }
@@ -1045,7 +1050,8 @@ fn check_vertex_ring_ok(puzzle: &Puzzle, r: usize, c: usize, state: &BacktrackSt
         ) {
             return false;
         }
-        let (lb, _ub) = vertex_boundary_bounds(puzzle, state, vr as usize, vc as usize);
+        let (lb, _ub) =
+            vertex_boundary_bounds(puzzle, &state.cell_to_region, state.width, vr as usize, vc as usize);
         // ring: degree 3 already reached → dead.  (ub check not needed: if lb ≥ 3
         // the violation is certain regardless of future assignments.)
         if has_ring && lb >= 3 {

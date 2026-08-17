@@ -11,6 +11,9 @@ use crate::clock::Instant;
 
 use crate::types::Puzzle;
 
+use crate::solver::backtrack::{collect_watchtowers, vertex_boundary_bounds, watchtowers_ok};
+use crate::solver::fence::{build_fence_cells, check_fence_patterns};
+
 use super::cells::{CellSet, PreBoundaries};
 
 pub const CANDIDATE_CAP: usize = 20_000;
@@ -47,6 +50,81 @@ pub const MAX_COMBOS: usize = 50_000;
 /// 4 historical rose OOM puzzles (0882/0826/0838/0999) had `visited` growing
 /// into the multi-million range; 2M stops them well before OOM.
 pub const VISITED_CAP: usize = 2_000_000;
+
+/// Companion-rule pruning state (R1, doc 18 §4 / 20 §1.4). Rose's `region_match`
+/// previously ignored companion rules entirely — it grew candidate regions
+/// oblivious to ring/brick/watchtower/fence and only let the final
+/// `validate::validate` reject them once (then give up). This bundles the
+/// pre-computed companion-rule data so `match_regions_mrv` can prune a partial
+/// assignment the moment it becomes impossible.
+struct CompanionRules<'a> {
+    puzzle: &'a Puzzle,
+    has_ring: bool,
+    has_brick: bool,
+    watchtowers: &'a [(Vec<[usize; 2]>, usize)],
+    fence_cells: &'a [crate::solver::fence::FenceCellData],
+}
+
+/// Incremental companion-rule check, run after each candidate region is assigned
+/// in `match_regions_mrv`. Reuses backtrack's *sound* (definite-boundary) checks:
+///
+/// - **ring/brick**: `vertex_boundary_bounds` lower bound `lb` counts only edges
+///   that are boundaries in *every* completion (assigned-vs-different-region,
+///   assigned-vs-blocked, outer border). `lb >= 3` (ring) / `lb >= 4` (brick) is
+///   a certain violation.
+/// - **watchtower**: `watchtowers_ok` — a vertex already touching more distinct
+///   regions than its target.
+/// - **fence**: `check_fence_patterns` — a fence cell whose determined boundary
+///   bits already contradict its pattern (arm-count / dihedral-key).
+///
+/// Deliberately **not** reused: backtrack's GF(2) parity check
+/// (`prototypes::check_gf2_parity`) counts "assigned vs *unassigned*" as a
+/// definite boundary, which over-prunes (an unassigned cell may still join the
+/// assigned region) — see doc 18 §4. Pruning here is false-negative-only: a
+/// rejected candidate may still have a valid completion, but any actual solution
+/// is re-validated by the router, so we can only miss, never emit a wrong answer.
+fn check_companion_rules(
+    region_of: &[Option<usize>],
+    w: usize,
+    cand: &CellSet,
+    comp: &CompanionRules,
+) -> bool {
+    let puzzle = comp.puzzle;
+    if comp.has_ring || comp.has_brick {
+        for idx in cand.iter() {
+            let r = idx / w;
+            let c = idx % w;
+            for (vr, vc) in [
+                (r as i32 - 1, c as i32 - 1),
+                (r as i32, c as i32 - 1),
+                (r as i32 - 1, c as i32),
+                (r as i32, c as i32),
+            ] {
+                if vr < 0 || vc < 0 || vr + 1 >= puzzle.height as i32 || vc + 1 >= puzzle.width as i32
+                {
+                    continue;
+                }
+                let (lb, _ub) =
+                    vertex_boundary_bounds(puzzle, region_of, w, vr as usize, vc as usize);
+                if comp.has_ring && lb >= 3 {
+                    return false;
+                }
+                if comp.has_brick && lb >= 4 {
+                    return false;
+                }
+            }
+        }
+    }
+    if !comp.watchtowers.is_empty() && !watchtowers_ok(region_of, w, comp.watchtowers) {
+        return false;
+    }
+    if !comp.fence_cells.is_empty()
+        && !check_fence_patterns(puzzle, region_of, w, comp.fence_cells)
+    {
+        return false;
+    }
+    true
+}
 
 /// BFS over boundary-compliant connected subsets containing `seed` (cell idx).
 /// Port of `bfs_candidates.generate_all_candidates`.
@@ -488,6 +566,20 @@ pub fn solve_by_region_match(
 
     let deadline = *start + std::time::Duration::from_millis(timeout_ms);
     let mut region_of: Vec<Option<usize>> = vec![None; h * w];
+
+    // Companion-rule pruning data (R1) — precompute once, pass down to the MRV
+    // recursion. Empty/`false` for the 6 pure-rose puzzles, so the per-assignment
+    // check becomes a no-op there (zero overhead on the common path).
+    let watchtowers = collect_watchtowers(puzzle);
+    let fence_cells = build_fence_cells(puzzle);
+    let companion = CompanionRules {
+        puzzle,
+        has_ring: puzzle.rules.iter().any(|r| r.ctype == "ring"),
+        has_brick: puzzle.rules.iter().any(|r| r.ctype == "brick"),
+        watchtowers: &watchtowers,
+        fence_cells: &fence_cells,
+    };
+
     if crate::aog_debug_enabled() {
         eprintln!(
             "rose: {} area combos (min_area={})",
@@ -529,6 +621,7 @@ pub fn solve_by_region_match(
             &mut assignment,
             combo_deadline,
             deadline,
+            &companion,
         ) {
             // Rebuild region info from region_of.
             let regions = super::build_regions(&region_of, h, w);
@@ -556,6 +649,7 @@ fn match_regions_mrv(
     assignment: &mut Vec<Option<CellSet>>,
     combo_deadline: Instant,
     deadline: Instant,
+    companion: &CompanionRules,
 ) -> bool {
     if Instant::now() >= combo_deadline || Instant::now() >= deadline {
         return false;
@@ -607,6 +701,14 @@ fn match_regions_mrv(
             }
             continue;
         }
+        // R1: prune the partial assignment if a companion rule is already
+        // impossible (ring/brick degree, watchtower region count, fence pattern).
+        if !check_companion_rules(region_of, w, cand, companion) {
+            for idx in cand.iter() {
+                region_of[idx] = None;
+            }
+            continue;
+        }
         let mut new_covered = covered.clone();
         new_covered.union_into(cand);
         assignment[best_idx] = Some(cand.clone());
@@ -621,6 +723,7 @@ fn match_regions_mrv(
             assignment,
             combo_deadline,
             deadline,
+            companion,
         ) {
             return true;
         }

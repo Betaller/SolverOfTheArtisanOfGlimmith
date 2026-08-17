@@ -2,11 +2,11 @@
   "unit": "官方谜题 (puzzles/official, 排除 -answer 目录)",
   "total": 1258,
   "latest": {
-    "date": "2026-08-14",
-    "commit": "edge-csp-solver",
-    "passed": 1072,
+    "date": "2026-08-17",
+    "commit": "8758659",
+    "passed": 1075,
     "total": 1258,
-    "pct": 85.21
+    "pct": 85.45
   },
   "history": [
     {
@@ -71,6 +71,13 @@
       "passed": 1072,
       "total": 1258,
       "pct": 85.21
+    },
+    {
+      "date": "2026-08-17",
+      "commit": "8758659",
+      "passed": 1075,
+      "total": 1258,
+      "pct": 85.45
     }
   ]
 }

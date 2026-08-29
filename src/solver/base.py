@@ -16,8 +16,15 @@ class Solver(ABC):
     name: str = "base"
 
     @abstractmethod
-    def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
-        ...
+    def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution: ...
+
+    def cancel(self) -> None:  # noqa: B027 — deliberate no-op hook, not a stub
+        """Abort an in-flight `solve`, called from another thread.
+
+        Default is a no-op for pure-Python solvers.  Anything that spawns a
+        subprocess must override this and kill it — otherwise cancelling only
+        takes effect once `solve` returns on its own.
+        """
 
     @classmethod
     def supports(cls, puzzle: Puzzle) -> bool:
@@ -43,6 +50,7 @@ class SolverRouter:
         self._solvers = solvers
         self._attempts: list[SolverAttempt] = []
         self._last_verify_error: str | None = None
+        self._cancelled = False
 
     @property
     def attempts(self) -> list[SolverAttempt]:
@@ -52,17 +60,30 @@ class SolverRouter:
     def solvers(self) -> list[Solver]:
         return self._solvers
 
-    def route(self, puzzle: Puzzle, timeout: float = 30.0,
-              puzzle_name: str | None = None) -> Solution:
+    def cancel(self) -> None:
+        """Abort an in-flight `route`, killing whatever the solvers spawned.
+
+        Safe to call from another thread, and before/after `route`.
+        """
+        self._cancelled = True
+        for solver in self._solvers:
+            solver.cancel()
+
+    def route(
+        self, puzzle: Puzzle, timeout: float = 30.0, puzzle_name: str | None = None
+    ) -> Solution:
         self._attempts = []
         start = time.monotonic()
 
         label = puzzle_name or (
-            f"{puzzle.height}x{puzzle.width} "
-            f"rules={sorted(r.type for r in puzzle.rules)}"
+            f"{puzzle.height}x{puzzle.width} " f"rules={sorted(r.type for r in puzzle.rules)}"
         )
 
         for solver in self._solvers:
+            # Cancelling must abort the whole chain, not just the running
+            # solver: falling through would hand the next one a fresh budget.
+            if self._cancelled:
+                break
             if not solver.supports(puzzle):
                 continue
 
@@ -74,44 +95,54 @@ class SolverRouter:
 
             try:
                 sol = solver.solve(puzzle, timeout=budget)
+                if self._cancelled:
+                    break
                 elapsed = int((time.monotonic() - t0) * 1000)
                 if sol.solved and not self._verify_answer(solver, puzzle, sol, label):
                     # wrong answer → try the next solver
-                    self._attempts.append(SolverAttempt(
-                        solver=solver.name,
-                        status=AttemptStatus.VALIDATION_FAILED,
-                        elapsed_ms=elapsed, steps=sol.steps_taken,
-                        note=self._last_verify_error,
-                    ))
+                    self._attempts.append(
+                        SolverAttempt(
+                            solver=solver.name,
+                            status=AttemptStatus.VALIDATION_FAILED,
+                            elapsed_ms=elapsed,
+                            steps=sol.steps_taken,
+                            note=self._last_verify_error,
+                        )
+                    )
                     continue
-                self._attempts.append(SolverAttempt(
-                    solver=solver.name,
-                    status=AttemptStatus.SUCCESS if sol.solved else AttemptStatus.EXHAUSTED,
-                    elapsed_ms=elapsed, steps=sol.steps_taken,
-                    note=sol.error_message if not sol.solved else None,
-                ))
+                self._attempts.append(
+                    SolverAttempt(
+                        solver=solver.name,
+                        status=AttemptStatus.SUCCESS if sol.solved else AttemptStatus.EXHAUSTED,
+                        elapsed_ms=elapsed,
+                        steps=sol.steps_taken,
+                        note=sol.error_message if not sol.solved else None,
+                    )
+                )
                 if sol.solved:
                     sol.elapsed_ms = int((time.monotonic() - start) * 1000)
                     return sol
             except Exception as e:
-                self._attempts.append(SolverAttempt(
-                    solver=solver.name,
-                    status=AttemptStatus.ERROR,
-                    elapsed_ms=int((time.monotonic() - t0) * 1000),
-                    steps=0, note=str(e),
-                ))
+                self._attempts.append(
+                    SolverAttempt(
+                        solver=solver.name,
+                        status=AttemptStatus.ERROR,
+                        elapsed_ms=int((time.monotonic() - t0) * 1000),
+                        steps=0,
+                        note=str(e),
+                    )
+                )
 
         return Solution(
             solved=False,
             steps_taken=sum(a.steps for a in self._attempts),
             elapsed_ms=int((time.monotonic() - start) * 1000),
-            error_message=" / ".join(
-                f"[{a.solver}] {a.error or '无解'}" for a in self._attempts
-            ),
+            error_message=" / ".join(f"[{a.solver}] {a.error or '无解'}" for a in self._attempts),
         )
 
-    def _verify_answer(self, solver: Solver, puzzle: Puzzle,
-                       solution: Solution, label: str) -> bool:
+    def _verify_answer(
+        self, solver: Solver, puzzle: Puzzle, solution: Solution, label: str
+    ) -> bool:
         """Independently verify a solver's answer before accepting it.
 
         Uses the self-contained validator in ``src.validation`` so that a buggy
@@ -124,12 +155,14 @@ class SolverRouter:
         result = IndependentValidator().validate(puzzle, board)
         if result.solved:
             return True
-        self._last_verify_error = (
-            "答案未通过独立验证: " + ("; ".join(result.errors[:5]) or "未知原因")
+        self._last_verify_error = "答案未通过独立验证: " + (
+            "; ".join(result.errors[:5]) or "未知原因"
         )
         logger.warning(
             "求解器 %s 对谜题 %s 返回错误答案: %s",
-            solver.name, label, "; ".join(result.errors[:5]) or "未知原因",
+            solver.name,
+            label,
+            "; ".join(result.errors[:5]) or "未知原因",
         )
         return False
 
@@ -143,6 +176,8 @@ def default_router() -> SolverRouter:
     # it solved 0 puzzles the Rust stack cannot (see
     # docs/official-puzzles-status.md §C.0).  Every answer is still
     # independently re-verified via IndependentValidator in `route`.
-    return SolverRouter([
-        RustSolver(),
-    ])
+    return SolverRouter(
+        [
+            RustSolver(),
+        ]
+    )

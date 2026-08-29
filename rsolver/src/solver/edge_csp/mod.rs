@@ -512,6 +512,10 @@ pub fn solve_edge_csp(
     timeout_ms: u64,
 ) -> ModuleOutcome {
     let input = adapter::build_input(puzzle);
+    // Nothing to solve on (no fillable cells) → not capable, never a panic.
+    if input.grid.total_existing_cells() == 0 {
+        return ModuleOutcome::None;
+    }
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut solver = Solver::new(input, deadline, puzzle);
     let Some(regions) = solver.solve() else {
@@ -528,10 +532,18 @@ pub fn solve_edge_csp(
 /// propagates (ring / brick / watchtower / compass / inequality / difference,
 /// plus area numbers and global area bounds).
 ///
-/// Rules edge_csp does NOT propagate (rose / shape / fence / boxy / solitary /
-/// size-separation / shape-delta-gemini) are excluded — for those, the search
-/// would only be filtered at the leaf by `validate::validate`, wasting the whole
-/// budget; the dedicated rose / pieces / aog solvers handle them instead.
+/// Rules edge_csp does NOT propagate (rose / shape / solitary /
+/// shape-delta-gemini) are excluded — for those, the search would only be
+/// filtered at the leaf by `validate::validate`, wasting the whole budget; the
+/// dedicated rose / pieces / aog solvers handle them instead.
+///
+/// The area family (`area` / `precise` / `range`) qualifies on its own, without
+/// an edge rule — doc 22 §4: area/precise/range are the integer-linear
+/// constraints of §1's table, and `propagate_area_bounds` already models them
+/// (per-component target-area sealing, growth-potential pruning), so an
+/// area-only puzzle has real propagation content.  They are additionally gated
+/// by `has_area_signal` so a puzzle carrying no usable area information is
+/// still rejected instead of routed into the edge DFS.
 pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
     const EDGE_RULES: [&str; 6] = [
         "ring",
@@ -541,6 +553,7 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
         "inequality",
         "difference",
     ];
+    const AREA_RULES: [&str; 3] = ["area", "precise", "range"];
     const SUPPORTED: [&str; 13] = [
         "ring",
         "brick",
@@ -556,17 +569,82 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
         "block",
         "non_block",
     ];
-    let has_edge = puzzle
-        .rules
-        .iter()
-        .any(|r| EDGE_RULES.contains(&r.ctype.as_str()));
-    if !has_edge {
-        return false;
-    }
-    puzzle
+    if !puzzle
         .rules
         .iter()
         .all(|r| SUPPORTED.contains(&r.ctype.as_str()))
+    {
+        return false;
+    }
+    if puzzle
+        .rules
+        .iter()
+        .any(|r| EDGE_RULES.contains(&r.ctype.as_str()))
+    {
+        return true;
+    }
+    if !puzzle
+        .rules
+        .iter()
+        .any(|r| AREA_RULES.contains(&r.ctype.as_str()))
+    {
+        return false;
+    }
+    has_area_signal(puzzle)
+}
+
+/// Whether an area-family puzzle (no edge rule) carries something the
+/// propagator can actually act on:
+/// - per-cell area numbers (`CellClue::Area`), or
+/// - a `precise`/`range` bound that really restricts region sizes.
+///
+/// A vacuous bound (`range` with `min=1`/`max=#fillable`, e.g. a sparse
+/// range-only puzzle) gives `build_components` nothing to prune with, so the
+/// search would degenerate to an unguided 2^|E| edge DFS — reject it here
+/// (doc 22 §4: sparse range puzzles are "constraint-poor, essentially hard").
+fn has_area_signal(puzzle: &Puzzle) -> bool {
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let mut fillable = 0usize;
+    for r in 0..h {
+        for c in 0..w {
+            let cell = &puzzle.cells[r][c];
+            if cell.blocked {
+                continue;
+            }
+            fillable += 1;
+            if cell.number.is_some() {
+                return true;
+            }
+        }
+    }
+    if fillable == 0 {
+        return false;
+    }
+    for rule in &puzzle.rules {
+        match rule.ctype.as_str() {
+            // `precise` fixes every region to one size — always a real bound.
+            "precise" => {
+                if rule.params.get("area").and_then(|v| v.as_u64()).is_some() {
+                    return true;
+                }
+            }
+            "range" => {
+                if let Some(v) = rule.params.get("min").and_then(|v| v.as_u64()) {
+                    if v as usize > 1 {
+                        return true;
+                    }
+                }
+                if let Some(v) = rule.params.get("max").and_then(|v| v.as_u64()) {
+                    if (v as usize) < fillable {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// Preempt trigger: edge-constraint puzzles with no size constraint (precise /
@@ -588,4 +666,64 @@ pub fn is_edge_csp_preempt(puzzle: &Puzzle) -> bool {
         )
     });
     has_edge && !has_size
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_edge_csp_capable;
+
+    /// Minimal 2x2 puzzle JSON with the given rules (no cell numbers, no
+    /// pre-drawn edges).
+    fn puzzle_with_rules(rules_json: &str) -> crate::types::Puzzle {
+        let json = format!(
+            r#"{{"grid":{{"height":2,"width":2}},
+                "cells":[{{"row":0,"col":0}},{{"row":0,"col":1}},
+                         {{"row":1,"col":0}},{{"row":1,"col":1}}],
+                "edges":[],"vertices":[],"rules":{}}}"#,
+            rules_json
+        );
+        crate::io::parse_puzzle(&json).expect("test puzzle must parse")
+    }
+
+    #[test]
+    fn edge_rule_puzzles_stay_capable() {
+        let p = puzzle_with_rules(r#"[{"type":"ring"}]"#);
+        assert!(is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn area_only_with_numbers_is_capable() {
+        let json = r#"{"grid":{"height":2,"width":2},
+            "cells":[{"row":0,"col":0,"number":2},{"row":0,"col":1},
+                     {"row":1,"col":0},{"row":1,"col":1}],
+            "edges":[],"vertices":[],"rules":[{"type":"area"}]}"#;
+        let p = crate::io::parse_puzzle(json).unwrap();
+        assert!(is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn restrictive_range_only_is_capable() {
+        let p = puzzle_with_rules(r#"[{"type":"range","params":{"min":2,"max":3}}]"#);
+        assert!(is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn vacuous_range_only_stays_out() {
+        // min=1 / max=4 == #fillable on a 2x2 board: nothing to propagate.
+        let p = puzzle_with_rules(r#"[{"type":"range","params":{"min":1,"max":4}}]"#);
+        assert!(!is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn unsupported_rule_stays_out() {
+        let p = puzzle_with_rules(r#"[{"type":"rose_window"},{"type":"area"}]"#);
+        assert!(!is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn no_area_information_stays_out() {
+        // `differentiation` alone is supported but carries no area signal.
+        let p = puzzle_with_rules(r#"[{"type":"differentiation"}]"#);
+        assert!(!is_edge_csp_capable(&p));
+    }
 }

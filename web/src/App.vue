@@ -64,8 +64,13 @@ function createNew() { store.newPuzzle(newH.value, newW.value); showNew.value = 
       <aside class="right-panel">
         <PropertyPanel />
         <div class="control">
-          <button class="solve-btn" @click="store.solve">{{ store.solving ? '求解中…' : '求解' }}</button>
+          <button class="solve-btn" :disabled="store.solving" @click="store.solve">{{ store.solving ? '求解中…' : '求解' }}</button>
+          <button class="cancel-btn" v-if="store.solving" @click="store.cancel">取消求解</button>
           <button class="reset-btn" @click="store.reset">重置</button>
+          <label class="timeout-label">超时(ms):
+            <input class="timeout-input" type="number" min="500" max="60000" step="500"
+                   v-model.number="store.solveTimeoutMs" :disabled="store.solving" />
+          </label>
           <div class="result" v-html="store.resultHtml" />
         </div>
       </aside>

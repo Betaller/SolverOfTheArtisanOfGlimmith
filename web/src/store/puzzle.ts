@@ -2,7 +2,7 @@ import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { CompassJson, EdgeJson, PuzzleJson, RegionCells, RegionJson, SolutionJson } from '../lib/types'
 import { cellRegionMap, emptyPuzzle, normalizePuzzle } from '../lib/model'
-import { solvePuzzle } from '../worker/solverClient'
+import { solvePuzzle, cancelSolve } from '../worker/solverClient'
 
 export interface Selection {
   cell: [number, number] | null
@@ -23,6 +23,8 @@ export const usePuzzleStore = defineStore('puzzle', () => {
   const solving = ref(false)
   const solveMessage = ref('就绪')
   const resultHtml = ref('就绪')
+  // Per-puzzle deadline handed to the wasm solver (overrides its 5s default).
+  const solveTimeoutMs = ref(5000)
 
   const undoStack = ref<PuzzleJson[]>([])
   const redoStack = ref<PuzzleJson[]>([])
@@ -56,6 +58,8 @@ export const usePuzzleStore = defineStore('puzzle', () => {
   }
 
   let undoTimer: ReturnType<typeof setTimeout> | null = null
+  // Guards against stale results / concurrent solves (see `solve`/`cancel`).
+  let solveToken = 0
   function markModified() {
     // Editing invalidates both the displayed solution and the loaded official
     // answer (the board no longer matches the canonical partition).
@@ -154,10 +158,15 @@ export const usePuzzleStore = defineStore('puzzle', () => {
       resultHtml.value = '请至少启用一条规则'
       return
     }
+    if (solving.value) return  // ignore re-entrant clicks; a worker is single-threaded
     solving.value = true
     resultHtml.value = '求解中...'
+    // A monotonically increasing token lets a slow, superseded solve's result
+    // be dropped instead of overwriting the current one.
+    const token = ++solveToken
     try {
-      const s = await solvePuzzle(JSON.stringify(puzzle))
+      const s = await solvePuzzle(JSON.stringify(puzzle), solveTimeoutMs.value)
+      if (token !== solveToken) return  // superseded by a newer solve/cancel
       solution.value = s
       if (s.solved) {
         showSolution.value = true
@@ -168,18 +177,29 @@ export const usePuzzleStore = defineStore('puzzle', () => {
         resultHtml.value = `求解失败<br>原因: ${s.error_message || '无解'}`
       }
     } catch (e) {
+      if (token !== solveToken) return
       solveMessage.value = '求解出错'
       resultHtml.value = `出错: ${e instanceof Error ? e.message : String(e)}`
     } finally {
-      solving.value = false
+      if (token === solveToken) solving.value = false
     }
+  }
+
+  /** Stop the in-flight solve: terminate the Worker and rebuild it next time. */
+  function cancel() {
+    cancelSolve()
+    solveToken++  // invalidate any in-flight result
+    solving.value = false
+    solveMessage.value = '求解已取消'
+    resultHtml.value = '求解已取消'
   }
 
   return {
     puzzle, name, solution, officialAnswer, showSolution, solving, solveMessage, resultHtml,
+    solveTimeoutMs,
     mode, currentNumber, currentSymbol, currentCompass,
     selectedCell, selectedEdge, selectedVertex, displayRegions,
-    snapshot, markModified, undo, redo, newPuzzle, loadPuzzle, reset, solve,
+    snapshot, markModified, undo, redo, newPuzzle, loadPuzzle, reset, solve, cancel,
     clearSelection, selectCell, selectEdge, selectVertex,
   }
 })

@@ -10,6 +10,7 @@ import init, { solve } from '../wasm/rsolver.js'
 interface SolveRequest {
   id: number
   puzzleJson: string
+  timeoutMs?: bigint
 }
 
 interface SolveResponse {
@@ -30,7 +31,7 @@ async function handle(req: SolveRequest) {
   try {
     await ensureReady()
     // `solve` is synchronous; the deadline inside rsolver guarantees it returns.
-    const solutionJson = solve(req.puzzleJson)
+    const solutionJson = solve(req.puzzleJson, req.timeoutMs)
     post({ id: req.id, solutionJson })
   } catch (err) {
     post({ id: req.id, error: err instanceof Error ? err.message : String(err) })

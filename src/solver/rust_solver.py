@@ -102,8 +102,7 @@ def _fitting_rectangles(puzzle: Puzzle) -> list[list[list[int]]]:
             fits = False
             for r0 in range(h - rh + 1):
                 for c0 in range(w - rw + 1):
-                    if any((r0 + r, c0 + c) not in fillable
-                           for r in range(rh) for c in range(rw)):
+                    if any((r0 + r, c0 + c) not in fillable for r in range(rh) for c in range(rw)):
                         continue
                     if _crosses_boundary(board, r0, c0, rh, rw):
                         continue
@@ -137,8 +136,21 @@ def _find_binary() -> str:
 class RustSolver(Solver):
     name = "rust"
 
+    # How often the waiting thread wakes up while a subprocess is running to
+    # notice a cancellation or the wall-clock deadline.  Small enough that
+    # cancelling feels instant, large enough to be noise next to a solve.
+    POLL_INTERVAL = 0.05
+
+    # How long to wait for the pipes to close after killing the subprocess.
+    # Normally they hit EOF immediately; anything else that inherited the pipes
+    # would keep `communicate` blocked forever, so this caps the wait and lets
+    # the daemon pump finish on its own rather than stranding the solver thread.
+    KILL_GRACE = 1.0
+
     def __init__(self) -> None:
         self._binary = _find_binary()
+        self._proc: subprocess.Popen | None = None
+        self._cancelled = False
 
     # The Rust binary runs solver parts sequentially (aog → rose → edge_csp →
     # pieces → backtrack; edge_csp/rose only fire for capable puzzles), each of
@@ -196,14 +208,16 @@ class RustSolver(Solver):
         for rd in data.get("regions", []):
             cells = [(c[0], c[1]) for c in rd.get("cells", [])]
             shape_cells = [(s[0], s[1]) for s in rd.get("shape", [])]
-            regions.append(RegionInfo(
-                region_id=rd["region_id"],
-                cells=cells,
-                area=rd.get("area", len(cells)),
-                shape=Shape(cells=frozenset(shape_cells)),
-                normalized_shape_key=rd.get("normalized_shape_key", ""),
-                matched_shape_name=rd.get("matched_shape_name"),
-            ))
+            regions.append(
+                RegionInfo(
+                    region_id=rd["region_id"],
+                    cells=cells,
+                    area=rd.get("area", len(cells)),
+                    shape=Shape(cells=frozenset(shape_cells)),
+                    normalized_shape_key=rd.get("normalized_shape_key", ""),
+                    matched_shape_name=rd.get("matched_shape_name"),
+                )
+            )
 
         board = self._board_from_regions(puzzle, regions)
 
@@ -231,31 +245,42 @@ class RustSolver(Solver):
         for a in raw or []:
             if not isinstance(a, dict):
                 continue
-            out.append(SolverAttempt(
-                solver=a.get("solver", ""),
-                status=AttemptStatus.parse(a.get("status", "")),
-                elapsed_ms=int(a.get("elapsed_ms", 0) or 0),
-                note=a.get("note"),
-            ))
+            out.append(
+                SolverAttempt(
+                    solver=a.get("solver", ""),
+                    status=AttemptStatus.parse(a.get("status", "")),
+                    elapsed_ms=int(a.get("elapsed_ms", 0) or 0),
+                    note=a.get("note"),
+                )
+            )
         return out
 
+    def cancel(self) -> None:
+        """Kill the in-flight rsolver subprocess, if there is one.
+
+        Called from the GUI thread while `solve` is blocked in the solver
+        thread.  `solve` sees `self._cancelled` on its next poll and returns as
+        soon as the pipes hit EOF, so only the thread winding down is left.
+        """
+        self._cancelled = True
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            with contextlib.suppress(Exception):
+                proc.kill()
+
     def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
+        self._cancelled = False
         input_json = self._prepare_input(puzzle)
 
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 [self._binary],
-                input=input_json,
-                capture_output=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self._wall_budget(timeout),
                 encoding="utf-8",
                 env=self._subprocess_env(timeout),
-            )
-        except subprocess.TimeoutExpired:
-            return Solution(
-                solved=False,
-                error_message=f"Rust solver timed out after {timeout:.0f}s",
             )
         except FileNotFoundError:
             return Solution(
@@ -265,16 +290,73 @@ class RustSolver(Solver):
         except Exception as e:
             return Solution(solved=False, error_message=str(e))
 
+        self._proc = proc
+        try:
+            stdout, stderr, killed = self._pump(proc, input_json, self._wall_budget(timeout))
+        finally:
+            self._proc = None
+
+        if killed:
+            reason = (
+                "求解已取消" if self._cancelled else f"Rust solver timed out after {timeout:.0f}s"
+            )
+            return Solution(solved=False, error_message=reason)
+
         if proc.returncode != 0:
-            err = f"Rust solver exited with code {proc.returncode}: {proc.stderr[:500]}"
+            err = f"Rust solver exited with code {proc.returncode}: {stderr[:500]}"
             return Solution(solved=False, error_message=err)
 
         try:
-            data = json.loads(proc.stdout)
+            data = json.loads(stdout)
         except json.JSONDecodeError as e:
             return Solution(solved=False, error_message=f"Invalid JSON from solver: {e}")
 
         return self._parse_solution(data, puzzle)
+
+    def _pump(
+        self, proc: subprocess.Popen, input_json: str, budget: float
+    ) -> tuple[str, str, bool]:
+        """Feed `input_json`, drain both pipes, and wait with a deadline.
+
+        Returns `(stdout, stderr, killed)`.  `communicate` runs in a daemon
+        thread so *this* thread stays free to notice `cancel()` and the
+        deadline.  Blocking in `communicate` here is what used to make
+        cancelling take the whole `RUST_PARTS × timeout × SLACK` budget — the
+        subprocess was unreachable and ran to its own deadline anyway.
+        """
+        captured: dict[str, str] = {}
+
+        def _communicate() -> None:
+            try:
+                out, err = proc.communicate(input=input_json)
+            except Exception as e:  # killed mid-write, pipes already closed, ...
+                out, err = "", str(e)
+            captured["out"], captured["err"] = out, err
+
+        pump = threading.Thread(target=_communicate, daemon=True)
+        pump.start()
+
+        killed = False
+        deadline = time.monotonic() + budget
+        while pump.is_alive():
+            pump.join(self.POLL_INTERVAL)
+            if not (self._cancelled or time.monotonic() >= deadline):
+                continue
+            # Decided to stop, so the result is abandoned either way — even if
+            # `cancel` (or the process itself) beat us to the kill.  Setting the
+            # flag here is what keeps the join below bounded.
+            killed = True
+            if proc.poll() is None:
+                with contextlib.suppress(Exception):
+                    proc.kill()
+            break
+
+        if killed:
+            pump.join(self.KILL_GRACE)
+        else:
+            pump.join()
+
+        return captured.get("out", ""), captured.get("err", ""), killed
 
     def solve_batch(self, puzzles: list[Puzzle], timeout: float = 30.0) -> list[Solution]:
         """Solve many puzzles in ONE rsolver `--batch` subprocess (line-delimited
@@ -328,8 +410,11 @@ class RustSolver(Solver):
                 if line is None:
                     # This puzzle exceeded its budget or the process died.
                     code = proc.poll()
-                    err = (f"Rust batch died (exit {code})" if code is not None
-                           else f"Rust batch timed out after {timeout:.0f}s")
+                    err = (
+                        f"Rust batch died (exit {code})"
+                        if code is not None
+                        else f"Rust batch timed out after {timeout:.0f}s"
+                    )
                     with contextlib.suppress(Exception):
                         proc.kill()
                     while len(results) < len(puzzles):
@@ -340,10 +425,12 @@ class RustSolver(Solver):
                 try:
                     results.append(self._parse_solution(json.loads(line), puzzle))
                 except json.JSONDecodeError as e:
-                    results.append(Solution(
-                        solved=False,
-                        error_message=f"Invalid JSON from batch line {i}: {e}",
-                    ))
+                    results.append(
+                        Solution(
+                            solved=False,
+                            error_message=f"Invalid JSON from batch line {i}: {e}",
+                        )
+                    )
             with contextlib.suppress(Exception):
                 proc.wait()
         except Exception as e:

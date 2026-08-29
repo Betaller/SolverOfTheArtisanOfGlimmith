@@ -18,7 +18,13 @@ const WEB_TIMEOUT_MS: u64 = 5_000;
 ///
 /// Always returns a well-formed solution object (`solved:false` + `error_message`
 /// on parse failure / timeout), so the JS caller can `JSON.parse` unconditionally.
+///
+/// `timeout_ms` overrides the default browser deadline (see [`WEB_TIMEOUT_MS`]);
+/// pass `None` to use it.  Cancelling a running solve is done from JS by
+/// terminating the Worker that called this (the synchronous DFS can't be
+/// interrupted mid-search), so the deadline here is only a backstop.
 #[wasm_bindgen]
-pub fn solve(puzzle_json: &str) -> String {
-    crate::solution_to_json_text(&crate::solve_json_line(puzzle_json, WEB_TIMEOUT_MS))
+pub fn solve(puzzle_json: &str, timeout_ms: Option<u64>) -> String {
+    let timeout = timeout_ms.unwrap_or(WEB_TIMEOUT_MS);
+    crate::solution_to_json_text(&crate::solve_json_line(puzzle_json, timeout))
 }

@@ -35,12 +35,40 @@ function getWorker(): Worker {
 }
 
 /** Solve one puzzle (JSON text in, parsed solution out). Never throws. */
-export function solvePuzzle(puzzleJson: string): Promise<SolutionJson> {
+export function solvePuzzle(puzzleJson: string, timeoutMs?: number): Promise<SolutionJson> {
   return new Promise((resolve) => {
     const id = nextId++
     pending.set(id, (res) => resolve(res instanceof Error ? errorToSolution(res) : res))
-    getWorker().postMessage({ id, puzzleJson })
+    // wasm-bindgen maps `Option<u64>` to `bigint | null | undefined`.
+    getWorker().postMessage({
+      id,
+      puzzleJson,
+      timeoutMs: timeoutMs === undefined ? undefined : BigInt(timeoutMs),
+    })
   })
+}
+
+/**
+ * Abort the in-flight solve by terminating the Worker — the synchronous wasm
+ * DFS can't be interrupted in place. Every pending call is settled with a
+ * "cancelled" solution so its awaiter doesn't hang forever, then the worker is
+ * killed (and lazily rebuilt by the next `solvePuzzle`).
+ */
+export function cancelSolve(): void {
+  if (!worker) return
+  const cancelled: SolutionJson = {
+    solved: false,
+    steps_taken: 0,
+    elapsed_ms: 0,
+    error_message: '已取消',
+    regions: [],
+    rule_results: {},
+    solver: '',
+  }
+  for (const [, resolve] of pending) resolve(cancelled)
+  pending.clear()
+  worker.terminate()
+  worker = null
 }
 
 function errorToSolution(err: Error): SolutionJson {

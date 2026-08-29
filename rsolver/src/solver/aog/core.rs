@@ -67,6 +67,33 @@ pub fn shape_mirror(grid: &mut Vec<Vec<u32>>, shape_size: usize) {
     }
 }
 
+/// True iff the 1-cells of `shape` (a square grid, normalized to the origin)
+/// exactly fill their bounding box with no holes — i.e. the shape is a solid
+/// rectangle. Used by the non_block `NonBlockFilter` (doc 19 §4) to exclude
+/// rectangular canonical shapes from the aog shape library.
+pub fn shape_is_rectangular(shape: &[Vec<u32>], shape_size: usize) -> bool {
+    if shape_size == 0 {
+        return false;
+    }
+    let mut max_i = 0usize;
+    let mut max_j = 0usize;
+    let mut count = 0usize;
+    for i in 0..shape_size {
+        for j in 0..shape_size {
+            if shape[i][j] == 1 {
+                count += 1;
+                if i > max_i {
+                    max_i = i;
+                }
+                if j > max_j {
+                    max_j = j;
+                }
+            }
+        }
+    }
+    count > 0 && count == (max_i + 1) * (max_j + 1)
+}
+
 /// Convert a cell-coordinate list into a square 0/1 grid (minimal bounding square).
 pub fn shape_grid_from_cells(cells: &[[usize; 2]]) -> (Vec<Vec<u32>>, usize) {
     if cells.is_empty() {
@@ -167,6 +194,15 @@ impl AoGCore {
     }
 
     pub fn shapes_insert(&mut self, shape: &mut Vec<Vec<u32>>, shape_size: usize) -> u32 {
+        // NonBlockFilter (doc 19 §4): under `non_block`, rectangular regions are
+        // forbidden. Refuse rectangular shapes at catalog-insert time so they
+        // never enter the library — symmetric to `only_rectangles` (which *adds*
+        // rectangles). Returning 0 makes the search-commit path skip the
+        // placement (and keeps rectangles out of `all_shapes_same`/`different`
+        // matching), covering rose/fence/homogeneous puzzles edge_csp can't reach.
+        if self.config.no_rectangles && shape_is_rectangular(shape, shape_size) {
+            return 0;
+        }
         if self.shape_cap > 0 && self.shapes.len() >= self.shape_cap {
             // Library full: refuse ALL 8 dihedral variants atomically (not
             // partially — a mid-loop cap in `add_shape_to_shapes` would insert

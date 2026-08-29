@@ -45,7 +45,6 @@ input[type="number"], input[type="text"] { width: 100%; }
 .control { padding: 8px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); }
 .solve-btn { background: var(--ok); color: #fff; border: none; font-size: 15px; font-weight: bold; padding: 12px; border-radius: 8px; }
 .solve-btn:disabled { opacity: .5; cursor: default; }
-.cancel-btn { background: var(--warn, #e2a23b); color: #1a1d24; border: none; font-size: 15px; font-weight: bold; padding: 12px; border-radius: 8px; cursor: pointer; }
 .timeout-label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .timeout-input { width: 96px; text-align: center; background: #1a1d24; color: #fafafa; border: 1px solid var(--border); border-radius: 4px; padding: 4px; }
 .timeout-input:disabled { opacity: .5; }

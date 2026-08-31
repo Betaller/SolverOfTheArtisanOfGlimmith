@@ -63,6 +63,12 @@
   animation: aog-fade-in var(--dur-1) var(--ease-out);
 }
 
+.edge-hover {
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px var(--brand-ring));
+  animation: aog-fade-in var(--dur-1) var(--ease-out);
+}
+
 .sel-ring {
   animation: aog-dash 900ms linear infinite;
   pointer-events: none;

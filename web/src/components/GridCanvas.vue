@@ -66,18 +66,14 @@ const cells = computed(() => {
     const blocked = !!cell?.blocked
     const ri = store.displayRegions?.get(cellKey(r, c))
     const fv = fenceDiamondValue(cell?.fence_pattern)
+    // No per-cell outline: same-region neighbours must read as one continuous
+    // shape. The silhouette comes from `regionOutlines`, the hairline grid from
+    // `gridLines`.
     let fill = C.value.cell_bg_null
-    let stroke = C.value.cell_border
-    if (blocked) {
-      fill = C.value.cell_blocked_bg
-      stroke = C.value.cell_blocked_border
-    } else if (ri != null) {
-      const base = REGION_COLORS[ri % REGION_COLORS.length]
-      fill = regionFill(base, dark)
-      stroke = regionStroke(base, dark)
-    }
+    if (blocked) fill = C.value.cell_blocked_bg
+    else if (ri != null) fill = regionFill(REGION_COLORS[ri % REGION_COLORS.length], dark)
     out.push({
-      r, c, x: cellX(c), y: cellY(r), blocked, region: ri ?? null, fill, stroke,
+      r, c, x: cellX(c), y: cellY(r), blocked, region: ri ?? null, fill,
       number: cell?.number, symbol: cell?.symbol, compass: cell?.compass,
       shapePattern: cell?.shape_pattern,
       fence: fv ? fenceSegments(fv, cellX(c) + cs.value / 2, cellY(r) + cs.value / 2, cs.value) : null,
@@ -129,6 +125,37 @@ const gridLines = computed(() => {
     lines.push(edgeEndpoints(e))
   }
   return lines
+})
+
+/**
+ * Region silhouette: the outline of every solved region, drawn only on the
+ * sides that face a *different* region (or a blocked cell / the board edge).
+ * Sides shared with a same-region neighbour are left open so the region reads
+ * as a single continuous shape instead of a patchwork of tiles.
+ */
+const regionOutlines = computed(() => {
+  const regions = store.displayRegions
+  const out: any[] = []
+  if (!regions) return out
+  const dark = isDark.value
+  const s = cs.value
+  for (let r = 0; r < h.value; r++) for (let c = 0; c < w.value; c++) {
+    if (getCell(r, c)?.blocked) continue
+    const ri = regions.get(cellKey(r, c))
+    if (ri == null) continue
+    const sameRegion = (nr: number, nc: number) => {
+      if (nr < 0 || nc < 0 || nr >= h.value || nc >= w.value) return false
+      if (getCell(nr, nc)?.blocked) return false
+      return regions.get(cellKey(nr, nc)) === ri
+    }
+    const x = cellX(c), y = cellY(r)
+    const color = regionStroke(REGION_COLORS[ri % REGION_COLORS.length], dark)
+    if (!sameRegion(r - 1, c)) out.push({ x1: x, y1: y, x2: x + s, y2: y, color, k: `t${r},${c}` })
+    if (!sameRegion(r + 1, c)) out.push({ x1: x, y1: y + s, x2: x + s, y2: y + s, color, k: `b${r},${c}` })
+    if (!sameRegion(r, c - 1)) out.push({ x1: x, y1: y, x2: x, y2: y + s, color, k: `l${r},${c}` })
+    if (!sameRegion(r, c + 1)) out.push({ x1: x + s, y1: y, x2: x + s, y2: y + s, color, k: `r${r},${c}` })
+  }
+  return out
 })
 
 const constraintLabels = computed(() => {
@@ -243,8 +270,17 @@ function hitVertex(x: number, y: number): [number, number] | null {
     if (Math.abs(x - vx(c)) < th && Math.abs(y - vy(r)) < th) return [r, c]
   return null
 }
+/**
+ * Pointer distance at which an edge counts as "aimed at". One radius drives
+ * both the hover highlight and the click target, so what lights up is always
+ * what a click would select.
+ */
+function edgeHitRadius(): number {
+  return Math.max(5, Math.min(14, cs.value * 0.22))
+}
+
 function hitEdge(x: number, y: number): [number, number, number, number] | null {
-  const th = Math.max(10, cs.value / 7)
+  const th = edgeHitRadius()
   let best: [number, number, number, number] | null = null
   let bestD = Infinity
   for (const e of p.value.edges) {
@@ -500,14 +536,15 @@ const hoverVertexDot = computed(() => {
 })
 const hoverEdgeLine = computed(() => {
   if (!hoverEdge.value) return null
-  // Cells win the hover except in boundary mode, where edges are the target.
-  if (hoverCell.value && store.mode !== 'boundary') return null
+  // Only where a click would act on the edge itself; in the painting tools the
+  // cell is the target even right up against its border.
+  if (store.mode !== 'select' && store.mode !== 'boundary') return null
   const [r1, c1, r2, c2] = hoverEdge.value
   if (store.selectedEdge && store.selectedEdge.join() === hoverEdge.value.join()) return null
   return edgeEndpoints({ r1, c1, r2, c2 })
 })
 const guides = computed(() => {
-  if (!hoverCell.value || cs.value < 22) return null
+  if (!hoverCell.value || hoverEdgeLine.value || cs.value < 22) return null
   const [r, c] = hoverCell.value
   return {
     x: cellX(c) + cs.value / 2,
@@ -612,10 +649,6 @@ onUnmounted(() => window.removeEventListener('mousedown', onDocMouseDown))
               :x="c.x" :y="c.y" :width="cs" :height="cs"
               fill="url(#aogBlocked)" opacity="0.4"
             />
-            <rect
-              :x="c.x + 0.5" :y="c.y + 0.5" :width="Math.max(0, cs - 1)" :height="Math.max(0, cs - 1)"
-              fill="none" :stroke="c.stroke" stroke-width="1"
-            />
             <g v-if="c.blocked">
               <line :x1="c.x + cs * 0.24" :y1="c.y + cs * 0.24" :x2="c.x + cs * 0.76" :y2="c.y + cs * 0.76" :stroke="C.cell_blocked_x" :stroke-width="Math.max(1.4, cs * 0.045)" stroke-linecap="round" />
               <line :x1="c.x + cs * 0.76" :y1="c.y + cs * 0.24" :x2="c.x + cs * 0.24" :y2="c.y + cs * 0.76" :stroke="C.cell_blocked_x" :stroke-width="Math.max(1.4, cs * 0.045)" stroke-linecap="round" />
@@ -654,6 +687,13 @@ onUnmounted(() => window.removeEventListener('mousedown', onDocMouseDown))
           </g>
         </g>
 
+        <!-- region silhouette (open on sides shared with the same region) -->
+        <line
+          v-for="o in regionOutlines" :key="o.k"
+          :x1="o.x1" :y1="o.y1" :x2="o.x2" :y2="o.y2"
+          :stroke="o.color" :stroke-width="Math.max(1.6, cs * 0.035)" stroke-linecap="round"
+        />
+
         <!-- region boundaries: glow → body → highlight core -->
         <g filter="url(#aogGlow)">
           <line v-for="(l, i) in boundaryLines" :key="`b${i}`" :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2" :stroke="C.boundary_edge" :stroke-width="Math.max(3, cs * 0.1)" stroke-linecap="round" stroke-opacity="0.55" />
@@ -677,9 +717,9 @@ onUnmounted(() => window.removeEventListener('mousedown', onDocMouseDown))
           <text v-if="wt.value > 4" :x="wt.x" :y="wt.y + cs / 9" text-anchor="middle" :font-size="cs / 4.4" font-weight="700" :fill="C.watchtower_text">{{ wt.value }}</text>
         </g>
 
-        <!-- hover affordances -->
-        <line v-if="hoverEdgeLine" :x1="hoverEdgeLine.x1" :y1="hoverEdgeLine.y1" :x2="hoverEdgeLine.x2" :y2="hoverEdgeLine.y2" :stroke="C.hover_cell" :stroke-width="Math.max(2, cs * 0.06)" stroke-linecap="round" stroke-opacity="0.45" />
-        <rect v-if="hoverCellRect" :x="hoverCellRect.x" :y="hoverCellRect.y" :width="hoverCellRect.w" :height="hoverCellRect.h" :rx="Math.min(4, cs * 0.1)" fill="none" :stroke="C.hover_cell" stroke-width="1.6" stroke-opacity="0.9" />
+        <!-- hover affordances: the border zone lights up the border, not the cell -->
+        <line v-if="hoverEdgeLine" class="edge-hover" :x1="hoverEdgeLine.x1" :y1="hoverEdgeLine.y1" :x2="hoverEdgeLine.x2" :y2="hoverEdgeLine.y2" :stroke="C.hover_cell" :stroke-width="Math.max(3, cs * 0.085)" stroke-linecap="round" stroke-opacity="0.9" />
+        <rect v-if="hoverCellRect && !hoverEdgeLine" :x="hoverCellRect.x" :y="hoverCellRect.y" :width="hoverCellRect.w" :height="hoverCellRect.h" :rx="Math.min(4, cs * 0.1)" fill="none" :stroke="C.hover_cell" stroke-width="1.6" stroke-opacity="0.9" />
         <circle v-if="hoverVertexDot" :cx="hoverVertexDot.cx" :cy="hoverVertexDot.cy" :r="Math.max(2, cs / 9)" fill="none" :stroke="C.hover_vertex" stroke-width="1.6" />
 
         <!-- selection -->

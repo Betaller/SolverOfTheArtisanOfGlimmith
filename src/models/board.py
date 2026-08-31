@@ -216,6 +216,9 @@ class Board:
             b._edges[i].constraint = src.constraint
         for i, src in enumerate(self._vertices):
             b._vertices[i].watchtower = src.watchtower
+        # Preserve pre-drawn outer boundaries — otherwise a cloned board silently
+        # loses its outer boundary edges (bug L5).
+        b.outer_boundaries = list(self.outer_boundaries)
         return b
 
     def get_region_cells(self, region_id: int) -> list[Cell]:

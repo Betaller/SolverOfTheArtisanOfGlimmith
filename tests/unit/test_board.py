@@ -431,6 +431,21 @@ class TestBoardClone:
         assert cloned_v is not None
         assert cloned_v.watchtower == 3
 
+    def test_clone_preserves_outer_boundaries(self) -> None:
+        # Bug L5: clone() used to drop outer_boundaries, silently losing
+        # pre-drawn outer edges whenever a board was cloned.
+        b = Board(3, 3)
+        b.outer_boundaries = [(0, 0, 0, 1), (3, 0, 3, 1)]
+        clone = b.clone()
+        assert clone.outer_boundaries == [(0, 0, 0, 1), (3, 0, 3, 1)]
+
+    def test_clone_outer_boundaries_is_independent(self) -> None:
+        b = Board(3, 3)
+        b.outer_boundaries = [(0, 0, 0, 1)]
+        clone = b.clone()
+        clone.outer_boundaries.append((0, 1, 0, 2))
+        assert b.outer_boundaries == [(0, 0, 0, 1)]
+
 
 class TestBoardRegion:
     def test_get_region_cells(self, empty_board_4x4: Board) -> None:

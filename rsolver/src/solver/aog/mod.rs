@@ -94,3 +94,70 @@ fn canonical_key_region(cells: &[[usize; 2]]) -> String {
 }
 
 use std::collections::HashMap;
+
+#[cfg(test)]
+mod tests {
+    use crate::clock::Instant;
+    use crate::types::*;
+
+    /// H3: with `block` (only_rectangles) + a `shape_pool` that contains a
+    /// non-rectangular shape (L-tromino), the AoG solver must NOT emit a
+    /// non-rectangular region.  The rectangle catalog (built for `block`) still
+    /// supplies the 2×2 square, so the 2×2 board is solved by that rectangle;
+    /// the L-tromino must be rejected.  If a non-rectangle ever slips through,
+    /// the assertion fails.
+    #[test]
+    fn test_block_rejects_nonrect_pool_shape() {
+        let h = 2usize;
+        let w = 2usize;
+        let cells = (0..h)
+            .map(|r| (0..w).map(|c| Cell::new(r, c)).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let puzzle = Puzzle {
+            height: h,
+            width: w,
+            cells,
+            h_edges: vec![vec![Edge::default(); w.saturating_sub(1)]; h],
+            v_edges: vec![vec![Edge::default(); w]; h.saturating_sub(1)],
+            vertices: vec![vec![Vertex::default(); w + 1]; h + 1],
+            rules: vec![Rule {
+                ctype: "block".into(),
+                params: Default::default(),
+            }],
+            // A non-rectangular pool shape (L-tromino) plus the 2×2 square.
+            shape_pool: vec![
+                vec![[0usize, 0], [0, 1], [1, 1]],
+                vec![[0usize, 0], [0, 1], [1, 0], [1, 1]],
+            ],
+            outer_boundaries: vec![],
+        };
+        let deadline = Instant::now() + std::time::Duration::from_secs(30);
+        let outcome = super::solve_aog(&puzzle, deadline);
+        let regions = match outcome {
+            ModuleOutcome::Solved(r) => r,
+            other => panic!("expected a solved 2x2 block partition, got {:?}", other),
+        };
+        // Exactly one region covering all 4 cells, and it must be a rectangle.
+        assert_eq!(regions.len(), 1, "2x2 block board is a single region");
+        let cells_set: std::collections::HashSet<[usize; 2]> =
+            regions[0].cells.iter().copied().collect();
+        assert_eq!(cells_set.len(), 4, "region must cover all 4 cells");
+        // Rectangle check: bounding box area == cell count.
+        let mut min_r = usize::MAX;
+        let mut max_r = 0;
+        let mut min_c = usize::MAX;
+        let mut max_c = 0;
+        for &[r, c] in &regions[0].cells {
+            min_r = min_r.min(r);
+            max_r = max_r.max(r);
+            min_c = min_c.min(c);
+            max_c = max_c.max(c);
+        }
+        let area = (max_r - min_r + 1) * (max_c - min_c + 1);
+        assert_eq!(
+            area,
+            regions[0].cells.len(),
+            "emitted region must be a rectangle (block rule)"
+        );
+    }
+}

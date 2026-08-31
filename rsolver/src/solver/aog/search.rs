@@ -1033,6 +1033,16 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
         if !mk_size[core.shapes[cur].nodes.len()] {
             continue;
         }
+        // H3: when `block` (→ only_rectangles) is active, every placed region
+        // must be a rectangle — including predefined `shape_pool` shapes.  The
+        // free-enumeration path below (`place_non_predifined_shape`) already
+        // enforces only_rectangles, but the Type1-4 predefined-shape paths did
+        // not, so a non-rectangular pool shape could be placed in violation of
+        // `block`.  Reject it here so such puzzles fall through to another
+        // solver instead of producing an invalid (non-rectangular) partition.
+        if core.config.only_rectangles && !core.shapes[cur].is_rectangle() {
+            continue;
+        }
 
         for p in 0..core.shapes[cur].nodes.len() {
             if ret == SPECIAL_START_DEFAULT && p != 0 {

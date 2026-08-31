@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from 'vue'
 import { usePuzzleStore } from '../store/puzzle'
 import { cellAt, edgeBetween, vertexAt, makeConstraint } from '../lib/model'
+import { parseNumber } from '../lib/fixes'
 import type { CellJson, EdgeJson } from '../lib/types'
 import AppIcon from './AppIcon.vue'
 import AppModal from './AppModal.vue'

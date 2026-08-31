@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { usePuzzleStore } from '../store/puzzle'
 import { useToast } from '../composables/useToast'
 import { RULE_NAMES, RULE_CATEGORIES, RULE_DESCRIPTIONS } from '../lib/theme'
+import { RULE_DEFAULT_PARAMS, ruleWithDefaults } from '../lib/fixes'
 import type { RuleJson } from '../lib/types'
 import AppIcon from './AppIcon.vue'
 import AppSwitch from './AppSwitch.vue'
@@ -19,8 +20,9 @@ function hasRule(type: string) { return store.puzzle.rules.some((r) => r.type ==
 function getRule(type: string): RuleJson | undefined { return store.puzzle.rules.find((r) => r.type === type) }
 
 function toggleRule(type: string, checked: boolean) {
-  if (checked) { if (!hasRule(type)) store.puzzle.rules.push({ type }) }
-  else { store.puzzle.rules = store.puzzle.rules.filter((r) => r.type !== type) as any }
+  if (checked) {
+    if (!hasRule(type)) store.puzzle.rules.push(ruleWithDefaults(type) as any)
+  } else { store.puzzle.rules = store.puzzle.rules.filter((r) => r.type !== type) as any }
   store.markModified()
   toast.info(`${checked ? '启用' : '停用'}规则「${RULE_NAMES[type] ?? type}」`, 1400)
 }

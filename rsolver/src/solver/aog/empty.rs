@@ -340,17 +340,11 @@ pub fn empty_area_check(core: &mut AoGCore, sp: &Vec<Vec<u32>>) -> bool {
     for x in 1..=core.n_row as i32 {
         for y in 1..=core.n_col as i32 {
             checked += 1;
-            // L1: bail on deadline inside the O(cells²) flood-fill scan so a
+            // N2: bail on deadline inside the O(cells²) flood-fill scan so a
             // single shape placement can't overshoot the budget by seconds.
-            // The old guard `checked % 256 == 0` never fired on boards smaller
-            // than 16×16 (the loop runs <256 cells), so the deadline was never
-            // checked here — the search could only bail at the next outer
-            // deadline check (far too late).  Check every iteration: for a
-            // 50×50 board this is ≤2500 cheap `Instant::now()` calls per scan,
-            // negligible, and guarantees the deadline can actually fire.
             // Returning false prunes safely — the search is already past its
-            // deadline and would fail anyway.
-            if Instant::now() >= core.deadline {
+            // deadline and would fail anyway (doc 17 §4.1 A1).
+            if checked % 256 == 0 && Instant::now() >= core.deadline {
                 return false;
             }
             let px = to_puzzle_x(x) as usize;

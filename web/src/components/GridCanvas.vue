@@ -403,6 +403,9 @@ function onKey(e: KeyboardEvent) {
 }
 
 function moveSelection(k: string) {
+  // Moving the selection must not carry a partially-typed multi-digit number
+  // across to the newly selected cell.
+  inlineNumber.value = ''
   const dr = k === 'ArrowUp' ? -1 : k === 'ArrowDown' ? 1 : 0
   const dc = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : 0
   if (store.selectedCell) {

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { usePuzzleStore } from '../store/puzzle'
 import { RULE_NAMES, RULE_CATEGORIES, RULE_DESCRIPTIONS } from '../lib/theme'
+import { RULE_DEFAULT_PARAMS, ruleWithDefaults } from '../lib/fixes'
 import type { RuleJson } from '../lib/types'
 import ShapeEditor from './ShapeEditor.vue'
 
@@ -13,8 +14,9 @@ function hasRule(type: string) { return store.puzzle.rules.some((r) => r.type ==
 function getRule(type: string): RuleJson | undefined { return store.puzzle.rules.find((r) => r.type === type) }
 
 function toggleRule(type: string, checked: boolean) {
-  if (checked) { if (!hasRule(type)) store.puzzle.rules.push({ type }) }
-  else { store.puzzle.rules = store.puzzle.rules.filter((r) => r.type !== type) as any }
+  if (checked) {
+    if (!hasRule(type)) store.puzzle.rules.push(ruleWithDefaults(type) as any)
+  } else { store.puzzle.rules = store.puzzle.rules.filter((r) => r.type !== type) as any }
   store.markModified()
 }
 function setParam(type: string, key: string, value: any) {

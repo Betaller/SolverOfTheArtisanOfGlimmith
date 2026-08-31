@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { usePuzzleStore } from './store/puzzle'
+import { isTypingTarget } from './lib/fixes'
 import GridCanvas from './components/GridCanvas.vue'
 import ToolPalette from './components/ToolPalette.vue'
 import ConstraintPanel from './components/ConstraintPanel.vue'
@@ -15,6 +16,9 @@ const newH = ref(6)
 const newW = ref(6)
 
 function onKey(e: KeyboardEvent) {
+  // Ignore shortcuts while typing in a text field so single-letter keys,
+  // Ctrl+Z (native undo), Ctrl+R / F5 (native reload) keep working.
+  if (isTypingTarget(e.target)) return
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? store.redo() : store.undo(); return }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { e.preventDefault(); showNew.value = true; return }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); store.reset(); return }

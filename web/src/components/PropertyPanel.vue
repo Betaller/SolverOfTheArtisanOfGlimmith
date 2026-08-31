@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from 'vue'
 import { usePuzzleStore } from '../store/puzzle'
 import { cellAt, edgeBetween, vertexAt, makeConstraint } from '../lib/model'
+import { parseNumber } from '../lib/fixes'
 import type { CellJson, EdgeJson } from '../lib/types'
 import ShapeGridEditor from './ShapeGridEditor.vue'
 
@@ -70,7 +71,7 @@ function applyCompass() {
     <template v-if="selCell">
       <label class="check"><input type="checkbox" :checked="selCell.blocked" @change="setBlocked(($event.target as HTMLInputElement).checked)" /> 障碍格</label>
       <hr />
-      <div class="row"><label>数字</label><input type="number" min="0" max="999" :value="selCell.number ?? 0" @change="setCell({ number: parseInt(($event.target as HTMLInputElement).value) || undefined })" /><button @click="setCell({ number: undefined })">清除</button></div>
+      <div class="row"><label>数字</label><input type="number" min="0" max="999" :value="selCell.number ?? 0" @change="setCell({ number: parseNumber(($event.target as HTMLInputElement).value) })" /><button @click="setCell({ number: undefined })">清除</button></div>
       <div class="row"><label>符号</label><input :value="selCell.symbol ?? ''" maxlength="2" @change="setCell({ symbol: ($event.target as HTMLInputElement).value || undefined })" /><button v-for="s in ['★','●','◆','▲','♥','■']" :key="s" @click="setCell({ symbol: s })">{{ s }}</button></div>
       <hr />
       <div class="row"><label>罗盘</label><button @click="openCompass">编辑</button></div>
@@ -104,7 +105,7 @@ function applyCompass() {
     <!-- vertex -->
     <template v-else-if="selVertex">
       <div class="prop-info">望塔: {{ selVertex.watchtower ?? '无' }}</div>
-      <div class="row"><label>望塔值</label><input type="number" min="0" max="4" :value="selVertex.watchtower ?? 0" @change="setWatchtower(parseInt(($event.target as HTMLInputElement).value) || null)" /><button @click="setWatchtower(null)">清除</button></div>
+      <div class="row"><label>望塔值</label><input type="number" min="0" max="4" :value="selVertex.watchtower ?? 0" @change="setWatchtower(parseNumber(($event.target as HTMLInputElement).value) ?? null)" /><button @click="setWatchtower(null)">清除</button></div>
     </template>
 
     <!-- pattern modal -->

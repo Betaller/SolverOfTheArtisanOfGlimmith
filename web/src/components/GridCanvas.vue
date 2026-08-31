@@ -264,8 +264,17 @@ function hitCell(x: number, y: number): [number, number] | null {
   if (r >= 0 && r < h.value && c >= 0 && c < w.value) return [r, c]
   return null
 }
+/**
+ * Pointer distance at which a vertex counts as "aimed at". Vertices sit on top
+ * of edges, so this is slightly wider than `edgeHitRadius` — near a corner the
+ * vertex wins, which is also how `onMouseDown` resolves its target.
+ */
+function vertexHitRadius(): number {
+  return Math.max(6, Math.min(16, cs.value * 0.26))
+}
+
 function hitVertex(x: number, y: number): [number, number] | null {
-  const th = Math.max(10, cs.value / 7)
+  const th = vertexHitRadius()
   for (let r = 0; r <= h.value; r++) for (let c = 0; c <= w.value; c++)
     if (Math.abs(x - vx(c)) < th && Math.abs(y - vy(r)) < th) return [r, c]
   return null
@@ -522,29 +531,37 @@ function ctxClearWatchtower() {
 
 // expose for template
 const selEdge = computed(() => store.selectedEdge ? edgeEndpoints({ r1: store.selectedEdge[0], c1: store.selectedEdge[1], r2: store.selectedEdge[2], c2: store.selectedEdge[3] }) : null)
-const hoverCellRect = computed(() => {
-  if (!hoverCell.value) return null
-  const [r, c] = hoverCell.value
-  if (store.selectedCell && store.selectedCell[0] === r && store.selectedCell[1] === c) return null
-  return { x: cellX(c) + 1.5, y: cellY(r) + 1.5, w: cs.value - 3, h: cs.value - 3 }
-})
+// Exactly one hover affordance at a time, in the same order `onMouseDown`
+// resolves its target: vertex → edge → cell. Which ones are even reachable
+// depends on the tool: the painting tools (number/symbol/compass/block) act on
+// the cell right up to its border, so they never light up a vertex or an edge.
+const vertexTargetable = computed(
+  () => store.mode === 'select' || store.mode === 'boundary' || store.mode === 'watchtower',
+)
+const edgeTargetable = computed(() => store.mode === 'select' || store.mode === 'boundary')
+
 const hoverVertexDot = computed(() => {
-  if (!hoverVertex.value) return null
+  if (!hoverVertex.value || !vertexTargetable.value) return null
   const [r, c] = hoverVertex.value
   if (store.selectedVertex && store.selectedVertex[0] === r && store.selectedVertex[1] === c) return null
   return { cx: vx(c), cy: vy(r) }
 })
 const hoverEdgeLine = computed(() => {
-  if (!hoverEdge.value) return null
-  // Only where a click would act on the edge itself; in the painting tools the
-  // cell is the target even right up against its border.
-  if (store.mode !== 'select' && store.mode !== 'boundary') return null
+  if (!hoverEdge.value || !edgeTargetable.value) return null
+  if (hoverVertexDot.value) return null
   const [r1, c1, r2, c2] = hoverEdge.value
   if (store.selectedEdge && store.selectedEdge.join() === hoverEdge.value.join()) return null
   return edgeEndpoints({ r1, c1, r2, c2 })
 })
+const hoverCellRect = computed(() => {
+  if (!hoverCell.value) return null
+  if (hoverVertexDot.value || hoverEdgeLine.value) return null
+  const [r, c] = hoverCell.value
+  if (store.selectedCell && store.selectedCell[0] === r && store.selectedCell[1] === c) return null
+  return { x: cellX(c) + 1.5, y: cellY(r) + 1.5, w: cs.value - 3, h: cs.value - 3 }
+})
 const guides = computed(() => {
-  if (!hoverCell.value || hoverEdgeLine.value || cs.value < 22) return null
+  if (!hoverCell.value || hoverVertexDot.value || hoverEdgeLine.value || cs.value < 22) return null
   const [r, c] = hoverCell.value
   return {
     x: cellX(c) + cs.value / 2,
@@ -719,7 +736,7 @@ onUnmounted(() => window.removeEventListener('mousedown', onDocMouseDown))
 
         <!-- hover affordances: the border zone lights up the border, not the cell -->
         <line v-if="hoverEdgeLine" class="edge-hover" :x1="hoverEdgeLine.x1" :y1="hoverEdgeLine.y1" :x2="hoverEdgeLine.x2" :y2="hoverEdgeLine.y2" :stroke="C.hover_cell" :stroke-width="Math.max(3, cs * 0.085)" stroke-linecap="round" stroke-opacity="0.9" />
-        <rect v-if="hoverCellRect && !hoverEdgeLine" :x="hoverCellRect.x" :y="hoverCellRect.y" :width="hoverCellRect.w" :height="hoverCellRect.h" :rx="Math.min(4, cs * 0.1)" fill="none" :stroke="C.hover_cell" stroke-width="1.6" stroke-opacity="0.9" />
+        <rect v-if="hoverCellRect" :x="hoverCellRect.x" :y="hoverCellRect.y" :width="hoverCellRect.w" :height="hoverCellRect.h" :rx="Math.min(4, cs * 0.1)" fill="none" :stroke="C.hover_cell" stroke-width="1.6" stroke-opacity="0.9" />
         <circle v-if="hoverVertexDot" :cx="hoverVertexDot.cx" :cy="hoverVertexDot.cy" :r="Math.max(2, cs / 9)" fill="none" :stroke="C.hover_vertex" stroke-width="1.6" />
 
         <!-- selection -->

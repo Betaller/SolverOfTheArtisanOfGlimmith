@@ -19,3 +19,6 @@ rsolver/target/
 
 # verify/log output
 verify_all*.log
+
+# temp benchmark / experiment artifacts (per-puzzle jsonl, experience notes, sweep logs)
+results/tmp/

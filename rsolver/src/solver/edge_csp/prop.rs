@@ -45,6 +45,25 @@ impl PropagationState {
     }
 }
 
+/// Per-bridge, per-direction reachability info for the H4 "sole isolating
+/// bridge" guard in `force_compass_via_bridges_and_gateways`.
+///
+/// For each Unknown bridge edge we record, per unsatisfied compass direction:
+/// - `other`: number of direction-cells that would become unreachable from the
+///   compass if this bridge were cut, and
+/// - `ciside_lt`: whether the still-reachable side holds fewer than the
+///   direction's required count `v`.
+///
+/// A bridge is forced Uncut only when it is the SOLE isolating bridge for some
+/// direction (`isolating_count == 1`) — when ≥2 bridges are each individually
+/// isolating, forcing all of them Uncut over-merges the component and can push
+/// the direction count past `v`, contradicting valid "cut only A" solutions.
+struct BridgeInfo {
+    eid: usize,
+    other: Vec<usize>,
+    ciside_lt: Vec<bool>,
+}
+
 impl<'a> Solver<'a> {
     /// Fixed-point propagation.  Returns `Ok(true)` when stable (no further
     /// progress), `Err(())` on contradiction or timeout.
@@ -1297,7 +1316,22 @@ impl<'a> Solver<'a> {
 
             // Force Uncut on Unknown bridges that separate CI cells from cells
             // needed for an unsatisfied direction.
-            for bridge_eid in bridges {
+            //
+            // H4 (soundness): the old code forced Uncut on EVERY bridge that,
+            // individually, leaves some direction's required cells unreachable
+            // (`ci_side_count < v && other_side_count > 0`).  When ≥2 bridges
+            // share a direction — each individually insufficient, but their
+            // union overflows v — forcing ALL of them Uncut keeps every dir-cell
+            // connected, pushing the direction's count past v and triggering a
+            // contradiction (Err), which loses valid solutions ("cut only A" /
+            // "cut only B").  Mirror the single-gateway guard (~line 1448
+            // `len()==1`) and the quota guard (~line 1017 `dir_count==1 &&
+            // all_others_blocked`): only force Uncut when the bridge is the SOLE
+            // reachable bridge for that direction.  We compute, per direction,
+            // how many bridges would isolate dir-cells; a bridge is forced only
+            // if that count is exactly 1.
+            let mut infos: Vec<BridgeInfo> = Vec::new();
+            for &bridge_eid in &bridges {
                 if self.edges[bridge_eid] != EdgeState::Unknown {
                     continue;
                 }
@@ -1321,8 +1355,9 @@ impl<'a> Solver<'a> {
                     }
                 }
 
-                let mut force_uncut = false;
-                'dir_check: for &(dir_idx, v, cri, cci) in &unsatisfied {
+                let mut other = vec![0usize; unsatisfied.len()];
+                let mut ciside_lt = vec![false; unsatisfied.len()];
+                for (di, &(dir_idx, v, cri, cci)) in unsatisfied.iter().enumerate() {
                     let mut ci_side_count = 0usize;
                     let mut other_side_count = 0usize;
                     for (i, &cell) in local_cells.iter().enumerate() {
@@ -1346,13 +1381,36 @@ impl<'a> Solver<'a> {
                             }
                         }
                     }
-                    if ci_side_count < v && other_side_count > 0 {
+                    other[di] = other_side_count;
+                    ciside_lt[di] = ci_side_count < v;
+                }
+                infos.push(BridgeInfo {
+                    eid: bridge_eid,
+                    other,
+                    ciside_lt,
+                });
+            }
+
+            // For each direction, count bridges that would isolate dir-cells.
+            let mut isolating_count = vec![0usize; unsatisfied.len()];
+            for info in &infos {
+                for di in 0..unsatisfied.len() {
+                    if info.other[di] > 0 && info.ciside_lt[di] {
+                        isolating_count[di] += 1;
+                    }
+                }
+            }
+            for info in &infos {
+                let mut force_uncut = false;
+                for di in 0..unsatisfied.len() {
+                    // Sole reachable bridge for this direction → must stay Uncut.
+                    if info.other[di] > 0 && info.ciside_lt[di] && isolating_count[di] == 1 {
                         force_uncut = true;
-                        break 'dir_check;
+                        break;
                     }
                 }
                 if force_uncut {
-                    compass_uncut_ef.push(bridge_eid);
+                    compass_uncut_ef.push(info.eid);
                 }
             }
 

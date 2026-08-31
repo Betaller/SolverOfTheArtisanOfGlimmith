@@ -1,0 +1,183 @@
+/* ==========================================================================
+   Board canvas — the puzzle sheet, its SVG layers and the context menu
+   ========================================================================== */
+
+.board-wrap {
+  position: relative;
+  display: inline-block;
+  outline: none;
+}
+
+.board-sheet {
+  position: relative;
+  display: inline-block;
+  padding: 2px;
+  background: var(--board-paper);
+  border: 1px solid var(--board-ring);
+  border-radius: var(--r-xl);
+  box-shadow: var(--board-shadow);
+  transition: box-shadow var(--dur-3) var(--ease-out), border-color var(--dur-3) var(--ease-out);
+}
+
+.board-wrap:focus-visible .board-sheet {
+  border-color: var(--brand);
+  box-shadow: var(--board-shadow), 0 0 0 4px var(--brand-ring);
+}
+
+.board-svg {
+  display: block;
+  border-radius: calc(var(--r-xl) - 2px);
+  overflow: visible;
+}
+
+.board-svg text {
+  font-family: var(--font-sans);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── per-cell / per-layer motion ────────────────────────────────────────── */
+.cell-region {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: aog-region-in var(--dur-3) var(--ease-spring) backwards;
+}
+
+@keyframes aog-region-in {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.cell-fill {
+  transition: fill var(--dur-2) var(--ease-out);
+}
+
+.guide {
+  pointer-events: none;
+  animation: aog-fade-in var(--dur-1) var(--ease-out);
+}
+
+.sel-ring {
+  animation: aog-dash 900ms linear infinite;
+  pointer-events: none;
+}
+
+.sel-vertex {
+  animation: aog-pulse 2s var(--ease-in-out) infinite;
+}
+
+.wt-chip {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.constr-chip {
+  filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.25));
+}
+
+.boundary-glow {
+  animation: aog-glow 3.2s var(--ease-in-out) infinite;
+}
+
+/* cursor reflect per mode */
+.board-svg {
+  cursor: default;
+}
+
+.board-svg[data-mode='boundary'] {
+  cursor: crosshair;
+}
+
+.board-svg[data-mode='block'] {
+  cursor: cell;
+}
+
+.board-svg[data-mode='number'],
+.board-svg[data-mode='symbol'],
+.board-svg[data-mode='compass'] {
+  cursor: copy;
+}
+
+.board-svg[data-mode='watchtower'] {
+  cursor: crosshair;
+}
+
+.board-svg.is-panning {
+  cursor: grabbing;
+}
+
+/* ── context menu ───────────────────────────────────────────────────────── */
+.ctx-menu {
+  position: fixed;
+  z-index: var(--z-popover);
+  min-width: 176px;
+  padding: var(--sp-1);
+  background: var(--glass-strong);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-3);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  animation: aog-pop-in var(--dur-2) var(--ease-out);
+  transform-origin: top left;
+}
+
+.ctx-menu__head {
+  padding: var(--sp-2) var(--sp-3) var(--sp-1);
+  font-size: var(--fs-10);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.ctx-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 6px var(--sp-3);
+  font: inherit;
+  font-size: var(--fs-12);
+  color: var(--text-1);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+
+.ctx-menu__item:hover {
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.ctx-menu__item.is-danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.ctx-menu__item svg {
+  flex: none;
+  color: var(--text-3);
+}
+
+.ctx-menu__item:hover svg {
+  color: currentColor;
+}
+
+.ctx-menu__item .kbd {
+  margin-left: auto;
+}
+
+.ctx-menu__sep {
+  height: 1px;
+  margin: var(--sp-1) 0;
+  background: var(--stroke-subtle);
+}

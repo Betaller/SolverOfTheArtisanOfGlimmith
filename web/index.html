@@ -1,9 +1,26 @@
 <!doctype html>
-<html lang="zh">
+<html lang="zh" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="格里米斯的工匠 — 谜题编辑器与求解器（WebAssembly 内核）" />
     <title>格里米斯的工匠 · 求解器</title>
+    <script>
+      // Apply the persisted theme before first paint so there is no flash.
+      ;(function () {
+        try {
+          var saved = localStorage.getItem('aog.theme')
+          var theme =
+            saved === 'light' || saved === 'dark'
+              ? saved
+              : window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark'
+          document.documentElement.dataset.theme = theme
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

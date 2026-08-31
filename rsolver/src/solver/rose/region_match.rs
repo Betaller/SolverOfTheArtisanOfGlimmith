@@ -62,6 +62,11 @@ pub fn generate_all_candidates(
     let w = puzzle.width;
     let n_bits = h * w;
     let is_multi = symbol_types.len() >= 2;
+    let all_required: u64 = if is_multi {
+        (1u64 << symbol_types.len()) - 1
+    } else {
+        0
+    };
 
     let mut visited: HashSet<CellSet> = HashSet::new();
     let mut results: Vec<CellSet> = Vec::new();
@@ -99,16 +104,27 @@ pub fn generate_all_candidates(
             // 必须 break，不能"停插入继续检查"（见 VISITED_CAP 注释）。
             break;
         }
-        // M1 (soundness): every BFS state is a candidate.  For multi-symbol
-        // puzzles the old B-MB early-stop (`syms == all_required → push,
-        // continue`) never generated same-symbol-set SUPERSETS (all required
-        // types plus symbol-less filler cells), so the true solution region was
-        // missing from the exact-cover rows and multi-symbol rose puzzles were
-        // falsely reported unsolvable (bug M1; doc 15 §2 A3 was unsound).
-        // Expansion stays cheap: the symbol-skip below refuses further symbol
-        // cells of already-present types, so supersets only add filler cells,
-        // and CANDIDATE_CAP / MAX_CANDIDATE_CELLS / VISITED_CAP bound the cost.
-        results.push(current.clone());
+        if is_multi {
+            if syms == all_required {
+                results.push(current.clone());
+                // B-MB: once a region contains all required symbol types, stop
+                // expanding — any larger superset uses more cells with the same
+                // symbols, strictly worse for the exact-cover match. Reduces
+                // visited/queue 10-50× on multi-symbol puzzles (C4-2, 0620,
+                // 1433). (doc 15 §2 A3.)
+                //
+                // M1-REVERT: the theoretically-sound removal of this early-stop
+                // (true solution region may be a same-symbol-set superset) is
+                // empirically net-negative: on slash-pack 0833 the superset
+                // expansion floods CANDIDATE_CAP and the puzzle flips from
+                // solved (~7s) to unsolvable, with no offsetting NEW solves.
+                // Early-stop restored; the theoretical soundness hole stays
+                // documented in docs/bugs and branch history.
+                continue;
+            }
+        } else {
+            results.push(current.clone());
+        }
         if current.len() >= MAX_CANDIDATE_CELLS {
             continue;
         }

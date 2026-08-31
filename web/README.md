@@ -12,13 +12,36 @@ web/
 │   ├── worker/solverClient.ts    # 主线程 promise 封装
 │   ├── lib/types.ts              # 与 rsolver 对齐的 JSON 协议类型
 │   ├── lib/model.ts              # 网格模型 / 边·顶点索引 / 区域着色
-│   ├── lib/theme.ts              # 主题色 + 22 条规则常量
+│   ├── lib/theme.ts              # 盘面色板（深/浅）+ 22 条规则常量
 │   ├── lib/shapes.ts             # 多联骨牌规范化 / 枚举
 │   ├── store/puzzle.ts           # Pinia：官方解优先，求解器兜底
-│   └── components/               # GridCanvas（SVG 画板）/ 工具 / 规则 / 属性 / 题库
+│   ├── composables/              # useTheme（主题）/ useViewport（缩放）/ useToast
+│   ├── styles/                   # 设计系统：tokens / base / ui / layout / panels / board
+│   └── components/
+│       ├── GridCanvas.vue        # SVG 画板（区域揭示动画、光晕边界、十字准线）
+│       ├── AppHeader.vue         # 顶栏：品牌、撤销重做、状态、主题切换
+│       ├── NavRail.vue           # 左侧图标导航（工具 / 规则 / 题库 / 形状）
+│       ├── RuleSummary.vue       # 舞台浮层：生效规则 + 形状池
+│       ├── StageHud.vue          # 舞台浮层：尺寸、区域数、缩放、适应窗口
+│       ├── SolverConsole.vue     # 求解控制台：英雄按钮、进度、结果卡
+│       ├── ToolPalette.vue · ConstraintPanel.vue · PropertyPanel.vue
+│       ├── PuzzleBrowser.vue · ShapeGallery.vue · ShapeEditor.vue
+│       └── AppIcon/AppModal/AppSwitch/ToastHost/ShortcutHelp（通用件）
 ├── scripts/bundle-puzzles.mjs    # 打包官方题 + 官方解 → public/data/
 └── public/data/                  # 生成物（gitignore，不入库）
 ```
+
+### 设计系统
+
+`src/styles/` 分六层，顺序由 `src/style.css` 导入：**tokens**（深/浅双主题语义变量、
+间距、圆角、阴影、动效）→ **base**（reset、极光背景、滚动条、keyframes）→ **ui**
+（按钮/输入/开关/胶囊/模态/Toast 等原语）→ **layout**（外壳布局）→ **panels**
+（业务面板）→ **board**（画板）。组件只消费语义变量，不写死颜色。
+
+主题通过 `<html data-theme>` 切换并持久化到 `localStorage`；`index.html` 内联脚本在
+首次绘制前应用，避免闪白。画板（纸面）随主题在深/浅两套盘面色板间切换，区域填充由
+`regionFill/regionStroke` 与纸面色混合得到，保证两套主题下都可读。全部动效在
+`prefers-reduced-motion` 下自动退化。
 
 ## 求解策略（官方解优先）
 

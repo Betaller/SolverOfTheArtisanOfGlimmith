@@ -22,7 +22,6 @@ export const usePuzzleStore = defineStore('puzzle', () => {
   const showSolution = ref(false)
   const solving = ref(false)
   const solveMessage = ref('就绪')
-  const resultHtml = ref('就绪')
   // Per-puzzle deadline handed to the wasm solver (overrides its 5s default).
   const solveTimeoutMs = ref(5000)
 
@@ -103,7 +102,6 @@ export const usePuzzleStore = defineStore('puzzle', () => {
     clearSelection()
     undoStack.value = []
     redoStack.value = []
-    resultHtml.value = '就绪'
   }
 
   function loadPuzzle(p: PuzzleJson, puzzleName: string, answer: RegionCells[] | null = null) {
@@ -116,12 +114,10 @@ export const usePuzzleStore = defineStore('puzzle', () => {
     clearSelection()
     undoStack.value = []
     redoStack.value = []
-    resultHtml.value = '已加载'
   }
 
   function reset() {
     if (initialData.value) applySnapshot(initialData.value)
-    resultHtml.value = '已重置'
   }
 
   function clearSelection() {
@@ -150,17 +146,15 @@ export const usePuzzleStore = defineStore('puzzle', () => {
     // Official answer: just reveal it (no solver run).
     if (officialAnswer.value) {
       showSolution.value = true
-      solveMessage.value = '官方解'
-      resultHtml.value = `官方解<br>区域数: ${officialAnswer.value.length}`
+      solveMessage.value = `官方解 · ${officialAnswer.value.length} 个区域`
       return
     }
     if (!puzzle.rules.length) {
-      resultHtml.value = '请至少启用一条规则'
+      solveMessage.value = '请至少启用一条规则'
       return
     }
     if (solving.value) return  // ignore re-entrant clicks; a worker is single-threaded
     solving.value = true
-    resultHtml.value = '求解中...'
     // A monotonically increasing token lets a slow, superseded solve's result
     // be dropped instead of overwriting the current one.
     const token = ++solveToken
@@ -170,16 +164,13 @@ export const usePuzzleStore = defineStore('puzzle', () => {
       solution.value = s
       if (s.solved) {
         showSolution.value = true
-        solveMessage.value = `求解成功! ${s.elapsed_ms}ms, ${s.regions.length}个区域`
-        resultHtml.value = `求解成功!<br>耗时: ${s.elapsed_ms}ms<br>区域数: ${s.regions.length}`
+        solveMessage.value = `求解成功 · ${s.elapsed_ms}ms · ${s.regions.length} 个区域`
       } else {
-        solveMessage.value = `求解失败: ${s.error_message || '无解'}`
-        resultHtml.value = `求解失败<br>原因: ${s.error_message || '无解'}`
+        solveMessage.value = `求解失败 · ${s.error_message || '无解'}`
       }
     } catch (e) {
       if (token !== solveToken) return
-      solveMessage.value = '求解出错'
-      resultHtml.value = `出错: ${e instanceof Error ? e.message : String(e)}`
+      solveMessage.value = `求解出错 · ${e instanceof Error ? e.message : String(e)}`
     } finally {
       if (token === solveToken) solving.value = false
     }
@@ -191,12 +182,11 @@ export const usePuzzleStore = defineStore('puzzle', () => {
     solveToken++  // invalidate any in-flight result
     solving.value = false
     solveMessage.value = '求解已取消'
-    resultHtml.value = '求解已取消'
   }
 
   return {
-    puzzle, name, solution, officialAnswer, showSolution, solving, solveMessage, resultHtml,
-    solveTimeoutMs,
+    puzzle, name, solution, officialAnswer, showSolution, solving, solveMessage,
+    solveTimeoutMs, undoStack, redoStack,
     mode, currentNumber, currentSymbol, currentCompass,
     selectedCell, selectedEdge, selectedVertex, displayRegions,
     snapshot, markModified, undo, redo, newPuzzle, loadPuzzle, reset, solve, cancel,

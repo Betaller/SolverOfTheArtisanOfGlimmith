@@ -1,0 +1,251 @@
+/* ==========================================================================
+   Reset + global chrome: ambient background, typography, scrollbars, motion.
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  line-height: var(--lh-normal);
+  color: var(--text-1);
+  background: var(--bg-root);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  transition: background-color var(--dur-3) var(--ease-out), color var(--dur-3) var(--ease-out);
+}
+
+/* ── ambient aurora backdrop ────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(42% 38% at 12% 8%, var(--aurora-1), transparent 62%),
+    radial-gradient(38% 34% at 88% 4%, var(--aurora-2), transparent 60%),
+    radial-gradient(46% 40% at 78% 92%, var(--aurora-3), transparent 66%);
+  filter: blur(8px) saturate(120%);
+  animation: aog-aurora 26s var(--ease-in-out) infinite alternate;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: linear-gradient(var(--stroke-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--stroke-subtle) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(120% 90% at 50% 0%, #000 20%, transparent 78%);
+}
+
+@keyframes aog-aurora {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(1.5%, -1.5%, 0) scale(1.05);
+  }
+  100% {
+    transform: translate3d(-1.5%, 1.5%, 0) scale(1.02);
+  }
+}
+
+/* ── typography ─────────────────────────────────────────────────────────── */
+h1,
+h2,
+h3,
+h4,
+h5 {
+  margin: 0;
+  font-weight: 600;
+  line-height: var(--lh-tight);
+  letter-spacing: -0.01em;
+}
+
+p {
+  margin: 0;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--stroke-subtle);
+  margin: var(--sp-4) 0;
+}
+
+b,
+strong {
+  font-weight: 600;
+}
+
+::selection {
+  background: var(--brand-soft-2);
+  color: var(--text-1);
+}
+
+/* ── focus ring ─────────────────────────────────────────────────────────── */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand-ring);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* ── scrollbars ─────────────────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-4) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-4);
+  border: 3px solid transparent;
+  border-radius: var(--r-full);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--stroke-strong);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── keyframes ──────────────────────────────────────────────────────────── */
+@keyframes aog-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes aog-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes aog-pop-in {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes aog-slide-left {
+  from {
+    opacity: 0;
+    transform: translate3d(-14px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes aog-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes aog-shimmer {
+  from {
+    transform: translate3d(-120%, 0, 0);
+  }
+  to {
+    transform: translate3d(220%, 0, 0);
+  }
+}
+
+@keyframes aog-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes aog-indeterminate {
+  0% {
+    transform: translate3d(-100%, 0, 0) scaleX(0.35);
+  }
+  50% {
+    transform: translate3d(30%, 0, 0) scaleX(0.55);
+  }
+  100% {
+    transform: translate3d(180%, 0, 0) scaleX(0.35);
+  }
+}
+
+@keyframes aog-dash {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes aog-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ── reduced motion ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

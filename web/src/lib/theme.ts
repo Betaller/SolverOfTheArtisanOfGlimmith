@@ -75,6 +75,78 @@ export const colors = {
   preview_summary_text: '#64748B',
 }
 
+/** Dark board palette — the puzzle sheet flips with the app theme. */
+export const colorsDark: BoardPalette = {
+  grid_bg: '#0F131B',
+  cell_bg_null: '#151A24',
+  cell_border: '#222A37',
+  cell_blocked_bg: '#05070B',
+  cell_blocked_border: '#000000',
+  cell_blocked_x: '#3B4757',
+  boundary_edge: '#F5C451',
+  boundary_highlight: '#FFF3C4',
+  grid_line: '#202836',
+  edge_constr_bg: '#2A2113',
+  edge_constr_border: '#F59E0B',
+  edge_constr_text: '#FBBF24',
+  watchtower_bg: '#241C3D',
+  watchtower_border: '#A78BFA',
+  watchtower_text: '#C4B5FD',
+  symbol_text: '#F87171',
+  number_text: '#E2E8F0',
+  compass_text: '#7DD3FC',
+  compass_line: '#1E3A5F',
+  selection_border: '#6C7CFF',
+  selection_vertex_fill: '#1E2540',
+  hover_cell: '#8B9BFF',
+  hover_vertex: '#8B9BFF',
+  overlay_bg: 'rgba(15,19,27,0.92)',
+  overlay_border: '#2A3140',
+  overlay_text: '#E2E8F0',
+  overlay_header: '#94A3B8',
+  shape_mini_pen: '#6C7CFF',
+  shape_mini_fill: '#232A4A',
+  shape_editor_active_bg: '#232A4A',
+  shape_editor_active_border: '#6C7CFF',
+  shape_editor_empty_bg: '#151A24',
+  shape_editor_empty_border: '#2A3140',
+  shape_editor_area_text: '#94A3B8',
+  preview_bg: '#0F131B',
+  preview_blocked_bg: '#05070B',
+  preview_cell_normal: '#151A24',
+  preview_cell_border: '#2A3140',
+  preview_boundary: '#F5C451',
+  preview_summary_text: '#94A3B8',
+}
+
+export const boardPalettes = { light: colors, dark: colorsDark }
+
+export type BoardPalette = Record<keyof typeof colors, string>
+export type BoardThemeName = 'light' | 'dark'
+
+/** sRGB channel blend — keeps region fills legible on both sheet colours. */
+export function mix(a: string, b: string, t: number): string {
+  const pa = hexRgb(a)
+  const pb = hexRgb(b)
+  const ch = (i: number) => Math.round(pa[i] + (pb[i] - pa[i]) * t)
+  return `#${[ch(0), ch(1), ch(2)].map((v) => v.toString(16).padStart(2, '0')).join('')}`
+}
+
+function hexRgb(hex: string): [number, number, number] {
+  const s = hex.replace('#', '')
+  const full = s.length === 3 ? s.split('').map((c) => c + c).join('') : s
+  return [parseInt(full.slice(0, 2), 16), parseInt(full.slice(2, 4), 16), parseInt(full.slice(4, 6), 16)]
+}
+
+/** Soft fill + saturated outline for a solved region on the given sheet. */
+export function regionFill(color: string, dark: boolean): string {
+  return dark ? mix(color, '#0F131B', 0.62) : mix(color, '#FFFFFF', 0.45)
+}
+
+export function regionStroke(color: string, dark: boolean): string {
+  return dark ? mix(color, '#FFFFFF', 0.2) : mix(color, '#0F172A', 0.12)
+}
+
 export const RULE_NAMES: Record<string, string> = {
   shape_pool: '形状池',
   rose_window: '玫瑰窗',

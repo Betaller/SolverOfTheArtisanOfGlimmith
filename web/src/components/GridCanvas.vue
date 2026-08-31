@@ -1,34 +1,45 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { usePuzzleStore } from '../store/puzzle'
-import { colors, P_COLORS, REGION_COLORS, RULE_NAMES, FENCE_EDGES } from '../lib/theme'
+import { useTheme } from '../composables/useTheme'
+import { useViewport } from '../composables/useViewport'
+import { boardPalettes, P_COLORS, REGION_COLORS, FENCE_EDGES, regionFill, regionStroke } from '../lib/theme'
 import { cellKey, edgeKey, vertexAt, makeConstraint } from '../lib/model'
 import type { CellJson, EdgeJson, PuzzleJson } from '../lib/types'
+import AppIcon from './AppIcon.vue'
 
 const store = usePuzzleStore()
+const { theme } = useTheme()
+const viewport = useViewport()
+const { renderSize: cs, zoomBy, fit, publishStage, publishGrid } = viewport
+
 const svgEl = ref<SVGSVGElement | null>(null)
-const cellSize = ref(60)
-const padding = 24
 
 const p = computed(() => store.puzzle as PuzzleJson)
 const h = computed(() => p.value.grid.height)
 const w = computed(() => p.value.grid.width)
-const W = computed(() => padding * 2 + w.value * cellSize.value)
-const H = computed(() => padding * 2 + h.value * cellSize.value)
+
+// Board colours follow the app theme; the sheet is its own "paper" surface.
+const C = computed(() => boardPalettes[theme.value])
+const isDark = computed(() => theme.value === 'dark')
+
+const pad = computed(() => Math.max(10, Math.min(34, Math.round(cs.value * 0.42))))
+const W = computed(() => pad.value * 2 + w.value * cs.value)
+const H = computed(() => pad.value * 2 + h.value * cs.value)
 
 // ── coordinates ──────────────────────────────────────────────────────────────
-const cellX = (c: number) => padding + c * cellSize.value
-const cellY = (r: number) => padding + r * cellSize.value
-const vx = (vc: number) => padding + vc * cellSize.value
-const vy = (vr: number) => padding + vr * cellSize.value
+const cellX = (c: number) => pad.value + c * cs.value
+const cellY = (r: number) => pad.value + r * cs.value
+const vx = (vc: number) => pad.value + vc * cs.value
+const vy = (vr: number) => pad.value + vr * cs.value
 
 function edgeEndpoints(e: { r1: number; c1: number; r2: number; c2: number }) {
   if (e.r1 === e.r2) {
-    const x = padding + (Math.min(e.c1, e.c2) + 1) * cellSize.value
-    return { x1: x, y1: padding + e.r1 * cellSize.value, x2: x, y2: padding + (e.r1 + 1) * cellSize.value }
+    const x = pad.value + (Math.min(e.c1, e.c2) + 1) * cs.value
+    return { x1: x, y1: pad.value + e.r1 * cs.value, x2: x, y2: pad.value + (e.r1 + 1) * cs.value }
   }
-  const y = padding + (Math.min(e.r1, e.r2) + 1) * cellSize.value
-  return { x1: padding + e.c1 * cellSize.value, y1: y, x2: padding + (e.c1 + 1) * cellSize.value, y2: y }
+  const y = pad.value + (Math.min(e.r1, e.r2) + 1) * cs.value
+  return { x1: pad.value + e.c1 * cs.value, y1: y, x2: pad.value + (e.c1 + 1) * cs.value, y2: y }
 }
 
 // O(1) cell/edge indexes — canvas lookups run per-edge/per-cell, so linear
@@ -48,18 +59,26 @@ const getEdge = (r1: number, c1: number, r2: number, c2: number): EdgeJson | und
 
 // ── render models ────────────────────────────────────────────────────────────
 const cells = computed(() => {
+  const dark = isDark.value
   const out: any[] = []
   for (let r = 0; r < h.value; r++) for (let c = 0; c < w.value; c++) {
     const cell = getCell(r, c)
     const blocked = !!cell?.blocked
     const ri = store.displayRegions?.get(cellKey(r, c))
     const fv = fenceDiamondValue(cell?.fence_pattern)
+    // No per-cell outline: same-region neighbours must read as one continuous
+    // shape. The silhouette comes from `regionOutlines`, the hairline grid from
+    // `gridLines`.
+    let fill = C.value.cell_bg_null
+    if (blocked) fill = C.value.cell_blocked_bg
+    else if (ri != null) fill = regionFill(REGION_COLORS[ri % REGION_COLORS.length], dark)
     out.push({
-      r, c, x: cellX(c), y: cellY(r), blocked,
-      fill: blocked ? colors.cell_blocked_bg : (ri != null ? REGION_COLORS[ri % REGION_COLORS.length] : colors.cell_bg_null),
+      r, c, x: cellX(c), y: cellY(r), blocked, region: ri ?? null, fill,
       number: cell?.number, symbol: cell?.symbol, compass: cell?.compass,
       shapePattern: cell?.shape_pattern,
-      fence: fv ? fenceSegments(fv, cellX(c) + cellSize.value / 2, cellY(r) + cellSize.value / 2, cellSize.value) : null,
+      fence: fv ? fenceSegments(fv, cellX(c) + cs.value / 2, cellY(r) + cs.value / 2, cs.value) : null,
+      // Staggered reveal: each region lands a frame after the previous one.
+      delay: ri != null ? Math.min(ri * 16, 720) : 0,
     })
   }
   return out
@@ -88,7 +107,7 @@ const boundaryLines = computed(() => {
     if (e.is_boundary || isAutoBoundary(e) || separatesRegions(e)) lines.push({ ...edgeEndpoints(e), key: edgeKey(e.r1, e.c1, e.r2, e.c2) })
   }
   for (const o of p.value.outer_boundaries ?? []) {
-    lines.push({ x1: padding + o.c1 * cellSize.value, y1: padding + o.r1 * cellSize.value, x2: padding + o.c2 * cellSize.value, y2: padding + o.r2 * cellSize.value, key: 'o' + edgeKey(o.r1, o.c1, o.r2, o.c2) })
+    lines.push({ x1: pad.value + o.c1 * cs.value, y1: pad.value + o.r1 * cs.value, x2: pad.value + o.c2 * cs.value, y2: pad.value + o.r2 * cs.value, key: 'o' + edgeKey(o.r1, o.c1, o.r2, o.c2) })
   }
   return lines
 })
@@ -106,6 +125,37 @@ const gridLines = computed(() => {
     lines.push(edgeEndpoints(e))
   }
   return lines
+})
+
+/**
+ * Region silhouette: the outline of every solved region, drawn only on the
+ * sides that face a *different* region (or a blocked cell / the board edge).
+ * Sides shared with a same-region neighbour are left open so the region reads
+ * as a single continuous shape instead of a patchwork of tiles.
+ */
+const regionOutlines = computed(() => {
+  const regions = store.displayRegions
+  const out: any[] = []
+  if (!regions) return out
+  const dark = isDark.value
+  const s = cs.value
+  for (let r = 0; r < h.value; r++) for (let c = 0; c < w.value; c++) {
+    if (getCell(r, c)?.blocked) continue
+    const ri = regions.get(cellKey(r, c))
+    if (ri == null) continue
+    const sameRegion = (nr: number, nc: number) => {
+      if (nr < 0 || nc < 0 || nr >= h.value || nc >= w.value) return false
+      if (getCell(nr, nc)?.blocked) return false
+      return regions.get(cellKey(nr, nc)) === ri
+    }
+    const x = cellX(c), y = cellY(r)
+    const color = regionStroke(REGION_COLORS[ri % REGION_COLORS.length], dark)
+    if (!sameRegion(r - 1, c)) out.push({ x1: x, y1: y, x2: x + s, y2: y, color, k: `t${r},${c}` })
+    if (!sameRegion(r + 1, c)) out.push({ x1: x, y1: y + s, x2: x + s, y2: y + s, color, k: `b${r},${c}` })
+    if (!sameRegion(r, c - 1)) out.push({ x1: x, y1: y, x2: x, y2: y + s, color, k: `l${r},${c}` })
+    if (!sameRegion(r, c + 1)) out.push({ x1: x + s, y1: y, x2: x + s, y2: y + s, color, k: `r${r},${c}` })
+  }
+  return out
 })
 
 const constraintLabels = computed(() => {
@@ -178,11 +228,24 @@ function fenceSegments(fval: string, cx: number, cy: number, size: number) {
   ]
 }
 
+/** Compass dial geometry: four arms plus a value slot per direction. */
+function compassArms(cx: number, cy: number, size: number) {
+  const inner = size * 0.14
+  const outer = size * 0.42
+  return [
+    { x1: cx, y1: cy - inner, x2: cx, y2: cy - outer, tx: cx, ty: cy - outer + size * 0.11 },
+    { x1: cx, y1: cy + inner, x2: cx, y2: cy + outer, tx: cx, ty: cy + outer + size * 0.02 },
+    { x1: cx - inner, y1: cy, x2: cx - outer, y2: cy, tx: cx - outer + size * 0.06, ty: cy + size * 0.04 },
+    { x1: cx + inner, y1: cy, x2: cx + outer, y2: cy, tx: cx + outer - size * 0.06, ty: cy + size * 0.04 },
+  ]
+}
+
+const P_SYMBOL = /^P[1-9]$/
+
 // ── interaction state ────────────────────────────────────────────────────────
 const hoverCell = ref<[number, number] | null>(null)
 const hoverEdge = ref<[number, number, number, number] | null>(null)
 const hoverVertex = ref<[number, number] | null>(null)
-const boundaryStart = ref<[number, number] | null>(null)
 const boundaryDragging = ref(false)
 const lastBoundaryVertex = ref<[number, number] | null>(null)
 const blockDragging = ref(false)
@@ -196,19 +259,37 @@ function toLocal(e: MouseEvent) {
 }
 
 function hitCell(x: number, y: number): [number, number] | null {
-  const c = Math.floor((x - padding) / cellSize.value)
-  const r = Math.floor((y - padding) / cellSize.value)
+  const c = Math.floor((x - pad.value) / cs.value)
+  const r = Math.floor((y - pad.value) / cs.value)
   if (r >= 0 && r < h.value && c >= 0 && c < w.value) return [r, c]
   return null
 }
+/**
+ * Pointer distance at which a vertex counts as "aimed at". Vertices sit on top
+ * of edges, so this is slightly wider than `edgeHitRadius` — near a corner the
+ * vertex wins, which is also how `onMouseDown` resolves its target.
+ */
+function vertexHitRadius(): number {
+  return Math.max(6, Math.min(16, cs.value * 0.26))
+}
+
 function hitVertex(x: number, y: number): [number, number] | null {
-  const th = Math.max(10, cellSize.value / 7)
+  const th = vertexHitRadius()
   for (let r = 0; r <= h.value; r++) for (let c = 0; c <= w.value; c++)
     if (Math.abs(x - vx(c)) < th && Math.abs(y - vy(r)) < th) return [r, c]
   return null
 }
+/**
+ * Pointer distance at which an edge counts as "aimed at". One radius drives
+ * both the hover highlight and the click target, so what lights up is always
+ * what a click would select.
+ */
+function edgeHitRadius(): number {
+  return Math.max(5, Math.min(14, cs.value * 0.22))
+}
+
 function hitEdge(x: number, y: number): [number, number, number, number] | null {
-  const th = Math.max(10, cellSize.value / 7)
+  const th = edgeHitRadius()
   let best: [number, number, number, number] | null = null
   let bestD = Infinity
   for (const e of p.value.edges) {
@@ -297,7 +378,6 @@ function onMouseDown(e: MouseEvent) {
       if (edge) { toggleEdgeBoundary(edge); store.selectEdge(edge); return }
       boundaryDragging.value = true
       lastBoundaryVertex.value = vertex
-      boundaryStart.value = null
       store.selectVertex(vertex[0], vertex[1])
     } else if (edge) { toggleEdgeBoundary(edge); store.selectEdge(edge) }
     return
@@ -364,6 +444,8 @@ function onMouseMove(e: MouseEvent) {
   }
   if (store.mode === 'watchtower' || (store.mode === 'boundary' && !boundaryDragging.value)) {
     hoverVertex.value = vertex
+    hoverEdge.value = edge
+    hoverCell.value = null
     return
   }
   hoverVertex.value = vertex
@@ -378,13 +460,13 @@ function onMouseUp() {
 }
 
 function onWheel(e: WheelEvent) {
-  cellSize.value = Math.max(15, Math.min(120, cellSize.value + (e.deltaY > 0 ? -5 : 5)))
+  zoomBy(e.deltaY > 0 ? -6 : 6)
 }
 
 // ── keyboard ─────────────────────────────────────────────────────────────────
 function onKey(e: KeyboardEvent) {
   const k = e.key
-  if (k === 'Escape') { store.clearSelection(); inlineNumber.value = ''; return }
+  if (k === 'Escape') { store.clearSelection(); inlineNumber.value = ''; ctxMenu.value = null; return }
   if (k === 'Delete' || k === 'Backspace') {
     if (store.selectedCell) {
       const c = getCell(store.selectedCell[0], store.selectedCell[1])
@@ -393,6 +475,12 @@ function onKey(e: KeyboardEvent) {
     return
   }
   if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') { moveSelection(k); return }
+  if (store.mode !== 'number') {
+    if (k === '+' || k === '=') { zoomBy(6); return }
+    if (k === '-' || k === '_') { zoomBy(-6); return }
+    if (k === '0') { fit(); return }
+    if (k.toLowerCase() === 'f') { fit(); return }
+  }
   const modeKeys: Record<string, string> = { v: 'select', b: 'boundary', x: 'block', n: 'number', s: 'symbol', c: 'compass', w: 'watchtower' }
   if (modeKeys[k.toLowerCase()]) { store.mode = modeKeys[k.toLowerCase()]; return }
   if (store.mode === 'number' && store.selectedCell && /^[0-9]$/.test(k)) {
@@ -444,132 +532,260 @@ function ctxClearWatchtower() {
   ctxMenu.value = null
 }
 
-// ── overlay (rules + shape pool) ─────────────────────────────────────────────
-const overlay = computed(() => {
-  const rules = [...new Set(p.value.rules.map((r) => ruleLabel(r)))]
-  const poolRule = p.value.rules.find((r) => r.type === 'shape_pool')
-  const shapes: any[] = (poolRule?.params?.shapes as [number, number][][]) ?? []
-  return { rules, shapes }
-})
-function ruleLabel(r: { type: string; params?: Record<string, any> }): string {
-  const name = RULE_NAMES[r.type] ?? r.type
-  const pr = r.params ?? {}
-  if (r.type === 'range') { const lo = pr.min, hi = pr.max; if (lo != null && hi != null) return `${name} ${lo}~${hi}`; if (lo != null) return `${name} ≥${lo}`; if (hi != null) return `${name} ≤${hi}` }
-  if (r.type === 'precise' && pr.area != null) return `${name} ${pr.area}`
-  if (r.type === 'rose_window' && pr.symbol_types) return `${name} ${pr.symbol_types.length}种`
-  return name
-}
-
 // expose for template
 const selEdge = computed(() => store.selectedEdge ? edgeEndpoints({ r1: store.selectedEdge[0], c1: store.selectedEdge[1], r2: store.selectedEdge[2], c2: store.selectedEdge[3] }) : null)
+// Exactly one hover affordance at a time, in the same order `onMouseDown`
+// resolves its target: vertex → edge → cell. Which ones are even reachable
+// depends on the tool: the painting tools (number/symbol/compass/block) act on
+// the cell right up to its border, so they never light up a vertex or an edge.
+const vertexTargetable = computed(
+  () => store.mode === 'select' || store.mode === 'boundary' || store.mode === 'watchtower',
+)
+const edgeTargetable = computed(() => store.mode === 'select' || store.mode === 'boundary')
+
+const hoverVertexDot = computed(() => {
+  if (!hoverVertex.value || !vertexTargetable.value) return null
+  const [r, c] = hoverVertex.value
+  if (store.selectedVertex && store.selectedVertex[0] === r && store.selectedVertex[1] === c) return null
+  return { cx: vx(c), cy: vy(r) }
+})
+const hoverEdgeLine = computed(() => {
+  if (!hoverEdge.value || !edgeTargetable.value) return null
+  if (hoverVertexDot.value) return null
+  const [r1, c1, r2, c2] = hoverEdge.value
+  if (store.selectedEdge && store.selectedEdge.join() === hoverEdge.value.join()) return null
+  return edgeEndpoints({ r1, c1, r2, c2 })
+})
+const hoverCellRect = computed(() => {
+  if (!hoverCell.value) return null
+  if (hoverVertexDot.value || hoverEdgeLine.value) return null
+  const [r, c] = hoverCell.value
+  if (store.selectedCell && store.selectedCell[0] === r && store.selectedCell[1] === c) return null
+  return { x: cellX(c) + 1.5, y: cellY(r) + 1.5, w: cs.value - 3, h: cs.value - 3 }
+})
+const guides = computed(() => {
+  if (!hoverCell.value || hoverVertexDot.value || hoverEdgeLine.value || cs.value < 22) return null
+  const [r, c] = hoverCell.value
+  return {
+    x: cellX(c) + cs.value / 2,
+    y: cellY(r) + cs.value / 2,
+    x1: pad.value,
+    x2: pad.value + w.value * cs.value,
+    y1: pad.value,
+    y2: pad.value + h.value * cs.value,
+  }
+})
+
+// ── solution reveal ──────────────────────────────────────────────────────────
+// Bumping this key remounts the cell layer, replaying the staggered reveal.
+const revealKey = ref(0)
+watch(
+  () => store.showSolution,
+  (v) => { if (v) revealKey.value++ },
+)
+
+// ── auto-fit ─────────────────────────────────────────────────────────────────
+let observer: ResizeObserver | null = null
+onMounted(() => {
+  publishGrid(h.value, w.value)
+  const el = svgEl.value?.closest('.stage') as HTMLElement | null
+  if (el) {
+    publishStage(el.clientWidth, el.clientHeight)
+    observer = new ResizeObserver(() => publishStage(el.clientWidth, el.clientHeight))
+    observer.observe(el)
+  }
+  fit()
+})
+onUnmounted(() => observer?.disconnect())
+
+// Re-fit whenever the grid dimensions change (new puzzle / loaded puzzle).
+watch([h, w], ([nh, nw]) => {
+  publishGrid(nh, nw)
+  fit()
+})
+
+function onDocMouseDown() {
+  if (ctxMenu.value) ctxMenu.value = null
+}
+onMounted(() => window.addEventListener('mousedown', onDocMouseDown))
+onUnmounted(() => window.removeEventListener('mousedown', onDocMouseDown))
 </script>
 
 <template>
-  <div class="grid-wrap" tabindex="0" @keydown="onKey">
-    <svg
-      ref="svgEl"
-      :width="W" :height="H"
-      class="grid"
-      @mousedown="onMouseDown"
-      @mousemove="onMouseMove"
-      @mouseup="onMouseUp"
-      @mouseleave="onMouseUp"
-      @wheel.prevent="onWheel"
-      @contextmenu.prevent
-    >
-      <g v-for="c in cells" :key="`${c.r}-${c.c}`">
-        <rect :x="c.x" :y="c.y" :width="cellSize" :height="cellSize" :fill="c.fill" :stroke="colors.cell_border" stroke-width="1" />
-        <g v-if="c.blocked">
-          <line :x1="c.x" :y1="c.y" :x2="c.x + cellSize" :y2="c.y + cellSize" :stroke="colors.cell_blocked_x" stroke-width="2" />
-          <line :x1="c.x + cellSize" :y1="c.y" :x2="c.x" :y2="c.y + cellSize" :stroke="colors.cell_blocked_x" stroke-width="2" />
+  <div class="board-wrap" tabindex="0" @keydown="onKey">
+    <div class="board-sheet">
+      <svg
+        ref="svgEl"
+        :width="W" :height="H"
+        class="board-svg"
+        :data-mode="store.mode"
+        @mousedown="onMouseDown"
+        @mousemove="onMouseMove"
+        @mouseup="onMouseUp"
+        @mouseleave="onMouseUp"
+        @wheel.prevent="onWheel"
+        @contextmenu.prevent
+      >
+        <defs>
+          <filter id="aogGlow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="2.6" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+          <pattern id="aogBlocked" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="7" :stroke="C.cell_blocked_x" stroke-width="2.4" />
+          </pattern>
+          <linearGradient id="aogChip" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18" />
+            <stop offset="100%" stop-color="#000000" stop-opacity="0.12" />
+          </linearGradient>
+        </defs>
+
+        <!-- sheet margin / inner frame -->
+        <rect
+          :x="pad - 4" :y="pad - 4" :width="w * cs + 8" :height="h * cs + 8"
+          :rx="8" fill="none" :stroke="C.grid_line" stroke-width="1"
+        />
+
+        <!-- hover crosshair guides -->
+        <g v-if="guides" class="guide">
+          <line :x1="guides.x1" :y1="guides.y" :x2="guides.x2" :y2="guides.y" :stroke="C.hover_cell" stroke-width="1" stroke-opacity="0.28" />
+          <line :x1="guides.x" :y1="guides.y1" :x2="guides.x" :y2="guides.y2" :stroke="C.hover_cell" stroke-width="1" stroke-opacity="0.28" />
         </g>
-        <g v-else>
-          <circle v-if="c.symbol && /^P[1-9]$/.test(c.symbol)" :cx="c.x + cellSize / 2" :cy="c.y + cellSize / 2" :r="cellSize * 0.24" :fill="P_COLORS[(parseInt(c.symbol[1]) - 1) % P_COLORS.length]" stroke="#000" stroke-width="1.5" />
-          <text v-else-if="c.symbol" :x="c.x + cellSize / 2" :y="c.y + cellSize * 0.62" text-anchor="middle" :font-size="cellSize / 2" font-weight="bold" :fill="colors.symbol_text">{{ c.symbol }}</text>
 
-          <text v-if="c.number != null && !c.symbol" :x="c.x + cellSize / 2" :y="c.y + cellSize * 0.62" text-anchor="middle" :font-size="cellSize / 2" font-weight="bold" :fill="colors.number_text">{{ c.number }}</text>
-          <text v-else-if="c.number != null" :x="c.x + 4" :y="c.y + cellSize * 0.28" :font-size="cellSize / 3" font-weight="bold" :fill="colors.number_text">{{ c.number }}</text>
+        <!-- cells -->
+        <g :key="revealKey">
+          <g v-for="c in cells" :key="`${c.r}-${c.c}`">
+            <rect
+              :x="c.x" :y="c.y" :width="cs" :height="cs"
+              :fill="c.blocked ? C.cell_blocked_bg : c.fill"
+              :class="{ 'cell-region': c.region != null && store.showSolution }"
+              :style="{ animationDelay: c.delay + 'ms' }"
+            />
+            <rect
+              v-if="c.blocked"
+              :x="c.x" :y="c.y" :width="cs" :height="cs"
+              fill="url(#aogBlocked)" opacity="0.4"
+            />
+            <g v-if="c.blocked">
+              <line :x1="c.x + cs * 0.24" :y1="c.y + cs * 0.24" :x2="c.x + cs * 0.76" :y2="c.y + cs * 0.76" :stroke="C.cell_blocked_x" :stroke-width="Math.max(1.4, cs * 0.045)" stroke-linecap="round" />
+              <line :x1="c.x + cs * 0.76" :y1="c.y + cs * 0.24" :x2="c.x + cs * 0.24" :y2="c.y + cs * 0.76" :stroke="C.cell_blocked_x" :stroke-width="Math.max(1.4, cs * 0.045)" stroke-linecap="round" />
+            </g>
+            <g v-else>
+              <g v-if="c.symbol && P_SYMBOL.test(c.symbol)">
+                <circle :cx="c.x + cs / 2" :cy="c.y + cs / 2" :r="cs * 0.24" :fill="P_COLORS[(parseInt(c.symbol[1]) - 1) % P_COLORS.length]" />
+                <circle :cx="c.x + cs / 2" :cy="c.y + cs / 2" :r="cs * 0.24" fill="url(#aogChip)" />
+                <circle :cx="c.x + cs / 2" :cy="c.y + cs / 2" :r="cs * 0.24" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="1.2" />
+              </g>
+              <text v-else-if="c.symbol" :x="c.x + cs / 2" :y="c.y + cs * 0.64" text-anchor="middle" :font-size="cs / 2" font-weight="700" :fill="C.symbol_text">{{ c.symbol }}</text>
 
-          <g v-if="c.compass">
-            <line :x1="c.x + cellSize/2" :y1="c.y + cellSize/2" :x2="c.x + cellSize/2" :y2="c.y + cellSize*0.2 + 8" :stroke="colors.compass_line" />
-            <line :x1="c.x + cellSize/2" :y1="c.y + cellSize/2" :x2="c.x + cellSize/2" :y2="c.y + cellSize*0.8 - 8" :stroke="colors.compass_line" />
-            <line :x1="c.x + cellSize/2" :y1="c.y + cellSize/2" :x2="c.x + cellSize*0.2 + 8" :y2="c.y + cellSize/2" :stroke="colors.compass_line" />
-            <line :x1="c.x + cellSize/2" :y1="c.y + cellSize/2" :x2="c.x + cellSize*0.8 - 8" :y2="c.y + cellSize/2" :stroke="colors.compass_line" />
-            <text v-if="c.compass.up >= 0" :x="c.x + cellSize/2" :y="c.y + cellSize*0.2" text-anchor="middle" :font-size="cellSize/7" :fill="colors.compass_text">{{ c.compass.up }}</text>
-            <text v-if="c.compass.down >= 0" :x="c.x + cellSize/2" :y="c.y + cellSize*0.82" text-anchor="middle" :font-size="cellSize/7" :fill="colors.compass_text">{{ c.compass.down }}</text>
-            <text v-if="c.compass.left >= 0" :x="c.x + cellSize*0.16" :y="c.y + cellSize*0.55" text-anchor="middle" :font-size="cellSize/7" :fill="colors.compass_text">{{ c.compass.left }}</text>
-            <text v-if="c.compass.right >= 0" :x="c.x + cellSize*0.84" :y="c.y + cellSize*0.55" text-anchor="middle" :font-size="cellSize/7" :fill="colors.compass_text">{{ c.compass.right }}</text>
-          </g>
-          <g v-if="c.shapePattern">
-            <rect v-for="(s, i) in shapeCells(c.shapePattern)" :key="i" :x="c.x + s.c * cellSize * 0.2 + cellSize*0.2" :y="c.y + s.r * cellSize * 0.2 + cellSize*0.2" :width="cellSize*0.2 - 1" :height="cellSize*0.2 - 1" rx="1" :fill="colors.shape_mini_fill" :stroke="colors.shape_mini_pen" />
-          </g>
-          <g v-if="c.fence">
-            <line v-for="(s, i) in c.fence" :key="i" :x1="s.x1" :y1="s.y1" :x2="s.x2" :y2="s.y2" :stroke="s.present ? '#2a1a08' : 'rgba(80,60,30,0.7)'" :stroke-width="s.present ? 1.8 : 1" :stroke-dasharray="s.present ? undefined : '3,3'" />
-            <circle :cx="c.x + cellSize/2" :cy="c.y + cellSize/2" :r="cellSize*0.09" fill="#2a1a08" />
+              <text v-if="c.number != null && !c.symbol" :x="c.x + cs / 2" :y="c.y + cs * 0.64" text-anchor="middle" :font-size="cs / 2" font-weight="700" :fill="C.number_text">{{ c.number }}</text>
+              <text v-else-if="c.number != null" :x="c.x + cs * 0.1" :y="c.y + cs * 0.32" :font-size="cs / 3.2" font-weight="700" :fill="C.number_text">{{ c.number }}</text>
+
+              <g v-if="c.compass">
+                <template v-for="(a, i) in compassArms(c.x + cs / 2, c.y + cs / 2, cs)" :key="i">
+                  <line :x1="a.x1" :y1="a.y1" :x2="a.x2" :y2="a.y2" :stroke="C.compass_line" :stroke-width="Math.max(1, cs * 0.035)" stroke-linecap="round" />
+                </template>
+                <circle :cx="c.x + cs / 2" :cy="c.y + cs / 2" :r="cs * 0.055" :fill="C.compass_text" fill-opacity="0.25" />
+                <text v-if="c.compass.up >= 0" :x="c.x + cs / 2" :y="c.y + cs * 0.28" text-anchor="middle" :font-size="cs / 6.6" font-weight="600" :fill="C.compass_text">{{ c.compass.up }}</text>
+                <text v-if="c.compass.down >= 0" :x="c.x + cs / 2" :y="c.y + cs * 0.82" text-anchor="middle" :font-size="cs / 6.6" font-weight="600" :fill="C.compass_text">{{ c.compass.down }}</text>
+                <text v-if="c.compass.left >= 0" :x="c.x + cs * 0.2" :y="c.y + cs * 0.56" text-anchor="middle" :font-size="cs / 6.6" font-weight="600" :fill="C.compass_text">{{ c.compass.left }}</text>
+                <text v-if="c.compass.right >= 0" :x="c.x + cs * 0.8" :y="c.y + cs * 0.56" text-anchor="middle" :font-size="cs / 6.6" font-weight="600" :fill="C.compass_text">{{ c.compass.right }}</text>
+              </g>
+
+              <g v-if="c.shapePattern">
+                <rect v-for="(s, i) in shapeCells(c.shapePattern)" :key="i" :x="c.x + s.c * cs * 0.2 + cs * 0.2" :y="c.y + s.r * cs * 0.2 + cs * 0.2" :width="Math.max(1, cs * 0.2 - 1)" :height="Math.max(1, cs * 0.2 - 1)" :rx="Math.min(2, cs * 0.04)" :fill="C.shape_mini_fill" :stroke="C.shape_mini_pen" stroke-width="0.8" />
+              </g>
+
+              <g v-if="c.fence">
+                <line v-for="(s, i) in c.fence" :key="i" :x1="s.x1" :y1="s.y1" :x2="s.x2" :y2="s.y2" :stroke="s.present ? C.number_text : C.cell_border" :stroke-width="s.present ? 2 : 1.2" :stroke-dasharray="s.present ? undefined : '3,3'" stroke-linecap="round" />
+                <circle :cx="c.x + cs / 2" :cy="c.y + cs / 2" :r="Math.max(1.2, cs * 0.09)" :fill="C.number_text" />
+              </g>
+            </g>
           </g>
         </g>
-      </g>
 
-      <line v-for="(l, i) in boundaryLines" :key="`b${i}`" :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2" :stroke="colors.boundary_edge" stroke-width="6" stroke-linecap="round" />
-      <line v-for="(l, i) in boundaryLines" :key="`bh${i}`" :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2" :stroke="colors.boundary_highlight" stroke-width="2.5" stroke-linecap="round" />
+        <!-- region silhouette (open on sides shared with the same region) -->
+        <line
+          v-for="o in regionOutlines" :key="o.k"
+          :x1="o.x1" :y1="o.y1" :x2="o.x2" :y2="o.y2"
+          :stroke="o.color" :stroke-width="Math.max(1.6, cs * 0.035)" stroke-linecap="round"
+        />
 
-      <line v-for="(l, i) in gridLines" :key="`g${i}`" :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2" :stroke="colors.grid_line" stroke-width="1" />
-      <rect :x="padding" :y="padding" :width="w * cellSize" :height="h * cellSize" fill="none" :stroke="colors.grid_line" stroke-width="1" />
+        <!-- region boundaries: glow → body → highlight core -->
+        <g filter="url(#aogGlow)">
+          <line v-for="(l, i) in boundaryLines" :key="`b${i}`" :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2" :stroke="C.boundary_edge" :stroke-width="Math.max(3, cs * 0.1)" stroke-linecap="round" stroke-opacity="0.55" />
+        </g>
+        <line v-for="(l, i) in boundaryLines" :key="`bm${i}`" :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2" :stroke="C.boundary_edge" :stroke-width="Math.max(2, cs * 0.075)" stroke-linecap="round" />
+        <line v-for="(l, i) in boundaryLines" :key="`bh${i}`" :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2" :stroke="C.boundary_highlight" :stroke-width="Math.max(1, cs * 0.028)" stroke-linecap="round" stroke-opacity="0.85" />
 
-      <g v-for="cl in constraintLabels" :key="cl.key">
-        <rect :x="cl.mx - 8" :y="cl.my - 8" :width="16" :height="16" rx="3" :fill="cl.kind === 'δ' ? '#111' : colors.edge_constr_bg" :stroke="colors.edge_constr_border" stroke-width="1" />
-        <text :x="cl.mx" :y="cl.my + 5" text-anchor="middle" :font-size="cellSize / 6" font-weight="bold" :fill="cl.kind === 'δ' ? '#fff' : colors.edge_constr_text">{{ cl.text }}</text>
-      </g>
+        <!-- hairline grid -->
+        <line v-for="(l, i) in gridLines" :key="`g${i}`" :x1="l.x1" :y1="l.y1" :x2="l.x2" :y2="l.y2" :stroke="C.grid_line" stroke-width="1" />
 
-      <g v-for="(wt, i) in watchtowers" :key="`w${i}`">
-        <circle :cx="wt.x" :cy="wt.y" :r="cellSize / 5" :fill="colors.watchtower_bg" :stroke="colors.watchtower_border" stroke-width="2" />
-        <circle v-for="(d, j) in diceDots(wt.value)" :key="j" :cx="wt.x + d[0] * cellSize / 5" :cy="wt.y + d[1] * cellSize / 5" :r="cellSize / 20" :fill="colors.watchtower_text" />
-        <text v-if="wt.value > 4" :x="wt.x" :y="wt.y + cellSize / 8" text-anchor="middle" :font-size="cellSize / 4" font-weight="bold" :fill="colors.watchtower_text">{{ wt.value }}</text>
-      </g>
+        <!-- edge constraints -->
+        <g v-for="cl in constraintLabels" :key="cl.key" class="constr-chip">
+          <rect :x="cl.mx - cs * 0.16" :y="cl.my - cs * 0.16" :width="cs * 0.32" :height="cs * 0.32" :rx="Math.min(4, cs * 0.09)" :fill="cl.kind === 'δ' ? C.number_text : C.edge_constr_bg" :stroke="cl.kind === 'δ' ? C.number_text : C.edge_constr_border" stroke-width="1.2" />
+          <text :x="cl.mx" :y="cl.my + cs * 0.09" text-anchor="middle" :font-size="cs / 4.6" font-weight="700" :fill="cl.kind === 'δ' ? C.grid_bg : C.edge_constr_text">{{ cl.text }}</text>
+        </g>
 
-      <rect v-if="store.selectedCell" :x="cellX(store.selectedCell[1])" :y="cellY(store.selectedCell[0])" :width="cellSize" :height="cellSize" fill="none" :stroke="colors.selection_border" stroke-width="3" />
-      <line v-if="selEdge" :x1="selEdge.x1" :y1="selEdge.y1" :x2="selEdge.x2" :y2="selEdge.y2" :stroke="colors.selection_border" stroke-width="5" stroke-linecap="round" />
-      <circle v-if="store.selectedVertex" :cx="vx(store.selectedVertex[1])" :cy="vy(store.selectedVertex[0])" :r="cellSize / 6" :fill="colors.selection_vertex_fill" :stroke="colors.selection_border" stroke-width="3" />
-      <circle v-if="boundaryStart" :cx="vx(boundaryStart[1])" :cy="vy(boundaryStart[0])" :r="cellSize / 4" fill="none" :stroke="colors.selection_border" stroke-width="2" stroke-dasharray="4" />
+        <!-- watchtowers -->
+        <g v-for="(wt, i) in watchtowers" :key="`w${i}`" class="wt-chip">
+          <circle :cx="wt.x" :cy="wt.y" :r="cs / 4.6" :fill="C.watchtower_bg" :stroke="C.watchtower_border" stroke-width="Math.max(1.4, cs * 0.035)" />
+          <circle v-for="(d, j) in diceDots(wt.value)" :key="j" :cx="wt.x + d[0] * cs / 4.6" :cy="wt.y + d[1] * cs / 4.6" :r="Math.max(0.8, cs / 20)" :fill="C.watchtower_text" />
+          <text v-if="wt.value > 4" :x="wt.x" :y="wt.y + cs / 9" text-anchor="middle" :font-size="cs / 4.4" font-weight="700" :fill="C.watchtower_text">{{ wt.value }}</text>
+        </g>
 
-      <rect v-if="hoverCell && !(hoverCell[0] === store.selectedCell?.[0] && hoverCell[1] === store.selectedCell?.[1])" :x="cellX(hoverCell[1])" :y="cellY(hoverCell[0])" :width="cellSize" :height="cellSize" fill="none" :stroke="colors.hover_cell" stroke-width="2" />
-      <circle v-if="hoverVertex && !(hoverVertex[0] === store.selectedVertex?.[0] && hoverVertex[1] === store.selectedVertex?.[1])" :cx="vx(hoverVertex[1])" :cy="vy(hoverVertex[0])" :r="cellSize / 8" fill="none" :stroke="colors.hover_vertex" stroke-width="2" />
-    </svg>
+        <!-- hover affordances: the border zone lights up the border, not the cell -->
+        <line v-if="hoverEdgeLine" class="edge-hover" :x1="hoverEdgeLine.x1" :y1="hoverEdgeLine.y1" :x2="hoverEdgeLine.x2" :y2="hoverEdgeLine.y2" :stroke="C.hover_cell" :stroke-width="Math.max(3, cs * 0.085)" stroke-linecap="round" stroke-opacity="0.9" />
+        <rect v-if="hoverCellRect" :x="hoverCellRect.x" :y="hoverCellRect.y" :width="hoverCellRect.w" :height="hoverCellRect.h" :rx="Math.min(4, cs * 0.1)" fill="none" :stroke="C.hover_cell" stroke-width="1.6" stroke-opacity="0.9" />
+        <circle v-if="hoverVertexDot" :cx="hoverVertexDot.cx" :cy="hoverVertexDot.cy" :r="Math.max(2, cs / 9)" fill="none" :stroke="C.hover_vertex" stroke-width="1.6" />
 
-    <div v-if="overlay.rules.length || overlay.shapes.length" class="overlay" :style="{ left: W + 'px', top: padding + 'px' }">
-      <div v-for="r in overlay.rules" :key="r" class="overlay-rule">{{ r }}</div>
-      <div v-if="overlay.shapes.length" class="overlay-shapes">
-        <div class="overlay-header">形状池</div>
-        <svg v-for="(s, i) in overlay.shapes" :key="i" :width="40" :height="40" class="mini-shape">
-          <rect v-for="(cell, j) in s" :key="j" :x="2 + cell[1] * 8" :y="2 + cell[0] * 8" :width="7" :height="7" :fill="colors.shape_mini_fill" :stroke="colors.shape_mini_pen" />
-        </svg>
-      </div>
+        <!-- selection -->
+        <rect
+          v-if="store.selectedCell"
+          :x="cellX(store.selectedCell[1]) + 1" :y="cellY(store.selectedCell[0]) + 1"
+          :width="Math.max(0, cs - 2)" :height="Math.max(0, cs - 2)"
+          :rx="Math.min(4, cs * 0.1)" fill="none" :stroke="C.selection_border" stroke-width="2.4" class="sel-ring"
+          stroke-dasharray="7 5"
+        />
+        <line v-if="selEdge" :x1="selEdge.x1" :y1="selEdge.y1" :x2="selEdge.x2" :y2="selEdge.y2" :stroke="C.selection_border" :stroke-width="Math.max(3, cs * 0.09)" stroke-linecap="round" />
+        <circle v-if="store.selectedVertex" :cx="vx(store.selectedVertex[1])" :cy="vy(store.selectedVertex[0])" :r="Math.max(3, cs / 6)" :fill="C.selection_vertex_fill" :stroke="C.selection_border" stroke-width="2.4" class="sel-vertex" />
+      </svg>
     </div>
 
+    <!-- context menu -->
     <div v-if="ctxMenu" class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @mousedown.stop @contextmenu.prevent>
       <template v-if="ctxMenu.kind === 'cell'">
-        <button v-if="getCell(ctxMenu.cell![0], ctxMenu.cell![1])?.blocked" @click="ctxToggleBlocked">取消障碍</button>
-        <button v-else @click="ctxToggleBlocked">设为障碍格</button>
-        <hr />
-        <button @click="ctxClearNumber">清除数字</button>
-        <button @click="ctxClearSymbol">清除符号</button>
-        <button @click="ctxClearCellAll">清除全部</button>
-        <hr />
-        <button @click="ctxToggleCellBoundary">切换此格边框</button>
+        <div class="ctx-menu__head">单元格 ({{ ctxMenu.cell![0] }}, {{ ctxMenu.cell![1] }})</div>
+        <button class="ctx-menu__item" @click="ctxToggleBlocked">
+          <AppIcon :name="getCell(ctxMenu.cell![0], ctxMenu.cell![1])?.blocked ? 'eye' : 'block'" :size="14" />
+          {{ getCell(ctxMenu.cell![0], ctxMenu.cell![1])?.blocked ? '取消障碍' : '设为障碍格' }}
+        </button>
+        <div class="ctx-menu__sep" />
+        <button class="ctx-menu__item" @click="ctxClearNumber"><AppIcon name="hash" :size="14" />清除数字</button>
+        <button class="ctx-menu__item" @click="ctxClearSymbol"><AppIcon name="star" :size="14" />清除符号</button>
+        <button class="ctx-menu__item is-danger" @click="ctxClearCellAll"><AppIcon name="trash" :size="14" />清除全部</button>
+        <div class="ctx-menu__sep" />
+        <button class="ctx-menu__item" @click="ctxToggleCellBoundary"><AppIcon name="pencil" :size="14" />切换此格边框</button>
       </template>
       <template v-else-if="ctxMenu.kind === 'edge'">
-        <button @click="ctxToggleEdge">切换分割线</button>
-        <hr />
-        <button @click="ctxSetConstraint('heterogeneous')">设异生 (≠)</button>
-        <button @click="ctxSetConstraint('homogeneous')">设双生 (=)</button>
-        <button @click="ctxSetConstraint('inequality')">设不等号 (箭头)</button>
-        <button @click="ctxSetConstraint('difference', 1)">设差值</button>
+        <div class="ctx-menu__head">边框约束</div>
+        <button class="ctx-menu__item" @click="ctxToggleEdge"><AppIcon name="pencil" :size="14" />切换分割线</button>
+        <div class="ctx-menu__sep" />
+        <button class="ctx-menu__item" @click="ctxSetConstraint('heterogeneous')"><AppIcon name="block" :size="14" />设异生 (≠)</button>
+        <button class="ctx-menu__item" @click="ctxSetConstraint('homogeneous')"><AppIcon name="check" :size="14" />设双生 (=)</button>
+        <button class="ctx-menu__item" @click="ctxSetConstraint('inequality')"><AppIcon name="chevronRight" :size="14" />设不等号 (箭头)</button>
+        <button class="ctx-menu__item" @click="ctxSetConstraint('difference', 1)"><AppIcon name="hash" :size="14" />设差值</button>
         <template v-if="getEdge(...ctxMenu.edge!)?.constraint">
-          <hr /><button @click="ctxClearConstraint">清除约束</button>
+          <div class="ctx-menu__sep" />
+          <button class="ctx-menu__item is-danger" @click="ctxClearConstraint"><AppIcon name="trash" :size="14" />清除约束</button>
         </template>
       </template>
       <template v-else>
-        <button @click="ctxClearWatchtower">清除望塔值</button>
+        <div class="ctx-menu__head">顶点 ({{ ctxMenu.vertex![0] }}, {{ ctxMenu.vertex![1] }})</div>
+        <button class="ctx-menu__item" @click="ctxClearWatchtower"><AppIcon name="tower" :size="14" />清除望塔值</button>
       </template>
     </div>
   </div>

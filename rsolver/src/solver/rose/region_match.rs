@@ -62,11 +62,6 @@ pub fn generate_all_candidates(
     let w = puzzle.width;
     let n_bits = h * w;
     let is_multi = symbol_types.len() >= 2;
-    let all_required: u32 = if is_multi {
-        (1u32 << symbol_types.len()) - 1
-    } else {
-        0
-    };
 
     let mut visited: HashSet<CellSet> = HashSet::new();
     let mut results: Vec<CellSet> = Vec::new();
@@ -87,9 +82,9 @@ pub fn generate_all_candidates(
             }
         }
     }
-    let initial_syms: u32 = symbol_of.get(&seed).map(|ti| 1u32 << ti).unwrap_or(0);
+    let initial_syms: u64 = symbol_of.get(&seed).map(|ti| 1u64 << ti).unwrap_or(0);
 
-    let mut queue: std::collections::VecDeque<(CellSet, CellSet, u32)> =
+    let mut queue: std::collections::VecDeque<(CellSet, CellSet, u64)> =
         std::collections::VecDeque::new();
     queue.push_back((initial, initial_frontier, initial_syms));
 
@@ -104,19 +99,16 @@ pub fn generate_all_candidates(
             // 必须 break，不能"停插入继续检查"（见 VISITED_CAP 注释）。
             break;
         }
-        if is_multi {
-            if syms == all_required {
-                results.push(current.clone());
-                // B-MB: once a region contains all required symbol types, stop
-                // expanding — any larger superset uses more cells with the same
-                // symbols, strictly worse for the exact-cover match. Reduces
-                // visited/queue 10-50× on multi-symbol puzzles (C4-2, 0620,
-                // 1433). (doc 15 §2 A3.)
-                continue;
-            }
-        } else {
-            results.push(current.clone());
-        }
+        // M1 (soundness): every BFS state is a candidate.  For multi-symbol
+        // puzzles the old B-MB early-stop (`syms == all_required → push,
+        // continue`) never generated same-symbol-set SUPERSETS (all required
+        // types plus symbol-less filler cells), so the true solution region was
+        // missing from the exact-cover rows and multi-symbol rose puzzles were
+        // falsely reported unsolvable (bug M1; doc 15 §2 A3 was unsound).
+        // Expansion stays cheap: the symbol-skip below refuses further symbol
+        // cells of already-present types, so supersets only add filler cells,
+        // and CANDIDATE_CAP / MAX_CANDIDATE_CELLS / VISITED_CAP bound the cost.
+        results.push(current.clone());
         if current.len() >= MAX_CANDIDATE_CELLS {
             continue;
         }
@@ -125,7 +117,7 @@ pub fn generate_all_candidates(
             let cell_sym = symbol_of.get(&cell).copied();
             let mut skip = false;
             if let Some(ti) = cell_sym {
-                if is_multi && (syms & (1u32 << ti)) != 0 {
+                if is_multi && (syms & (1u64 << ti)) != 0 {
                     skip = true;
                 }
             }
@@ -153,7 +145,7 @@ pub fn generate_all_candidates(
                 continue;
             }
             visited.insert(new_fs.clone());
-            let new_syms = syms | cell_sym.map(|ti| 1u32 << ti).unwrap_or(0);
+            let new_syms = syms | cell_sym.map(|ti| 1u64 << ti).unwrap_or(0);
             let mut new_frontier = frontier.clone();
             new_frontier.remove(cell);
             for (dr, dc) in dirs {

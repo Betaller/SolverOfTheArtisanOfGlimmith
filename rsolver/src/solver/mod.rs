@@ -368,6 +368,13 @@ fn is_rose_capable(puzzle: &Puzzle) -> bool {
     if !has_rose {
         return false;
     }
+    // M2: symbol bookkeeping uses u64 bitmasks keyed by symbol-type index.
+    // A rose_window with >64 distinct symbol types cannot be represented, and
+    // silently masking high bits away could accept invalid regions — refuse
+    // the puzzle instead (the router falls through to the other solvers).
+    if crate::shapes::rose_symbol_types(puzzle).len() > 64 {
+        return false;
+    }
     !puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "different")
 }
 

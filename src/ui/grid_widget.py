@@ -387,6 +387,7 @@ class GridWidget(QWidget):
     def _set_cell_attr(self, r: int, c: int, attr: str, value) -> None:
         cell = self.board.cell(r, c)
         setattr(cell, attr, value)
+        self.board_modified.emit()
         self.update()
 
     def _clear_cell_properties(self, r: int, c: int) -> None:
@@ -398,12 +399,14 @@ class GridWidget(QWidget):
             cell.shape_pattern = None
             cell.fence_pattern = None
             cell.region_id = None
+            self.board_modified.emit()
             self.update()
 
     def _toggle_cell_boundary(self, r: int, c: int) -> None:
         for e in self.board.edges():
             if (e.r1 == r and e.c1 == c) or (e.r2 == r and e.c2 == c):
                 e.is_boundary = not e.is_boundary
+        self.board_modified.emit()
         self.update()
 
     def _toggle_edge_boundary(self, r1: int, c1: int, r2: int, c2: int) -> None:
@@ -418,6 +421,7 @@ class GridWidget(QWidget):
         e = self.board.edge_between(r1, c1, r2, c2)
         if e is not None:
             e.constraint = EdgeConstraint(type=ctype, value=value)
+            self.board_modified.emit()
             self.edge_clicked.emit(r1, c1, r2, c2)
             self.update()
 
@@ -425,6 +429,7 @@ class GridWidget(QWidget):
         e = self.board.edge_between(r1, c1, r2, c2)
         if e is not None:
             e.constraint = None
+            self.board_modified.emit()
             self.edge_clicked.emit(r1, c1, r2, c2)
             self.update()
 
@@ -432,6 +437,7 @@ class GridWidget(QWidget):
         v = self.board.vertex_at(r, c)
         if v is not None:
             v.watchtower = None
+            self.board_modified.emit()
             self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -501,6 +507,7 @@ class GridWidget(QWidget):
                     self._selected_vertex = vertex
                     self._selected_cell = None
                     self._selected_edge = None
+                    self.board_modified.emit()
                     self.vertex_clicked.emit(vr, vc)
                     self.update()
             return
@@ -522,6 +529,7 @@ class GridWidget(QWidget):
             self._selected_edge = None
             self._selected_vertex = None
             self._inline_number = ""
+            self.board_modified.emit()
             self.setFocus()
             self.update()
             self.cell_clicked.emit(cell[0], cell[1])
@@ -533,6 +541,7 @@ class GridWidget(QWidget):
             self._selected_cell = cell
             self._selected_edge = None
             self._selected_vertex = None
+            self.board_modified.emit()
             self.update()
             self.cell_clicked.emit(cell[0], cell[1])
             return
@@ -543,6 +552,7 @@ class GridWidget(QWidget):
             self._selected_cell = cell
             self._selected_edge = None
             self._selected_vertex = None
+            self.board_modified.emit()
             self.update()
             self.cell_clicked.emit(cell[0], cell[1])
             return
@@ -600,6 +610,7 @@ class GridWidget(QWidget):
 
         self._boundary_start_vertex = None
         self._selected_vertex = None
+        self.board_modified.emit()
         self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -724,6 +735,7 @@ class GridWidget(QWidget):
                     cell.symbol = None
                     cell.compass = None
                     self._inline_number = ""
+                    self.board_modified.emit()
                     self.update()
                 return
 
@@ -733,6 +745,7 @@ class GridWidget(QWidget):
                 r, c = self._selected_cell
                 cell = self.board.cell(r, c)
                 cell.number = int(self._inline_number)
+                self.board_modified.emit()
                 self.update()
                 return
             elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
@@ -741,6 +754,7 @@ class GridWidget(QWidget):
                     cell = self.board.cell(r, c)
                     cell.number = int(self._inline_number)
                     self._inline_number = ""
+                    self.board_modified.emit()
                     self._move_selection(0, 1)
                     self.update()
                 return
@@ -752,6 +766,7 @@ class GridWidget(QWidget):
                 if not cell.blocked:
                     cell.number = int(text)
                     self._inline_number = ""
+                    self.board_modified.emit()
                     self.update()
                 return
 

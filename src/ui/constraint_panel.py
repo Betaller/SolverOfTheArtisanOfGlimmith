@@ -152,6 +152,10 @@ class ConstraintPanel(QWidget):
             layout.addWidget(QLabel("面积:"))
             spin = QSpinBox()
             spin.setRange(1, 256)
+            # Sensible default so toggling the rule ON without editing the spin
+            # yields a solvable constraint (bug C3: an empty params dict would
+            # resolve `area` to 0, making every region illegal).
+            spin.setValue(1)
             spin.valueChanged.connect(lambda v, t=rule_type: self._on_param_changed(t, "area", v))
             self._param_spin(rule_type, "area", spin)
             layout.addWidget(spin)
@@ -161,6 +165,7 @@ class ConstraintPanel(QWidget):
             layout.addWidget(QLabel("最小:"))
             min_spin = QSpinBox()
             min_spin.setRange(1, 256)
+            min_spin.setValue(1)
             min_spin.valueChanged.connect(lambda v, t=rule_type: self._on_param_changed(t, "min", v))
             self._param_spin(rule_type, "min", min_spin)
             layout.addWidget(min_spin)
@@ -228,10 +233,28 @@ class ConstraintPanel(QWidget):
             self._param_widgets[rule_type].setVisible(checked)
         if self._puzzle is not None:
             if checked:
-                self._puzzle.rules.append(Rule(type=rule_type))
+                # Populate default params from the spin widgets so a freshly
+                # toggled rule is solvable instead of carrying an empty params
+                # dict (bug C3: empty params → `area`/`min` default to 0).
+                self._puzzle.rules.append(
+                    Rule(type=rule_type, params=self._collect_params(rule_type))
+                )
             else:
                 self._puzzle.rules = [r for r in self._puzzle.rules if r.type != rule_type]
         self.rules_changed.emit()
+
+    def _collect_params(self, rule_type: str) -> dict:
+        """Read the current param-spin values for a rule type.
+
+        Used when a rule is toggled ON so its params are seeded from the UI
+        defaults rather than left empty (bug C3).  Rules without param spins
+        (e.g. shape_pool, rose_window) return an empty dict.
+        """
+        params: dict = {}
+        if hasattr(self, "_param_spins"):
+            for pname, spin in self._param_spins.get(rule_type, {}).items():
+                params[pname] = spin.value()
+        return params
 
     def _on_param_changed(self, rule_type: str, param: str, value: int) -> None:
         if self._puzzle is None:
@@ -252,7 +275,13 @@ class ConstraintPanel(QWidget):
         self._puzzle = puzzle
         for rule_type, cb in self._checkboxes.items():
             has_rule = puzzle.has_rule(rule_type)
+            # Block the signal: `setChecked(True)` would otherwise fire
+            # `toggled(True)` → `_on_rule_toggled` appends the rule AGAIN,
+            # duplicating every rule already present in the loaded puzzle
+            # (bug C1: [area,block] → [area,block,block,area]).
+            cb.blockSignals(True)
             cb.setChecked(has_rule)
+            cb.blockSignals(False)
             if rule_type in self._param_widgets:
                 self._param_widgets[rule_type].setVisible(has_rule)
             if has_rule and hasattr(self, "_param_spins"):

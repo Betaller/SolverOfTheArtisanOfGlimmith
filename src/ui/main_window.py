@@ -134,6 +134,16 @@ class MainWindow(QMainWindow):
         self._undo_stack: list[dict] = []
         self._redo_stack: list[dict] = []
         self._undo_depth = 100
+        # State of the board most recently committed to the undo stack.  Used to
+        # compute the *pre-edit* snapshot so the first Ctrl+Z undoes the last
+        # edit instead of being a no-op (bug L2).
+        self._last_synced_state: dict | None = None
+        # Monotonic token identifying the currently-active solve request.  A
+        # solution/error callback is only applied if its token still matches,
+        # so a solve that finishes after the puzzle was switched is ignored
+        # (bug C2).
+        self._solve_request_id = 0
+        self._solver_thread: SolverThread | None = None
 
         self.setWindowTitle("格里米斯的工匠 - 求解器")
         self.resize(1500, 900)
@@ -337,38 +347,70 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel("就绪")
         self.statusBar().addWidget(self._status_label)
 
+    def _reset_undo_state(self) -> None:
+        """Start a fresh undo/redo history for the current puzzle.
+
+        The committed baseline is the puzzle as it stands right now, so any
+        subsequent edit produces a real (pre-edit) snapshot.
+        """
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._last_synced_state = (
+            puzzle_to_dict(self._puzzle) if self._puzzle is not None else None
+        )
+
     def _save_undo_snapshot(self) -> None:
-        """Save current puzzle state for undo before a modification."""
+        """Record the *pre-edit* state so undo restores the prior edit.
+
+        The debounce in `_on_board_modified` fires this after the user stops
+        editing.  We compare the current puzzle against `_last_synced_state`
+        (the last committed state) and, only on a real change, push that
+        pre-edit state onto the undo stack and advance the baseline.  This
+        fixes bug L2: previously the *post-edit* state was stored, making the
+        first Ctrl+Z a no-op and the initial state unreachable.
+        """
         self._sync_puzzle_from_ui()
         if self._puzzle is None:
             return
-        snap = puzzle_to_dict(self._puzzle)
-        if self._undo_stack and snap == self._undo_stack[-1]:
+        cur = puzzle_to_dict(self._puzzle)
+        if self._last_synced_state is None:
+            self._last_synced_state = cur
             return
-        self._undo_stack.append(snap)
+        if cur == self._last_synced_state:
+            return
+        self._undo_stack.append(self._last_synced_state)
         if len(self._undo_stack) > self._undo_depth:
             self._undo_stack.pop(0)
         self._redo_stack.clear()
+        self._last_synced_state = cur
 
     def _on_undo(self) -> None:
         if not self._undo_stack:
             return
+        if hasattr(self, "_undo_timer"):
+            self._undo_timer.stop()
         self._sync_puzzle_from_ui()
         cur = puzzle_to_dict(self._puzzle) if self._puzzle else None
         prev = self._undo_stack.pop()
         if cur is not None:
             self._redo_stack.append(cur)
+        # `prev` is the state we should land on; make it the new baseline so a
+        # later edit (and a later undo/redo) stays consistent.
+        self._last_synced_state = prev
         self._apply_snapshot(prev)
         self._status_label.setText("已撤销")
 
     def _on_redo(self) -> None:
         if not self._redo_stack:
             return
+        if hasattr(self, "_undo_timer"):
+            self._undo_timer.stop()
         self._sync_puzzle_from_ui()
         cur = puzzle_to_dict(self._puzzle) if self._puzzle else None
         nxt = self._redo_stack.pop()
         if cur is not None:
             self._undo_stack.append(cur)
+        self._last_synced_state = nxt
         self._apply_snapshot(nxt)
         self._status_label.setText("已重做")
 
@@ -449,6 +491,7 @@ class MainWindow(QMainWindow):
         self._grid_widget.set_board(board)
         self._property_panel.set_board(board)
         self._constraint_panel.set_puzzle(self._puzzle)
+        self._reset_undo_state()
         self._result_label.setText("已重置")
         self._status_label.setText("已重置为初始状态")
         self._update_title()
@@ -457,16 +500,28 @@ class MainWindow(QMainWindow):
     def _on_reset(self) -> None:
         if self._initial_puzzle_data is None:
             return
-        if hasattr(self, '_solver_thread') and self._solver_thread is not None and self._solver_thread.isRunning():
-            self._solver_thread.cancel()
-            self._solve_btn.setEnabled(True)
-            self._solve_btn.setText("求解")
+        self._cancel_solver()
         self._load_from_initial()
 
+    def _cancel_solver(self) -> None:
+        """Cancel any in-flight solve and invalidate its callbacks.
+
+        Called whenever the active puzzle is replaced (new / open / reset) so a
+        late solution callback can never be painted onto the now-current board
+        (bug C2).  Bumping the request token guarantees `_on_solution_ready` /
+        `_on_solver_error` ignore any result still queued for the old solve.
+        """
+        if self._solver_thread is not None and self._solver_thread.isRunning():
+            self._solver_thread.cancel()
+        self._solve_request_id += 1
+
     def _create_new_puzzle(self, height: int, width: int) -> None:
+        # Switch the active puzzle: drop any running solve (bug C2).
+        self._cancel_solver()
         self._puzzle = self._puzzle_service.create_puzzle(height, width)
         self._current_file = None
         self._save_initial_state()
+        self._reset_undo_state()
 
         board = Board(height, width)
         self._grid_widget.set_board(board)
@@ -512,6 +567,8 @@ class MainWindow(QMainWindow):
 
     def _load_puzzle_file(self, path: str) -> None:
         try:
+            # Switch the active puzzle: drop any running solve (bug C2).
+            self._cancel_solver()
             self._puzzle = self._puzzle_service.load_puzzle(path)
             self._current_file = path
 
@@ -523,6 +580,7 @@ class MainWindow(QMainWindow):
             self._constraint_panel.set_puzzle(self._puzzle)
             self._shape_gallery.set_puzzle(self._puzzle)
             self._save_initial_state()
+            self._reset_undo_state()
             self._result_label.setText("已加载")
             self._status_label.setText(f"已加载: {os.path.basename(path)}")
             self._update_title()
@@ -623,8 +681,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "请至少启用一条规则")
             return
 
-        if hasattr(self, '_solver_thread') and self._solver_thread is not None and self._solver_thread.isRunning():
-            self._solver_thread.cancel()
+        if self._solver_thread is not None and self._solver_thread.isRunning():
+            self._cancel_solver()
             self._solve_btn.setEnabled(True)
             self._solve_btn.setText("求解")
             self._progress_bar.setVisible(False)
@@ -640,12 +698,26 @@ class MainWindow(QMainWindow):
         self._result_label.setTextFormat(Qt.TextFormat.RichText)
         self._status_label.setText("求解中...")
 
+        # Capture a monotonically increasing request token so the result
+        # callback only applies if THIS solve is still the active one (bug C2):
+        # switching puzzles bumps the token and cancels the thread, so a late
+        # callback from an abandoned solve is ignored.
+        self._solve_request_id += 1
+        req_id = self._solve_request_id
         self._solver_thread = SolverThread(self._puzzle, timeout=30, puzzle_name=self._current_file)
-        self._solver_thread.finished.connect(self._on_solution_ready)
-        self._solver_thread.error.connect(self._on_solver_error)
+        self._solver_thread.finished.connect(
+            lambda sol, rid=req_id: self._on_solution_ready(sol, rid)
+        )
+        self._solver_thread.error.connect(
+            lambda msg, rid=req_id: self._on_solver_error(msg, rid)
+        )
         self._solver_thread.start()
 
-    def _on_solution_ready(self, solution: Solution) -> None:
+    def _on_solution_ready(self, solution: Solution, request_id: int = 0) -> None:
+        # Ignore results from a solve that is no longer the active one (bug C2):
+        # the puzzle was switched (or the solve was cancelled) before it finished.
+        if request_id != self._solve_request_id:
+            return
         if self._puzzle is None:
             return
 
@@ -692,7 +764,9 @@ class MainWindow(QMainWindow):
         self._solve_btn.setText("求解")
         self._progress_bar.setVisible(False)
 
-    def _on_solver_error(self, err_msg: str) -> None:
+    def _on_solver_error(self, err_msg: str, request_id: int = 0) -> None:
+        if request_id != self._solve_request_id:
+            return
         QMessageBox.critical(self, "求解错误", err_msg)
         self._status_label.setText("求解出错")
         self._result_label.setText(f"出错: {err_msg}")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import glob
 from typing import Optional
@@ -18,6 +19,8 @@ from src.ui import theme as _ui_theme
 
 from src.models.puzzle import RULE_NAMES
 
+
+logger = logging.getLogger(__name__)
 
 PUZZLE_BASE = "puzzles"
 
@@ -385,9 +388,14 @@ class PuzzleBrowser(QWidget):
                         difficulty=difficulty,
                     )
                     self._all_puzzles.append(info)
-                    self._grid_cache[name] = data
-                except Exception:
-                    pass
+                    # Key the cache by the FULL file path, not the basename: two
+                    # puzzles can share a basename in different directories and
+                    # must not collide (bug L7).
+                    self._grid_cache[fpath] = data
+                except Exception as e:
+                    # Surface the failure instead of silently swallowing it, so a
+                    # corrupt/malformed puzzle file is at least logged (bug L7).
+                    logger.warning("解析谜题失败 %s: %s", fpath, e)
 
         self._apply_filters()
 
@@ -485,7 +493,9 @@ class PuzzleBrowser(QWidget):
             top.setData(0, Qt.ItemDataRole.UserRole, None)
             for info in grouped[cat]:
                 child = QTreeWidgetItem([f"{info.name}  ({info.height}×{info.width})"])
-                child.setData(0, Qt.ItemDataRole.UserRole, info.name)
+                # Store the full path (not the basename) so selections stay
+                # unambiguous across directories (bug L7).
+                child.setData(0, Qt.ItemDataRole.UserRole, info.path)
                 top.addChild(child)
             self._tree.addTopLevelItem(top)
             total += len(grouped[cat])
@@ -495,8 +505,8 @@ class PuzzleBrowser(QWidget):
         self._preview_widget.clear()
         self._preview_label.setText("选择题目以预览")
 
-    def _find_info(self, name: str) -> PuzzleInfo | None:
-        return next((p for p in self._all_puzzles if p.name == name), None)
+    def _find_info(self, path: str) -> PuzzleInfo | None:
+        return next((p for p in self._all_puzzles if p.path == path), None)
 
     def _on_selection_changed(self, current: QTreeWidgetItem | None,
                               previous: QTreeWidgetItem | None) -> None:
@@ -504,16 +514,16 @@ class PuzzleBrowser(QWidget):
             self._preview_widget.clear()
             self._preview_label.setText("选择题目以预览")
             return
-        name = current.data(0, Qt.ItemDataRole.UserRole)
-        if not name:
+        key = current.data(0, Qt.ItemDataRole.UserRole)
+        if not key:
             self._preview_widget.clear()
             self._preview_label.setText("选择题目以预览")
             return
-        info = self._find_info(name)
+        info = self._find_info(key)
         if info is None:
             return
 
-        data = self._grid_cache.get(name)
+        data = self._grid_cache.get(key)
         if data is not None:
             self._preview_widget.set_puzzle(info, data)
 
@@ -526,10 +536,10 @@ class PuzzleBrowser(QWidget):
         )
 
     def _on_item_activated(self, item: QTreeWidgetItem, column: int) -> None:
-        name = item.data(0, Qt.ItemDataRole.UserRole)
-        if not name:
+        key = item.data(0, Qt.ItemDataRole.UserRole)
+        if not key:
             return
-        info = self._find_info(name)
+        info = self._find_info(key)
         if info is not None:
             self.puzzle_selected.emit(info.path)
 

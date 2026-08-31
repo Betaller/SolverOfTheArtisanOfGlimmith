@@ -379,11 +379,17 @@ class RustSolver(Solver):
         try:
             # Binary mode: the per-puzzle reader does `os.read` on the raw fd,
             # so Python's buffered reader must not be in between.
+            #
+            # `stderr` is routed to DEVNULL on purpose: the Rust batch binary can
+            # emit a lot of diagnostics, and a blocking `PIPE` that nobody reads
+            # fills its 64 KB buffer, stalls the subprocess, and makes the whole
+            # batch look "timed out" (bug L6).  `solve_batch` never consumes
+            # stderr, so discarding it is safe.
             proc = subprocess.Popen(
                 [self._binary, "--batch"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
                 env=self._subprocess_env(timeout),
             )
         except FileNotFoundError:

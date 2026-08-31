@@ -1,5 +1,7 @@
 //! Empty-area analysis and start-area selection (dfs.cpp `dfs_empty` + `find_*`).
 
+use std::collections::{HashMap, HashSet, VecDeque};
+
 use super::types::*;
 use super::types::{CompassStates, Node};
 use crate::clock::Instant;
@@ -165,7 +167,10 @@ fn dfs_empty_compass_check(x: i32, y: i32, core: &mut AoGCore, sp: &Vec<Vec<u32>
 }
 
 // ── try_place_id: bipartite partition helper ─────────────────────────────────
+// (Kept for reference; the minimum-vertex-cover computation now uses
+// `component_max_matching` below — see H1.)
 
+#[allow(dead_code)]
 fn try_place_id(x: i32, y: i32, value: i32, visited_value: i32, core: &mut AoGCore) -> i32 {
     let key = encode_node(x, y);
     let e = core.dfs_ctx.place_visited.entry(key).or_insert(0);
@@ -176,15 +181,133 @@ fn try_place_id(x: i32, y: i32, value: i32, visited_value: i32, core: &mut AoGCo
     let mut count = value;
     if let Some(neighbors) = core.dfs_ctx.block_adj.get(&key).cloned() {
         for n in neighbors {
-            // `1 - value` flips the 0/1 bipartition color. The C++ original uses
-            // `!value` (logical NOT → 0↔1), but Rust's `!` on an i32 is bitwise
-            // NOT (→ -1/-2), which produced negative counts, wrapped the usize
-            // cast, and overflowed `empty_block_line_count` (panic / `unreachable
-            // executed` under wasm).
             count += try_place_id(n.x, n.y, 1 - value, visited_value, core);
         }
     }
     count
+}
+
+/// Maximum bipartite matching size (Kőnig's theorem: = minimum vertex cover)
+/// for the connected component of `block_adj` containing `start_key`.
+///
+/// `block_adj` is the adjacency list of the block-line graph (bipartite: every
+/// edge separates a fillable cell from a forced block-line). The true number of
+/// cells that must be excluded from a region is the minimum vertex cover τ =
+/// maximum matching size — NOT `min(|X|,|Y|)` (which over-counts, pruning valid
+/// regions: bug H1).
+///
+/// Returns the matching size. DEFENSIVE: if the component is not bipartite
+/// (an odd cycle — should never happen for the block-line graph), it falls back
+/// to `min(|X|,|Y|)` so we never silently lose more than the old code did.
+///
+/// `seen` is filled with every node key in the component so the caller can
+/// process each component exactly once.
+fn component_max_matching(
+    start_key: u64,
+    block_adj: &HashMap<u64, Vec<Node>>,
+    seen: &mut HashSet<u64>,
+) -> usize {
+    // 1. Collect the component via BFS.
+    let mut comp: Vec<u64> = Vec::new();
+    let mut q: VecDeque<u64> = VecDeque::new();
+    q.push_back(start_key);
+    seen.insert(start_key);
+    while let Some(u) = q.pop_front() {
+        comp.push(u);
+        if let Some(neigh) = block_adj.get(&u) {
+            for &n in neigh {
+                let k = encode_node(n.x, n.y);
+                if seen.insert(k) {
+                    q.push_back(k);
+                }
+            }
+        }
+    }
+
+    // 2. 2-color the component.
+    let mut color: HashMap<u64, i32> = HashMap::new();
+    let mut bipartite = true;
+    {
+        let mut q: VecDeque<u64> = VecDeque::new();
+        q.push_back(start_key);
+        color.insert(start_key, 0);
+        while let Some(u) = q.pop_front() {
+            let cu = color[&u];
+            if let Some(neigh) = block_adj.get(&u) {
+                for &n in neigh {
+                    let k = encode_node(n.x, n.y);
+                    match color.get(&k) {
+                        None => {
+                            color.insert(k, 1 - cu);
+                            q.push_back(k);
+                        }
+                        Some(&cv) => {
+                            if cv == cu {
+                                bipartite = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !bipartite {
+        // Fallback: min(|X|,|Y|) of the component (the old, over-counting value).
+        let cnt0 = comp.iter().filter(|&&k| color.get(&k).copied() == Some(0)).count();
+        let cnt1 = comp.len() - cnt0;
+        return cnt0.min(cnt1);
+    }
+
+    // 3. Kuhn's augmenting-path maximum matching on the bipartition.
+    let left: Vec<u64> = comp.iter().copied().filter(|&k| color[&k] == 0).collect();
+    let right: Vec<u64> = comp.iter().copied().filter(|&k| color[&k] == 1).collect();
+    let mut right_local: HashMap<u64, usize> = HashMap::new();
+    for (i, &k) in right.iter().enumerate() {
+        right_local.insert(k, i);
+    }
+    // right key -> matched left key.
+    let mut match_right: HashMap<u64, u64> = HashMap::new();
+
+    // Iterative DFS augmenting path to avoid recursion depth issues.
+    fn try_augment(
+        u: u64,
+        block_adj: &HashMap<u64, Vec<Node>>,
+        match_right: &mut HashMap<u64, u64>,
+        visited_right: &mut HashSet<u64>,
+        right_local: &HashMap<u64, usize>,
+    ) -> bool {
+        if let Some(neigh) = block_adj.get(&u) {
+            for &n in neigh {
+                let k = encode_node(n.x, n.y);
+                if !right_local.contains_key(&k) {
+                    continue; // not on the right side
+                }
+                if visited_right.contains(&k) {
+                    continue;
+                }
+                visited_right.insert(k);
+                let can = match match_right.get(&k) {
+                    None => true,
+                    Some(&m) => try_augment(m, block_adj, match_right, visited_right, right_local),
+                };
+                if can {
+                    match_right.insert(k, u);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    let mut matching = 0usize;
+    for &u in &left {
+        let mut visited_right: HashSet<u64> = HashSet::new();
+        if try_augment(u, block_adj, &mut match_right, &mut visited_right, &right_local) {
+            matching += 1;
+        }
+    }
+    matching
 }
 
 // ── DFS_empty: high-level empty area analysis ────────────────────────────────
@@ -233,25 +356,26 @@ pub fn dfs_empty_area(x: i32, y: i32, core: &mut AoGCore, sp: &Vec<Vec<u32>>) {
 
     core.dfs_ctx.place_visited.clear();
     core.dfs_ctx.empty_block_line_count = 0;
+    // H1: per connected component of the block-line graph, the cells that must
+    // be excluded = minimum vertex cover = maximum bipartite matching size τ
+    // (Kőnig).  The old `min(|X|,|Y|)` over-counts excluded cells, pushing
+    // `max_area_size` too low and pruning valid regions.  `place_visited` is
+    // still cleared (kept for `try_place_id`'s fallback / future use) but the
+    // per-component walk below uses its own `seen` set.
+    let mut node_keys: Vec<u64> = Vec::new();
     for (a, b) in &pairs {
-        if !core
-            .dfs_ctx
-            .place_visited
-            .contains_key(&encode_node(a.x, a.y))
-        {
-            let c1 = try_place_id(a.x, a.y, 0, 1, core);
-            let c2 = try_place_id(a.x, a.y, 1, 2, core);
-            core.dfs_ctx.empty_block_line_count += c1.min(c2) as usize;
+        node_keys.push(encode_node(a.x, a.y));
+        node_keys.push(encode_node(b.x, b.y));
+    }
+    node_keys.sort_unstable();
+    node_keys.dedup();
+    let mut comp_seen: HashSet<u64> = HashSet::new();
+    for &k in &node_keys {
+        if comp_seen.contains(&k) {
+            continue;
         }
-        if !core
-            .dfs_ctx
-            .place_visited
-            .contains_key(&encode_node(b.x, b.y))
-        {
-            let c1 = try_place_id(b.x, b.y, 0, 1, core);
-            let c2 = try_place_id(b.x, b.y, 1, 2, core);
-            core.dfs_ctx.empty_block_line_count += c1.min(c2) as usize;
-        }
+        let tau = component_max_matching(k, &core.dfs_ctx.block_adj, &mut comp_seen);
+        core.dfs_ctx.empty_block_line_count += tau;
     }
 }
 
@@ -837,4 +961,64 @@ pub fn find_special_start_area(core: &mut AoGCore, sp: &Vec<Vec<u32>>) -> (u32, 
         special_start_type = SPECIAL_START_DEFAULT;
     }
     (special_start_type, ret_data.1, ret_data.2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// H1: the block-line graph is bipartite.  The minimum vertex cover equals
+    /// the maximum bipartite matching size τ (Kőnig), which is ≤ min(|X|,|Y|).
+    /// The old code used min(|X|,|Y|), over-counting excluded cells.
+    ///
+    /// Double-star graph:
+    ///   X (color 0) = {x1,x2,x3,x4},  Y (color 1) = {y1,y2,y3}
+    ///   y1 hub: y1-x1,x2,x3,x4 ;  y2-x1 ;  y3-x1
+    /// min(|X|,|Y|) = 3, but maximum matching = 2 (only two of {y1,y2,y3} can
+    /// be matched because x1 is the sole neighbour of y2 and y3).
+    #[test]
+    fn test_max_bipartite_matching_double_star() {
+        let mut adj: HashMap<u64, Vec<Node>> = HashMap::new();
+        let x1 = Node { x: 0, y: 0 };
+        let x2 = Node { x: 0, y: 1 };
+        let x3 = Node { x: 0, y: 2 };
+        let x4 = Node { x: 0, y: 3 };
+        let y1 = Node { x: 1, y: 0 };
+        let y2 = Node { x: 1, y: 1 };
+        let y3 = Node { x: 1, y: 2 };
+        let add = |adj: &mut HashMap<u64, Vec<Node>>, a: Node, b: Node| {
+            adj.entry(encode_node(a.x, a.y)).or_default().push(b);
+            adj.entry(encode_node(b.x, b.y)).or_default().push(a);
+        };
+        add(&mut adj, y1, x1);
+        add(&mut adj, y1, x2);
+        add(&mut adj, y1, x3);
+        add(&mut adj, y1, x4);
+        add(&mut adj, y2, x1);
+        add(&mut adj, y3, x1);
+
+        let mut seen: HashSet<u64> = HashSet::new();
+        let tau = component_max_matching(encode_node(x1.x, x1.y), &adj, &mut seen);
+        assert_eq!(tau, 2, "max matching must be 2, not min(|X|,|Y|)=3");
+    }
+
+    /// Sanity: a single star K_{1,3} has matching size 1 (== min here).
+    #[test]
+    fn test_max_bipartite_matching_star() {
+        let mut adj: HashMap<u64, Vec<Node>> = HashMap::new();
+        let c = Node { x: 5, y: 5 };
+        let l1 = Node { x: 6, y: 5 };
+        let l2 = Node { x: 7, y: 5 };
+        let l3 = Node { x: 8, y: 5 };
+        let add = |adj: &mut HashMap<u64, Vec<Node>>, a: Node, b: Node| {
+            adj.entry(encode_node(a.x, a.y)).or_default().push(b);
+            adj.entry(encode_node(b.x, b.y)).or_default().push(a);
+        };
+        add(&mut adj, c, l1);
+        add(&mut adj, c, l2);
+        add(&mut adj, c, l3);
+        let mut seen: HashSet<u64> = HashSet::new();
+        let tau = component_max_matching(encode_node(c.x, c.y), &adj, &mut seen);
+        assert_eq!(tau, 1);
+    }
 }

@@ -339,30 +339,23 @@ fn build_solution(
     }
 }
 
-/// Solution builder for the AoG solver, whose internal constraint checks are
-/// authoritative (the C++ solver enforces every rule during the search).
+/// Solution builder for the AoG solver.
+///
+/// H5 (soundness): this used to mark the result solved WITHOUT running
+/// `validate::validate`, on the grounds that aog's internal checks are
+/// authoritative.  aog was therefore the only solver path whose output the
+/// Rust binary never re-validated (rose / pieces / backtrack / edge_csp all go
+/// through `build_solution`'s validate gate) — every soundness hole in aog's
+/// search (H1–H3) shipped straight through.  Run the same `validate::validate`
+/// gate here: defense in depth, and an invalid aog partition now falls through
+/// to the next solver in the router instead of being returned as "solved".
 fn build_solution_trusted(
     regions: Vec<RegionInfo>,
     start: &Instant,
     puzzle: &Puzzle,
     attempts: Vec<SolverAttempt>,
 ) -> Solution {
-    let elapsed = start.elapsed().as_millis() as u64;
-    let rule_results: HashMap<String, bool> = puzzle
-        .rules
-        .iter()
-        .map(|r| (r.ctype.clone(), true))
-        .collect();
-    Solution {
-        solved: true,
-        steps_taken: 0,
-        elapsed_ms: elapsed,
-        error_message: None,
-        regions,
-        rule_results,
-        solver: "aog".to_string(),
-        attempts,
-    }
+    build_solution(regions, start, puzzle, "aog", attempts)
 }
 
 /// True for puzzles the rose solver can attempt — mirrors Python
@@ -373,6 +366,13 @@ fn build_solution_trusted(
 fn is_rose_capable(puzzle: &Puzzle) -> bool {
     let has_rose = puzzle.rules.iter().any(|r| r.ctype == "rose_window");
     if !has_rose {
+        return false;
+    }
+    // M2: symbol bookkeeping uses u64 bitmasks keyed by symbol-type index.
+    // A rose_window with >64 distinct symbol types cannot be represented, and
+    // silently masking high bits away could accept invalid regions — refuse
+    // the puzzle instead (the router falls through to the other solvers).
+    if crate::shapes::rose_symbol_types(puzzle).len() > 64 {
         return false;
     }
     !puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "different")

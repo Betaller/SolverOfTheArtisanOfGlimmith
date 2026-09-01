@@ -62,8 +62,8 @@ pub fn generate_all_candidates(
     let w = puzzle.width;
     let n_bits = h * w;
     let is_multi = symbol_types.len() >= 2;
-    let all_required: u32 = if is_multi {
-        (1u32 << symbol_types.len()) - 1
+    let all_required: u64 = if is_multi {
+        (1u64 << symbol_types.len()) - 1
     } else {
         0
     };
@@ -87,9 +87,9 @@ pub fn generate_all_candidates(
             }
         }
     }
-    let initial_syms: u32 = symbol_of.get(&seed).map(|ti| 1u32 << ti).unwrap_or(0);
+    let initial_syms: u64 = symbol_of.get(&seed).map(|ti| 1u64 << ti).unwrap_or(0);
 
-    let mut queue: std::collections::VecDeque<(CellSet, CellSet, u32)> =
+    let mut queue: std::collections::VecDeque<(CellSet, CellSet, u64)> =
         std::collections::VecDeque::new();
     queue.push_back((initial, initial_frontier, initial_syms));
 
@@ -112,6 +112,14 @@ pub fn generate_all_candidates(
                 // symbols, strictly worse for the exact-cover match. Reduces
                 // visited/queue 10-50× on multi-symbol puzzles (C4-2, 0620,
                 // 1433). (doc 15 §2 A3.)
+                //
+                // M1-REVERT: the theoretically-sound removal of this early-stop
+                // (true solution region may be a same-symbol-set superset) is
+                // empirically net-negative: on slash-pack 0833 the superset
+                // expansion floods CANDIDATE_CAP and the puzzle flips from
+                // solved (~7s) to unsolvable, with no offsetting NEW solves.
+                // Early-stop restored; the theoretical soundness hole stays
+                // documented in docs/bugs and branch history.
                 continue;
             }
         } else {
@@ -125,7 +133,7 @@ pub fn generate_all_candidates(
             let cell_sym = symbol_of.get(&cell).copied();
             let mut skip = false;
             if let Some(ti) = cell_sym {
-                if is_multi && (syms & (1u32 << ti)) != 0 {
+                if is_multi && (syms & (1u64 << ti)) != 0 {
                     skip = true;
                 }
             }
@@ -153,7 +161,7 @@ pub fn generate_all_candidates(
                 continue;
             }
             visited.insert(new_fs.clone());
-            let new_syms = syms | cell_sym.map(|ti| 1u32 << ti).unwrap_or(0);
+            let new_syms = syms | cell_sym.map(|ti| 1u64 << ti).unwrap_or(0);
             let mut new_frontier = frontier.clone();
             new_frontier.remove(cell);
             for (dr, dc) in dirs {

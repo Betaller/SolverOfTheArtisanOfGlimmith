@@ -318,12 +318,12 @@ fn solve_multisymbol(
         boundary_endpoints.insert(r1 * w + c1);
         boundary_endpoints.insert(r2 * w + c2);
     }
-    let mut region_symbols: Vec<u32> = vec![0u32; m];
+    let mut region_symbols: Vec<u64> = vec![0u64; m];
     let mut region_sizes: Vec<usize> = vec![1usize; m];
     let mut region_of = vec![None; n_bits];
     for (i, &seed) in seeds.iter().enumerate() {
         region_of[seed] = Some(i);
-        region_symbols[i] = 1u32 << symbol_of.get(&seed).copied().unwrap_or(0);
+        region_symbols[i] = 1u64 << symbol_of.get(&seed).copied().unwrap_or(0);
     }
 
     let mut queue: VecDeque<(usize, usize)> = seeds.iter().enumerate().map(|(i, &s)| (s, i)).collect();
@@ -345,7 +345,7 @@ fn solve_multisymbol(
             }
             let sym = symbol_of.get(&nidx).copied();
             if let Some(si) = sym {
-                if (region_symbols[rid] & (1u32 << si)) != 0 {
+                if (region_symbols[rid] & (1u64 << si)) != 0 {
                     continue;
                 }
             }
@@ -370,7 +370,7 @@ fn solve_multisymbol(
             }
             region_of[nidx] = Some(rid);
             if let Some(si) = sym {
-                region_symbols[rid] |= 1u32 << si;
+                region_symbols[rid] |= 1u64 << si;
             }
             region_sizes[rid] += 1;
             queue.push_back((nidx, rid));
@@ -414,7 +414,7 @@ fn solve_multisymbol(
                 let mut valid: Vec<usize> = candidates
                     .into_iter()
                     .filter(|&i| {
-                        !(sym.is_some() && (region_symbols[i] & (1u32 << sym.unwrap())) != 0)
+                        !(sym.is_some() && (region_symbols[i] & (1u64 << sym.unwrap())) != 0)
                     })
                     .collect();
                 if valid.is_empty() {
@@ -424,7 +424,7 @@ fn solve_multisymbol(
                 let best = valid[0];
                 region_of[idx] = Some(best);
                 if let Some(si) = sym {
-                    region_symbols[best] |= 1u32 << si;
+                    region_symbols[best] |= 1u64 << si;
                 }
                 region_sizes[best] += 1;
                 unassigned.remove(idx);
@@ -463,7 +463,7 @@ fn solve_multisymbol(
                 let mut sorted: Vec<usize> = neigh.into_iter().collect();
                 sorted.sort_unstable();
                 for nrid in sorted {
-                    if sym.is_some() && (region_symbols[nrid] & (1u32 << sym.unwrap())) != 0 {
+                    if sym.is_some() && (region_symbols[nrid] & (1u64 << sym.unwrap())) != 0 {
                         continue;
                     }
                     let mut conflict = false;
@@ -484,8 +484,8 @@ fn solve_multisymbol(
                         continue;
                     }
                     if let Some(si) = sym {
-                        region_symbols[cur_rid] &= !(1u32 << si);
-                        region_symbols[nrid] |= 1u32 << si;
+                        region_symbols[cur_rid] &= !(1u64 << si);
+                        region_symbols[nrid] |= 1u64 << si;
                     }
                     region_of[cell_r * w + cell_c] = Some(nrid);
                     region_sizes[cur_rid] -= 1;
@@ -506,7 +506,7 @@ fn solve_multisymbol(
         }
     }
 
-    let all_mask: u32 = (1u32 << symbol_types.len()) - 1;
+    let all_mask: u64 = (1u64 << symbol_types.len()) - 1;
     if region_symbols.iter().any(|&s| s != all_mask) {
         return None;
     }

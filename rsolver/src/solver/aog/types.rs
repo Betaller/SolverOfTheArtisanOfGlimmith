@@ -161,6 +161,62 @@ impl Shape {
         }
         true
     }
+
+    /// True iff the shape's cells form a full axis-aligned rectangle.  Used to
+    /// enforce `block` (`only_rectangles`): when a `shape_pool` also supplies
+    /// non-rectangular shapes, those must not be placed (bug H3).
+    pub fn is_rectangle(&self) -> bool {
+        if self.nodes.is_empty() {
+            return false;
+        }
+        let mut min_x = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut min_y = i32::MAX;
+        let mut max_y = i32::MIN;
+        for n in &self.nodes {
+            min_x = min_x.min(n.x);
+            max_x = max_x.max(n.x);
+            min_y = min_y.min(n.y);
+            max_y = max_y.max(n.y);
+        }
+        let w = (max_x - min_x + 1) as usize;
+        let h = (max_y - min_y + 1) as usize;
+        w * h == self.nodes.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// H3: `is_rectangle` must be true for a domino (1×2) and false for an
+    /// L-tromino (the shape `block` must reject placing).
+    #[test]
+    fn test_is_rectangle_domino() {
+        let g = vec![vec![1u32, 1], vec![0, 0]];
+        let s = Shape::from_grid(&g, 2);
+        assert!(s.is_rectangle(), "1x2 domino is a rectangle");
+    }
+
+    #[test]
+    fn test_is_rectangle_l_tromino() {
+        let g = vec![vec![1u32, 1], vec![0, 1]];
+        let s = Shape::from_grid(&g, 2);
+        assert!(!s.is_rectangle(), "L-tromino is not a rectangle");
+    }
+
+    #[test]
+    fn test_is_rectangle_5x1_bar() {
+        let g = vec![
+            vec![1u32, 0, 0, 0, 0],
+            vec![1, 0, 0, 0, 0],
+            vec![1, 0, 0, 0, 0],
+            vec![1, 0, 0, 0, 0],
+            vec![1, 0, 0, 0, 0],
+        ];
+        let s = Shape::from_grid(&g, 5);
+        assert!(s.is_rectangle(), "5x1 bar is a rectangle");
+    }
 }
 
 // ── Config ───────────────────────────────────────────────────────────────────

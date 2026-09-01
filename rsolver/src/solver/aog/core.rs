@@ -916,7 +916,21 @@ impl AoGCore {
                 while l * l <= size {
                     if size % l == 0 {
                         let h = size / l;
-                        if l <= core.n_row && h <= core.n_col {
+                        // H2: a `size`-cell rectangle can be placed either as an
+                        // `l × h` bar (l rows, h cols) or as an `h × l` bar.  The
+                        // old code only inserted when the `l × h` orientation fit
+                        // (`l <= n_row && h <= n_col`); the 90° rotation is added by
+                        // `shapes_insert`, but if the `l × h` orientation itself
+                        // was rejected, its rotation was never generated — so a
+                        // rectangle that only fits VERTICALLY (`h <= n_row &&
+                        // l <= n_col`) was missing from the catalog and the puzzle
+                        // could be reported unsolvable.  Insert whenever EITHER
+                        // orientation fits the board (the catalog is board-
+                        // independent, so the other orientation is covered by the
+                        // dihedral rotations of whatever we insert).
+                        if (l <= core.n_row && h <= core.n_col)
+                            || (h <= core.n_row && l <= core.n_col)
+                        {
                             let dim = h.max(l);
                             let mut grid = vec![vec![0u32; dim]; dim];
                             for i in 0..l {
@@ -1108,5 +1122,56 @@ mod tests {
             // At least one orientation is new for each distinct shape.
             assert_ne!(n, 0, "cap=0 must not refuse any new shape");
         }
+    }
+
+    #[test]
+    fn test_rectangle_catalog_includes_vertical_orientation() {
+        // H2: a 5×2 board with `block` (only_rectangles). A size-5 region can
+        // only be a 5×1 vertical bar (the 1×5 horizontal bar doesn't fit in 2
+        // columns). The old code rejected the 1×5 orientation (5 > n_col=2) and
+        // never generated its 90° rotation, so the vertical bar was missing.
+        let h = 5usize;
+        let w = 2usize;
+        let cells = (0..h)
+            .map(|r| (0..w).map(|c| Cell::new(r, c)).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let puzzle = Puzzle {
+            height: h,
+            width: w,
+            cells,
+            h_edges: vec![vec![Edge::default(); w.saturating_sub(1)]; h],
+            v_edges: vec![vec![Edge::default(); w]; h.saturating_sub(1)],
+            vertices: vec![vec![Vertex::default(); w + 1]; h + 1],
+            rules: vec![Rule {
+                ctype: "block".into(),
+                params: Default::default(),
+            }],
+            shape_pool: vec![],
+            outer_boundaries: vec![],
+        };
+        let deadline = Instant::now() + std::time::Duration::from_secs(60);
+        let core = AoGCore::build(&puzzle, deadline).expect("build must succeed");
+
+        // 5×1 vertical bar as a 5×5 normalized grid (first column filled).
+        let mut vbar = vec![vec![0u32; 5]; 5];
+        for i in 0..5 {
+            vbar[i][0] = 1;
+        }
+        assert_ne!(
+            core.shapes_search(&vbar, 5),
+            NO_SHAPE_INDEX,
+            "5x1 vertical bar must be present in the rectangle catalog"
+        );
+
+        // And the 1×5 horizontal bar (its rotation) is present too.
+        let mut hbar = vec![vec![0u32; 5]; 5];
+        for j in 0..5 {
+            hbar[0][j] = 1;
+        }
+        assert_ne!(
+            core.shapes_search(&hbar, 5),
+            NO_SHAPE_INDEX,
+            "1x5 horizontal bar must be present in the rectangle catalog"
+        );
     }
 }

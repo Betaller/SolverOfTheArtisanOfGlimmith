@@ -10,7 +10,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget, QMenu
 
-from src.models.board import Board, Cell, Edge, EdgeConstraintType, Vertex, Shape, CompassClue
+from src.models.board import (
+    Board, Cell, Edge, EdgeConstraint, EdgeConstraintType, Vertex, Shape, CompassClue
+)
 from src.ui import theme as _ui_theme
 
 

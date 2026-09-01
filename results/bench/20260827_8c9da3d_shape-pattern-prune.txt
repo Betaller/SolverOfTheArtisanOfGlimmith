@@ -1,0 +1,188 @@
+baseline: 169 run, 2 skipped (--skip-slow)
+[   1/169] PASS Zone1    0179B.json               via=aog:success                   0ms
+[   2/169] PASS Zone1    0182.json                via=aog:success                   0ms
+[   3/169] PASS Zone1    1068.json                via=aog:success                   1ms
+[   4/169] PASS Zone1    0181.json                via=aog:success                   0ms
+[   5/169] PASS Zone1    1033.json                via=aog:success                   0ms
+[   6/169] PASS Zone1    0201.json                via=aog:success                   5ms
+[   7/169] PASS Zone1    1243.json                via=aog:success                   0ms
+[   8/169] PASS Zone1    1123.json                via=aog:success                   5ms
+[   9/169] PASS Zone1    1426.json                via=aog:success                   1ms
+[  10/169] PASS Zone1    1252.json                via=aog:success                   1ms
+[  11/169] PASS Zone1    1427.json                via=aog:success                   1ms
+[  12/169] PASS Zone1    1244.json                via=aog:success                   1ms
+[  13/169] PASS Zone1    0046.json                via=aog:success                   1ms
+[  14/169] PASS Zone1    1428.json                via=aog:success                   2ms
+[  15/169] PASS Zone1    0172.json                via=aog:success                   3ms
+[  16/169] PASS Zone1    1429.json                via=aog:success                   4ms
+[  17/169] PASS Zone1    0173.json                via=aog:success                   2ms
+[  18/169] PASS Zone1    0176.json                via=aog:success                   0ms
+[  19/169] PASS Zone1    0177.json                via=aog:success                   0ms
+[  20/169] PASS Zone1    0178.json                via=aog:success                   0ms
+[  21/169] PASS Zone1    0247.json                via=aog:success                   0ms
+[  22/169] PASS Zone1    0225.json                via=aog:success                   1ms
+[  23/169] PASS Zone1    0174.json                via=aog:success                  17ms
+[  24/169] PASS Zone1    0226.json                via=aog:success                   9ms
+[  25/169] PASS Zone1    0250.json                via=aog:success                   2ms
+[  26/169] PASS Zone1    0249.json                via=aog:success                   4ms
+[  27/169] PASS Zone1    0253.json                via=aog:success                   1ms
+[  28/169] PASS Zone1    0259.json                via=aog:success                   0ms
+[  29/169] PASS Zone1    0783.json                via=aog:success                   0ms
+[  30/169] PASS Zone1    1037.json                via=aog:success                   0ms
+[  31/169] PASS Zone1    1069.json                via=aog:success                 109ms
+[  32/169] PASS Zone1    1096.json                via=aog:success                   0ms
+[  33/169] PASS Zone1    0784.json                via=aog:success                  20ms
+[  34/169] PASS Zone1    0331.json                via=aog:success                 188ms
+[  35/169] PASS Zone1    0252.json                via=aog:success                  92ms
+[  36/169] PASS Zone1    1125.json                via=aog:success                   0ms
+[  37/169] PASS Zone1    1170b.json               via=aog:success                   0ms
+[  38/169] PASS Zone1    1171.json                via=aog:success                   0ms
+[  39/169] PASS Zone1    0123.json                via=aog:success                   0ms
+[  40/169] PASS Zone1    1250.json                via=aog:success                   0ms
+[  41/169] PASS Zone1    0128.json                via=aog:success                   0ms
+[  42/169] PASS Zone1    0134.json                via=aog:success                   0ms
+[  43/169] PASS Zone1    0133.json                via=aog:success                   0ms
+[  44/169] PASS Zone1    0137.json                via=aog:success                   0ms
+[  45/169] PASS Zone1    0135.json                via=aog:success                   0ms
+[  46/169] PASS Zone1    0144.json                via=aog:success                   2ms
+[  47/169] PASS Zone1    0146.json                via=aog:success                   2ms
+[  48/169] PASS Zone1    0148.json                via=aog:success                   0ms
+[  49/169] PASS Zone1    0147.json                via=aog:success                   0ms
+[  50/169] PASS Zone1    0149.json                via=aog:success                   0ms
+[  51/169] PASS Zone1    0150.json                via=aog:success                   0ms
+[  52/169] PASS Zone1    0151.json                via=aog:success                   1ms
+[  53/169] PASS Zone1    0175.json                via=aog:success                   0ms
+[  54/169] PASS Zone1    0200.json                via=aog:success                   0ms
+[  55/169] PASS Zone1    0361.json                via=aog:success                  82ms
+[  56/169] PASS Zone1    0363.json                via=aog:success                   0ms
+[  57/169] PASS Zone1    0364.json                via=aog:success                   1ms
+[  58/169] PASS Zone1    0365.json                via=aog:success                   0ms
+[  59/169] PASS Zone1    0366.json                via=aog:success                   0ms
+[  60/169] PASS Zone1    0368.json                via=aog:success                   2ms
+[  61/169] PASS Zone1    0371.json                via=aog:success                   1ms
+[  62/169] PASS Zone1    0379.json                via=aog:success                   0ms
+[  63/169] PASS Zone1    0380.json                via=aog:success                   0ms
+[  64/169] PASS Zone1    0392.json                via=aog:success                   0ms
+[  65/169] PASS Zone1    1040.json                via=aog:success                   0ms
+[  66/169] PASS Zone1    1042.json                via=aog:success                   0ms
+[  67/169] PASS Zone1    1043.json                via=aog:success                   0ms
+[  68/169] PASS Zone1    1046.json                via=aog:success                   0ms
+[  69/169] PASS Zone1    1048.json                via=aog:success                   0ms
+[  70/169] PASS Zone1    1049.json                via=aog:success                   1ms
+[  71/169] PASS Zone1    1051.json                via=aog:success                   0ms
+[  72/169] PASS Zone1    1053.json                via=aog:success                   0ms
+[  73/169] PASS Zone1    1054.json                via=aog:success                   0ms
+[  74/169] PASS Zone1    1057.json                via=aog:success                   0ms
+[  75/169] PASS Zone1    1058.json                via=aog:success                   0ms
+[  76/169] PASS Zone1    1245.json                via=aog:success                   1ms
+[  77/169] PASS Zone1    1423.json                via=aog:success                   0ms
+[  78/169] PASS Zone2    0344r.json               via=aog:success                   0ms
+[  79/169] PASS Zone2    0647.json                via=aog:success                   0ms
+[  80/169] PASS Zone1    0224.json                via=aog:success                 592ms
+[  81/169] PASS Zone2    0739.json                via=aog:success                 442ms
+[  82/169] PASS Zone2    0746.json                via=aog:success                   0ms
+[  83/169] PASS Zone2    0753.json                via=aog:success                   1ms
+[  84/169] PASS Zone2    1101.json                via=aog:success                  37ms
+[  85/169] PASS Zone2    0738.json                via=aog:success                   1ms
+[  86/169] PASS Zone2    0877.json                via=aog:success                   1ms
+[  87/169] PASS Zone2    0704.json                via=aog:success                  23ms
+[  88/169] PASS Zone2    0705b.json               via=aog:success                   0ms
+[  89/169] PASS Zone2    1014.json                via=aog:success                   0ms
+[  90/169] PASS Zone2    0319.json                via=aog:success                   0ms
+[  91/169] PASS Zone2    0258.json                via=aog:success                   1ms
+[  92/169] PASS Zone2    0284.json                via=aog:success                   0ms
+[  93/169] PASS Zone2    0285.json                via=aog:success                   0ms
+[  94/169] PASS Zone2    0310.json                via=aog:success                   0ms
+[  95/169] PASS Zone2    0333.json                via=aog:success                  35ms
+[  96/169] PASS Zone2    0603.json                via=aog:success                   0ms
+[  97/169] PASS Zone2    0604.json                via=aog:success                   0ms
+[  98/169] PASS Zone2    0605.json                via=aog:success                   0ms
+[  99/169] PASS Zone2    1254.json                via=aog:success                   1ms
+[ 100/169] PASS Zone2    1262.json                via=aog:success                   0ms
+[ 101/169] PASS Zone2    1309.json                via=aog:success                   4ms
+[ 102/169] PASS Zone2    0286.json                via=aog:success                   0ms
+[ 103/169] PASS Zone2    0287.json                via=aog:success                   0ms
+[ 104/169] PASS Zone2    0733.json                via=aog:success                   0ms
+[ 105/169] PASS Zone2    0769.json                via=aog:success                  14ms
+[ 106/169] PASS Zone2    0779.json                via=aog:success                   1ms
+[ 107/169] PASS Zone2    0780.json                via=aog:success                  48ms
+[ 108/169] PASS Zone2    1181.json                via=aog:success                   0ms
+[ 109/169] PASS Zone2    1343.json                via=aog:success                   6ms
+[ 110/169] PASS Zone2    1347.json                via=aog:success                   0ms
+[ 111/169] PASS Zone2    0677.json                via=aog:success                   3ms
+[ 112/169] PASS Zone2    0815.json                via=aog:success                   0ms
+[ 113/169] PASS Zone2    0816.json                via=aog:success                   1ms
+[ 114/169] PASS Zone2    1190.json                via=aog:success                   0ms
+[ 115/169] PASS Zone2    1436.json                via=aog:success                 135ms
+[ 116/169] PASS Zone2    0129b.json               via=aog:success                   1ms
+[ 117/169] PASS Zone2    0503.json                via=aog:success                   0ms
+[ 118/169] PASS Zone2    0565.json                via=aog:success                   0ms
+[ 119/169] PASS Zone2    0568.json                via=aog:success                   0ms
+[ 120/169] PASS Zone2    0639.json                via=aog:success                   0ms
+[ 121/169] PASS Zone2    0785.json                via=aog:success                   0ms
+[ 122/169] PASS Zone2    0786.json                via=aog:success                 105ms
+[ 123/169] PASS Zone2    0797.json                via=aog:success                   1ms
+[ 124/169] PASS Zone2    0798.json                via=aog:success                   0ms
+[ 125/169] PASS Zone2    0808.json                via=aog:success                 261ms
+[ 126/169] PASS Zone2    1184.json                via=aog:success                   0ms
+[ 127/169] PASS Zone2    0827.json                via=aog:success                  26ms
+[ 128/169] PASS Zone2    0498.json                via=aog:success                   0ms
+[ 129/169] PASS Zone2    0577.json                via=aog:success                   0ms
+[ 130/169] PASS Zone2    0671.json                via=aog:success                   0ms
+[ 131/169] PASS Zone2    0842.json                via=aog:success                   0ms
+[ 132/169] PASS Zone2    0859.json                via=aog:success                   1ms
+[ 133/169] PASS Zone2    1255.json                via=aog:success                   0ms
+[ 134/169] PASS Zone3    0021.json                via=aog:success                   2ms
+[ 135/169] PASS Zone3    0033.json                via=aog:success                   0ms
+[ 136/169] PASS Zone3    0407.json                via=aog:success                   0ms
+[ 137/169] PASS Zone3    0613.json                via=aog:success                   0ms
+[ 138/169] PASS Zone3    0668.json                via=aog:success                   0ms
+[ 139/169] PASS Zone3    0940.json                via=aog:success                  11ms
+[ 140/169] PASS Zone3    1154.json                via=aog:success                   1ms
+[ 141/169] PASS Zone3    1266.json                via=aog:success                   1ms
+[ 142/169] PASS Zone3    1295.json                via=aog:success                   0ms
+[ 143/169] PASS Zone1    0732.json                via=aog:timeout→rose:success   3000ms
+[ 144/169] PASS Zone1    0153.json                via=aog:success                3279ms
+[ 145/169] PASS Zone3    0870.json                via=aog:success                4457ms
+[ 146/169] FAIL Zone3    0976.json                via=aog:timeout→pieces:exhausted→backtrack:exhausted  19545ms  No solution found
+[ 147/169] FAIL Zone3    0606.json                via=aog:timeout→pieces:timeout→backtrack:exhausted  36327ms  No solution found
+[ 148/169] PASS Zone3    0996.json                via=aog:success                  81ms
+[ 149/169] PASS Zone3    0917c.json               via=aog:success                 791ms
+[ 150/169] PASS Zone3    0918b.json               via=aog:success                 469ms
+[ 151/169] PASS Zone3    0843.json                via=aog:success                   9ms
+[ 152/169] PASS Zone3    1071.json                via=aog:success                   1ms
+[ 153/169] PASS Zone3    1072.json                via=aog:success                   2ms
+[ 154/169] FAIL Zone3    0994.json                via=aog:timeout→pieces:timeout→backtrack:exhausted  24039ms  No solution found
+[ 155/169] PASS Zone3    1387.json                via=aog:success                  68ms
+[ 156/169] PASS Zone3    0154.json                via=aog:success                   0ms
+[ 157/169] PASS Zone3    0268.json                via=aog:success                  83ms
+[ 158/169] PASS Zone3    0653.json                via=aog:success                  66ms
+[ 159/169] FAIL Zone3    1215.json                via=aog:timeout→pieces:timeout→backtrack:exhausted  43617ms  No solution found
+[ 160/169] PASS Zone3    0941.json                via=aog:success                   2ms
+[ 161/169] PASS Zone3    0988.json                via=aog:success                  83ms
+[ 162/169] PASS Zone3    1151.json                via=aog:success                  64ms
+[ 163/169] FAIL Zone3    1093.json                via=aog:timeout→pieces:exhausted→backtrack:exhausted  12091ms  No solution found
+[ 164/169] FAIL Zone1    1435.json                via=-                             0ms  Rust solver timed out after 12s
+[ 165/169] FAIL Zone1    1099.json                via=-                             0ms  Rust solver timed out after 12s
+[ 166/169] FAIL Zone1    1098.json                via=-                             0ms  Rust solver timed out after 12s
+[ 167/169] FAIL Zone1    1100.json                via=-                             0ms  Rust solver timed out after 12s
+[ 168/169] FAIL Zone2    0745.json                via=-                             0ms  Rust solver timed out after 12s
+[ 169/169] PASS Zone3    0825.json                via=aog:success               11789ms
+
+结果: 159/169 通过
+  Zone1: 80 / 84
+  Zone2: 55 / 56
+  Zone3: 24 / 29
+
+回归对比: REGRESSION=0  NEW=0  NEW FILE=0  SKIPPED-SLOW=2
+失败:
+  0976.json: No solution found
+  0606.json: No solution found
+  0994.json: No solution found
+  1215.json: No solution found
+  1093.json: No solution found
+  1435.json: Rust solver timed out after 12s
+  1099.json: Rust solver timed out after 12s
+  1098.json: Rust solver timed out after 12s
+  1100.json: Rust solver timed out after 12s
+  0745.json: Rust solver timed out after 12s

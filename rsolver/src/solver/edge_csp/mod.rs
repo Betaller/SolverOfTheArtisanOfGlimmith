@@ -545,16 +545,31 @@ pub fn solve_edge_csp(
 /// by `has_area_signal` so a puzzle carrying no usable area information is
 /// still rejected instead of routed into the edge DFS.
 pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
-    const EDGE_RULES: [&str; 6] = [
+    const EDGE_RULES: [&str; 7] = [
         "ring",
         "brick",
         "watchtower",
         "compass",
         "inequality",
         "difference",
+        "fence",
     ];
     const AREA_RULES: [&str; 3] = ["area", "precise", "range"];
-    const SUPPORTED: [&str; 13] = [
+    // `rose_window` / `same` / `different` / `homogeneous` / `mixed` /
+    // `heterogeneous` are NOT propagated by edge_csp (it can only leaf-check
+    // them via `validate::validate`), but they frequently co-occur with a
+    // propagatable edge rule (ring/fence/compass/…). Tolerating them lets
+    // edge_csp engage on those edge rules instead of the puzzle being entirely
+    // excluded (which starves the search of edge_csp's strong propagation).
+    // Pure non-edge combos are still rejected by the EDGE_RULES/AREA_RULES
+    // checks below, so the blast radius is limited to edge+window/shape puzzles.
+    //
+    // `puzzle_piece` is deliberately NOT tolerated: a `puzzle_piece` puzzle is
+    // solved by the `pieces` (DLX) solver, and gating it into edge_csp makes
+    // edge_csp run first (full budget) and blow the Python subprocess wall
+    // budget before `pieces` gets to run (regressed Zone2/0745). `pieces` runs
+    // independently of the gate, so excluding `puzzle_piece` here costs nothing.
+    const SUPPORTED: [&str; 20] = [
         "ring",
         "brick",
         "watchtower",
@@ -568,6 +583,13 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
         "differentiation",
         "block",
         "non_block",
+        "solitary",
+        "rose_window",
+        "same",
+        "different",
+        "homogeneous",
+        "mixed",
+        "heterogeneous",
     ];
     if !puzzle
         .rules

@@ -200,6 +200,19 @@ impl<'a> Solver<'a> {
                         }
                     }
                 }
+
+                // NOTE: AOG deduces `exact_piece_count` from the rose window
+                // here ("all types occur N times => exactly N pieces",
+                // `third_party/aog/src/solver/mod.rs:139`) and uses it to seed
+                // Cut edges as parity-1 facts.  We deliberately do NOT: our type
+                // set is built from *any* cell symbol, not just rose clues, so a
+                // puzzle carrying non-rose symbols gets a wrong count and the
+                // resulting pruning drops real solutions.
+                //
+                // Measured 2026-09-03 on the 187 rose_window puzzles: enabling
+                // the deduction and the extra parity seeding gained 0987 but
+                // lost 0213nopad, 1135 and 1392 (-2 net).  Reverted.
+                solver.exact_piece_count = None;
             }
         }
 

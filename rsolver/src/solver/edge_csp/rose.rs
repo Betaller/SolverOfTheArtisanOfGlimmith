@@ -273,6 +273,19 @@ impl<'a> Solver<'a> {
         let ne = self.grid.num_edges();
         let two_piece = self.exact_piece_count == Some(2);
 
+        // The forcing loop below can only fire if some parity-1 relation gets
+        // seeded: Uncut edges and SAME pairs only seed parity 0, so without a
+        // 2-of-a-kind rose pair (or a known 2-piece count, which also seeds
+        // Cut edges as parity 1) every root ends up with uniform parity and no
+        // edge can be forced Cut - and no union can contradict either.  That
+        // makes the whole O(V + E) pass provably a no-op, so skip it.  This
+        // matters on puzzles whose rose types all occur >2 times, where the
+        // pass was pure per-propagation overhead.
+        let has_parity1_source = two_piece || self.rose_by_type.iter().any(|t| t.len() == 2);
+        if !has_parity1_source {
+            return Ok(false);
+        }
+
         let mut uf = ParityUF::new(n);
 
         // Seed: rose cells of same type (exactly 2) → different pieces (parity=1).

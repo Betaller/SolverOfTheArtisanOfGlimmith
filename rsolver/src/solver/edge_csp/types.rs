@@ -103,6 +103,13 @@ pub enum EdgeClueKind {
     Inequality { smaller_first: bool },
     /// The two adjacent pieces differ in area by exactly `value` (unsigned).
     Diff { value: usize },
+    /// Gemini (`homogeneous`): the two adjacent pieces have the SAME normalized
+    /// shape - which implies equal area.
+    Gemini,
+    /// Delta (`heterogeneous`): the two adjacent pieces have DIFFERENT
+    /// normalized shapes.  Note this does *not* imply different areas (two
+    /// distinct shapes can share an area), so only the shape relation is known.
+    Delta,
 }
 
 #[derive(Clone, Debug)]

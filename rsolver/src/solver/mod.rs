@@ -58,6 +58,12 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // success it is attached to the returned `Solution`.
     let mut attempts: Vec<SolverAttempt> = Vec::new();
 
+    // NOTE (2026-09-03): running edge_csp BEFORE aog here (wiring up the
+    // previously dead `is_edge_csp_preempt`) was tried and REJECTED - it cost
+    // 61 puzzles (1112 -> 1051, 65 regressions, 4 gains) and *increased* the
+    // OOM pool from 57 to 75.  edge_csp burns its unit budget on puzzles aog
+    // cracks in seconds, and OOMs on some of its own.  Keep aog first.
+
     // 0. AoG DFS solver first: direct port of the C++ reference solver.
     // For pure rose_window puzzles aog solves most in <1s but can hang for the
     // full budget on "no size constraint" ones — give it a short budget, then

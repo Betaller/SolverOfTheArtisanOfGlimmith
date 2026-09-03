@@ -17,13 +17,13 @@ pub mod adapter;
 pub mod grid;
 pub mod parity_uf;
 pub mod prop;
+pub mod rose;
 pub mod types;
 
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
 use crate::clock::Instant;
-use crate::solver::rose;
 use crate::types::{ModuleOutcome, Puzzle, RegionInfo};
 
 use adapter::Input;
@@ -80,6 +80,21 @@ pub(crate) struct Solver<'a> {
     pub timed_out: bool,
     // First solution found.
     pub solution_regions: Option<Vec<RegionInfo>>,
+    // --- Rose-window state (populated only when rose_window is present) ---
+    /// Per-cell rose symbol type index (u8::MAX = no symbol).
+    pub cell_rose_sym: Vec<u8>,
+    /// Bitmask of all present rose symbol types.
+    pub rose_bits_all: u8,
+    /// Number of distinct rose symbol types.
+    pub num_rose_types: usize,
+    /// Rose cells grouped by symbol type index.
+    pub rose_by_type: Vec<Vec<CellId>>,
+    /// Reusable BFS-visited buffer for rose reachability.
+    pub rose_visited: Vec<bool>,
+    /// Branching state for rose-pair SAME/DIFF (used by propagation + search).
+    pub pair_branch: rose::PairBranchState,
+    /// Exact piece count, if known (used by parity propagation for 2-piece).
+    pub exact_piece_count: Option<usize>,
 }
 
 impl<'a> Solver<'a> {
@@ -145,7 +160,48 @@ impl<'a> Solver<'a> {
             deadline,
             timed_out: false,
             solution_regions: None,
+            cell_rose_sym: vec![u8::MAX; nc],
+            rose_bits_all: 0,
+            num_rose_types: 0,
+            rose_by_type: Vec::new(),
+            rose_visited: vec![false; nc],
+            pair_branch: rose::PairBranchState::default(),
+            exact_piece_count: None,
         };
+
+        // Rose-window state: map each distinct symbol string to a type index and
+        // record per-cell type.  Only populated when rose_window is present.
+        if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
+            let mut sym_to_idx: std::collections::HashMap<String, u8> =
+                std::collections::HashMap::new();
+            for r in 0..puzzle.height {
+                for c in 0..puzzle.width {
+                    if let Some(sym) = &puzzle.cells[r][c].symbol {
+                        if !sym_to_idx.contains_key(sym) {
+                            sym_to_idx.insert(sym.clone(), sym_to_idx.len() as u8);
+                        }
+                    }
+                }
+            }
+            let num = sym_to_idx.len();
+            if num > 0 && num <= 8 {
+                solver.num_rose_types = num;
+                solver.rose_bits_all = (1u8 << num) - 1;
+                solver.cell_rose_sym = vec![u8::MAX; nc];
+                solver.rose_by_type = vec![Vec::new(); num];
+                for r in 0..puzzle.height {
+                    for c in 0..puzzle.width {
+                        let idx = r * puzzle.width + c;
+                        if let Some(sym) = &puzzle.cells[r][c].symbol {
+                            if let Some(&ti) = sym_to_idx.get(sym) {
+                                solver.cell_rose_sym[idx] = ti;
+                                solver.rose_by_type[ti as usize].push(idx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         for &e in &input.pre_cut {
             solver.mark_pre_cut(e);
@@ -338,7 +394,7 @@ impl<'a> Solver<'a> {
                 region_of[c] = Some(comp[c]);
             }
         }
-        rose::build_regions(&region_of, self.grid.rows, self.grid.cols)
+        crate::solver::rose::build_regions(&region_of, self.grid.rows, self.grid.cols)
     }
 
     /// Multi-factor edge selection (target area, sealed/growing, watchtower).
@@ -472,9 +528,24 @@ impl<'a> Solver<'a> {
             return;
         }
 
-        let Some((e, _score)) = self.select_edge() else {
+        let Some((e, score)) = self.select_edge() else {
             return;
         };
+
+        // Rose-pair branching: resolve the final rose ambiguity near the leaves
+        // (few unknown edges left).  Gated on `curr_unknown <= thr` (AOG uses a
+        // fixed 80; we scale it to `num_edges/4` so small puzzles only branch at
+        // their tail too).  Branching on every node explodes the search and
+        // regresses borderline puzzles — the bulk of the work is done by edge
+        // propagation; pairing only disambiguates the tail.  Safe: a wrong branch
+        // is caught by `validate` at the leaf and the router falls through.
+        let rose_branch_thr = (self.grid.num_edges() / 4).min(80);
+        if self.rose_bits_all != 0 && self.curr_unknown <= rose_branch_thr {
+            if let Some((c1, c2)) = self.select_rose_pair(score) {
+                self.branch_on_pair(c1, c2);
+                return;
+            }
+        }
 
         let cut_first = self.prefer_cut_first(e);
         let order: &[EdgeState; 2] = if cut_first {

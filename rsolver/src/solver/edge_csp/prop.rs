@@ -90,6 +90,11 @@ impl<'a> Solver<'a> {
             if !self.vertex_clues.is_empty() {
                 progress |= self.propagate_watchtower()?;
             }
+            if self.rose_bits_all != 0 {
+                progress |= self.propagate_rose_separation()?;
+                progress |= self.propagate_rose_phase3()?;
+                progress |= self.propagate_parity()?;
+            }
 
             if !progress {
                 // Failed-literal detection: probe unknown edges / edge pairs.

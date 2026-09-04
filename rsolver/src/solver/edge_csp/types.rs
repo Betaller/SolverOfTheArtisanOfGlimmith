@@ -118,6 +118,15 @@ pub struct EdgeClue {
     pub kind: EdgeClueKind,
 }
 
+/// Canonical polyomino shape of a sealed region.  Ordered by
+/// `(height, width, cells)` so canonical forms can be compared/equal-tested.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Shape {
+    pub height: i32,
+    pub width: i32,
+    pub cells: Vec<(i32, i32)>,
+}
+
 /// Vertex-level clue (watchtower: number of distinct pieces meeting there).
 #[derive(Clone, Debug)]
 pub struct VertexClue {
@@ -144,4 +153,8 @@ pub struct GlobalRules {
     pub boxy: bool,
     /// `non_block` (non_boxy): no piece may be rectangular.
     pub non_boxy: bool,
+    /// `solitary`: every piece contains exactly one clue cell (symbol / compass
+    /// / number / shape_pattern / fence_pattern).  Consumed by
+    /// `propagate_solitary`.
+    pub solitary: bool,
 }

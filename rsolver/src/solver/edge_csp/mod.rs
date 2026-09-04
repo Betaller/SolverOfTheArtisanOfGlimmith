@@ -16,11 +16,12 @@
 pub mod adapter;
 pub mod grid;
 pub mod parity_uf;
+pub mod polyomino;
 pub mod prop;
 pub mod rose;
 pub mod types;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 use std::time::Duration;
 
 use crate::clock::Instant;
@@ -46,6 +47,12 @@ pub(crate) struct Solver<'a> {
     pub grid: Grid,
     pub cell_clues: Vec<CellClue>,
     pub edge_clues: Vec<EdgeClue>,
+    /// Cached gemini (`homogeneous`) edge ids — the two regions they separate
+    /// must end up the same shape, hence the same area.
+    pub gemini_edges: Vec<EdgeId>,
+    /// True iff the puzzle has at least one Gemini edge AND one Delta edge (the
+    /// `propagate_delta_gemini_interaction` precondition).
+    pub has_gemini_and_delta: bool,
     pub vertex_clues: Vec<VertexClue>,
     pub rules: GlobalRules,
     pub edges: Vec<EdgeState>,
@@ -72,7 +79,7 @@ pub(crate) struct Solver<'a> {
     pub prop: PropagationState,
     // Edge-selection cache.
     pub growth_edge_count: Vec<usize>,
-    pub watchtower_vertices: HashSet<VertexId>,
+    pub watchtower_vertices: BTreeSet<VertexId>,
     // Pre-computed cell clue index.
     pub cell_clues_indexed: Vec<Vec<usize>>,
     // Deadline / timeout bookkeeping.
@@ -95,6 +102,11 @@ pub(crate) struct Solver<'a> {
     pub pair_branch: rose::PairBranchState,
     /// Exact piece count, if known (used by parity propagation for 2-piece).
     pub exact_piece_count: Option<usize>,
+    /// `clue_cell[cell]` — cell carries a `solitary`-relevant clue.  Mirrors the
+    /// `validate::validate` "solitary" predicate exactly (symbol / compass /
+    /// number / shape_pattern / fence_pattern), so `propagate_solitary` prunes
+    /// on the same notion of "clue" the leaf check enforces.
+    pub clue_cell: Vec<bool>,
 }
 
 impl<'a> Solver<'a> {
@@ -116,8 +128,24 @@ impl<'a> Solver<'a> {
             })
             .collect();
 
-        let watchtower_vertices: HashSet<VertexId> =
+        let watchtower_vertices: BTreeSet<VertexId> =
             input.vertex_clues.iter().map(|cl| cl.vertex).collect();
+
+        // Gemini edges cached up front: `check_gemini_pairs` runs inside the
+        // propagation loop and needs `&mut self` for `growth_potential`, so it
+        // cannot borrow `self.edge_clues` while iterating.
+        let gemini_edges: Vec<EdgeId> = input
+            .edge_clues
+            .iter()
+            .filter(|cl| matches!(cl.kind, EdgeClueKind::Gemini))
+            .map(|cl| cl.edge)
+            .collect();
+        let has_gemini = !gemini_edges.is_empty();
+        let has_delta = input
+            .edge_clues
+            .iter()
+            .any(|cl| matches!(cl.kind, EdgeClueKind::Delta));
+        let has_gemini_and_delta = has_gemini && has_delta;
 
         let has_compass_clue = input
             .cell_clues
@@ -128,11 +156,33 @@ impl<'a> Solver<'a> {
             .iter()
             .any(|c| matches!(c, CellClue::Palisade { .. }));
 
+        // Solitary clue-cell index.  Built straight from `puzzle` (not from
+        // `cell_clues`, which only carries the area / compass / palisade clues
+        // the propagators consume) so that `symbol` / `shape_pattern` cells also
+        // count — `validate`'s solitary check counts them too.
+        let mut clue_cell = vec![false; nc];
+        let mut num_clue_cells = 0usize;
+        for r in 0..puzzle.height {
+            for c in 0..puzzle.width {
+                let cell = &puzzle.cells[r][c];
+                if cell.symbol.is_some()
+                    || cell.compass.is_some()
+                    || cell.number.is_some()
+                    || cell.shape_pattern.is_some()
+                    || cell.fence_pattern.is_some()
+                {
+                    clue_cell[r * puzzle.width + c] = true;
+                }
+            }
+        }
+
         let mut solver = Self {
             puzzle,
             grid: input.grid,
             cell_clues: input.cell_clues,
             edge_clues: input.edge_clues,
+            gemini_edges,
+            has_gemini_and_delta,
             vertex_clues: input.vertex_clues,
             rules: input.rules,
             edges: vec![EdgeState::Unknown; n],
@@ -167,13 +217,14 @@ impl<'a> Solver<'a> {
             rose_visited: vec![false; nc],
             pair_branch: rose::PairBranchState::default(),
             exact_piece_count: None,
+            clue_cell,
         };
 
         // Rose-window state: map each distinct symbol string to a type index and
         // record per-cell type.  Only populated when rose_window is present.
         if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
-            let mut sym_to_idx: std::collections::HashMap<String, u8> =
-                std::collections::HashMap::new();
+            let mut sym_to_idx: std::collections::BTreeMap<String, u8> =
+                std::collections::BTreeMap::new();
             for r in 0..puzzle.height {
                 for c in 0..puzzle.width {
                     if let Some(sym) = &puzzle.cells[r][c].symbol {

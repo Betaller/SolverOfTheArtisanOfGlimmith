@@ -17,7 +17,7 @@
 use super::parity_uf::ParityUF;
 use super::types::*;
 use super::Solver;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 /// Branching constraint state managed by the rose-pair subsystem.
 #[derive(Default)]
@@ -25,11 +25,11 @@ pub(crate) struct PairBranchState {
     /// Manual DIFF constraints accumulated during branching.
     pub diffs: Vec<(CellId, CellId)>,
     /// Fast-lookup set for manual DIFF pairs.
-    pub diff_set: HashSet<(CellId, CellId)>,
+    pub diff_set: BTreeSet<(CellId, CellId)>,
     /// Manual SAME constraints accumulated during branching.
     pub sames: Vec<(CellId, CellId)>,
     /// Fast-lookup set for manual SAME pairs.
-    pub same_set: HashSet<(CellId, CellId)>,
+    pub same_set: BTreeSet<(CellId, CellId)>,
     /// Reusable BFS parent buffer for path-finding.
     pub bfs_prev: Vec<Option<(CellId, EdgeId)>>,
 }

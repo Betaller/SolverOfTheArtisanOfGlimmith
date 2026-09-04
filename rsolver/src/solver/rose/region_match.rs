@@ -50,6 +50,16 @@ pub const VISITED_CAP: usize = 2_000_000;
 
 /// BFS over boundary-compliant connected subsets containing `seed` (cell idx).
 /// Port of `bfs_candidates.generate_all_candidates`.
+///
+/// `start`/`timeout_ms` bound the wall-clock budget: the BFS loop bails the
+/// moment `start + timeout_ms` elapses, returning the partial `results`
+/// collected so far.  Previously there was no internal time check — only the
+/// `VISITED_CAP` space cap — so a single seed on an open rose_window grid could
+/// run until the harness killed the whole subprocess (the 40s "timed out"
+/// HARNESS_TIMEOUT failures).  Bailing on the deadline lets `solve_by_region_match`
+/// return and `solve_rose` fall through to `rose_growth`, which now gets the
+/// remaining budget.  False-negative only (partial candidates can only *miss* the
+/// exact cover, never produce an invalid one).
 pub fn generate_all_candidates(
     puzzle: &Puzzle,
     seed: usize,
@@ -57,10 +67,13 @@ pub fn generate_all_candidates(
     pre: &PreBoundaries,
     symbol_of: &HashMap<usize, usize>,
     symbol_types: &[String],
+    start: &Instant,
+    timeout_ms: u64,
 ) -> Vec<CellSet> {
     let h = puzzle.height;
     let w = puzzle.width;
     let n_bits = h * w;
+    let deadline = *start + std::time::Duration::from_millis(timeout_ms);
     let is_multi = symbol_types.len() >= 2;
     let all_required: u64 = if is_multi {
         (1u64 << symbol_types.len()) - 1
@@ -95,6 +108,12 @@ pub fn generate_all_candidates(
 
     let dirs = [(-1i32, 0), (1, 0), (0, -1), (0, 1)];
     while let Some((current, frontier, syms)) = queue.pop_front() {
+        // Wall-clock bail-out: stop expanding once the budget is spent so the
+        // caller can fall through to rose_growth instead of hanging until the
+        // harness kills the subprocess.
+        if Instant::now() >= deadline {
+            break;
+        }
         if results.len() >= CANDIDATE_CAP {
             break;
         }
@@ -414,7 +433,7 @@ pub fn solve_by_region_match(
     let mut all_candidates: Vec<Vec<CellSet>> = Vec::new();
     for &seed in &seeds {
         let t0 = Instant::now();
-        let cands = generate_all_candidates(puzzle, seed, all_positions, pre, &symbol_of, symbol_types);
+        let cands = generate_all_candidates(puzzle, seed, all_positions, pre, &symbol_of, symbol_types, start, timeout_ms);
         if crate::aog_debug_enabled() {
             eprintln!(
                 "rose: seed {} -> {} candidates in {:?}",
@@ -435,10 +454,22 @@ pub fn solve_by_region_match(
         );
     }
 
+    // Deadline for the whole region_match attempt.  Computed here (not further
+    // down) so the pre-filter loops below can bail on it: `can_partition` runs a
+    // BFS per candidate per seed, which with CANDIDATE_CAP candidates and m seeds
+    // is enough work to blow the harness wall budget even when candidate
+    // generation itself respected its deadline (C4-2 hung >200s this way).
+    let deadline = *start + std::time::Duration::from_millis(timeout_ms);
+
     // Pre-filter by area and region-size bounds: each candidate must be within
     // [range.min, range.max] (or precise) and leave >= 1 cell per other seed.
+    // These filters are pure pruning — bailing early just leaves extra candidates
+    // in place (sound, only slower for `match_regions_mrv`, which re-checks).
     let (min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
     for cands in all_candidates.iter_mut() {
+        if Instant::now() >= deadline {
+            break;
+        }
         let max_for_this = max_sz.min(total - (m - 1));
         cands.retain(|c| c.len() >= min_sz && c.len() <= max_for_this);
         if cands.is_empty() {
@@ -446,10 +477,24 @@ pub fn solve_by_region_match(
         }
     }
 
-    // Pre-filter by component reachability.
+    // Pre-filter by component reachability.  `can_partition` runs a full BFS per
+    // candidate, so this is the most expensive pre-filter — bail out the moment
+    // the deadline passes.  Pruning only: candidates left unfiltered stay in the
+    // pool (sound — `match_regions_mrv` re-verifies, it just has more to try).
     let n = symbol_types.len();
+    let mut deadline_hit = Instant::now() >= deadline;
     for cands in all_candidates.iter_mut() {
+        if deadline_hit {
+            break;
+        }
         cands.retain(|c| {
+            if deadline_hit {
+                return true; // deadline already blown — keep everything, stop pruning
+            }
+            if Instant::now() >= deadline {
+                deadline_hit = true;
+                return true;
+            }
             let mut remaining = all_positions.clone();
             // remaining = all_positions - cand
             for idx in c.iter() {
@@ -494,7 +539,6 @@ pub fn solve_by_region_match(
     );
     combos.sort_by_key(|c| c.iter().max().unwrap_or(&0) - c.iter().min().unwrap_or(&0));
 
-    let deadline = *start + std::time::Duration::from_millis(timeout_ms);
     let mut region_of: Vec<Option<usize>> = vec![None; h * w];
     if crate::aog_debug_enabled() {
         eprintln!(
@@ -689,7 +733,7 @@ mod tests {
         let symbol_types = vec!["A".to_string()];
         let mut symbol_of = HashMap::new();
         symbol_of.insert(0usize, 0usize);
-        let cands = generate_all_candidates(&puzzle, 0, &all_positions, &pre, &symbol_of, &symbol_types);
+        let cands = generate_all_candidates(&puzzle, 0, &all_positions, &pre, &symbol_of, &symbol_types, &crate::clock::Instant::now(), 1_000);
         assert!(!cands.is_empty(), "must return at least the singleton region");
         assert!(cands.iter().all(|c| c.contains(0)), "every candidate contains the seed");
         assert!(cands.len() <= CANDIDATE_CAP);

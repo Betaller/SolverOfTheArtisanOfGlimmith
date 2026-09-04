@@ -154,9 +154,15 @@ fn rose_plain_and_growth(
     timeout_ms: u64,
     mut validation_failed_in: bool,
 ) -> ModuleOutcome {
-    // region_match first (mirrors rose/solver.py:40).
+    // region_match first (mirrors rose/solver.py:40).  Give it only a share of
+    // the rose budget so rose_growth gets the remainder: previously region_match
+    // consumed the whole budget (its candidate BFS ignored the deadline), so
+    // rose_growth never ran and rose_window puzzles hung until the harness kill.
+    // 60% is enough for region_match to complete on the solvable puzzles (which
+    // finish in seconds anyway) while leaving 40% for the rose_growth fallback.
+    let rm_budget = (timeout_ms * 3) / 5;
     if crate::aog_debug_enabled() {
-        eprintln!("rose: region_match start (types={} m={})", symbol_types.len(), m);
+        eprintln!("rose: region_match start (types={} m={} rm_budget={})", symbol_types.len(), m, rm_budget);
     }
     if let Some(regions) = region_match::solve_by_region_match(
         puzzle,
@@ -165,7 +171,7 @@ fn rose_plain_and_growth(
         m,
         all_positions,
         start,
-        timeout_ms,
+        rm_budget,
     ) {
         match accept_if_valid(regions, puzzle) {
             Some(ok) => return ModuleOutcome::Solved(ok),

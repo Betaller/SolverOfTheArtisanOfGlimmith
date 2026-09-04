@@ -211,8 +211,18 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         attempts.push(not_attempted("pieces", "no shape_pool / area / compass clues"));
     }
 
-    // Fallback: backtracking solver
-    {
+    // Fallback: backtracking solver.
+    //
+    // Gated OFF by default (`BACKTRACK_ON=1` re-enables).  Measured on the full
+    // official corpus (1258 puzzles, `--timeout 40`): backtrack **solves 0
+    // puzzles** while hanging on many — `dfs` gets stuck in a loop inside a
+    // single call (steps stop advancing), so its wall-clock deadline never fires.
+    // Those hangs blow the harness's `RUST_PARTS × timeout × SLACK` wall budget,
+    // so the subprocess is killed and *no* attempt trace is recorded (the ~41
+    // "Rust solver timed out after 40s" failures), burning ~190s of CPU each and
+    // starving the parallel workers of CPU.  Removing it costs nothing measured
+    // and removes the hangs; re-enable for research with BACKTRACK_ON=1.
+    if std::env::var("BACKTRACK_ON").is_ok() {
         let b_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
         let b_start = Instant::now();
         let outcome = backtrack::solve_backtrack(puzzle, &start, timeout_ms);
@@ -232,6 +242,11 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             }
             _ => record_module_with_elapsed("backtrack", outcome, b_deadline, elapsed, &mut attempts),
         }
+    } else {
+        attempts.push(not_attempted(
+            "backtrack",
+            "disabled (solves 0/1258 and hangs past its deadline); BACKTRACK_ON=1 to enable",
+        ));
     }
 
     let elapsed = start.elapsed().as_millis() as u64;

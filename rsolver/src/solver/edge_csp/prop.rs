@@ -8,8 +8,9 @@
 
 use super::types::*;
 use super::parity_uf::ParityUF;
+use super::polyomino::{canonical, make_shape};
 use super::Solver;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 
 /// Reusable buffers and caches owned by the propagation subsystem.
 pub(crate) struct PropagationState {
@@ -85,6 +86,9 @@ impl<'a> Solver<'a> {
             }
             if self.has_palisade_clue {
                 progress |= self.propagate_palisade_constraints()?;
+            }
+            if self.has_gemini_and_delta {
+                progress |= self.propagate_delta_gemini_interaction()?;
             }
             progress |= self.propagate_area_bounds()?;
             if !self.vertex_clues.is_empty() {
@@ -624,8 +628,119 @@ impl<'a> Solver<'a> {
         if self.rules.boxy || self.rules.non_boxy {
             progress |= self.propagate_boxy_nonboxy(num_comp)?;
         }
+        if self.rules.solitary {
+            progress |= self.propagate_solitary(num_comp)?;
+        }
         // Final sealed-pair size-separation contradiction check.
         self.check_size_separation_sealed_pairs(num_comp)?;
+        // Gemini: the two regions across a gemini edge must match in area.
+        self.check_gemini_pairs(num_comp)?;
+        // Gemini/Delta shape-identity: sealed regions across a gemini edge must
+        // share a canonical shape; across a delta edge they must differ.
+        self.propagate_shape_constraints(num_comp)?;
+
+        Ok(progress)
+    }
+
+    /// `solitary` propagation: every finished piece holds exactly one clue cell,
+    /// so clue cells stand in bijection with pieces.  edge_csp previously only
+    /// leaf-checked this rule via `validate::validate`, which meant a
+    /// compass+solitary puzzle burned its whole budget rediscovering that two
+    /// clues had been merged.
+    ///
+    /// Every inference below only discards assignments that appear in no valid
+    /// solution, so the search stays complete:
+    ///
+    /// * **S2** a component holding ≥2 clue cells already breaks the rule —
+    ///   components only ever grow, so the clue count can never come back down
+    ///   → contradiction.
+    /// * **S7** an Unknown edge between two components that each already hold a
+    ///   clue must be Cut: merging them would trigger S2.  (This subsumes the
+    ///   adjacent-clue-cell special case, since a lone clue cell is its own
+    ///   single-cell component.)
+    /// * **S3** a *sealed* component holding no clue cell is a finished piece
+    ///   with zero clues → contradiction.
+    /// * **S4** a clue-less component with exactly one Unknown growth edge must
+    ///   use it — cutting it would seal the component clue-less (S3) → Uncut.
+    ///
+    /// Ordering matters for soundness: S7 only ever writes Cut, which cannot
+    /// change connectivity over Uncut edges and so leaves `comp_cells` /
+    /// `curr_comp_id` valid.  S4 writes Uncut, which *merges* components and
+    /// invalidates them, so all S4 edges are decided against one consistent
+    /// snapshot and applied last; the fixed-point loop then rebuilds components.
+    fn propagate_solitary(&mut self, num_comp: usize) -> Result<bool, ()> {
+        let mut progress = false;
+
+        // Per-component clue counts + S2.
+        let mut clues_in = vec![0usize; num_comp];
+        for ci in 0..num_comp {
+            let mut n = 0usize;
+            for &c in &self.comp_cells[ci] {
+                if self.clue_cell[c] {
+                    n += 1;
+                }
+            }
+            if n >= 2 {
+                return Err(());
+            }
+            clues_in[ci] = n;
+        }
+
+        // S7: separate two clue-bearing components.
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Unknown {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let (ci1, ci2) = (self.curr_comp_id[c1], self.curr_comp_id[c2]);
+            if ci1 == ci2 {
+                continue;
+            }
+            if clues_in[ci1] >= 1 && clues_in[ci2] >= 1 {
+                if !self.set_edge(e, EdgeState::Cut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+
+        // S3 / S4 on clue-less components, decided against the post-S7 snapshot.
+        let mut to_uncut: Vec<EdgeId> = Vec::new();
+        for ci in 0..num_comp {
+            if clues_in[ci] != 0 {
+                continue;
+            }
+            let mut unknown: Option<EdgeId> = None;
+            let mut count = 0usize;
+            for &e in &self.prop.growth_edges[ci] {
+                if self.edges[e] == EdgeState::Unknown {
+                    count += 1;
+                    if count > 1 {
+                        break;
+                    }
+                    unknown = Some(e);
+                }
+            }
+            match count {
+                0 => return Err(()), // S3
+                1 => to_uncut.push(unknown.unwrap()),
+                _ => {}
+            }
+        }
+        for e in to_uncut {
+            // A previously-decided edge here is not a contradiction: two adjacent
+            // clue-less components can share their single growth edge, so the
+            // first Uncut already merged them (and satisfies both).
+            if self.edges[e] == EdgeState::Unknown {
+                if !self.set_edge(e, EdgeState::Uncut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
 
         Ok(progress)
     }
@@ -2856,7 +2971,7 @@ impl<'a> Solver<'a> {
             return Ok(false);
         }
         // Step 1: sealed_neighbor_sizes[ci].
-        let mut sealed_neighbor_sizes: Vec<HashSet<usize>> = vec![HashSet::new(); num_comp];
+        let mut sealed_neighbor_sizes: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); num_comp];
         for e in 0..self.grid.num_edges() {
             if self.edges[e] != EdgeState::Cut {
                 continue;
@@ -2999,6 +3114,251 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Gemini (`homogeneous`) area-equality propagation.
+    ///
+    /// A gemini edge says the two regions it separates have the SAME shape,
+    /// which implies equal area.  Enforcing the area half is the cheap, sound
+    /// part of doc-21's "gemini=>尺寸相等" item; the shape-identity half (and
+    /// the delta_gemini vertex interaction) is not modelled.
+    ///
+    /// Three checks per gemini edge:
+    /// - both components finished → areas must be equal;
+    /// - one finished at size `a`, the other still growing → the other has
+    ///   already overshot (`> a`), or can no longer reach `a`
+    ///   (`growth_potential < a`) → contradiction.
+    fn check_gemini_pairs(&mut self, num_comp: usize) -> Result<(), ()> {
+        if self.gemini_edges.is_empty() {
+            return Ok(());
+        }
+        for i in 0..self.gemini_edges.len() {
+            let e = self.gemini_edges[i];
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            let s1 = self.curr_comp_sz[ci1];
+            let s2 = self.curr_comp_sz[ci2];
+            let g1 = self.is_growing(ci1);
+            let g2 = self.is_growing(ci2);
+
+            if !g1 && !g2 {
+                if s1 != s2 {
+                    return Err(());
+                }
+                continue;
+            }
+            // Exactly one side still growing: it must finish at the other's size.
+            if !g1 && g2 {
+                if s2 > s1 || self.growth_potential(ci2) < s1 {
+                    return Err(());
+                }
+            } else if g1 && !g2 {
+                if s1 > s2 || self.growth_potential(ci1) < s2 {
+                    return Err(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Shape-identity propagation for Gemini (same shape) and Delta (different
+    /// shape) edge clues.  Ported from `third_party/aog/src/solver/propagation/
+    /// shape.rs::propagate_shape_constraints` (the gemini/delta portions).
+    ///
+    /// For each sealed component we compute its canonical polyomino shape, then:
+    /// - Gemini edge with both sides sealed: the two shapes must compare equal.
+    /// - Delta edge with both sides sealed: the two shapes must differ.
+    ///
+    /// Pure contradiction check (`Err` on violation) — never forces an edge, so it
+    /// is regression-safe.  It prunes search branches where two sealed regions
+    /// violate their shape relation, which is what the `homogeneous` /
+    /// `heterogeneous` official puzzles actually require (area equality alone is
+    /// insufficient: equal area does not imply equal shape).
+    fn propagate_shape_constraints(&mut self, num_comp: usize) -> Result<(), ()> {
+        let has_gemini = self
+            .edge_clues
+            .iter()
+            .any(|cl| matches!(cl.kind, EdgeClueKind::Gemini));
+        let has_delta = self
+            .edge_clues
+            .iter()
+            .any(|cl| matches!(cl.kind, EdgeClueKind::Delta));
+        if !has_gemini && !has_delta {
+            return Ok(());
+        }
+
+        // Canonical shape per sealed component.
+        let mut comp_shape: Vec<Option<Shape>> = vec![None; num_comp];
+        for &ci in &self.prop.sealed_list {
+            let at_limit = match self.curr_target_area[ci] {
+                Some(t) => self.curr_comp_sz[ci] == t,
+                None => true,
+            };
+            if !at_limit {
+                continue;
+            }
+            let cells: Vec<(i32, i32)> = self.comp_cells[ci]
+                .iter()
+                .map(|&c| {
+                    let (r, col) = self.grid.cell_pos(c);
+                    (r as i32, col as i32)
+                })
+                .collect();
+            comp_shape[ci] = Some(canonical(&make_shape(&cells)));
+        }
+
+        if has_gemini {
+            for clue in &self.edge_clues {
+                if !matches!(clue.kind, EdgeClueKind::Gemini) {
+                    continue;
+                }
+                let e = clue.edge;
+                if self.edges[e] != EdgeState::Cut {
+                    continue;
+                }
+                let (c1, c2) = self.grid.edge_cells(e);
+                if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                    continue;
+                }
+                let ci1 = self.curr_comp_id[c1];
+                let ci2 = self.curr_comp_id[c2];
+                if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                    continue;
+                }
+                if self.is_sealed(ci1) && self.is_sealed(ci2) {
+                    match (&comp_shape[ci1], &comp_shape[ci2]) {
+                        (Some(s1), Some(s2)) if s1 != s2 => return Err(()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if has_delta {
+            for clue in &self.edge_clues {
+                if !matches!(clue.kind, EdgeClueKind::Delta) {
+                    continue;
+                }
+                let e = clue.edge;
+                if self.edges[e] != EdgeState::Cut {
+                    continue;
+                }
+                let (c1, c2) = self.grid.edge_cells(e);
+                if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                    continue;
+                }
+                let ci1 = self.curr_comp_id[c1];
+                let ci2 = self.curr_comp_id[c2];
+                if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                    continue;
+                }
+                // Both sealed: shapes must differ.
+                match (&comp_shape[ci1], &comp_shape[ci2]) {
+                    (Some(s1), Some(s2)) if s1 == s2 => return Err(()),
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Geometric interaction between Gemini and Delta edge clues at a vertex.
+    ///
+    /// Ported from `third_party/aog/src/solver/propagation/delta_gemini.rs`.
+    /// If a Gemini edge and a Delta edge (both same orientation) meet at a
+    /// vertex, the two orthogonal (transverse) edges at that vertex cannot BOTH
+    /// be Uncut — that would merge the pieces on both sides, requiring
+    /// Shape(L) == Shape(R) (Gemini) and Shape(L) != Shape(R) (Delta)
+    /// simultaneously.  When the `bricky` rule is on they also cannot BOTH be
+    /// Cut (a clue edge is already Cut, so a second Cut would isolate a cell).
+    fn propagate_delta_gemini_interaction(&mut self) -> Result<bool, ()> {
+        let mut progress = false;
+        let mut edge_kinds = vec![None; self.grid.num_edges()];
+        for clue in &self.edge_clues {
+            edge_kinds[clue.edge] = Some(clue.kind);
+        }
+
+        for i in 0..=self.grid.rows {
+            for j in 0..=self.grid.cols {
+                let ((h_west, h_east), (v_north, v_south)) = self.grid.vertex_edges(i, j);
+
+                // Case 1: Gemini/Delta on a collinear horizontal pair.
+                // Transverse edges are the vertical pair.
+                if let (Some(e1), Some(e2)) = (h_west, h_east) {
+                    if matches!(
+                        (edge_kinds[e1], edge_kinds[e2]),
+                        (Some(EdgeClueKind::Gemini), Some(EdgeClueKind::Delta))
+                            | (Some(EdgeClueKind::Delta), Some(EdgeClueKind::Gemini))
+                    ) {
+                        if let (Some(t1), Some(t2)) = (v_north, v_south) {
+                            progress |= self.propagate_transverse_pair(t1, t2)?;
+                        }
+                    }
+                }
+
+                // Case 2: Gemini/Delta on a collinear vertical pair.
+                // Transverse edges are the horizontal pair.
+                if let (Some(e1), Some(e2)) = (v_north, v_south) {
+                    if matches!(
+                        (edge_kinds[e1], edge_kinds[e2]),
+                        (Some(EdgeClueKind::Gemini), Some(EdgeClueKind::Delta))
+                            | (Some(EdgeClueKind::Delta), Some(EdgeClueKind::Gemini))
+                    ) {
+                        if let (Some(t1), Some(t2)) = (h_west, h_east) {
+                            progress |= self.propagate_transverse_pair(t1, t2)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(progress)
+    }
+
+    fn propagate_transverse_pair(&mut self, e1: EdgeId, e2: EdgeId) -> Result<bool, ()> {
+        let mut progress = false;
+        let s1 = self.edges[e1];
+        let s2 = self.edges[e2];
+
+        // 1. Cannot both be Uncut.
+        if s1 == EdgeState::Uncut && s2 == EdgeState::Uncut {
+            return Err(());
+        }
+        if s1 == EdgeState::Uncut && s2 == EdgeState::Unknown && self.set_edge(e2, EdgeState::Cut) {
+            progress = true;
+        }
+        if s2 == EdgeState::Uncut && s1 == EdgeState::Unknown && self.set_edge(e1, EdgeState::Cut) {
+            progress = true;
+        }
+
+        // 2. If Bricky, cannot both be Cut.
+        if self.rules.bricky {
+            if s1 == EdgeState::Cut && s2 == EdgeState::Cut {
+                return Err(());
+            }
+            if s1 == EdgeState::Cut
+                && s2 == EdgeState::Unknown
+                && self.set_edge(e2, EdgeState::Uncut)
+            {
+                progress = true;
+            }
+            if s2 == EdgeState::Cut
+                && s1 == EdgeState::Unknown
+                && self.set_edge(e1, EdgeState::Uncut)
+            {
+                progress = true;
+            }
+        }
+
+        Ok(progress)
     }
 
     /// Boxy (`block`) / non-boxy (`non_block`) propagation — port of

@@ -89,9 +89,17 @@ pub fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<
 /// doc 23 §3.3).  `None` means no candidate was produced at all.
 pub fn solve_rose(
     puzzle: &Puzzle,
-    start: &Instant,
+    _start: &Instant,
     timeout_ms: u64,
 ) -> ModuleOutcome {
+    // Anchor this module's deadlines to *its own* start, not the caller's global
+    // `start`.  The router hands rose `timeout_ms - aog_elapsed` measured from the
+    // global start, so anchoring to the global start makes rose's deadline already
+    // expired whenever aog used more than `timeout_ms - rose_ms`: with
+    // AOG_ROSE_BUDGET_MS=30s rose ran for 0ms and returned immediately, silently
+    // losing the 9 puzzles rose solves.  `backtrack` already anchors correctly.
+    // Total wall time is unchanged (aog_elapsed + rose_ms still = timeout_ms).
+    let rose_start = Instant::now();
     let h = puzzle.height;
     let w = puzzle.width;
     let mut all_positions = CellSet::new(h * w);
@@ -121,7 +129,7 @@ pub fn solve_rose(
         // return, otherwise we record whether it was a validation failure for
         // the final outcome decision, then fall through.
         let mut validation_failed = false;
-        match solve_rose_with_pin(puzzle, &pre, &symbol_types, m, &all_positions, start, timeout_ms) {
+        match solve_rose_with_pin(puzzle, &pre, &symbol_types, m, &all_positions, &rose_start, timeout_ms) {
             ModuleOutcome::Solved(regions) => return ModuleOutcome::Solved(regions),
             ModuleOutcome::ValidationFailed => validation_failed = true,
             ModuleOutcome::None => {}
@@ -130,13 +138,13 @@ pub fn solve_rose(
         // also fail for puzzle_piece, but rose_growth is a last resort).
         return rose_plain_and_growth(
             puzzle, &pre, &symbol_types, m, &all_positions,
-            start, timeout_ms, validation_failed,
+            &rose_start, timeout_ms, validation_failed,
         );
     }
 
     rose_plain_and_growth(
         puzzle, &pre, &symbol_types, m, &all_positions,
-        start, timeout_ms, false,
+        &rose_start, timeout_ms, false,
     )
 }
 

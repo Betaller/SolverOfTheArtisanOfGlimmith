@@ -399,7 +399,25 @@ fn is_rose_capable(puzzle: &Puzzle) -> bool {
     !puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "different")
 }
 
-const AOG_ROSE_BUDGET_MS: u64 = 3_000;
+/// Cap on aog's budget when the puzzle is rose-capable, so the rose solver gets
+/// the remainder (aog hangs on "rose_window without size constraint" puzzles).
+///
+/// Raised 3s -> 20s: 31 failing puzzles are rose-capable and had aog time out at
+/// this very cap (e.g. 0957, which aog solves in 1.7s unloaded but could not fit
+/// in 3s under parallel load).  The tradeoff is nearly free because the rose
+/// solver only ever solves ~9 puzzles and its slowest success takes 4.9s (0833) —
+/// even after aog takes 20s, rose still has ~20s of the 40s unit, far more than
+/// it needs.
+///
+/// Measured on the full corpus: 1111 -> 1120 PASS, +9 and 0 regressions
+/// (0213, 0213nopad, 0856, 0957, 0620, 1386 via aog; 0439, 0491, 0445 via
+/// edge_csp).  10s and 30s were also tried: 10s gains 6, 30s gains the same 8 as
+/// 20s, so 20s is the knee of the curve.
+///
+/// This only pays off together with the matching fix in `rose::solve_rose`, which
+/// now anchors its deadlines to its own start instead of the global one — without
+/// it, aog taking 20s left rose's deadline already expired so rose ran 0ms.
+const AOG_ROSE_BUDGET_MS: u64 = 20_000;
 
 fn has_area_number_clues(puzzle: &Puzzle) -> bool {
     for r in 0..puzzle.height {

@@ -222,7 +222,12 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // "Rust solver timed out after 40s" failures), burning ~190s of CPU each and
     // starving the parallel workers of CPU.  Removing it costs nothing measured
     // and removes the hangs; re-enable for research with BACKTRACK_ON=1.
-    if std::env::var("BACKTRACK_ON").is_ok() {
+    // Backtrack is the *only* solver that handles rule-less puzzles (aog/rose are
+    // skipped, edge_csp/pieces find nothing to engage), and those are trivial for
+    // it — no hang risk.  Keep it for that case regardless of the gate.
+    let backtrack_enabled =
+        std::env::var("BACKTRACK_ON").is_ok() || puzzle.rules.is_empty();
+    if backtrack_enabled {
         let b_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
         let b_start = Instant::now();
         let outcome = backtrack::solve_backtrack(puzzle, &start, timeout_ms);

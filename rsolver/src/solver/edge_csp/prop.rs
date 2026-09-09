@@ -497,6 +497,23 @@ impl<'a> Solver<'a> {
                     continue;
                 }
 
+                // Area-feasibility cut (sound): an Uncut edge merges `ci1` and
+                // `ci2` into one region whose size is *at least* `sz1 + sz2`,
+                // and that region must satisfy each component's area upper
+                // bound.  If that minimum already exceeds either component's
+                // `max_area`, no valid solution can uncut this edge -> force Cut.
+                // Strictly reduces branching on area / precise / range puzzles
+                // (e.g. 0289's 5M-node explosion) and prunes no valid solution.
+                let sum_sz = self.curr_comp_sz[ci1] + self.curr_comp_sz[ci2];
+                if sum_sz > self.prop.curr_max_area[ci1]
+                    || sum_sz > self.prop.curr_max_area[ci2]
+                {
+                    if !self.set_edge(e, EdgeState::Cut) {
+                        return Err(());
+                    }
+                    continue;
+                }
+
                 self.can_grow_buf[ci1] = true;
                 self.can_grow_buf[ci2] = true;
                 self.prop.growth_edges[ci1].push(e);

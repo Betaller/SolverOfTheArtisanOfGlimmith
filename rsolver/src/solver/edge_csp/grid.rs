@@ -165,6 +165,40 @@ impl Grid {
         ]
     }
 
+    /// The up-to-4 edges around a grid vertex `(i,j)`, `0<=i<=rows`, `0<=j<=cols`,
+    /// returned as `((h_west, h_east), (v_north, v_south))` where the two
+    /// horizontal edges form a collinear pair through the vertex and the two
+    /// vertical edges form the orthogonal (transverse) pair.  Mirrors
+    /// `third_party/aog/src/grid.rs::vertex_edges`.  Edges outside the grid are
+    /// `None`.
+    pub fn vertex_edges(
+        &self,
+        i: usize,
+        j: usize,
+    ) -> ((Option<EdgeId>, Option<EdgeId>), (Option<EdgeId>, Option<EdgeId>)) {
+        let h_west = if i >= 1 && i < self.rows && j >= 1 {
+            Some(self.h_edge(i - 1, j - 1))
+        } else {
+            None
+        };
+        let h_east = if i >= 1 && i < self.rows && j < self.cols {
+            Some(self.h_edge(i - 1, j))
+        } else {
+            None
+        };
+        let v_north = if i >= 1 && j >= 1 && j < self.cols {
+            Some(self.v_edge(i - 1, j - 1))
+        } else {
+            None
+        };
+        let v_south = if i < self.rows && j >= 1 && j < self.cols {
+            Some(self.v_edge(i, j - 1))
+        } else {
+            None
+        };
+        ((h_west, h_east), (v_north, v_south))
+    }
+
     /// The up-to-4 edges around a cell, in order `[north, south, west, east]`.
     pub fn cell_edges(&self, c: CellId) -> [Option<EdgeId>; 4] {
         let (r, col) = self.cell_pos(c);

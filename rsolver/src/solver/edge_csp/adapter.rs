@@ -128,8 +128,29 @@ pub fn build_input(puzzle: &Puzzle) -> Input {
                         value: value.unwrap_or(0) as usize,
                     },
                 }),
-                // Heterogeneous/Homogeneous: shape relation, router-validated.
-                _ => {}
+                // Gemini / Delta: shape relations between the two regions on
+                // either side of the edge.  Like every other edge clue, the
+                // edge IS the boundary between the regions being compared, so
+                // it is necessarily Cut - mark it pre-cut to take it out of the
+                // search (AOG does the same for all edge clues in `new()`).
+                // Previously these were dropped entirely here, leaving the edge
+                // Unknown and giving edge_csp zero propagation on
+                // homogeneous/heterogeneous puzzles.
+                Some(EdgeConstraintType::Homogeneous) => {
+                    pre_cut.push(eid);
+                    edge_clues.push(EdgeClue {
+                        edge: eid,
+                        kind: EdgeClueKind::Gemini,
+                    });
+                }
+                Some(EdgeConstraintType::Heterogeneous) => {
+                    pre_cut.push(eid);
+                    edge_clues.push(EdgeClue {
+                        edge: eid,
+                        kind: EdgeClueKind::Delta,
+                    });
+                }
+                None => {}
             }
         };
 
@@ -185,6 +206,7 @@ pub fn build_input(puzzle: &Puzzle) -> Input {
         size_separation: has("differentiation"),
         boxy: has("block"),
         non_boxy: has("non_block"),
+        solitary: has("solitary"),
     };
 
     // `area_bounds` returns (min incl. compass, max incl. B2 cap).  We want the

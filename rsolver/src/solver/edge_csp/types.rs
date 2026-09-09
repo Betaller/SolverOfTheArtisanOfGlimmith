@@ -103,12 +103,28 @@ pub enum EdgeClueKind {
     Inequality { smaller_first: bool },
     /// The two adjacent pieces differ in area by exactly `value` (unsigned).
     Diff { value: usize },
+    /// Gemini (`homogeneous`): the two adjacent pieces have the SAME normalized
+    /// shape - which implies equal area.
+    Gemini,
+    /// Delta (`heterogeneous`): the two adjacent pieces have DIFFERENT
+    /// normalized shapes.  Note this does *not* imply different areas (two
+    /// distinct shapes can share an area), so only the shape relation is known.
+    Delta,
 }
 
 #[derive(Clone, Debug)]
 pub struct EdgeClue {
     pub edge: EdgeId,
     pub kind: EdgeClueKind,
+}
+
+/// Canonical polyomino shape of a sealed region.  Ordered by
+/// `(height, width, cells)` so canonical forms can be compared/equal-tested.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Shape {
+    pub height: i32,
+    pub width: i32,
+    pub cells: Vec<(i32, i32)>,
 }
 
 /// Vertex-level clue (watchtower: number of distinct pieces meeting there).
@@ -137,4 +153,8 @@ pub struct GlobalRules {
     pub boxy: bool,
     /// `non_block` (non_boxy): no piece may be rectangular.
     pub non_boxy: bool,
+    /// `solitary`: every piece contains exactly one clue cell (symbol / compass
+    /// / number / shape_pattern / fence_pattern).  Consumed by
+    /// `propagate_solitary`.
+    pub solitary: bool,
 }

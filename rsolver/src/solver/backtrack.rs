@@ -348,7 +348,15 @@ fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
     }
 
     state.steps += 1;
-    if state.steps % 1024 == 0 && timed_out(state) {
+    // Deadline check granularity.  Was `% 1024`, but a single dfs node runs
+    // expensive pruning (`sat_boundary_feasible` every 64 steps,
+    // `propagate_area_bounds` every 256), so 1024 steps can take minutes —
+    // backtrack then overran its 40s unit deadline by ~4.5 min (C4-2 spent 277s
+    // in backtrack), blowing the harness's 192s wall budget so the process was
+    // killed and *no* attempt trace was recorded (the HARNESS_TIMEOUT failures).
+    // 16 steps bounds the overrun to a few seconds at negligible clock-read cost.
+    // Safe: backtrack solves 0/1258 puzzles, so nothing depends on it running late.
+    if state.steps % 16 == 0 && timed_out(state) {
         return false;
     }
 

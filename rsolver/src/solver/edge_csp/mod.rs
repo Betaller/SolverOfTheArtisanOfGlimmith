@@ -161,7 +161,6 @@ impl<'a> Solver<'a> {
         // the propagators consume) so that `symbol` / `shape_pattern` cells also
         // count — `validate`'s solitary check counts them too.
         let mut clue_cell = vec![false; nc];
-        let mut num_clue_cells = 0usize;
         for r in 0..puzzle.height {
             for c in 0..puzzle.width {
                 let cell = &puzzle.cells[r][c];

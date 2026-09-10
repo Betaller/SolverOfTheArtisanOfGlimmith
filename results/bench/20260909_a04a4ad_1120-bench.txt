@@ -1,0 +1,7 @@
+SolverOfTheArtisanOfGlimmith — 1120 里程碑基准汇总
+生成时间: 2026-09-10（手工归档，非 CI 重跑）
+数据源: results/bench/20260909_areafeas_full.jsonl（1120 PASS / 138 FAIL，逐题解+独立验证）
+口径: puzzles/official（1258 题，排除 -answer）；benchmark_rust_solver.py --timeout 40 -j 8
+里程碑 commit: a04a4ad = PR#64 合并 (7c05d41 rose-cap 预算+rose deadline 锚定, de1f3f4 边 CSP 面积可行性裁剪)
+
+结果: 1120/1258 通过

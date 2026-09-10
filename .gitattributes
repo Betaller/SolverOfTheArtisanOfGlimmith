@@ -1,0 +1,6 @@
+# Git LFS: 仅归档本次新增的 4 个求解器二进制（绕过 check-added-large-files --maxkb=500 钩子）。
+# 早期已提交的 results/bin/* 为普通 blob，不在此清单内，保持原样。
+results/bin/rsolver-135aa19-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-5474a51-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-7c05d41-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-a8172ff-linux-x86_64 filter=lfs diff=lfs merge=lfs -text

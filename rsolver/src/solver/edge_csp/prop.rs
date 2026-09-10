@@ -1925,9 +1925,19 @@ impl<'a> Solver<'a> {
             return Ok(false);
         }
         let mut progress = false;
-        // Adjacent cell pairs in the 2×2 layout: (TL,TR), (TL,BL), (TR,BR), (BL,BR).
-        let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
 
+        let pa = self.watchtower_pass_a()?;
+        progress |= pa;
+        let pb = self.watchtower_pass_b()?;
+        progress |= pb;
+
+        Ok(progress)
+    }
+    /// Pass A of `propagate_watchtower`: component-ID-based distinct-region
+    /// counting. Extracted verbatim from `propagate_watchtower` — no logic change.
+    fn watchtower_pass_a(&mut self) -> Result<bool, ()> {
+        let mut progress = false;
+        let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
         // === Pass A: component-ID-based (distinct region counting) ===
         if !self.curr_comp_id.is_empty() {
             // Collect (is_err, forced_cuts) per clue to avoid borrow conflicts.
@@ -2008,7 +2018,14 @@ impl<'a> Solver<'a> {
                 }
             }
         }
+        Ok(progress)
+    }
 
+    /// Pass B of `propagate_watchtower`: edge-count-based propagation.
+    /// Extracted verbatim from `propagate_watchtower` — no logic change.
+    fn watchtower_pass_b(&mut self) -> Result<bool, ()> {
+        let mut progress = false;
+        let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
         // === Pass B: edge-count-based ===
         let constraints: Vec<(usize, usize, usize, Vec<EdgeId>, bool)> = self
             .vertex_clues
@@ -2138,6 +2155,7 @@ impl<'a> Solver<'a> {
         }
         Ok(progress)
     }
+
 
     /// Edge-level parity propagation for watchtower vertices — port of
     /// `third_party/aog watchtower.rs::propagate_vertex_edge_parity`.

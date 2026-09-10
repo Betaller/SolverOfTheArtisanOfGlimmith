@@ -15,6 +15,21 @@ const MULTI_REPAIR_ITER: usize = 200;
 
 const DIRS: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
 
+/// Bundles the per-solve run state shared by `solve_singlesymbol` /
+/// `solve_multisymbol`, replacing the 9-11 flat parameters they used to take.
+/// Pure signature-level change — no solving logic is altered.
+struct RoseGrowthCtx<'a> {
+    puzzle: &'a Puzzle,
+    pre: &'a PreBoundaries,
+    m: usize,
+    seeds: &'a [usize],
+    h: usize,
+    w: usize,
+    n_bits: usize,
+    all_positions: &'a CellSet,
+    deadline: Instant,
+}
+
 /// Port of `rose_growth.solve_rose_growth`.
 pub fn solve_rose_growth(
     puzzle: &Puzzle,
@@ -46,26 +61,35 @@ pub fn solve_rose_growth(
     }
 
     let symbol_of = super::cells::symbol_index_map(puzzle, symbol_types);
+    let ctx = RoseGrowthCtx {
+        puzzle,
+        pre,
+        m,
+        seeds: &seeds,
+        h,
+        w,
+        n_bits,
+        all_positions,
+        deadline,
+    };
     let result = if symbol_types.len() >= 2 {
-        solve_multisymbol(puzzle, pre, symbol_types, m, &seeds, &symbol_of, h, w, all_positions, n_bits, deadline)
+        solve_multisymbol(&ctx, symbol_types, &symbol_of)
     } else {
-        solve_singlesymbol(puzzle, pre, m, &seeds, &symbol_of, h, w, all_positions, n_bits, deadline)
+        solve_singlesymbol(&ctx)
     };
     result
 }
 
-fn solve_singlesymbol(
-    puzzle: &Puzzle,
-    pre: &PreBoundaries,
-    m: usize,
-    seeds: &[usize],
-    _symbol_of: &std::collections::HashMap<usize, usize>,
-    h: usize,
-    w: usize,
-    all_positions: &CellSet,
-    n_bits: usize,
-    deadline: Instant,
-) -> Option<Vec<crate::types::RegionInfo>> {
+fn solve_singlesymbol(ctx: &RoseGrowthCtx) -> Option<Vec<crate::types::RegionInfo>> {
+    let puzzle = ctx.puzzle;
+    let pre = ctx.pre;
+    let m = ctx.m;
+    let seeds = ctx.seeds;
+    let h = ctx.h;
+    let w = ctx.w;
+    let all_positions = ctx.all_positions;
+    let n_bits = ctx.n_bits;
+    let deadline = ctx.deadline;
     let mut region_of = vec![None; n_bits];
     let mut region_cells: Vec<CellSet> = vec![CellSet::new(n_bits); m];
     for (i, &seed) in seeds.iter().enumerate() {
@@ -292,18 +316,19 @@ fn solve_singlesymbol(
 }
 
 fn solve_multisymbol(
-    puzzle: &Puzzle,
-    pre: &PreBoundaries,
+    ctx: &RoseGrowthCtx,
     symbol_types: &[String],
-    m: usize,
-    seeds: &[usize],
     symbol_of: &std::collections::HashMap<usize, usize>,
-    h: usize,
-    w: usize,
-    all_positions: &CellSet,
-    n_bits: usize,
-    deadline: Instant,
 ) -> Option<Vec<crate::types::RegionInfo>> {
+    let puzzle = ctx.puzzle;
+    let pre = ctx.pre;
+    let m = ctx.m;
+    let seeds = ctx.seeds;
+    let h = ctx.h;
+    let w = ctx.w;
+    let all_positions = ctx.all_positions;
+    let n_bits = ctx.n_bits;
+    let deadline = ctx.deadline;
     // Honor the caller's deadline in every potentially-long loop below. The
     // previous signature took `_deadline` (unused) — a latent hang that was
     // masked while region_match always found the solution, but surfaces as a

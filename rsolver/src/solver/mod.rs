@@ -58,6 +58,12 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // success it is attached to the returned `Solution`.
     let mut attempts: Vec<SolverAttempt> = Vec::new();
 
+    // NOTE (2026-09-03): running edge_csp BEFORE aog here (wiring up the
+    // previously dead `is_edge_csp_preempt`) was tried and REJECTED - it cost
+    // 61 puzzles (1112 -> 1051, 65 regressions, 4 gains) and *increased* the
+    // OOM pool from 57 to 75.  edge_csp burns its unit budget on puzzles aog
+    // cracks in seconds, and OOMs on some of its own.  Keep aog first.
+
     // 0. AoG DFS solver first: direct port of the C++ reference solver.
     // For pure rose_window puzzles aog solves most in <1s but can hang for the
     // full budget on "no size constraint" ones — give it a short budget, then
@@ -205,8 +211,23 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         attempts.push(not_attempted("pieces", "no shape_pool / area / compass clues"));
     }
 
-    // Fallback: backtracking solver
-    {
+    // Fallback: backtracking solver.
+    //
+    // Gated OFF by default (`BACKTRACK_ON=1` re-enables).  Measured on the full
+    // official corpus (1258 puzzles, `--timeout 40`): backtrack **solves 0
+    // puzzles** while hanging on many — `dfs` gets stuck in a loop inside a
+    // single call (steps stop advancing), so its wall-clock deadline never fires.
+    // Those hangs blow the harness's `RUST_PARTS × timeout × SLACK` wall budget,
+    // so the subprocess is killed and *no* attempt trace is recorded (the ~41
+    // "Rust solver timed out after 40s" failures), burning ~190s of CPU each and
+    // starving the parallel workers of CPU.  Removing it costs nothing measured
+    // and removes the hangs; re-enable for research with BACKTRACK_ON=1.
+    // Backtrack is the *only* solver that handles rule-less puzzles (aog/rose are
+    // skipped, edge_csp/pieces find nothing to engage), and those are trivial for
+    // it — no hang risk.  Keep it for that case regardless of the gate.
+    let backtrack_enabled =
+        std::env::var("BACKTRACK_ON").is_ok() || puzzle.rules.is_empty();
+    if backtrack_enabled {
         let b_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
         let b_start = Instant::now();
         let outcome = backtrack::solve_backtrack(puzzle, &start, timeout_ms);
@@ -226,6 +247,11 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             }
             _ => record_module_with_elapsed("backtrack", outcome, b_deadline, elapsed, &mut attempts),
         }
+    } else {
+        attempts.push(not_attempted(
+            "backtrack",
+            "disabled (solves 0/1258 and hangs past its deadline); BACKTRACK_ON=1 to enable",
+        ));
     }
 
     let elapsed = start.elapsed().as_millis() as u64;
@@ -378,7 +404,25 @@ fn is_rose_capable(puzzle: &Puzzle) -> bool {
     !puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "different")
 }
 
-const AOG_ROSE_BUDGET_MS: u64 = 3_000;
+/// Cap on aog's budget when the puzzle is rose-capable, so the rose solver gets
+/// the remainder (aog hangs on "rose_window without size constraint" puzzles).
+///
+/// Raised 3s -> 20s: 31 failing puzzles are rose-capable and had aog time out at
+/// this very cap (e.g. 0957, which aog solves in 1.7s unloaded but could not fit
+/// in 3s under parallel load).  The tradeoff is nearly free because the rose
+/// solver only ever solves ~9 puzzles and its slowest success takes 4.9s (0833) —
+/// even after aog takes 20s, rose still has ~20s of the 40s unit, far more than
+/// it needs.
+///
+/// Measured on the full corpus: 1111 -> 1120 PASS, +9 and 0 regressions
+/// (0213, 0213nopad, 0856, 0957, 0620, 1386 via aog; 0439, 0491, 0445 via
+/// edge_csp).  10s and 30s were also tried: 10s gains 6, 30s gains the same 8 as
+/// 20s, so 20s is the knee of the curve.
+///
+/// This only pays off together with the matching fix in `rose::solve_rose`, which
+/// now anchors its deadlines to its own start instead of the global one — without
+/// it, aog taking 20s left rose's deadline already expired so rose ran 0ms.
+const AOG_ROSE_BUDGET_MS: u64 = 20_000;
 
 fn has_area_number_clues(puzzle: &Puzzle) -> bool {
     for r in 0..puzzle.height {

@@ -16,14 +16,15 @@
 pub mod adapter;
 pub mod grid;
 pub mod parity_uf;
+pub mod polyomino;
 pub mod prop;
+pub mod rose;
 pub mod types;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 use std::time::Duration;
 
 use crate::clock::Instant;
-use crate::solver::rose;
 use crate::types::{ModuleOutcome, Puzzle, RegionInfo};
 
 use adapter::Input;
@@ -46,6 +47,12 @@ pub(crate) struct Solver<'a> {
     pub grid: Grid,
     pub cell_clues: Vec<CellClue>,
     pub edge_clues: Vec<EdgeClue>,
+    /// Cached gemini (`homogeneous`) edge ids — the two regions they separate
+    /// must end up the same shape, hence the same area.
+    pub gemini_edges: Vec<EdgeId>,
+    /// True iff the puzzle has at least one Gemini edge AND one Delta edge (the
+    /// `propagate_delta_gemini_interaction` precondition).
+    pub has_gemini_and_delta: bool,
     pub vertex_clues: Vec<VertexClue>,
     pub rules: GlobalRules,
     pub edges: Vec<EdgeState>,
@@ -72,7 +79,7 @@ pub(crate) struct Solver<'a> {
     pub prop: PropagationState,
     // Edge-selection cache.
     pub growth_edge_count: Vec<usize>,
-    pub watchtower_vertices: HashSet<VertexId>,
+    pub watchtower_vertices: BTreeSet<VertexId>,
     // Pre-computed cell clue index.
     pub cell_clues_indexed: Vec<Vec<usize>>,
     // Deadline / timeout bookkeeping.
@@ -80,6 +87,26 @@ pub(crate) struct Solver<'a> {
     pub timed_out: bool,
     // First solution found.
     pub solution_regions: Option<Vec<RegionInfo>>,
+    // --- Rose-window state (populated only when rose_window is present) ---
+    /// Per-cell rose symbol type index (u8::MAX = no symbol).
+    pub cell_rose_sym: Vec<u8>,
+    /// Bitmask of all present rose symbol types.
+    pub rose_bits_all: u8,
+    /// Number of distinct rose symbol types.
+    pub num_rose_types: usize,
+    /// Rose cells grouped by symbol type index.
+    pub rose_by_type: Vec<Vec<CellId>>,
+    /// Reusable BFS-visited buffer for rose reachability.
+    pub rose_visited: Vec<bool>,
+    /// Branching state for rose-pair SAME/DIFF (used by propagation + search).
+    pub pair_branch: rose::PairBranchState,
+    /// Exact piece count, if known (used by parity propagation for 2-piece).
+    pub exact_piece_count: Option<usize>,
+    /// `clue_cell[cell]` — cell carries a `solitary`-relevant clue.  Mirrors the
+    /// `validate::validate` "solitary" predicate exactly (symbol / compass /
+    /// number / shape_pattern / fence_pattern), so `propagate_solitary` prunes
+    /// on the same notion of "clue" the leaf check enforces.
+    pub clue_cell: Vec<bool>,
 }
 
 impl<'a> Solver<'a> {
@@ -101,8 +128,24 @@ impl<'a> Solver<'a> {
             })
             .collect();
 
-        let watchtower_vertices: HashSet<VertexId> =
+        let watchtower_vertices: BTreeSet<VertexId> =
             input.vertex_clues.iter().map(|cl| cl.vertex).collect();
+
+        // Gemini edges cached up front: `check_gemini_pairs` runs inside the
+        // propagation loop and needs `&mut self` for `growth_potential`, so it
+        // cannot borrow `self.edge_clues` while iterating.
+        let gemini_edges: Vec<EdgeId> = input
+            .edge_clues
+            .iter()
+            .filter(|cl| matches!(cl.kind, EdgeClueKind::Gemini))
+            .map(|cl| cl.edge)
+            .collect();
+        let has_gemini = !gemini_edges.is_empty();
+        let has_delta = input
+            .edge_clues
+            .iter()
+            .any(|cl| matches!(cl.kind, EdgeClueKind::Delta));
+        let has_gemini_and_delta = has_gemini && has_delta;
 
         let has_compass_clue = input
             .cell_clues
@@ -113,11 +156,32 @@ impl<'a> Solver<'a> {
             .iter()
             .any(|c| matches!(c, CellClue::Palisade { .. }));
 
+        // Solitary clue-cell index.  Built straight from `puzzle` (not from
+        // `cell_clues`, which only carries the area / compass / palisade clues
+        // the propagators consume) so that `symbol` / `shape_pattern` cells also
+        // count — `validate`'s solitary check counts them too.
+        let mut clue_cell = vec![false; nc];
+        for r in 0..puzzle.height {
+            for c in 0..puzzle.width {
+                let cell = &puzzle.cells[r][c];
+                if cell.symbol.is_some()
+                    || cell.compass.is_some()
+                    || cell.number.is_some()
+                    || cell.shape_pattern.is_some()
+                    || cell.fence_pattern.is_some()
+                {
+                    clue_cell[r * puzzle.width + c] = true;
+                }
+            }
+        }
+
         let mut solver = Self {
             puzzle,
             grid: input.grid,
             cell_clues: input.cell_clues,
             edge_clues: input.edge_clues,
+            gemini_edges,
+            has_gemini_and_delta,
             vertex_clues: input.vertex_clues,
             rules: input.rules,
             edges: vec![EdgeState::Unknown; n],
@@ -145,7 +209,62 @@ impl<'a> Solver<'a> {
             deadline,
             timed_out: false,
             solution_regions: None,
+            cell_rose_sym: vec![u8::MAX; nc],
+            rose_bits_all: 0,
+            num_rose_types: 0,
+            rose_by_type: Vec::new(),
+            rose_visited: vec![false; nc],
+            pair_branch: rose::PairBranchState::default(),
+            exact_piece_count: None,
+            clue_cell,
         };
+
+        // Rose-window state: map each distinct symbol string to a type index and
+        // record per-cell type.  Only populated when rose_window is present.
+        if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
+            let mut sym_to_idx: std::collections::BTreeMap<String, u8> =
+                std::collections::BTreeMap::new();
+            for r in 0..puzzle.height {
+                for c in 0..puzzle.width {
+                    if let Some(sym) = &puzzle.cells[r][c].symbol {
+                        if !sym_to_idx.contains_key(sym) {
+                            sym_to_idx.insert(sym.clone(), sym_to_idx.len() as u8);
+                        }
+                    }
+                }
+            }
+            let num = sym_to_idx.len();
+            if num > 0 && num <= 8 {
+                solver.num_rose_types = num;
+                solver.rose_bits_all = (1u8 << num) - 1;
+                solver.cell_rose_sym = vec![u8::MAX; nc];
+                solver.rose_by_type = vec![Vec::new(); num];
+                for r in 0..puzzle.height {
+                    for c in 0..puzzle.width {
+                        let idx = r * puzzle.width + c;
+                        if let Some(sym) = &puzzle.cells[r][c].symbol {
+                            if let Some(&ti) = sym_to_idx.get(sym) {
+                                solver.cell_rose_sym[idx] = ti;
+                                solver.rose_by_type[ti as usize].push(idx);
+                            }
+                        }
+                    }
+                }
+
+                // NOTE: AOG deduces `exact_piece_count` from the rose window
+                // here ("all types occur N times => exactly N pieces",
+                // `third_party/aog/src/solver/mod.rs:139`) and uses it to seed
+                // Cut edges as parity-1 facts.  We deliberately do NOT: our type
+                // set is built from *any* cell symbol, not just rose clues, so a
+                // puzzle carrying non-rose symbols gets a wrong count and the
+                // resulting pruning drops real solutions.
+                //
+                // Measured 2026-09-03 on the 187 rose_window puzzles: enabling
+                // the deduction and the extra parity seeding gained 0987 but
+                // lost 0213nopad, 1135 and 1392 (-2 net).  Reverted.
+                solver.exact_piece_count = None;
+            }
+        }
 
         for &e in &input.pre_cut {
             solver.mark_pre_cut(e);
@@ -338,7 +457,7 @@ impl<'a> Solver<'a> {
                 region_of[c] = Some(comp[c]);
             }
         }
-        rose::build_regions(&region_of, self.grid.rows, self.grid.cols)
+        crate::solver::rose::build_regions(&region_of, self.grid.rows, self.grid.cols)
     }
 
     /// Multi-factor edge selection (target area, sealed/growing, watchtower).
@@ -472,9 +591,24 @@ impl<'a> Solver<'a> {
             return;
         }
 
-        let Some((e, _score)) = self.select_edge() else {
+        let Some((e, score)) = self.select_edge() else {
             return;
         };
+
+        // Rose-pair branching: resolve the final rose ambiguity near the leaves
+        // (few unknown edges left).  Gated on `curr_unknown <= thr` (AOG uses a
+        // fixed 80; we scale it to `num_edges/4` so small puzzles only branch at
+        // their tail too).  Branching on every node explodes the search and
+        // regresses borderline puzzles — the bulk of the work is done by edge
+        // propagation; pairing only disambiguates the tail.  Safe: a wrong branch
+        // is caught by `validate` at the leaf and the router falls through.
+        let rose_branch_thr = (self.grid.num_edges() / 4).min(80);
+        if self.rose_bits_all != 0 && self.curr_unknown <= rose_branch_thr {
+            if let Some((c1, c2)) = self.select_rose_pair(score) {
+                self.branch_on_pair(c1, c2);
+                return;
+            }
+        }
 
         let cut_first = self.prefer_cut_first(e);
         let order: &[EdgeState; 2] = if cut_first {

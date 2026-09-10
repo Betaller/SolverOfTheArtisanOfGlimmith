@@ -3,7 +3,7 @@
 //! Generates all valid shape placements from cell clues (area numbers, compass,
 //! shape pool), builds a DLX matrix (columns = cells), and finds exact cover.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use crate::clock::Instant;
 
 use crate::dlx::DancingLinks;
@@ -297,14 +297,48 @@ fn generate_all_placements(puzzle: &Puzzle, ctx: &SolveContext) -> Vec<Placement
     }
 
     // Deduplicate
-    let mut seen: HashSet<Vec<usize>> = HashSet::new();
+    let mut seen: BTreeSet<Vec<usize>> = BTreeSet::new();
     placements.retain(|p| {
         let mut ids = p.cell_ids_flat.clone();
         ids.sort();
         seen.insert(ids)
     });
 
+    // `solitary`: each region holds exactly one clue cell.  A placement that
+    // spans two or more clue cells can never be part of a valid partition, so
+    // drop it.  (A placement covering zero clue cells is fine — regions need not
+    // all be clue-anchored.)  This also makes Every clue's placements
+    // individually valid, which is required for the DLX cover to exist when a
+    // clue cell must end up as its own region.
+    if puzzle.rules.iter().any(|r| r.ctype == "solitary") {
+        placements.retain(|p| {
+            let mut clues = 0;
+            for &[r, c] in &p.cells {
+                if is_clue_cell(puzzle, r, c) {
+                    clues += 1;
+                    if clues >= 2 {
+                        break;
+                    }
+                }
+            }
+            clues < 2
+        });
+    }
+
     placements
+}
+
+/// True iff the cell carries a `solitary`-relevant clue, matching the
+/// `validate::validate` "solitary" predicate (symbol / compass / number /
+/// shape_pattern / fence_pattern).  Blocked cells are never fillable and so are
+/// never present in a placement.
+fn is_clue_cell(puzzle: &Puzzle, r: usize, c: usize) -> bool {
+    let cell = &puzzle.cells[r][c];
+    cell.symbol.is_some()
+        || cell.compass.is_some()
+        || cell.number.is_some()
+        || cell.shape_pattern.is_some()
+        || cell.fence_pattern.is_some()
 }
 
 impl CompassClue {
@@ -464,28 +498,32 @@ fn compass_rec(
     compass: &CompassClue,
     results: &mut Vec<Vec<[usize; 2]>>,
 ) {
-    // Check if any direction exceeds its compass value
-    if counts[0] > compass.up.unwrap_or(0) as usize
-        || counts[1] > compass.down.unwrap_or(0) as usize
-        || counts[2] > compass.right.unwrap_or(0) as usize
-        || counts[3] > compass.left.unwrap_or(0) as usize
+    // Check if any *specified* direction exceeds its compass value.  An
+    // unspecified direction (`None`) is unbounded — it may hold any number of
+    // cells.  (Previously `unwrap_or(0)` treated `None` as "exactly 0", which
+    // silently discarded every placement extending into that direction and made
+    // loosely-specified compass clues unsolvable.)
+    if compass.up.map_or(false, |v| counts[0] > v as usize)
+        || compass.down.map_or(false, |v| counts[1] > v as usize)
+        || compass.right.map_or(false, |v| counts[2] > v as usize)
+        || compass.left.map_or(false, |v| counts[3] > v as usize)
     {
         return;
     }
 
-    // Check if all specified directions are exactly satisfied
-    // (Note: in our format, 0 means "not specified" BUT ONLY if the compass is from the I/O layer
-    //  For compass clues, all values default to 0, meaning "no constraint in that direction")
-    let all_satisfied = compass.up.unwrap_or(0) == counts[0] as i64
-        && compass.down.unwrap_or(0) == counts[1] as i64
-        && compass.right.unwrap_or(0) == counts[2] as i64
-        && compass.left.unwrap_or(0) == counts[3] as i64;
+    // A placement is complete when every *specified* direction is exactly
+    // satisfied.  Unspecified directions are unbounded, so the region is still
+    // complete even if it has cells there.  Single-cell regions are valid when
+    // no direction is specified (a clue with spec=0 can be its own region).
+    let all_satisfied = compass.up.map_or(true, |v| counts[0] as i64 == v)
+        && compass.down.map_or(true, |v| counts[1] as i64 == v)
+        && compass.right.map_or(true, |v| counts[2] as i64 == v)
+        && compass.left.map_or(true, |v| counts[3] as i64 == v);
 
-    if all_satisfied && current.len() > 1 {
+    if all_satisfied && !current.is_empty() {
         results.push(current.clone());
-        // Continue: can grow in unspecified... but in our format all values are specified
-        // as 0 (meaning "exactly 0") or non-zero. So if all_satisfied, we're done.
-        return;
+        // Continue growing: an unspecified direction may still add cells while
+        // staying within the specified counts, yielding distinct larger regions.
     }
 
     if candidates.is_empty() {
@@ -497,13 +535,30 @@ fn compass_rec(
     // the count check above, which treats None as "0 cells allowed"). This is far
     // tighter than the old `current.len() + 20` heuristic and terminates the
     // placement DFS as soon as the region can't grow further. (doc 16 §2 D7.)
-    let max_sz = 1usize
-        + compass.up.unwrap_or(0) as usize
-        + compass.down.unwrap_or(0) as usize
-        + compass.left.unwrap_or(0) as usize
-        + compass.right.unwrap_or(0) as usize;
-    if current.len() >= max_sz {
-        return;
+    // Upper bound on region size from the *specified* directions only.  An
+    // unspecified direction (`None`) is unbounded, so the whole region is
+    // unbounded → omit the cap.  (Previously `unwrap_or(0)` capped the region at
+    // `1 + sum(specified)`, discarding every larger valid placement whenever a
+    // direction was left unspecified.)
+    let max_sz: Option<usize> = if compass.up.is_none()
+        || compass.down.is_none()
+        || compass.left.is_none()
+        || compass.right.is_none()
+    {
+        None
+    } else {
+        Some(
+            1usize
+                + compass.up.unwrap() as usize
+                + compass.down.unwrap() as usize
+                + compass.left.unwrap() as usize
+                + compass.right.unwrap() as usize,
+        )
+    };
+    if let Some(limit) = max_sz {
+        if current.len() >= limit {
+            return;
+        }
     }
 
     if results.len() >= MAX_COMPASS_PLACEMENTS {
@@ -593,7 +648,7 @@ fn reconstruct_and_validate(
     row_ids: &[usize],
     ctx: &SolveContext,
 ) -> Option<Vec<RegionInfo>> {
-    let mut piece_of_cell: HashMap<(usize, usize), usize> = HashMap::new();
+    let mut piece_of_cell: BTreeMap<(usize, usize), usize> = BTreeMap::new();
     for (i, &row_id) in row_ids.iter().enumerate() {
         for &[r, c] in &placements[row_id].cells {
             piece_of_cell.insert((r, c), i);

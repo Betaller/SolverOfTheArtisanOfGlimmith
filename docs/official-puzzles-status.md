@@ -38,6 +38,7 @@
 | 2026-09-18 | compass bbox 面积界回填 + solitary 可行集 + pieces compass deadline | `results/tmp/20260918_compass-bbox-verify.txt`（定向验证） | 直跑 rsolver + 154 题 compass/solitary 回归 | **1126 预估 / 1258**（+3，全量待确认） | +3（vs 1123） | `get_compass_area_bounds` 对含 `-1` 方向的罗盘线索给出 `max = 1+Σ(v_d or 半平面可存格数)`（原先四方向全已知才有 max），激活 `size==max→封口`/`growth_potential`/放置枚举门槛（够格线索 58→155）；`propagate_solitary` 加 S5 bbox 可行集（S5a/b/c，仅全罗盘线索且 K≤64 激活）；`pieces::compass_rec` 加 deadline（0312/0680 不再被 harness 击杀）。**新解 1386（compass+rose）、0418/1140fix（compass+watchtower）via edge_csp**；154 道 compass/solitary PASS 题 0 回归；compass+solitary FAIL 簇 11 题仍未解（S5b 根层不触发）。 |
 | 2026-09-18 | edge_csp dual_connectivity D1/D2（structural_pieces via precise） | 直跑 rsolver | 直跑 rsolver + 169 题 precise PASS 回归 | **1128 预估 / 1258**（+2，全量待确认） | +2（vs 1126） | 新字段 `structural_pieces`：仅从 `precise` 规则推导（fillable/A 整除时），刻意不用玫瑰窗计数（后者会打开 two-piece parity seeding 的错误强制，见 doc 27）。`propagate_dual_connectivity`：D1 须生长而仅 1 条 Unknown 生长边→强制 Uncut；D2 组件图连通分量数 >片数→矛盾、==片数→分量内 Unknown 边全 Uncut。**新解 0209（precise+ring，15.7s）、0703（fence+precise，1.8s）via edge_csp**；169 道 precise PASS 题 0 回归；1248（fence+homogeneous+precise）仍超时。 |
 | 2026-09-18 | edge_csp 卫生项打包（structural_pieces_max / compass 不兼容 / S5d / rose 源） | 直跑 rsolver | 定向回归 | **1128 预估 / 1258** | 0（均为 0 增益 0 回归的声音基础设施） | ① `structural_pieces_max`（range/precise 的 min_area 派生片数上界）供 D2 的 `cc > cap` 矛盾用；② `init_compass_incompatibility`（相邻不相容罗盘对预强制 Cut）；③ solitary S5d（单候选格的唯一邻接强制 Uncut）；④ `structural_pieces` 玫瑰窗源。四项各自实测 0 新解，但回归全绿（分别 273 / 96 / 154 / 56 题），保留为后续优化的地基。 |
+| 2026-09-18 | **全量收口基准（`65d2336`）** | `results/bench/20260918_65d2336_shape-identity-compass-dual.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1127 / 1258** | **+7**（vs 1120） | 9 新解 / 2 损失。新解：0341/1370（different+fence）、1340（different+rose_window）via 形状同一性传播；1386/0418（本轮 0418 因争抢未进榜，串行复测 SOLVED）via compass bbox；0209/0703 via dual_connectivity；0956（aog 35s）/1131（edge_csp 65s）为临界题受益。损失 0685（串行复测 SOLVED，争抢噪声）、0491（watchtower 8×10，**1120 时代二进制同样 OOM**，非本轮回归）。二进制 `results/bin/rsolver-65d2336-linux-x86_64`。 |
 
 ---
 
@@ -515,6 +516,22 @@ seeding，根层强制错误 Cut）。本次改用**结构规则**来源：
 - **D3 桥分析未移植**（风险最高，需论证桥两侧面积，暂缓）。
 - **新解**：0209（precise+ring，edge_csp 15.7s）、0703（fence+precise，1.8s）。
 - **回归**：169 道 precise PASS 题全部复测 0 回归。1248 仍超时。
+
+### 2026-09-18 · 全量收口基准 1127/1258（`65d2336`）
+
+`--timeout 40 -j 6`，较 1120 基线净 **+7**（9 新解 / 2 损失）。
+
+- **新解 9 道**：0341 / 1370 / 1340（形状同一性传播，见上）；0209 / 0703
+  （dual_connectivity，见上）；1386（compass bbox 紧界）；0956（aog 35s）、
+  1131（edge_csp 65s）为跨运行临界题，本轮剪枝收紧后在预算内解出；
+  0418 本轮 -j 6 争抢未进榜，**串行复测 SOLVED**（edge_csp 27.5s）。
+- **损失 2 道**：0685 串行复测 SOLVED（aog 20s，争抢噪声）；0491（watchtower
+  8×10）在本轮与 `results/bin/rsolver-7c05d41-linux-x86_64`（1120 提交的二进制）
+  上**均 rc=137 OOM**，属固有内存不稳题，非本轮回归。
+- **判噪声口径**：与 `docs/code-complexity-report.md` §7.5 一致——并行下 40s 边界
+  题随机翻转，逐题串行复测才能定性。按此口径真实能力约 **1129**（+0685 +0418）。
+- **产物**：`results/bench/20260918_65d2336_shape-identity-compass-dual.{txt,jsonl}`、
+  `results/bin/rsolver-65d2336-linux-x86_64`。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

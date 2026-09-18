@@ -192,8 +192,52 @@ fn wavefront_growth(
     true
 }
 
+/// Is the cell set 4-connected?  Guards `rose_growth`'s repair moves so they
+/// never slice a region in two (doc 28).  Regions are small, so a plain BFS
+/// over the set is cheap.
+fn is_connected_set(cells: &CellSet, w: usize) -> bool {
+    let n = cells.len();
+    if n <= 1 {
+        return true;
+    }
+    let mut max_idx = 0usize;
+    for i in cells.iter() {
+        if i > max_idx {
+            max_idx = i;
+        }
+    }
+    let mut seen = vec![false; max_idx + 1];
+    let start = cells.iter().next().unwrap();
+    let mut q = std::collections::VecDeque::new();
+    q.push_back(start);
+    seen[start] = true;
+    let mut reached = 0usize;
+    while let Some(cur) = q.pop_front() {
+        reached += 1;
+        let (r, c) = (cur / w, cur % w);
+        for (dr, dc) in DIRS {
+            let nr = r as i32 + dr;
+            let nc = c as i32 + dc;
+            if nr < 0 || nc < 0 {
+                continue;
+            }
+            let ni = nr as usize * w + nc as usize;
+            if ni <= max_idx && !seen[ni] && cells.contains(ni) {
+                seen[ni] = true;
+                q.push_back(ni);
+            }
+        }
+    }
+    reached == n
+}
+
 /// First repair strategy: move one endpoint of a violating pre-boundary edge
 /// into an adjacent region that has no pre-boundary conflict with it.
+///
+/// Every move is guarded by `is_connected_set` on the region the cell leaves:
+/// without that guard the repair can slice a region in two, and the resulting
+/// candidate is rejected by `validate` (doc 28 — 25 FAILs showed
+/// `rose:validation_failed`, traced to this path).
 fn try_swap_fix(
     region_of: &mut [Option<usize>],
     region_cells: &mut [CellSet],
@@ -225,9 +269,17 @@ fn try_swap_fix(
                 if has_pre_neighbor_in(region_of, pre, nrid, cell_r, cell_c, h, w) {
                     continue;
                 }
-                region_of[cell_r * w + cell_c] = Some(nrid);
-                region_cells[cur].remove(cell_r * w + cell_c);
-                region_cells[nrid].insert(cell_r * w + cell_c);
+                let idx = cell_r * w + cell_c;
+                region_of[idx] = Some(nrid);
+                region_cells[cur].remove(idx);
+                region_cells[nrid].insert(idx);
+                // The cell left `cur`; if that split it, undo and try the next.
+                if !is_connected_set(&region_cells[cur], w) {
+                    region_of[idx] = Some(cur);
+                    region_cells[cur].insert(idx);
+                    region_cells[nrid].remove(idx);
+                    continue;
+                }
                 return true;
             }
         }
@@ -266,12 +318,27 @@ fn try_chain_move(
                     continue;
                 }
                 if can_move_self(region_of, pre, n_rid, nidx, cell_r, cell_c, h, w) {
-                    region_of[nidx] = Some(cur);
-                    region_cells[n_rid].remove(nidx);
-                    region_cells[cur].insert(nidx);
-                    region_of[cell_r * w + cell_c] = Some(n_rid);
-                    region_cells[cur].remove(cell_r * w + cell_c);
-                    region_cells[n_rid].insert(cell_r * w + cell_c);
+                    let a = nidx;
+                    let b = cell_r * w + cell_c;
+                    region_of[a] = Some(cur);
+                    region_cells[n_rid].remove(a);
+                    region_cells[cur].insert(a);
+                    region_of[b] = Some(n_rid);
+                    region_cells[cur].remove(b);
+                    region_cells[n_rid].insert(b);
+                    // Both regions changed hands; a swap that disconnects either
+                    // one is not a repair (doc 28).
+                    if !is_connected_set(&region_cells[cur], w)
+                        || !is_connected_set(&region_cells[n_rid], w)
+                    {
+                        region_of[a] = Some(n_rid);
+                        region_cells[cur].remove(a);
+                        region_cells[n_rid].insert(a);
+                        region_of[b] = Some(cur);
+                        region_cells[n_rid].remove(b);
+                        region_cells[cur].insert(b);
+                        continue;
+                    }
                     return true;
                 }
             }
@@ -586,6 +653,14 @@ fn repair_symbol_distribution(
                         region_of[idx] = Some(di);
                         region_cells[ei].remove(idx);
                         region_cells[di].insert(idx);
+                        // Moving a non-symbol cell out of an over-full region
+                        // must not split it (doc 28).
+                        if !is_connected_set(&region_cells[ei], w) {
+                            region_of[idx] = Some(ei);
+                            region_cells[ei].insert(idx);
+                            region_cells[di].remove(idx);
+                            continue;
+                        }
                         moved = true;
                         break;
                     }

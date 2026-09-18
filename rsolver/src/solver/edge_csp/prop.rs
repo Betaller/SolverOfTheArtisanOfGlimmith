@@ -736,7 +736,8 @@ impl<'a> Solver<'a> {
         self.check_gemini_pairs(num_comp)?;
         // Gemini/Delta shape-identity: sealed regions across a gemini edge must
         // share a canonical shape; across a delta edge they must differ.
-        self.propagate_shape_constraints(num_comp)?;
+        // Also `same`/`different`/`mixed` global shape-identity rules.
+        progress |= self.propagate_shape_constraints(num_comp)?;
 
         Ok(progress)
     }
@@ -3631,7 +3632,7 @@ impl<'a> Solver<'a> {
         Ok(())
     }
 
-    fn propagate_shape_constraints(&mut self, num_comp: usize) -> Result<(), ()> {
+    fn propagate_shape_constraints(&mut self, num_comp: usize) -> Result<bool, ()> {
         let has_gemini = self
             .edge_clues
             .iter()
@@ -3640,19 +3641,156 @@ impl<'a> Solver<'a> {
             .edge_clues
             .iter()
             .any(|cl| matches!(cl.kind, EdgeClueKind::Delta));
-        if !has_gemini && !has_delta {
-            return Ok(());
+        let has_mingle = self.rules.mingle;
+        let has_mismatch = self.rules.mismatch;
+        let has_mixed = self.rules.mixed;
+        if !has_gemini && !has_delta && !has_mingle && !has_mismatch && !has_mixed {
+            return Ok(false);
         }
 
         // Canonical shape per sealed component.
         let comp_shape = self.sealed_comp_shapes(num_comp);
+        let mut progress = false;
         if has_gemini {
             self.check_gemini_shape_pairs(num_comp, &comp_shape)?;
         }
         if has_delta {
             self.check_delta_shape_pairs(num_comp, &comp_shape)?;
         }
+        if has_mingle {
+            progress |= self.check_mingle(num_comp, &comp_shape)?;
+        }
+        if has_mismatch {
+            self.check_mismatch(num_comp, &comp_shape)?;
+        }
+        if has_mixed {
+            self.check_mixed(num_comp, &comp_shape)?;
+        }
 
+        Ok(progress)
+    }
+
+    /// `same` (mingle): EVERY piece shares one canonical shape — global, not
+    /// merely adjacent (`check_rule_same` requires `len(shape_keys) <= 1`).
+    ///
+    /// Once a piece is sealed at size `a`, every other piece must also finish
+    /// at `a`:
+    /// - any two sealed shapes that differ → contradiction;
+    /// - a growing component whose size already exceeds `a`, whose target area
+    ///   (from clues) is not `a`, or whose growth potential falls short of `a`
+    ///   → contradiction;
+    /// - a growing component that has already reached size `a` is sealed: force
+    ///   its remaining growth edges Cut (the same inference
+    ///   `propagate_area_constraints` performs at `size == max_a`).
+    ///
+    /// Returns whether any edge was forced.
+    fn check_mingle(
+        &mut self,
+        num_comp: usize,
+        comp_shape: &[Option<Shape>],
+    ) -> Result<bool, ()> {
+        // Reference size: the first sealed shape's component size.
+        let mut ref_sz: Option<usize> = None;
+        let mut ref_shape: Option<&Shape> = None;
+        for ci in 0..num_comp {
+            let Some(shape) = &comp_shape[ci] else {
+                continue;
+            };
+            match ref_shape {
+                None => {
+                    ref_shape = Some(shape);
+                    ref_sz = Some(self.curr_comp_sz[ci]);
+                }
+                Some(rs) => {
+                    if rs != shape {
+                        return Err(());
+                    }
+                }
+            }
+        }
+        let Some(a) = ref_sz else {
+            return Ok(false); // nothing sealed yet — size unknown, no inference
+        };
+        let mut progress = false;
+        for ci in 0..num_comp {
+            if comp_shape[ci].is_some() {
+                continue; // sealed at `a` already (shapes verified equal above)
+            }
+            if let Some(target) = self.curr_target_area[ci] {
+                if target != a {
+                    return Err(());
+                }
+            }
+            let sz = self.curr_comp_sz[ci];
+            if sz > a {
+                return Err(());
+            }
+            if !self.is_growing(ci) {
+                continue;
+            }
+            if sz == a {
+                // Reached the shared shape size → seal, mirroring the
+                // `size == max_a` branch of `propagate_area_constraints`.
+                for i in 0..self.prop.growth_edges[ci].len() {
+                    let e = self.prop.growth_edges[ci][i];
+                    if self.edges[e] == EdgeState::Unknown {
+                        if !self.set_edge(e, EdgeState::Cut) {
+                            return Err(());
+                        }
+                        progress = true;
+                    }
+                }
+            } else if self.growth_potential(ci) < a {
+                return Err(());
+            }
+        }
+        Ok(progress)
+    }
+
+    /// `different` (mismatch): every piece has a distinct canonical shape
+    /// (`check_rule_different` requires all shape keys pairwise unique), so two
+    /// sealed components carrying the same canonical shape is a contradiction.
+    fn check_mismatch(
+        &self,
+        num_comp: usize,
+        comp_shape: &[Option<Shape>],
+    ) -> Result<(), ()> {
+        // BTreeSet (not HashSet): membership-only here, but the project keeps
+        // search-path containers ordered so results stay reproducible.
+        let mut taken: std::collections::BTreeSet<&Shape> = std::collections::BTreeSet::new();
+        for ci in 0..num_comp {
+            if let Some(shape) = &comp_shape[ci] {
+                if !taken.insert(shape) {
+                    return Err(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `mixed`: pieces sharing an edge have different canonical shapes.  Every
+    /// Cut edge between two distinct sealed components is such an adjacency, so
+    /// equal shapes on the two sides → contradiction.
+    fn check_mixed(&self, num_comp: usize, comp_shape: &[Option<Shape>]) -> Result<(), ()> {
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            if let (Some(s1), Some(s2)) = (&comp_shape[ci1], &comp_shape[ci2]) {
+                if s1 == s2 {
+                    return Err(());
+                }
+            }
+        }
         Ok(())
     }
 

@@ -157,4 +157,15 @@ pub struct GlobalRules {
     /// / number / shape_pattern / fence_pattern).  Consumed by
     /// `propagate_solitary`.
     pub solitary: bool,
+    /// `same`: every piece has the SAME canonical shape (global, not merely
+    /// adjacent — matches `check_rule_same` in `src/solver/constraints.py`).
+    /// Consumed by `propagate_shape_constraints`.
+    pub mingle: bool,
+    /// `different`: every piece has a DISTINCT canonical shape (global
+    /// uniqueness — matches `check_rule_different`).  Consumed by
+    /// `propagate_shape_constraints`.
+    pub mismatch: bool,
+    /// `mixed`: pieces sharing an edge have different canonical shapes
+    /// (matches `check_rule_mixed`).  Consumed by `propagate_shape_constraints`.
+    pub mixed: bool,
 }

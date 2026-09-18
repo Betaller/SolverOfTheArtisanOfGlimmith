@@ -34,6 +34,7 @@
 | 2026-08-17 | 求解器返回信息完善：attempts 求解链 + ModuleOutcome（`9d8461f`，可观测性，非算法） | `results/bench/20260817_9d8461f_attempts-full.jsonl`（全量）+ `results/bin/rsolver-9d8461f-linux-x86_64` | `benchmark_rust_solver.py --timeout 30 -j 6` | **1084 / 1258** | 较 iter7 估算 1085，**−1（aog 抖动，非算法回归）** | **可观测性改动，求解能力不变**。`Solution` 加 `attempts: Vec<SolverAttempt>`（per-module 求解链，doc 23）：每个分派考虑过的模块一条 `{solver, status, elapsed_ms, note}`，`status` 六态 `success`/`timeout`/`exhausted`/`validation_failed`/`not_attempted`/`error`。五个 `solve_*` 返回类型 `Option<Vec<RegionInfo>>` → `ModuleOutcome`（`Solved`/`ValidationFailed`/`None`），把 aog/edge_csp/rose 内部「找到候选但 validate 拒绝」从 `None` 里分出来（原先被吞掉，对 FAIL 根因分析最关键）。`mod.rs` 分派处包裹计时+记录；`build_solution` 校验失败时把刚 push 的 success 改写成 validation_failed。JSON `attempts` 为新增可选字段（`skip_serializing_if=Vec::is_empty`，旧消费者不解析即忽略）。Python 侧 `SolverAttempt` 统一到 `models/solution.py`（L1 router 链 + L2 Rust 模块链共用，带 `AttemptStatus` 枚举 + `solved`/`error` 兼容 property）；UI 结果面板加求解链表格；benchmark `via=` 显示完整链（如 `aog:timeout→rose:success`）+ JSONL 落 `attempts`。**端到端实测**：C4-1 `aog:timeout(3011ms)→rose:success(54ms)`（旧 JSON 只说 solver=rose）；1169 `aog:validation_failed→rose/edge_csp:not_attempted→pieces:success`（validation_failed 成功浮出）；0839/1406 `aog:timeout→rose:validation_failed→backtrack:exhausted`（rose 产假解被 validate 拒，可见）。**0 真回归**：1 道差异 1270（homogeneous+rose_window，solo timeout=40 1.9s 解出 aog:success）为已知 aog 非确定性抖动题（iter4 已记录 1270/0749/0875 均为 aog 抖动假回归），与 attempts 改动无关。**已知边界**：OOM/外部 kill 时进程没机会写 JSON，`attempts=[]`（如 0882/0826/0838 rose OOM 题）；timeout/exhausted 用 `now>=deadline` 近似判定，精确 deadline-hit 信号留待 deadline 盲区整改（doc 17）。`cargo test` 20、`pytest` 全绿、ruff 改动文件错误数 19→16（未引入新错误）。详见 `docs/优化/23-求解器返回信息完善方案.md`。 |
 | 2026-09-02 | 1102 收口基准（`c10e181`） | `results/bench/20260902_c10e181_verify.jsonl` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1102 / 1258** | +18（vs 1084） | 1120 里程碑前的全量收口基准（rose-cap 预算 + rose deadline 锚定之前）；逐题解 + 独立验证均过，新解构成见下方 1120 条目。 |
 | 2026-09-09 | 1120 里程碑（PR#64 `a04a4ad` = 7c05d41 + de1f3f4） | `results/bench/20260909_areafeas_full.jsonl` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1120 / 1258** | +18（vs 1102） | ① `AOG_ROSE_BUDGET_MS` 3s→20s：31 道 rose-capable 题原被 aog 3s 截断全超时，放宽后 aog 解 0213/0213nopad/0856/0957/0620/1386；② `solve_rose` 把 deadline 锚定自身起点（修复 router 全局 start 致 rose 剩余预算为负、0ms 返回，曾让 30s aog 预算回退 6 道）；③ 边 CSP `propagate` 加声音的面积可行性裁剪（两组件合并区最小尺寸已超任一方 max_area 则强 Cut，剪 0289 等爆炸，0 真回归）。新解 0439/0491/0445/0651 via edge_csp。1120/1258，0 真回归。 |
+| 2026-09-18 | edge_csp 形状同一性传播（same/different/mixed，`feat/shape-identity-propagation`） | `results/tmp/20260918_shape-identity-verify.txt`（定向验证；全量基准待合入前跑） | 直跑 rsolver + 219 题形状规则回归 | **1123 预估 / 1258**（+3，全量待确认） | +3（vs 1120） | `GlobalRules` 加 mingle/mismatch/mixed 三标志；`propagate_shape_constraints` 扩展 `check_mingle`（全局同形：首个密封组件定尺寸 a 后，超尺寸/目标≠a/潜力<a 判矛盾，达 a 强制封口）、`check_mismatch`（密封形状两两互异，BTreeSet）、`check_mixed`（Cut 边两侧密封同形判矛盾）。`is_edge_csp_capable` 放开纯形状同一性题（rose_window+same 等——`is_rose_capable` 拒绝它们，此前仅 aog 尝试）。**新解 0341/1370（different+fence）、1340（different+rose_window）via edge_csp**；219 道形状规则 PASS 题 0 回归；select_edge 启发式扩展（clue 约束/Slitherlink 端点/rose 邻近）实测致 0924fix/0972 真回归已回退。`pytest` 301、`cargo test` 34 通过。 |
 
 ---
 
@@ -437,6 +438,34 @@ vs `6169df3` 基线：**0 回归，+1 PASS（0829）**；**8 道校验失败 →
 - **边 CSP 声音的面积可行性裁剪（`de1f3f4`）**：两组件间一条 Uncut 边合并出的区域尺寸至少 `sz1+sz2` 且须满足各方 max_area；若该最小尺寸已超任一 max_area，则无合法解可 uncut，强 Cut。缩减 area/precise/range 题分支（如 0289 爆炸），**剪掉 0 个合法解**。全量基准 1120 保持、0 回归（3 个临界翻转为 `-j 8` 负载噪声，solo 确认）；新 edge_csp 解出 0651，0980/0685 等 brick/ring OOM 在 aog 未被内存 kill 时也解出。
 - **新解**：0213 / 0213nopad / 0856 / 0957 / 0620 / 1386（aog）+ 0439 / 0491 / 0445 / 0651（edge_csp）。
 - **结果**：1120 / 1258（89.03%），较 1102 基准 +18、较 1084 基准 +36；0 真回归。二进制 `results/bin/rsolver-7c05d41-linux-x86_64`，基准 `results/bench/20260909_areafeas_full.jsonl`。
+
+### 2026-09-18 · edge_csp 形状同一性传播（same / different / mixed）
+
+1120 基线的 138 道 FAIL **全部带规则**（doc 26 基于 1111 基线的「134 道无规则」结论已过时）。
+按规则组合统计，涉及 `same`/`different`/`mixed` 的 FAIL 共 19 道，是仅次于
+compass+solitary（11 道）的第二大簇；其中 9 道本就在 `is_edge_csp_capable` 门内
+（有 fence/ring/brick 等边规则），另 10 道（rose_window+same、different+rose_window 等）
+因 `is_rose_capable` 拒绝 same/different 而只由 aog 尝试。
+
+- **传播实现**（`edge_csp/prop.rs`、`types.rs`、`adapter.rs`）：
+  - `check_mingle`（`same`）：按 `check_rule_same` 的**全局**语义（`len(shape_keys) <= 1`），
+    不是参考 aog 的仅相邻 mingle。首个密封组件定出共享尺寸 `a` 后：任何生长组件
+    超尺寸 / 目标面积≠a / 生长潜力<a 判矛盾；已达 `a` 的生长组件强制封口（生长边 Cut）。
+  - `check_mismatch`（`different`）：密封组件 canonical 形状两两互异（BTreeSet）。
+  - `check_mixed`（`mixed`）：每条 Cut 边两侧若均密封且 canonical 形状相同即判矛盾。
+  - 三者均为 false-negative-only（只拒绝、不产解），声音性由 219 题回归背书。
+- **门控放开**（`is_edge_csp_capable`）：所有规则 ⊆ SUPPORTED 且含 same/different/mixed
+  至少一条 → capable。这给 rose_window+same / different+rose_window 类题第二次机会
+  （aog 满预算失败后 edge_csp 接力），墙钟仍在 `RUST_PARTS=4` 预算内。
+- **新解**：0341（different+fence，44ms）、1370（different+fence，722ms）、
+  1340（different+rose_window，926ms），均 via edge_csp。
+- **证伪项**：select_edge 启发式补全（doc 26 §5.3 的 clue 约束组件 +30 / Slitherlink
+  路径端点 +45 / rose 邻近 +80）已实现并实测——0924fix（fence+difference，基线 12s）
+  与 0972（ring+rose_window，基线 9.2s）串行复测双双超时，属**真回归**（搜索序改变
+  砍掉原本可达的分支），已回退。教训：edge_csp 的搜索序对慢题敏感，启发式调整
+  必须逐题验证不能只看 FAIL 集合的净变化。
+- **验证**：219 道含 same/different/mixed 的 PASS 题全部复测 0 回归；`pytest` 301、
+  `cargo test` 34 通过。全量基准待合入前跑（见软门禁）。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

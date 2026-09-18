@@ -739,6 +739,20 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
     {
         return true;
     }
+    // Shape-identity rules now carry real propagation (`check_mingle` /
+    // `check_mismatch` / `check_mixed` in `propagate_shape_constraints`), so a
+    // puzzle whose only usable signal is `same` / `different` / `mixed` is no
+    // longer a leaf-check-only search.  This matters most for
+    // rose_window+same / rose_window+different combos: `is_rose_capable`
+    // rejects them (the rose solver's symbol bookkeeping assumes no global
+    // shape identity), so without this gate they were attempted by aog alone.
+    if puzzle
+        .rules
+        .iter()
+        .any(|r| matches!(r.ctype.as_str(), "same" | "different" | "mixed"))
+    {
+        return true;
+    }
     if !puzzle
         .rules
         .iter()
@@ -881,5 +895,16 @@ mod tests {
         // `differentiation` alone is supported but carries no area signal.
         let p = puzzle_with_rules(r#"[{"type":"differentiation"}]"#);
         assert!(!is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn shape_identity_rule_alone_is_capable() {
+        // `same`/`different`/`mixed` now propagate, so they qualify even with
+        // no edge or area rule (e.g. rose_window+same, which the rose solver
+        // refuses and aog alone used to attempt).
+        let p = puzzle_with_rules(r#"[{"type":"rose_window"},{"type":"same"}]"#);
+        assert!(is_edge_csp_capable(&p));
+        let p = puzzle_with_rules(r#"[{"type":"different"}]"#);
+        assert!(is_edge_csp_capable(&p));
     }
 }

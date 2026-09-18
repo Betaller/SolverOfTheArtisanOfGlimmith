@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any
 
-from src.models.board import Board, Cell, Edge, Vertex, Shape, EdgeConstraint, CompassClue
-
+from src.models.board import Board, Cell, Edge, Shape, Vertex
 
 RULE_NAMES: dict[str, str] = {
     "shape_pool": "形状池",
@@ -37,7 +36,7 @@ RULE_IDS: dict[str, str] = {v: k for k, v in RULE_NAMES.items()}
 @dataclass(slots=True)
 class Rule:
     type: str
-    params: dict = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
 
     @property
     def display_name(self) -> str:
@@ -146,9 +145,7 @@ def check_rule_conflicts(rules: list[Rule]) -> list[str]:
     active = {r.type for r in rules}
     for a, b in CONFLICTING_RULES:
         if a in active and b in active:
-            warnings.append(
-                f"规则 '{RULE_NAMES.get(a, a)}' 与 '{RULE_NAMES.get(b, b)}' 互为冲突"
-            )
+            warnings.append(f"规则 '{RULE_NAMES.get(a, a)}' 与 '{RULE_NAMES.get(b, b)}' 互为冲突")
     return warnings
 
 

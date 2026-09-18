@@ -88,25 +88,13 @@ pub fn generate_all_candidates(
     initial.insert(seed);
     visited.insert(initial.clone());
 
-    let (sr, sc) = (seed / w, seed % w);
-    let mut initial_frontier = CellSet::new(n_bits);
-    for (dr, dc) in [(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
-        let nr = sr as i32 + dr;
-        let nc = sc as i32 + dc;
-        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
-            let nidx = nr as usize * w + nc as usize;
-            if all_positions.contains(nidx) && !pre.contains(sr, sc, nr as usize, nc as usize) {
-                initial_frontier.insert(nidx);
-            }
-        }
-    }
+    let initial_frontier = seed_initial_frontier(seed, all_positions, pre, h, w);
     let initial_syms: u64 = symbol_of.get(&seed).map(|ti| 1u64 << ti).unwrap_or(0);
 
     let mut queue: std::collections::VecDeque<(CellSet, CellSet, u64)> =
         std::collections::VecDeque::new();
     queue.push_back((initial, initial_frontier, initial_syms));
 
-    let dirs = [(-1i32, 0), (1, 0), (0, -1), (0, 1)];
     while let Some((current, frontier, syms)) = queue.pop_front() {
         // Wall-clock bail-out: stop expanding once the budget is spent so the
         // caller can fall through to rose_growth instead of hanging until the
@@ -123,83 +111,162 @@ pub fn generate_all_candidates(
             // 必须 break，不能"停插入继续检查"（见 VISITED_CAP 注释）。
             break;
         }
-        if is_multi {
-            if syms == all_required {
-                results.push(current.clone());
-                // B-MB: once a region contains all required symbol types, stop
-                // expanding — any larger superset uses more cells with the same
-                // symbols, strictly worse for the exact-cover match. Reduces
-                // visited/queue 10-50× on multi-symbol puzzles (C4-2, 0620,
-                // 1433). (doc 15 §2 A3.)
-                //
-                // M1-REVERT: the theoretically-sound removal of this early-stop
-                // (true solution region may be a same-symbol-set superset) is
-                // empirically net-negative: on slash-pack 0833 the superset
-                // expansion floods CANDIDATE_CAP and the puzzle flips from
-                // solved (~7s) to unsolvable, with no offsetting NEW solves.
-                // Early-stop restored; the theoretical soundness hole stays
-                // documented in docs/bugs and branch history.
-                continue;
-            }
-        } else {
+        // B-MB / M1-REVERT: once a region contains all required symbol types,
+        // stop expanding (any larger superset uses more cells with the same
+        // symbols, strictly worse for the exact-cover match). The M1 revert
+        // showed removing this early-stop regressed slash-pack 0833 from solved
+        // to unsolvable, so it stays. See region_match history / docs/bugs.
+        let complete_multi = is_multi && syms == all_required;
+        if complete_multi || !is_multi {
             results.push(current.clone());
+        }
+        if complete_multi {
+            continue;
         }
         if current.len() >= MAX_CANDIDATE_CELLS {
             continue;
         }
         for cell in frontier.iter().collect::<Vec<_>>() {
-            let (cr, cc) = (cell / w, cell % w);
-            let cell_sym = symbol_of.get(&cell).copied();
-            let mut skip = false;
-            if let Some(ti) = cell_sym {
-                if is_multi && (syms & (1u64 << ti)) != 0 {
-                    skip = true;
-                }
+            if let Some(triple) = process_frontier_cell(
+                &current,
+                &frontier,
+                &mut visited,
+                all_positions,
+                cell,
+                syms,
+                is_multi,
+                symbol_of,
+                pre,
+                h,
+                w,
+            ) {
+                queue.push_back(triple);
             }
-            if !skip {
-                for (dr, dc) in dirs {
-                    let nr = cr as i32 + dr;
-                    let nc = cc as i32 + dc;
-                    if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
-                        let nidx = nr as usize * w + nc as usize;
-                        if current.contains(nidx)
-                            && pre.contains(cr, cc, nr as usize, nc as usize)
-                        {
-                            skip = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            if skip {
-                continue;
-            }
-            let mut new_fs = current.clone();
-            new_fs.insert(cell);
-            if visited.contains(&new_fs) {
-                continue;
-            }
-            visited.insert(new_fs.clone());
-            let new_syms = syms | cell_sym.map(|ti| 1u64 << ti).unwrap_or(0);
-            let mut new_frontier = frontier.clone();
-            new_frontier.remove(cell);
-            for (dr, dc) in dirs {
-                let nr = cr as i32 + dr;
-                let nc = cc as i32 + dc;
-                if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
-                    let nidx = nr as usize * w + nc as usize;
-                    if all_positions.contains(nidx)
-                        && !current.contains(nidx)
-                        && !pre.contains(cr, cc, nr as usize, nc as usize)
-                    {
-                        new_frontier.insert(nidx);
-                    }
-                }
-            }
-            queue.push_back((new_fs, new_frontier, new_syms));
         }
     }
     results
+}
+
+/// Build the initial BFS frontier from `seed`: cells reachable from `seed` through
+/// non-pre-boundary edges within `all_positions`.  Inline of the seed-setup loop
+/// in `generate_all_candidates` — same cells, same order.
+fn seed_initial_frontier(
+    seed: usize,
+    all_positions: &CellSet,
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> CellSet {
+    let (sr, sc) = (seed / w, seed % w);
+    let mut initial_frontier = CellSet::new(h * w);
+    for (dr, dc) in [(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
+        let nr = sr as i32 + dr;
+        let nc = sc as i32 + dc;
+        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
+            let nidx = nr as usize * w + nc as usize;
+            if all_positions.contains(nidx) && !pre.contains(sr, sc, nr as usize, nc as usize) {
+                initial_frontier.insert(nidx);
+            }
+        }
+    }
+    initial_frontier
+}
+
+/// True when `cell` (in `current`) is blocked from growing because it sits on a
+/// pre-boundary edge that leads back into `current` — i.e. adding it would
+/// violate a pre-boundary.  Inline of the skip check in `generate_all_candidates`.
+fn frontier_blocked_by_pre(
+    current: &CellSet,
+    cr: usize,
+    cc: usize,
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> bool {
+    for (dr, dc) in [(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
+        let nr = cr as i32 + dr;
+        let nc = cc as i32 + dc;
+        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
+            let nidx = nr as usize * w + nc as usize;
+            if current.contains(nidx) && pre.contains(cr, cc, nr as usize, nc as usize) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recompute the frontier after committing `cell` (at `cr,cc`) into `current`:
+/// drop `cell`, then add any in-`all_positions`, out-of-`current`, non-pre-boundary
+/// neighbour.  Inline of the new-frontier build in `generate_all_candidates`.
+fn expand_frontier(
+    frontier: &CellSet,
+    current: &CellSet,
+    all_positions: &CellSet,
+    cr: usize,
+    cc: usize,
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> CellSet {
+    let mut new_frontier = frontier.clone();
+    new_frontier.remove(cr * w + cc);
+    for (dr, dc) in [(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
+        let nr = cr as i32 + dr;
+        let nc = cc as i32 + dc;
+        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
+            let nidx = nr as usize * w + nc as usize;
+            if all_positions.contains(nidx)
+                && !current.contains(nidx)
+                && !pre.contains(cr, cc, nr as usize, nc as usize)
+            {
+                new_frontier.insert(nidx);
+            }
+        }
+    }
+    new_frontier
+}
+
+/// Process one frontier cell during candidate BFS: returns the
+/// `(new_region, new_frontier, new_syms)` triple to enqueue, or `None` if the
+/// cell is skipped (symbol conflict / pre-boundary) or already visited.
+/// Byte-identical to the inline body it replaces.
+fn process_frontier_cell(
+    current: &CellSet,
+    frontier: &CellSet,
+    visited: &mut HashSet<CellSet>,
+    all_positions: &CellSet,
+    cell: usize,
+    syms: u64,
+    is_multi: bool,
+    symbol_of: &HashMap<usize, usize>,
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> Option<(CellSet, CellSet, u64)> {
+    let (cr, cc) = (cell / w, cell % w);
+    let cell_sym = symbol_of.get(&cell).copied();
+    let mut skip = false;
+    if let Some(ti) = cell_sym {
+        if is_multi && (syms & (1u64 << ti)) != 0 {
+            skip = true;
+        }
+    }
+    if !skip && frontier_blocked_by_pre(current, cr, cc, pre, h, w) {
+        skip = true;
+    }
+    if skip {
+        return None;
+    }
+    let mut new_fs = current.clone();
+    new_fs.insert(cell);
+    if visited.contains(&new_fs) {
+        return None;
+    }
+    visited.insert(new_fs.clone());
+    let new_syms = syms | cell_sym.map(|ti| 1u64 << ti).unwrap_or(0);
+    let new_frontier = expand_frontier(frontier, current, all_positions, cr, cc, pre, h, w);
+    Some((new_fs, new_frontier, new_syms))
 }
 
 /// Port of `region_match._can_partition`: every remaining cell must be reachable
@@ -375,36 +442,9 @@ pub fn solve_by_region_match(
 
     // Most constrained symbol type (among cells in `all_positions` — pre-pinned
     // cells are excluded so their symbols don't seed a region).
-    let mut best_type_idx = 0usize;
-    let mut best_count = usize::MAX;
-    for (ti, st) in symbol_types.iter().enumerate() {
-        let count = (0..h)
-            .flat_map(|r| (0..w).map(move |c| (r, c)))
-            .filter(|&(r, c)| {
-                !puzzle.cells[r][c].blocked
-                    && all_positions.contains(r * w + c)
-                    && puzzle.cells[r][c].symbol.as_deref() == Some(st.as_str())
-            })
-            .count();
-        if count < best_count {
-            best_count = count;
-            best_type_idx = ti;
-        }
-    }
+    let best_type_idx = pick_best_type(puzzle, symbol_types, all_positions, h, w);
 
-    let mut seeds: Vec<usize> = Vec::new();
-    for r in 0..h {
-        for c in 0..w {
-            let idx = r * w + c;
-            if !puzzle.cells[r][c].blocked
-                && all_positions.contains(idx)
-                && puzzle.cells[r][c].symbol.as_deref()
-                    == Some(symbol_types[best_type_idx].as_str())
-            {
-                seeds.push(idx);
-            }
-        }
-    }
+    let mut seeds = collect_seeds(puzzle, symbol_types, best_type_idx, all_positions, h, w);
     seeds.sort_unstable();
     if seeds.len() != m {
         return None;
@@ -412,22 +452,7 @@ pub fn solve_by_region_match(
 
     // All symbol cells in `all_positions` (for reachability).  Pre-pinned
     // cells are excluded so reachability is computed over the remainder only.
-    let mut all_seed_cells = CellSet::new(total_bits(h, w));
-    let mut symbol_of: HashMap<usize, usize> = HashMap::new();
-    for r in 0..h {
-        for c in 0..w {
-            let idx = r * w + c;
-            if puzzle.cells[r][c].blocked || !all_positions.contains(idx) {
-                continue;
-            }
-            if let Some(sym) = puzzle.cells[r][c].symbol.as_ref() {
-                all_seed_cells.insert(idx);
-                if let Some(ti) = symbol_types.iter().position(|t| t == sym) {
-                    symbol_of.insert(idx, ti);
-                }
-            }
-        }
-    }
+    let (all_seed_cells, symbol_of) = build_symbol_maps(puzzle, symbol_types, all_positions, h, w);
 
     // Generate candidates per seed (single-symbol path).
     let mut all_candidates: Vec<Vec<CellSet>> = Vec::new();
@@ -466,15 +491,8 @@ pub fn solve_by_region_match(
     // These filters are pure pruning — bailing early just leaves extra candidates
     // in place (sound, only slower for `match_regions_mrv`, which re-checks).
     let (min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
-    for cands in all_candidates.iter_mut() {
-        if Instant::now() >= deadline {
-            break;
-        }
-        let max_for_this = max_sz.min(total - (m - 1));
-        cands.retain(|c| c.len() >= min_sz && c.len() <= max_for_this);
-        if cands.is_empty() {
-            return None;
-        }
+    if !filter_by_area(&mut all_candidates, deadline, min_sz, max_sz, total, m) {
+        return None;
     }
 
     // Pre-filter by component reachability.  `can_partition` runs a full BFS per
@@ -482,6 +500,161 @@ pub fn solve_by_region_match(
     // the deadline passes.  Pruning only: candidates left unfiltered stay in the
     // pool (sound — `match_regions_mrv` re-verifies, it just has more to try).
     let n = symbol_types.len();
+    if !filter_by_partition(&mut all_candidates, all_positions, &all_seed_cells, pre, h, w, n, deadline) {
+        return None;
+    }
+
+    for cands in all_candidates.iter_mut() {
+        cands.sort_by_key(|c| c.len());
+    }
+
+    // Sizes and by-size lookup.
+    let (seed_size_sets, candidates_by_size) = build_size_index(&all_candidates);
+
+    let min_area_per_region = min_sz.max(n);
+    let mut combos: Vec<Vec<usize>> = Vec::new();
+    enum_area_combos_bounded(
+        total,
+        m,
+        min_area_per_region,
+        &seed_size_sets,
+        0,
+        &mut Vec::new(),
+        &mut combos,
+    );
+    combos.sort_by_key(|c| c.iter().max().unwrap_or(&0) - c.iter().min().unwrap_or(&0));
+
+    if crate::aog_debug_enabled() {
+        eprintln!(
+            "rose: {} area combos (min_area={})",
+            combos.len(),
+            min_area_per_region
+        );
+    }
+
+    try_combos(&combos, &candidates_by_size, all_positions, total, h, w, pre, m, deadline)
+}
+
+/// Pick the most-constrained symbol type (fewest cells in `all_positions`).
+/// Inline of the selection loop in `solve_by_region_match`.
+fn pick_best_type(
+    puzzle: &Puzzle,
+    symbol_types: &[String],
+    all_positions: &CellSet,
+    h: usize,
+    w: usize,
+) -> usize {
+    let mut best_type_idx = 0usize;
+    let mut best_count = usize::MAX;
+    for (ti, st) in symbol_types.iter().enumerate() {
+        let count = (0..h)
+            .flat_map(|r| (0..w).map(move |c| (r, c)))
+            .filter(|&(r, c)| {
+                !puzzle.cells[r][c].blocked
+                    && all_positions.contains(r * w + c)
+                    && puzzle.cells[r][c].symbol.as_deref() == Some(st.as_str())
+            })
+            .count();
+        if count < best_count {
+            best_count = count;
+            best_type_idx = ti;
+        }
+    }
+    best_type_idx
+}
+
+/// Collect seed cells of `symbol_types[best_type_idx]` lying in `all_positions`.
+/// Inline of the seed-collection loop in `solve_by_region_match`.
+fn collect_seeds(
+    puzzle: &Puzzle,
+    symbol_types: &[String],
+    best_type_idx: usize,
+    all_positions: &CellSet,
+    h: usize,
+    w: usize,
+) -> Vec<usize> {
+    let mut seeds: Vec<usize> = Vec::new();
+    for r in 0..h {
+        for c in 0..w {
+            let idx = r * w + c;
+            if !puzzle.cells[r][c].blocked
+                && all_positions.contains(idx)
+                && puzzle.cells[r][c].symbol.as_deref() == Some(symbol_types[best_type_idx].as_str())
+            {
+                seeds.push(idx);
+            }
+        }
+    }
+    seeds
+}
+
+/// Build `(all_seed_cells, symbol_of)` over `all_positions`.  Inline of the
+/// symbol-map build loop in `solve_by_region_match`.
+fn build_symbol_maps(
+    puzzle: &Puzzle,
+    symbol_types: &[String],
+    all_positions: &CellSet,
+    h: usize,
+    w: usize,
+) -> (CellSet, HashMap<usize, usize>) {
+    let total = h * w;
+    let mut all_seed_cells = CellSet::new(total);
+    let mut symbol_of: HashMap<usize, usize> = HashMap::new();
+    for r in 0..h {
+        for c in 0..w {
+            let idx = r * w + c;
+            if puzzle.cells[r][c].blocked || !all_positions.contains(idx) {
+                continue;
+            }
+            if let Some(sym) = puzzle.cells[r][c].symbol.as_ref() {
+                all_seed_cells.insert(idx);
+                if let Some(ti) = symbol_types.iter().position(|t| t == sym) {
+                    symbol_of.insert(idx, ti);
+                }
+            }
+        }
+    }
+    (all_seed_cells, symbol_of)
+}
+
+/// Area / region-size pre-filter: drop candidates outside `[min_sz, max_sz.min(total
+/// - (m - 1))]` and bail if any seed's candidate pool empties.  Returns `false` if
+/// the caller should `return None`.  Inline of the area pre-filter in
+/// `solve_by_region_match`.
+fn filter_by_area(
+    all_candidates: &mut [Vec<CellSet>],
+    deadline: Instant,
+    min_sz: usize,
+    max_sz: usize,
+    total: usize,
+    m: usize,
+) -> bool {
+    for cands in all_candidates.iter_mut() {
+        if Instant::now() >= deadline {
+            break;
+        }
+        let max_for_this = max_sz.min(total.saturating_sub(m - 1));
+        cands.retain(|c| c.len() >= min_sz && c.len() <= max_for_this);
+        if cands.is_empty() {
+            return false;
+        }
+    }
+    true
+}
+
+/// Reachability pre-filter: drop candidates whose removal leaves an unreachable
+/// remainder (per `can_partition`).  Returns `false` if the caller should
+/// `return None`.  Inline of the partition pre-filter in `solve_by_region_match`.
+fn filter_by_partition(
+    all_candidates: &mut [Vec<CellSet>],
+    all_positions: &CellSet,
+    all_seed_cells: &CellSet,
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+    n: usize,
+    deadline: Instant,
+) -> bool {
     let mut deadline_hit = Instant::now() >= deadline;
     for cands in all_candidates.iter_mut() {
         if deadline_hit {
@@ -500,21 +673,23 @@ pub fn solve_by_region_match(
             for idx in c.iter() {
                 remaining.remove(idx);
             }
-            can_partition(&remaining, &all_seed_cells, pre, h, w, n)
+            can_partition(&remaining, all_seed_cells, pre, h, w, n)
         });
         if cands.is_empty() {
-            return None;
+            return false;
         }
     }
+    true
+}
 
-    for cands in all_candidates.iter_mut() {
-        cands.sort_by_key(|c| c.len());
-    }
-
-    // Sizes and by-size lookup.
+/// `(seed_size_sets, candidates_by_size)` lookup tables.  Inline of the size-index
+/// build loop in `solve_by_region_match`.
+fn build_size_index(
+    all_candidates: &[Vec<CellSet>],
+) -> (Vec<Vec<usize>>, Vec<HashMap<usize, Vec<CellSet>>>) {
     let mut seed_size_sets: Vec<Vec<usize>> = Vec::new();
     let mut candidates_by_size: Vec<HashMap<usize, Vec<CellSet>>> = Vec::new();
-    for cands in &all_candidates {
+    for cands in all_candidates {
         let mut sizes: Vec<usize> = cands.iter().map(|c| c.len()).collect();
         sizes.sort_unstable();
         sizes.dedup();
@@ -525,30 +700,26 @@ pub fn solve_by_region_match(
         }
         candidates_by_size.push(by_size);
     }
+    (seed_size_sets, candidates_by_size)
+}
 
-    let min_area_per_region = min_sz.max(n);
-    let mut combos: Vec<Vec<usize>> = Vec::new();
-    enum_area_combos_bounded(
-        total,
-        m,
-        min_area_per_region,
-        &seed_size_sets,
-        0,
-        &mut Vec::new(),
-        &mut combos,
-    );
-    combos.sort_by_key(|c| c.iter().max().unwrap_or(&0) - c.iter().min().unwrap_or(&0));
-
+/// Try each area combo via MRV exact-cover.  Returns the first successful region
+/// set, or `None`.  Inline of the combo loop in `solve_by_region_match` (the
+/// `region_of` working buffer is intentionally kept across combos, matching the
+/// original which declared it once before the loop).
+fn try_combos(
+    combos: &[Vec<usize>],
+    candidates_by_size: &[HashMap<usize, Vec<CellSet>>],
+    all_positions: &CellSet,
+    total: usize,
+    h: usize,
+    w: usize,
+    pre: &PreBoundaries,
+    m: usize,
+    deadline: Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
     let mut region_of: Vec<Option<usize>> = vec![None; h * w];
-    if crate::aog_debug_enabled() {
-        eprintln!(
-            "rose: {} area combos (min_area={})",
-            combos.len(),
-            min_area_per_region
-        );
-    }
-
-    for combo in &combos {
+    for combo in combos {
         if Instant::now() >= deadline {
             break;
         }
@@ -566,10 +737,9 @@ pub fn solve_by_region_match(
         if !feasible {
             continue;
         }
-        let combo_deadline =
-            Instant::now() + std::time::Duration::from_millis(PER_COMBO_TIMEOUT_MS);
+        let combo_deadline = Instant::now() + std::time::Duration::from_millis(PER_COMBO_TIMEOUT_MS);
         let mut assignment: Vec<Option<CellSet>> = vec![None; m];
-        let covered = CellSet::new(total_bits(h, w));
+        let covered = CellSet::new(h * w);
         if match_regions_mrv(
             &sized,
             all_positions,
@@ -582,9 +752,7 @@ pub fn solve_by_region_match(
             combo_deadline,
             deadline,
         ) {
-            // Rebuild region info from region_of.
-            let regions = super::build_regions(&region_of, h, w);
-            return Some(regions);
+            return Some(super::build_regions(&region_of, h, w));
         }
     }
     None

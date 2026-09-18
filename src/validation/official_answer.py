@@ -12,9 +12,11 @@ compares a solver's region partition against the canonical one, ignoring
 region-id labels, so the benchmark scripts can report "solved & validated but
 ≠ official" as a distinct outcome.
 """
+
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 
@@ -46,25 +48,26 @@ def load_official_regions(puzzle_path: str | Path) -> list[list[list[int]]] | No
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return None
-    regions = data.get("regions")
+    regions: list[list[list[int]]] | None = data.get("regions")
     if not regions:
         return None
     return regions
 
 
-def partition_key(regions) -> frozenset:
+def partition_key(
+    regions: Iterable[Iterable[Sequence[int]]],
+) -> frozenset[frozenset[tuple[int, ...]]]:
     """Normalize a region partition to a frozenset of cell-set frozensets.
 
     Region-id labels are ignored: two partitions are equal iff they cover the
     same cells with the same region cell-sets.
     """
-    return frozenset(
-        frozenset(tuple(c) for c in reg)
-        for reg in regions
-    )
+    return frozenset(frozenset(tuple(c) for c in reg) for reg in regions)
 
 
-def matches_official_answer(puzzle_path: str | Path, solution_regions) -> bool | None:
+def matches_official_answer(
+    puzzle_path: str | Path, solution_regions: Iterable[Iterable[Sequence[int]]]
+) -> bool | None:
     """Whether a solver's region partition equals the official answer.
 
     ``solution_regions`` is a list of region cell-lists (each a list of

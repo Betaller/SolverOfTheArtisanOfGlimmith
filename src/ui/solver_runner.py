@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from src.models.puzzle import Puzzle
 from src.models.solution import Solution
@@ -12,7 +12,11 @@ class SolverThread(QThread):
     error = Signal(str)
 
     def __init__(
-        self, puzzle: Puzzle, timeout: float = 30.0, puzzle_name: str | None = None, parent=None
+        self,
+        puzzle: Puzzle,
+        timeout: float = 30.0,
+        puzzle_name: str | None = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._puzzle = puzzle

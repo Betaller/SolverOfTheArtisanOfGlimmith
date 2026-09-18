@@ -9,6 +9,7 @@ Usage:
   AOG_SHAPE_CAP env not used here — we set it per-run.
   Run from repo root: .venv/bin/python scripts/exp_shape_cap.py
 """
+
 from __future__ import annotations
 
 import json
@@ -97,27 +98,40 @@ def run_one(puzzle_path: Path, cap: int) -> dict:
         }
 
 
+def _tag_for(r: dict) -> str:
+    if r["solved"]:
+        return "PASS"
+    if r["exit"] == -9:
+        return "OOM"
+    return "fail"
+
+
+def _run_cap(cap: int) -> dict:
+    base = Path("puzzles/official")
+    cap_results: dict = {}
+    for zone_sub, name in OOM:
+        p = base / zone_sub / f"{name}.json"
+        if not p.exists():
+            print(f"  {name}: MISSING {p}", flush=True)
+            continue
+        r = run_one(p, cap)
+        cap_results[name] = r
+        tag = _tag_for(r)
+        print(
+            f"  {name:<6} exit={str(r['exit']):>5} solved={r['solved']} "
+            f"elapsed={r['elapsed_ms']}ms wall={r['wall_ms']}ms [{tag}] {r['err'][:60]}",
+            flush=True,
+        )
+    return cap_results
+
+
 def main() -> None:
     if not BIN.exists():
         sys.exit(f"missing {BIN}; build first: cd rsolver && cargo build --release")
-    base = Path("puzzles/official")
     results = {}
     for cap in CAPS:
         print(f"\n=== AOG_SHAPE_CAP={cap} ===", flush=True)
-        cap_results = {}
-        for zone_sub, name in OOM:
-            p = base / zone_sub / f"{name}.json"
-            if not p.exists():
-                print(f"  {name}: MISSING {p}", flush=True)
-                continue
-            r = run_one(p, cap)
-            cap_results[name] = r
-            tag = "PASS" if r["solved"] else ("OOM" if r["exit"] == -9 else "fail")
-            print(
-                f"  {name:<6} exit={str(r['exit']):>5} solved={r['solved']} "
-                f"elapsed={r['elapsed_ms']}ms wall={r['wall_ms']}ms [{tag}] {r['err'][:60]}",
-                flush=True,
-            )
+        cap_results = _run_cap(cap)
         results[str(cap)] = cap_results
         solved_n = sum(1 for r in cap_results.values() if r["solved"])
         oom_n = sum(1 for r in cap_results.values() if r["exit"] == -9)

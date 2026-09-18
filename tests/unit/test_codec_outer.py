@@ -38,8 +38,7 @@ class TestDictToPuzzleOuterBoundaries:
             "edges": [],
             "vertices": [],
             "outer_boundaries": [
-                {"r1": r1, "c1": c1, "r2": r2, "c2": c2}
-                for r1, c1, r2, c2 in outer
+                {"r1": r1, "c1": c1, "r2": r2, "c2": c2} for r1, c1, r2, c2 in outer
             ],
             "rules": [],
             "shape_pool": [],

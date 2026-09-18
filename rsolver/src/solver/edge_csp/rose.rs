@@ -19,6 +19,51 @@ use super::types::*;
 use super::Solver;
 use std::collections::BTreeSet;
 
+/// True when `cur` is a rose cell that may be paired with `c1` for branching.
+///
+/// Type-0 cells other than the BFS start `c1` are excluded: two type-0 cells
+/// are already forced DIFF by the rose rule, so pairing them is a no-op.
+#[inline]
+fn is_branch_candidate(cur_sym: u8, cur: CellId, c1: CellId) -> bool {
+    if cur_sym == u8::MAX {
+        return false;
+    }
+    cur_sym != 0 || cur == c1
+}
+
+/// Number of BFS-parent hops from `cur` back to `c1` (0 when unreachable,
+/// i.e. when `cur == c1`).
+#[inline]
+fn path_distance(bfs_prev: &[Option<(CellId, EdgeId)>], c1: CellId, cur: CellId) -> usize {
+    let mut dist = 0usize;
+    let mut tmp = cur;
+    while tmp != c1 {
+        if let Some((p, _)) = bfs_prev[tmp] {
+            dist += 1;
+            tmp = p;
+        } else {
+            break;
+        }
+    }
+    dist
+}
+
+/// Heuristic score for branching on the rose pair `(c1, cur)`.
+#[inline]
+fn pair_score(dist: usize, count1: u8, count2: u8, num_types: usize) -> i32 {
+    let mut score: i32 = 150;
+    if dist <= 2 {
+        score += 50;
+    }
+    if count1 >= (num_types as u8) - 1 {
+        score += 40;
+    }
+    if count2 >= (num_types as u8) - 1 {
+        score += 40;
+    }
+    score
+}
+
 /// Branching constraint state managed by the rose-pair subsystem.
 #[derive(Default)]
 pub(crate) struct PairBranchState {
@@ -436,6 +481,25 @@ impl<'a> Solver<'a> {
         Ok(())
     }
 
+    /// Number of distinct rose symbol types present in each growing component
+    /// (index by component id).  Entries beyond `comp_cells` stay 0 — mirrors
+    /// the original `for ci in 0..num_comp { if ci >= comp_cells.len() { break } }`
+    /// guard.
+    fn comp_rose_counts(&self, num_comp: usize) -> Vec<u8> {
+        let mut counts: Vec<u8> = vec![0; num_comp];
+        for (ci, slot) in counts.iter_mut().enumerate().take(self.comp_cells.len()) {
+            let mut mask: u8 = 0;
+            for &c in &self.comp_cells[ci] {
+                let sym = self.cell_rose_sym[c];
+                if sym != u8::MAX {
+                    mask |= 1 << sym;
+                }
+            }
+            *slot = mask.count_ones() as u8;
+        }
+        counts
+    }
+
     /// Select the best rose cell pair to branch on (SAME/DIFF), if any pair
     /// scores higher than `edge_score`.  Only BFS from type-0 rose cells; each
     /// (type-0, other-type) pair is considered once.
@@ -452,19 +516,7 @@ impl<'a> Solver<'a> {
         let n = self.grid.num_cells();
         let num_types = rose_by_type.len();
         let num_comp = self.curr_comp_sz.len();
-        let mut comp_rose_count: Vec<u8> = vec![0; num_comp];
-        for ci in 0..num_comp {
-            if ci >= self.comp_cells.len() {
-                break;
-            }
-            let mut mask: u8 = 0;
-            for &c in &self.comp_cells[ci] {
-                if sym[c] != u8::MAX {
-                    mask |= 1 << sym[c];
-                }
-            }
-            comp_rose_count[ci] = mask.count_ones() as u8;
-        }
+        let comp_rose_count = self.comp_rose_counts(num_comp);
 
         let mut best_pair: Option<(CellId, CellId)> = None;
         let mut best_pair_score: i32 = edge_score;
@@ -481,33 +533,16 @@ impl<'a> Solver<'a> {
             while let Some(cur) = self.q_buf.pop() {
                 let cur_sym = sym[cur];
 
-                if cur_sym != u8::MAX && cur_sym == 0 && cur != c1 {
-                    // Skip type-0 cells (must be DIFF by rose rule) except start.
-                } else if cur_sym != u8::MAX {
+                if is_branch_candidate(cur_sym, cur, c1) {
                     let ci2 = self.curr_comp_id[cur];
                     if ci1 != ci2 && !self.is_diff_inline(c1, cur) {
-                        let mut dist = 0usize;
-                        let mut tmp = cur;
-                        while tmp != c1 {
-                            if let Some((p, _)) = self.pair_branch.bfs_prev[tmp] {
-                                dist += 1;
-                                tmp = p;
-                            } else {
-                                break;
-                            }
-                        }
-
-                        let mut score: i32 = 150;
-                        if dist <= 2 {
-                            score += 50;
-                        }
-                        if comp_rose_count[ci1] >= (num_types as u8) - 1 {
-                            score += 40;
-                        }
-                        if comp_rose_count[ci2] >= (num_types as u8) - 1 {
-                            score += 40;
-                        }
-
+                        let dist = path_distance(&self.pair_branch.bfs_prev, c1, cur);
+                        let score = pair_score(
+                            dist,
+                            comp_rose_count[ci1],
+                            comp_rose_count[ci2],
+                            num_types,
+                        );
                         if score > best_pair_score {
                             best_pair_score = score;
                             best_pair = Some((c1, cur));

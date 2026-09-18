@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from typing import cast
 
 from src.models.board import Board, Cell, EdgeConstraintType, Shape
 from src.models.puzzle import Puzzle
@@ -25,25 +26,29 @@ def get_region_shape(cells: list[Cell]) -> Shape:
     return Shape(cells=frozenset(positions))
 
 
+def _region_is_connected(board: Board, rid: int, cells: list[Cell]) -> bool:
+    if not cells:
+        return True
+    visited: set[tuple[int, int]] = set()
+    stack = [(cells[0].row, cells[0].col)]
+    while stack:
+        r, c = stack.pop()
+        if (r, c) in visited:
+            continue
+        visited.add((r, c))
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = r + dr, c + dc
+            neighbor = (
+                board.cell(nr, nc) if 0 <= nr < board.height and 0 <= nc < board.width else None
+            )
+            if neighbor is not None and neighbor.region_id == rid and (nr, nc) not in visited:
+                stack.append((nr, nc))
+    return len(visited) == len(cells)
+
+
 def check_region_connectivity(board: Board) -> bool:
     for rid, cells in get_region_cells(board).items():
-        if not cells:
-            continue
-        visited: set[tuple[int, int]] = set()
-        stack = [(cells[0].row, cells[0].col)]
-        while stack:
-            r, c = stack.pop()
-            if (r, c) in visited:
-                continue
-            visited.add((r, c))
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nr, nc = r + dr, c + dc
-                neighbor = (
-                    board.cell(nr, nc) if 0 <= nr < board.height and 0 <= nc < board.width else None
-                )
-                if neighbor is not None and neighbor.region_id == rid and (nr, nc) not in visited:
-                    stack.append((nr, nc))
-        if len(visited) != len(cells):
+        if not _region_is_connected(board, rid, cells):
             return False
     return True
 
@@ -89,7 +94,7 @@ def _rose_symbol_types(puzzle: Puzzle, board: Board | None = None) -> list[str]:
     return []
 
 
-def _rose_M(puzzle: Puzzle, board: Board) -> int:
+def _rose_m(puzzle: Puzzle, board: Board) -> int:
     symbol_types = _rose_symbol_types(puzzle, board)
     if not symbol_types:
         return 0
@@ -99,6 +104,16 @@ def _rose_M(puzzle: Puzzle, board: Board) -> int:
     return next(iter(counts.values())) if len(set(counts.values())) == 1 else 0
 
 
+def _rose_count_symbols(board: Board, symbol_types: set[str]) -> tuple[Counter[str], bool]:
+    counts: Counter[str] = Counter()
+    for c in board.cells():
+        if c.symbol is not None:
+            if c.symbol not in symbol_types:
+                return counts, False
+            counts[c.symbol] += 1
+    return counts, True
+
+
 def check_rule_rose_window(puzzle: Puzzle, board: Board) -> bool:
     rule = puzzle.get_rule("rose_window")
     if rule is None:
@@ -106,29 +121,31 @@ def check_rule_rose_window(puzzle: Puzzle, board: Board) -> bool:
     symbol_types = _rose_symbol_types(puzzle, board)
     if not symbol_types:
         return False
-    N = len(symbol_types)
 
-    symbol_counts: Counter[str] = Counter()
-    for c in board.cells():
-        if c.symbol is not None:
-            if c.symbol not in symbol_types:
-                return False
-            symbol_counts[c.symbol] += 1
-
-    if len(set(symbol_counts.values())) != 1:
+    counts, ok = _rose_count_symbols(board, set(symbol_types))
+    if not ok:
         return False
-    M = next(iter(symbol_counts.values()))
+    if len(set(counts.values())) != 1:
+        return False
+    m = next(iter(counts.values()))
 
     regions = get_region_cells(board)
-    if len(regions) != M:
+    if len(regions) != m:
         return False
 
-    for rid, cells in regions.items():
+    for _, cells in regions.items():
         region_symbols = {c.symbol for c in cells if c.symbol is not None}
         if region_symbols != set(symbol_types):
             return False
 
     return True
+
+
+def _edge_constraint_violates(etype: EdgeConstraintType, shape1: Shape, shape2: Shape) -> bool:
+    eq = shapes_equal(shape1, shape2)
+    if etype == EdgeConstraintType.HETEROGENEOUS and eq:
+        return True
+    return etype == EdgeConstraintType.HOMOGENEOUS and not eq
 
 
 def check_edge_constraint_type(board: Board, etype: EdgeConstraintType) -> bool:
@@ -140,14 +157,11 @@ def check_edge_constraint_type(board: Board, etype: EdgeConstraintType) -> bool:
                 return False
             if c1.region_id == c2.region_id:
                 return False
-            cells1 = board.get_region_cells(c1.region_id)
-            cells2 = board.get_region_cells(c2.region_id)
+            cells1 = board.get_region_cells(cast(int, c1.region_id))
+            cells2 = board.get_region_cells(cast(int, c2.region_id))
             shape1 = get_region_shape(cells1)
             shape2 = get_region_shape(cells2)
-            eq = shapes_equal(shape1, shape2)
-            if etype == EdgeConstraintType.HETEROGENEOUS and eq:
-                return False
-            if etype == EdgeConstraintType.HOMOGENEOUS and not eq:
+            if _edge_constraint_violates(etype, shape1, shape2):
                 return False
     return True
 
@@ -169,10 +183,7 @@ def check_rule_precise(puzzle: Puzzle, board: Board) -> bool:
     if rule is None:
         return True
     target = rule.params.get("area", 0)
-    for _, cells in get_region_cells(board).items():
-        if len(cells) != target:
-            return False
-    return True
+    return all(len(cells) == target for _, cells in get_region_cells(board).items())
 
 
 def check_rule_puzzle_piece(puzzle: Puzzle, board: Board) -> bool:
@@ -180,7 +191,7 @@ def check_rule_puzzle_piece(puzzle: Puzzle, board: Board) -> bool:
         return True
     for c in board.cells():
         if c.shape_pattern is not None and c.assigned:
-            cells = board.get_region_cells(c.region_id)
+            cells = board.get_region_cells(cast(int, c.region_id))
             region_shape = get_region_shape(cells)
             if not shapes_equal(region_shape, c.shape_pattern):
                 return False
@@ -194,8 +205,8 @@ def check_rule_mixed(puzzle: Puzzle, board: Board) -> bool:
         c1 = board.cell(e.r1, e.c1)
         c2 = board.cell(e.r2, e.c2)
         if c1.assigned and c2.assigned and c1.region_id != c2.region_id:
-            cells1 = board.get_region_cells(c1.region_id)
-            cells2 = board.get_region_cells(c2.region_id)
+            cells1 = board.get_region_cells(cast(int, c1.region_id))
+            cells2 = board.get_region_cells(cast(int, c2.region_id))
             shape1 = get_region_shape(cells1)
             shape2 = get_region_shape(cells2)
             if shapes_equal(shape1, shape2):
@@ -208,7 +219,7 @@ def check_rule_area(puzzle: Puzzle, board: Board) -> bool:
         return True
     for c in board.cells():
         if c.number is not None and c.assigned:
-            cells = board.get_region_cells(c.region_id)
+            cells = board.get_region_cells(cast(int, c.region_id))
             if len(cells) != c.number:
                 return False
     return True
@@ -230,10 +241,30 @@ def check_rule_range(puzzle: Puzzle, board: Board) -> bool:
         return True
     min_area = rule.params.get("min", 0)
     max_area = rule.params.get("max", 999)
-    for _, cells in get_region_cells(board).items():
-        if not (min_area <= len(cells) <= max_area):
-            return False
-    return True
+    return all(min_area <= len(cells) <= max_area for _, cells in get_region_cells(board).items())
+
+
+def _fence_edge_bits(board: Board, c: Cell) -> list[bool]:
+    bits: list[bool] = []
+    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        nr, nc = c.row + dr, c.col + dc
+        if 0 <= nr < board.height and 0 <= nc < board.width:
+            neighbor = board.cell(nr, nc)
+            # a blocked (missing) cell counts as a boundary, matching the
+            # game: the region outline runs along the hole
+            is_boundary = neighbor.blocked or (
+                neighbor.assigned and neighbor.region_id != c.region_id
+            )
+        else:
+            is_boundary = True
+        bits.append(is_boundary)
+    return bits
+
+
+def _fence_shape_from_bits(edge_bits: list[bool]) -> Shape:
+    return Shape(
+        cells=frozenset((r, c) for r in range(3) for c in range(3) if _fence_bit(edge_bits, r, c))
+    )
 
 
 def check_rule_fence(puzzle: Puzzle, board: Board) -> bool:
@@ -242,43 +273,20 @@ def check_rule_fence(puzzle: Puzzle, board: Board) -> bool:
     for c in board.cells():
         if c.fence_pattern is None or not c.assigned:
             continue
-        edge_bits: list[bool] = []
-        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            nr, nc = c.row + dr, c.col + dc
-            if 0 <= nr < board.height and 0 <= nc < board.width:
-                neighbor = board.cell(nr, nc)
-                # a blocked (missing) cell counts as a boundary, matching the
-                # game: the region outline runs along the hole
-                is_boundary = neighbor.blocked or (
-                    neighbor.assigned and neighbor.region_id != c.region_id
-                )
-            else:
-                is_boundary = True
-            edge_bits.append(is_boundary)
-
-        fence_shape = Shape(
-            cells=frozenset(
-                (r, c) for r in range(3) for c in range(3) if _fence_bit(edge_bits, r, c)
-            )
-        )
+        bits = _fence_edge_bits(board, c)
+        fence_shape = _fence_shape_from_bits(bits)
         if not shapes_equal(fence_shape, c.fence_pattern):
             return False
     return True
 
 
 def _fence_bit(edge_bits: list[bool], r: int, c: int) -> bool:
-    center = r == 1 and c == 1
-    if center:
+    if r == 1 and c == 1:
         return True
-    if r == 0 and c == 1:
-        return edge_bits[0]
-    if r == 2 and c == 1:
-        return edge_bits[1]
-    if r == 1 and c == 0:
-        return edge_bits[2]
-    if r == 1 and c == 2:
-        return edge_bits[3]
-    return False
+    bit_index = {(0, 1): 0, (2, 1): 1, (1, 0): 2, (1, 2): 3}.get((r, c))
+    if bit_index is None:
+        return False
+    return edge_bits[bit_index]
 
 
 def check_rule_different(puzzle: Puzzle, board: Board) -> bool:
@@ -342,8 +350,8 @@ def check_rule_differentiation(puzzle: Puzzle, board: Board) -> bool:
         c1 = board.cell(e.r1, e.c1)
         c2 = board.cell(e.r2, e.c2)
         if c1.assigned and c2.assigned and c1.region_id != c2.region_id:
-            cells1 = board.get_region_cells(c1.region_id)
-            cells2 = board.get_region_cells(c2.region_id)
+            cells1 = board.get_region_cells(cast(int, c1.region_id))
+            cells2 = board.get_region_cells(cast(int, c2.region_id))
             if len(cells1) == len(cells2):
                 return False
     return True
@@ -358,10 +366,10 @@ def count_boundary_edges_at_vertex(board: Board, vr: int, vc: int) -> int:
     border) and blocked cells count as boundaries, except blocked-blocked which
     is one empty space (mirrors C++/aog AREA_BLOCK sharing).
     """
-    H, W = board.height, board.width
+    h, w = board.height, board.width
 
     def val(r: int, c: int) -> int | None:
-        if 0 <= r < H and 0 <= c < W:
+        if 0 <= r < h and 0 <= c < w:
             cell = board.cell(r, c)
             if cell.blocked or not cell.assigned:
                 return None
@@ -384,10 +392,7 @@ def count_boundary_edges_at_vertex(board: Board, vr: int, vc: int) -> int:
 def check_rule_brick(puzzle: Puzzle, board: Board) -> bool:
     if not puzzle.has_rule("brick"):
         return True
-    for v in board.vertices():
-        if count_boundary_edges_at_vertex(board, v.row, v.col) == 4:
-            return False
-    return True
+    return all(count_boundary_edges_at_vertex(board, v.row, v.col) != 4 for v in board.vertices())
 
 
 def check_rule_ring(puzzle: Puzzle, board: Board) -> bool:
@@ -397,12 +402,19 @@ def check_rule_ring(puzzle: Puzzle, board: Board) -> bool:
     # border, so check every geometric grid point (0..H x 0..W) — vertex
     # (vr,vc) is the corner of cells (vr,vc)..(vr+1,vc+1), i.e. geometric
     # point (vr+1,vc+1), so iterate vr in -1..H-1.  Mirrors the C++ check_loopy.
-    H, W = board.height, board.width
-    for vr in range(-1, H):
-        for vc in range(-1, W):
+    h, w = board.height, board.width
+    for vr in range(-1, h):
+        for vc in range(-1, w):
             if count_boundary_edges_at_vertex(board, vr, vc) == 3:
                 return False
     return True
+
+
+def _inequality_violated(value: object, area1: int, area2: int) -> bool:
+    reversed_dir = value == 1
+    if reversed_dir:
+        return area2 >= area1
+    return area1 >= area2
 
 
 def check_rule_inequality(puzzle: Puzzle, board: Board) -> bool:
@@ -416,16 +428,10 @@ def check_rule_inequality(puzzle: Puzzle, board: Board) -> bool:
                 return False
             if c1.region_id == c2.region_id:
                 return False
-            cells1 = board.get_region_cells(c1.region_id)
-            cells2 = board.get_region_cells(c2.region_id)
-            area1, area2 = len(cells1), len(cells2)
-            reversed_dir = e.constraint.value == 1
-            if reversed_dir:
-                if area2 >= area1:
-                    return False
-            else:
-                if area1 >= area2:
-                    return False
+            cells1 = board.get_region_cells(cast(int, c1.region_id))
+            cells2 = board.get_region_cells(cast(int, c2.region_id))
+            if _inequality_violated(e.constraint.value, len(cells1), len(cells2)):
+                return False
     return True
 
 
@@ -440,8 +446,8 @@ def check_rule_difference(puzzle: Puzzle, board: Board) -> bool:
                 return False
             if c1.region_id == c2.region_id:
                 return False
-            cells1 = board.get_region_cells(c1.region_id)
-            cells2 = board.get_region_cells(c2.region_id)
+            cells1 = board.get_region_cells(cast(int, c1.region_id))
+            cells2 = board.get_region_cells(cast(int, c2.region_id))
             if abs(len(cells1) - len(cells2)) != e.constraint.value:
                 return False
     return True
@@ -459,6 +465,18 @@ def check_rule_watchtower(puzzle: Puzzle, board: Board) -> bool:
     return True
 
 
+def _in_halfplane(dr: int, dc: int, rr: int, cc: int, r: int, c: int) -> bool:
+    if dr == -1:
+        return rr < r
+    if dr == 1:
+        return rr > r
+    if dc == -1:
+        return cc < c
+    if dc == 1:
+        return cc > c
+    return False
+
+
 def _compass_halfplane_count(
     cell: Cell, dr: int, dc: int, region_positions: set[tuple[int, int]]
 ) -> int:
@@ -473,7 +491,7 @@ def _compass_halfplane_count(
     for rr, cc in region_positions:
         if rr == r and cc == c:
             continue
-        if dr == -1 and rr < r or dr == 1 and rr > r or (dc == -1 and cc < c or dc == 1 and cc > c):
+        if _in_halfplane(dr, dc, rr, cc, r, c):
             count += 1
     return count
 
@@ -485,7 +503,7 @@ def check_rule_compass(puzzle: Puzzle, board: Board) -> bool:
     for c in board.cells():
         if c.compass is None or not c.assigned:
             continue
-        region_cells = regions.get(c.region_id)
+        region_cells = regions.get(cast(int, c.region_id))
         if region_cells is None:
             return False
         positions = {(cell.row, cell.col) for cell in region_cells}

@@ -63,14 +63,29 @@ function matchesExtra(e: Entry): boolean {
   return true
 }
 
+const ruleLabelHas = (r: string, q: string): boolean =>
+  (RULE_NAMES[r] ?? '').toLowerCase().includes(q)
+
+function matchesSearch(e: Entry, q: string): boolean {
+  if (!q) return true
+  if (e.id.toLowerCase().includes(q)) return true
+  return e.rules.some((r) => r.toLowerCase().includes(q) || ruleLabelHas(r, q))
+}
+function filterEntry(e: Entry, q: string): boolean {
+  if (category.value !== '全部目录' && e.category !== category.value) return false
+  if (!matchesRules(e) || !matchesSize(e) || !matchesExtra(e)) return false
+  return matchesSearch(e, q)
+}
+function pushGrouped(map: Map<string, Entry[]>, e: Entry) {
+  const bucket = map.get(e.category) ?? map.set(e.category, []).get(e.category)!
+  bucket.push(e)
+}
+
 const grouped = computed(() => {
   const map = new Map<string, Entry[]>()
+  const q = search.value.trim().toLowerCase()
   for (const e of entries.value) {
-    if (category.value !== '全部目录' && e.category !== category.value) continue
-    if (!matchesRules(e) || !matchesSize(e) || !matchesExtra(e)) continue
-    const q = search.value.trim().toLowerCase()
-    if (q && !e.id.toLowerCase().includes(q) && !e.rules.some((r) => r.toLowerCase().includes(q) || (RULE_NAMES[r] ?? '').toLowerCase().includes(q))) continue
-    ;(map.get(e.category) ?? map.set(e.category, []).get(e.category)!).push(e)
+    if (filterEntry(e, q)) pushGrouped(map, e)
   }
   return map
 })

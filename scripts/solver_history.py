@@ -34,7 +34,6 @@ import argparse
 import datetime
 import json
 import re
-import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -83,6 +82,35 @@ def _find_backtick(s: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _parse_md_row(s: str) -> dict | None:
+    """解析单条里程碑表行；非 1258 口径或无法解析时返回 None。"""
+    if not s.startswith("|"):
+        return None
+    cells = [c.strip() for c in s.strip("|").split("|")]
+    if len(cells) < 5:
+        return None
+    date = cells[0]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        return None
+    # 通过列（cells[4]）里的 ``N / M``；只取 1258 口径全量基准，避免混入
+    # 1295 全量 verify、Zone 单区（301/312）、「待全量验证」等不同口径行。
+    m = re.search(r"(\d+)\s*/\s*(\d+)", cells[4])
+    if not m:
+        return None
+    passed, total = int(m.group(1)), int(m.group(2))
+    if total != OFFICIAL_TOTAL:
+        return None
+    # commit：优先里程碑列的 hex 短 sha，其次结果文件列文件名里的 hex，再退到反引号标签。
+    commit = _find_hex(cells[1]) or _find_hex(cells[2]) or _find_backtick(cells[1]) or ""
+    return {
+        "date": date,
+        "commit": commit,
+        "passed": passed,
+        "total": total,
+        "pct": _pct(passed, total),
+    }
+
+
 def _parse_md(path: Path) -> list[dict]:
     """解析里程碑表，返回按出现顺序排列的 1258 口径历史点。"""
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -95,33 +123,11 @@ def _parse_md(path: Path) -> list[dict]:
             continue
         if s.startswith("## 第二部分"):
             break
-        if not in_section or not s.startswith("|"):
+        if not in_section:
             continue
-        cells = [c.strip() for c in s.strip("|").split("|")]
-        if len(cells) < 5:
-            continue
-        date = cells[0]
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
-            continue
-        # 通过列（cells[4]）里的 ``N / M``；只取 1258 口径全量基准，避免混入
-        # 1295 全量 verify、Zone 单区（301/312）、「待全量验证」等不同口径行。
-        m = re.search(r"(\d+)\s*/\s*(\d+)", cells[4])
-        if not m:
-            continue
-        passed, total = int(m.group(1)), int(m.group(2))
-        if total != OFFICIAL_TOTAL:
-            continue
-        # commit：优先里程碑列的 hex 短 sha，其次结果文件列文件名里的 hex，再退到反引号标签。
-        commit = _find_hex(cells[1]) or _find_hex(cells[2]) or _find_backtick(cells[1]) or ""
-        points.append(
-            {
-                "date": date,
-                "commit": commit,
-                "passed": passed,
-                "total": total,
-                "pct": _pct(passed, total),
-            }
-        )
+        row = _parse_md_row(s)
+        if row is not None:
+            points.append(row)
     return points
 
 
@@ -278,9 +284,9 @@ def _render_png(data: dict, png_path: Path) -> None:
 
 def _svg_chart(hist: list[dict]) -> str:
     """内联 SVG 折线图（内联进 HTML，随页面 light/dark 一起换肤）。"""
-    W, H = 840, 380
-    L, R, T, B = 60, 24, 24, 40  # 左/右/上/下边距
-    plot_w, plot_h = W - L - R, H - T - B
+    w, h = 840, 380
+    left, right, top, bottom = 60, 24, 24, 40  # 左/右/上/下边距
+    plot_w, plot_h = w - left - right, h - top - bottom
     ys = [p["pct"] for p in hist]
     lo, hi = min(ys), max(ys)
     span = (hi - lo) or 1.0
@@ -288,10 +294,10 @@ def _svg_chart(hist: list[dict]) -> str:
     lo, hi = lo - pad, hi + pad
 
     def x(i: int) -> float:
-        return L + (plot_w * i / (len(hist) - 1)) if len(hist) > 1 else L + plot_w / 2
+        return left + (plot_w * i / (len(hist) - 1)) if len(hist) > 1 else left + plot_w / 2
 
     def y(v: float) -> float:
-        return T + plot_h * (1 - (v - lo) / (hi - lo))
+        return top + plot_h * (1 - (v - lo) / (hi - lo))
 
     parts: list[str] = []
 
@@ -300,10 +306,10 @@ def _svg_chart(hist: list[dict]) -> str:
         v = lo + (hi - lo) * k / 3
         yy = y(v)
         parts.append(
-            f'<line class="grid" x1="{L}" y1="{yy:.1f}" x2="{W - R}" y2="{yy:.1f}"/>'
+            f'<line class="grid" x1="{left}" y1="{yy:.1f}" x2="{w - right}" y2="{yy:.1f}"/>'
         )
         parts.append(
-            f'<text class="axis" x="{L - 10}" y="{yy + 4:.1f}" text-anchor="end">{v:.1f}%</text>'
+            f'<text class="axis" x="{left - 10}" y="{yy + 4:.1f}" text-anchor="end">{v:.1f}%</text>'
         )
 
     pts = [(x(i), y(ys[i])) for i in range(len(hist))]
@@ -317,7 +323,8 @@ def _svg_chart(hist: list[dict]) -> str:
         parts.append(f"<title>{label}</title>")
         parts.append("</circle>")
         parts.append(
-            f'<text class="axis" x="{px:.1f}" y="{H - 14}" text-anchor="middle">{p["date"][5:]}</text>'
+            f'<text class="axis" x="{px:.1f}" y="{h - 14}" '
+            f'text-anchor="middle">{p["date"][5:]}</text>'
         )
 
     # hover 十字线 + 提示框（JS 驱动）
@@ -402,7 +409,9 @@ function move(e) {
   cross.setAttribute('y1', 24); cross.setAttribute('y2', 340);
   cross.setAttribute('visibility', 'visible');
   const i = pts.indexOf(best);
-  tip.textContent = `${DATA[i].date}  ${DATA[i].commit || '—'}\\n${DATA[i].passed}/${DATA[i].total}  (${DATA[i].pct}%)`;
+  tip.textContent =
+    `${DATA[i].date}  ${DATA[i].commit || '—'}\\n` +
+    `${DATA[i].passed}/${DATA[i].total}  (${DATA[i].pct}%)`;
   const wr = wrap.getBoundingClientRect();
   tip.style.left = (e.clientX - wr.left) + 'px';
   tip.style.top = (e.clientY - wr.top) + 'px';
@@ -441,15 +450,18 @@ def _render_html(data: dict, html_path: Path) -> None:
         )
     table = (
         "<table><thead><tr><th>日期</th><th>commit</th><th class='num'>通过</th>"
-        "<th class='num'>占比</th></tr></thead><tbody>"
-        + "".join(rows)
-        + "</tbody></table>"
+        "<th class='num'>占比</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
     )
 
     data_json = json.dumps(
         [
-            {"date": p["date"], "commit": p["commit"], "passed": p["passed"],
-             "total": p["total"], "pct": p["pct"]}
+            {
+                "date": p["date"],
+                "commit": p["commit"],
+                "passed": p["passed"],
+                "total": p["total"],
+                "pct": p["pct"],
+            }
             for p in hist
         ],
         ensure_ascii=False,
@@ -462,6 +474,8 @@ def _render_html(data: dict, html_path: Path) -> None:
         f'<svg id="chart" viewBox="0 0 840 380" role="img" '
         f'aria-label="官方题求解率变化曲线">\n{_svg_chart(hist)}\n</svg></div>'
     )
+
+    unit_line = f"{data.get('unit', '')} · 共 {last['total']} 题 · 数据源 docs/solver-history.json"
 
     html = f"""<!doctype html>
 <html lang="zh">
@@ -476,10 +490,10 @@ def _render_html(data: dict, html_path: Path) -> None:
 <body>
 <div class="viz-root">
   <h1>官方谜题求解能力变化</h1>
-  <p class="sub">{data.get('unit', '')} · 共 {last['total']} 题 · 数据源 docs/solver-history.json</p>
+  <p class="sub">{unit_line}</p>
   <div class="hero">
-    <span class="num">{last['pct']:.2f}%</span>
-    <span class="unit">{last['passed']} / {last['total']} 题解出</span>
+    <span class="num">{last["pct"]:.2f}%</span>
+    <span class="unit">{last["passed"]} / {last["total"]} 题解出</span>
   </div>
   {delta_html}
   {svg}

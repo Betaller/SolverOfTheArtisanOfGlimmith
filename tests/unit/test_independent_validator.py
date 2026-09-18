@@ -7,8 +7,9 @@ from src.validation.validator import IndependentValidator, _canonical_key
 
 def _puzzle(rules, h=4, w=4) -> Puzzle:
     b = Board(h, w)
-    return Puzzle(height=h, width=w, cells=b.cells(), edges=b.edges(),
-                  vertices=b.vertices(), rules=rules)
+    return Puzzle(
+        height=h, width=w, cells=b.cells(), edges=b.edges(), vertices=b.vertices(), rules=rules
+    )
 
 
 def _board(h, w, regions, blocked=()) -> Board:
@@ -43,7 +44,9 @@ class TestIndependentValidatorShapePool:
         assert any("形状池" in e for e in res.errors)
 
     def test_shape_params_may_be_shape_objects(self) -> None:
-        puzzle = _puzzle([Rule("shape_pool", {"shapes": [_shape(((0, 0), (0, 1), (1, 0), (1, 1)))]})], h=2, w=2)
+        puzzle = _puzzle(
+            [Rule("shape_pool", {"shapes": [_shape(((0, 0), (0, 1), (1, 0), (1, 1)))]})], h=2, w=2
+        )
         board = _board(2, 2, [[(0, 0), (0, 1), (1, 0), (1, 1)]])
         res = IndependentValidator().validate(puzzle, board)
         assert res.solved
@@ -52,11 +55,15 @@ class TestIndependentValidatorShapePool:
 class TestIndependentValidatorCompass:
     def test_halfplane_rule(self) -> None:
         puzzle = _puzzle([Rule.compass()], h=3, w=3)
-        board = _board(3, 3, [
-            [(0, 0), (0, 1), (1, 0), (1, 1)],
-            [(0, 2), (1, 2)],
-            [(2, 0), (2, 1), (2, 2)],
-        ])
+        board = _board(
+            3,
+            3,
+            [
+                [(0, 0), (0, 1), (1, 0), (1, 1)],
+                [(0, 2), (1, 2)],
+                [(2, 0), (2, 1), (2, 2)],
+            ],
+        )
         # region 0 cells to the right of (0,0): (0,1),(1,1) -> 2
         board.cell(0, 0).compass = CompassClue(up=-1, down=-1, left=-1, right=2)
         res = IndependentValidator().validate(puzzle, board)
@@ -64,11 +71,15 @@ class TestIndependentValidatorCompass:
 
     def test_halfplane_wrong_value_rejected(self) -> None:
         puzzle = _puzzle([Rule.compass()], h=3, w=3)
-        board = _board(3, 3, [
-            [(0, 0), (0, 1), (1, 0), (1, 1)],
-            [(0, 2), (1, 2)],
-            [(2, 0), (2, 1), (2, 2)],
-        ])
+        board = _board(
+            3,
+            3,
+            [
+                [(0, 0), (0, 1), (1, 0), (1, 1)],
+                [(0, 2), (1, 2)],
+                [(2, 0), (2, 1), (2, 2)],
+            ],
+        )
         board.cell(0, 0).compass = CompassClue(up=-1, down=-1, left=-1, right=1)
         res = IndependentValidator().validate(puzzle, board)
         assert not res.solved
@@ -111,7 +122,9 @@ class TestIndependentValidatorBasics:
 
 class TestCanonicalKey:
     def test_rotations_reflections_equal(self) -> None:
-        assert _canonical_key(frozenset({(0, 0), (0, 1), (1, 0)})) == \
-            _canonical_key(frozenset({(0, 0), (0, 1), (1, 1)}))
-        assert _canonical_key(frozenset({(0, 0), (0, 1), (1, 0)})) != \
-            _canonical_key(frozenset({(0, 0), (0, 1), (1, 2)}))
+        assert _canonical_key(frozenset({(0, 0), (0, 1), (1, 0)})) == _canonical_key(
+            frozenset({(0, 0), (0, 1), (1, 1)})
+        )
+        assert _canonical_key(frozenset({(0, 0), (0, 1), (1, 0)})) != _canonical_key(
+            frozenset({(0, 0), (0, 1), (1, 2)})
+        )

@@ -58,29 +58,45 @@ const getCell = (r: number, c: number): CellJson | undefined => cellIndex.value.
 const getEdge = (r1: number, c1: number, r2: number, c2: number): EdgeJson | undefined => edgeIndex.value.get(edgeKey(r1, c1, r2, c2))
 
 // ── render models ────────────────────────────────────────────────────────────
+// No per-cell outline: same-region neighbours must read as one continuous
+// shape. The silhouette comes from `regionOutlines`, the hairline grid from
+// `gridLines`.
+function cellFill(blocked: boolean, ri: number | undefined, dark: boolean): string {
+  if (blocked) return C.value.cell_blocked_bg
+  if (ri == null) return C.value.cell_bg_null
+  return regionFill(REGION_COLORS[ri % REGION_COLORS.length], dark)
+}
+
+function cellFence(cell: CellJson | undefined, r: number, c: number) {
+  if (!cell) return null
+  const fv = fenceDiamondValue(cell.fence_pattern)
+  if (!fv) return null
+  return fenceSegments(fv, cellX(c) + cs.value / 2, cellY(r) + cs.value / 2, cs.value)
+}
+
+// Staggered reveal: each region lands a frame after the previous one.
+function cellDelay(ri: number | undefined): number {
+  return ri == null ? 0 : Math.min(ri * 16, 720)
+}
+
+function cellVisual(r: number, c: number, dark: boolean) {
+  const cell = getCell(r, c)
+  const ri = store.displayRegions?.get(cellKey(r, c))
+  const blocked = !!cell?.blocked
+  return {
+    r, c, x: cellX(c), y: cellY(r), blocked, region: ri ?? null,
+    fill: cellFill(blocked, ri, dark),
+    number: cell?.number, symbol: cell?.symbol, compass: cell?.compass,
+    shapePattern: cell?.shape_pattern,
+    fence: cellFence(cell, r, c),
+    delay: cellDelay(ri),
+  }
+}
+
 const cells = computed(() => {
   const dark = isDark.value
   const out: any[] = []
-  for (let r = 0; r < h.value; r++) for (let c = 0; c < w.value; c++) {
-    const cell = getCell(r, c)
-    const blocked = !!cell?.blocked
-    const ri = store.displayRegions?.get(cellKey(r, c))
-    const fv = fenceDiamondValue(cell?.fence_pattern)
-    // No per-cell outline: same-region neighbours must read as one continuous
-    // shape. The silhouette comes from `regionOutlines`, the hairline grid from
-    // `gridLines`.
-    let fill = C.value.cell_bg_null
-    if (blocked) fill = C.value.cell_blocked_bg
-    else if (ri != null) fill = regionFill(REGION_COLORS[ri % REGION_COLORS.length], dark)
-    out.push({
-      r, c, x: cellX(c), y: cellY(r), blocked, region: ri ?? null, fill,
-      number: cell?.number, symbol: cell?.symbol, compass: cell?.compass,
-      shapePattern: cell?.shape_pattern,
-      fence: fv ? fenceSegments(fv, cellX(c) + cs.value / 2, cellY(r) + cs.value / 2, cs.value) : null,
-      // Staggered reveal: each region lands a frame after the previous one.
-      delay: ri != null ? Math.min(ri * 16, 720) : 0,
-    })
-  }
+  for (let r = 0; r < h.value; r++) for (let c = 0; c < w.value; c++) out.push(cellVisual(r, c, dark))
   return out
 })
 
@@ -133,48 +149,94 @@ const gridLines = computed(() => {
  * Sides shared with a same-region neighbour are left open so the region reads
  * as a single continuous shape instead of a patchwork of tiles.
  */
+function isBlocked(r: number, c: number): boolean {
+  const cell = getCell(r, c)
+  return !!cell?.blocked
+}
+
+function sameRegion(regions: Map<string, number>, ri: number, nr: number, nc: number): boolean {
+  if (nr < 0 || nc < 0 || nr >= h.value || nc >= w.value) return false
+  if (isBlocked(nr, nc)) return false
+  return regions.get(cellKey(nr, nc)) === ri
+}
+
+/** One side of a region silhouette: the offset of the neighbour it faces and
+ * the segment to draw when that neighbour is not part of the region. */
+type OutlineSide = {
+  dr: number
+  dc: number
+  tag: string
+  seg: (x: number, y: number, s: number) => { x1: number; y1: number; x2: number; y2: number }
+}
+const OUTLINE_SIDES: OutlineSide[] = [
+  { dr: -1, dc: 0, tag: 't', seg: (x, y, s) => ({ x1: x, y1: y, x2: x + s, y2: y }) },
+  { dr: 1, dc: 0, tag: 'b', seg: (x, y, s) => ({ x1: x, y1: y + s, x2: x + s, y2: y + s }) },
+  { dr: 0, dc: -1, tag: 'l', seg: (x, y, s) => ({ x1: x, y1: y, x2: x, y2: y + s }) },
+  { dr: 0, dc: 1, tag: 'r', seg: (x, y, s) => ({ x1: x + s, y1: y, x2: x + s, y2: y + s }) },
+]
+
+function regionSides(regions: Map<string, number>, ri: number, r: number, c: number, color: string) {
+  const s = cs.value
+  const x = cellX(c), y = cellY(r)
+  const out: any[] = []
+  for (const side of OUTLINE_SIDES) {
+    if (sameRegion(regions, ri, r + side.dr, c + side.dc)) continue
+    out.push({ ...side.seg(x, y, s), color, k: `${side.tag}${r},${c}` })
+  }
+  return out
+}
+
 const regionOutlines = computed(() => {
   const regions = store.displayRegions
   const out: any[] = []
   if (!regions) return out
   const dark = isDark.value
-  const s = cs.value
   for (let r = 0; r < h.value; r++) for (let c = 0; c < w.value; c++) {
-    if (getCell(r, c)?.blocked) continue
+    if (isBlocked(r, c)) continue
     const ri = regions.get(cellKey(r, c))
     if (ri == null) continue
-    const sameRegion = (nr: number, nc: number) => {
-      if (nr < 0 || nc < 0 || nr >= h.value || nc >= w.value) return false
-      if (getCell(nr, nc)?.blocked) return false
-      return regions.get(cellKey(nr, nc)) === ri
-    }
-    const x = cellX(c), y = cellY(r)
-    const color = regionStroke(REGION_COLORS[ri % REGION_COLORS.length], dark)
-    if (!sameRegion(r - 1, c)) out.push({ x1: x, y1: y, x2: x + s, y2: y, color, k: `t${r},${c}` })
-    if (!sameRegion(r + 1, c)) out.push({ x1: x, y1: y + s, x2: x + s, y2: y + s, color, k: `b${r},${c}` })
-    if (!sameRegion(r, c - 1)) out.push({ x1: x, y1: y, x2: x, y2: y + s, color, k: `l${r},${c}` })
-    if (!sameRegion(r, c + 1)) out.push({ x1: x + s, y1: y, x2: x + s, y2: y + s, color, k: `r${r},${c}` })
+    out.push(...regionSides(regions, ri, r, c, regionStroke(REGION_COLORS[ri % REGION_COLORS.length], dark)))
   }
   return out
 })
+
+function constraintValue(e: EdgeJson): number | undefined | null {
+  return e.constraint?.value
+}
+
+/** `rev` (value === 1) flips the arrow; unflipped it points along the
+ * increasing row/column, i.e. away from the origin corner. */
+function inequalityArrow(rev: boolean, forward: boolean, inc: string, dec: string): string {
+  return rev === forward ? inc : dec
+}
+
+function inequalityText(e: EdgeJson): string {
+  const rev = constraintValue(e) === 1
+  const forward = e.c1 === e.c2 ? e.r1 < e.r2 : e.c1 < e.c2
+  return e.c1 === e.c2
+    ? inequalityArrow(rev, forward, '^', 'v')
+    : inequalityArrow(rev, forward, '>', '<')
+}
+
+const CONSTRAINT_LABELS: Record<string, { kind: string; text: (e: EdgeJson) => string }> = {
+  heterogeneous: { kind: 'δ', text: () => 'δ' },
+  homogeneous: { kind: '♂', text: () => '♂' },
+  inequality: { kind: 'ineq', text: inequalityText },
+  difference: { kind: 'val', text: (e) => String(constraintValue(e) ?? '') },
+}
+const NO_LABEL = { kind: '', text: () => '' }
 
 const constraintLabels = computed(() => {
   const out: any[] = []
   for (const e of p.value.edges) {
     if (!e.constraint) continue
+    const spec = CONSTRAINT_LABELS[e.constraint.type] ?? NO_LABEL
     const { x1, y1, x2, y2 } = edgeEndpoints(e)
-    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2
-    const ct = e.constraint.type
-    let kind = '', text = ''
-    if (ct === 'heterogeneous') { kind = 'δ'; text = 'δ' }
-    else if (ct === 'homogeneous') { kind = '♂'; text = '♂' }
-    else if (ct === 'inequality') {
-      kind = 'ineq'
-      const rev = e.constraint.value === 1
-      if (e.c1 === e.c2) text = rev ? (e.r1 < e.r2 ? '^' : 'v') : (e.r1 < e.r2 ? 'v' : '^')
-      else text = rev ? (e.c1 < e.c2 ? '>' : '<') : (e.c1 < e.c2 ? '<' : '>')
-    } else if (ct === 'difference') { kind = 'val'; text = String(e.constraint.value ?? '') }
-    out.push({ mx, my, kind, text, key: edgeKey(e.r1, e.c1, e.r2, e.c2) })
+    out.push({
+      mx: (x1 + x2) / 2, my: (y1 + y2) / 2,
+      kind: spec.kind, text: spec.text(e),
+      key: edgeKey(e.r1, e.c1, e.r2, e.c2),
+    })
   }
   return out
 })
@@ -204,16 +266,23 @@ function shapeCells(pattern: [number, number][] | null | undefined): { r: number
 
 // Fence: recover the F-value from the stored 3x3 directional pattern
 // (up/down/left/right bits), matching PyQt _fence_diamond.
+type FenceValue = (up: boolean, down: boolean, left: boolean, right: boolean) => string
+
+// Two opposite arms read as a straight fence (F2); a corner reads as F7.
+const FENCE_BY_ARMS: Record<number, FenceValue> = {
+  0: () => 'F0',
+  1: () => 'F1',
+  2: (up, down, left, right) => (up && down) || (left && right) ? 'F2' : 'F7',
+  3: () => 'F3',
+}
+const FENCE_ALL_ARMS: FenceValue = () => 'F4'
+
 function fenceDiamondValue(cells: [number, number][] | null | undefined): string | null {
   if (!cells || !cells.length) return null
   const has = (r: number, c: number) => cells.some(([rr, cc]) => rr === r && cc === c)
   const up = has(0, 1), down = has(2, 1), left = has(1, 0), right = has(1, 2)
   const count = [up, down, left, right].filter(Boolean).length
-  if (count === 0) return 'F0'
-  if (count === 1) return 'F1'
-  if (count === 2) return (up && down) || (left && right) ? 'F2' : 'F7'
-  if (count === 3) return 'F3'
-  return 'F4'
+  return (FENCE_BY_ARMS[count] ?? FENCE_ALL_ARMS)(up, down, left, right)
 }
 
 function fenceSegments(fval: string, cx: number, cy: number, size: number) {
@@ -357,100 +426,162 @@ function paintBlocked(r: number, c: number, blocked: boolean) {
 }
 
 // ── mouse handlers ───────────────────────────────────────────────────────────
-function onMouseDown(e: MouseEvent) {
-  const { x, y } = toLocal(e)
-  const vertex = hitVertex(x, y)
-  const edge = hitEdge(x, y)
-  const cell = hitCell(x, y)
-
-  if (e.button === 2) {
-    if (store.mode === 'block' && cell) { blockDragging.value = true; blockPaint.value = false; paintBlocked(cell[0], cell[1], false); store.selectCell(cell[0], cell[1]); return }
-    if (vertex) ctxMenu.value = { x: e.clientX, y: e.clientY, kind: 'vertex', vertex }
-    else if (edge) ctxMenu.value = { x: e.clientX, y: e.clientY, kind: 'edge', edge }
-    else if (cell) ctxMenu.value = { x: e.clientX, y: e.clientY, kind: 'cell', cell }
-    else ctxMenu.value = null
-    return
-  }
-  if (e.button !== 0) return
-
-  if (store.mode === 'boundary') {
-    if (vertex) {
-      if (edge) { toggleEdgeBoundary(edge); store.selectEdge(edge); return }
-      boundaryDragging.value = true
-      lastBoundaryVertex.value = vertex
-      store.selectVertex(vertex[0], vertex[1])
-    } else if (edge) { toggleEdgeBoundary(edge); store.selectEdge(edge) }
-    return
-  }
-  if (store.mode === 'watchtower') {
-    if (vertex) {
-      const v = vertexAt(p.value, vertex[0], vertex[1])
-      if (v) { const val = store.currentNumber; if (val != null && val >= 1 && val <= 4) { v.watchtower = val; store.markModified() } }
-      store.selectVertex(vertex[0], vertex[1])
-    }
-    return
-  }
-  if (store.mode === 'block') {
-    if (cell) { blockDragging.value = true; blockPaint.value = true; paintBlocked(cell[0], cell[1], true); store.selectCell(cell[0], cell[1]) }
-    return
-  }
-  if (store.mode === 'number' && cell) {
-    const c = getCell(cell[0], cell[1])
-    if (c && store.currentNumber != null) { c.number = store.currentNumber; store.markModified() }
-    inlineNumber.value = ''
-    store.selectCell(cell[0], cell[1])
-    return
-  }
-  if (store.mode === 'symbol' && cell) {
-    const c = getCell(cell[0], cell[1])
-    if (c) { c.symbol = store.currentSymbol ?? undefined; store.markModified() }
-    store.selectCell(cell[0], cell[1])
-    return
-  }
-  if (store.mode === 'compass' && cell) {
-    const c = getCell(cell[0], cell[1])
-    if (c) { c.compass = store.currentCompass ?? undefined; store.markModified() }
-    store.selectCell(cell[0], cell[1])
-    return
-  }
-  if (store.mode === 'select') {
-    if (vertex) store.selectVertex(vertex[0], vertex[1])
-    else if (edge) store.selectEdge(edge)
-    else if (cell) store.selectCell(cell[0], cell[1])
-    else store.clearSelection()
-  }
+/** What the pointer is over, resolved once per event in the same order
+ * `onMouseDown` picks its target: vertex → edge → cell. */
+type PointerTarget = {
+  vertex: [number, number] | null
+  edge: [number, number, number, number] | null
+  cell: [number, number] | null
+  ev: MouseEvent
 }
 
-function onMouseMove(e: MouseEvent) {
+function pointerTarget(e: MouseEvent): PointerTarget {
   const { x, y } = toLocal(e)
-  const vertex = hitVertex(x, y)
-  const edge = hitEdge(x, y)
-  const cell = hitCell(x, y)
+  return { vertex: hitVertex(x, y), edge: hitEdge(x, y), cell: hitCell(x, y), ev: e }
+}
 
-  if (store.mode === 'block' && blockDragging.value) {
-    if (cell) paintBlocked(cell[0], cell[1], blockPaint.value)
-    hoverCell.value = cell
+function toggleEdgeTarget(edge: [number, number, number, number]) {
+  toggleEdgeBoundary(edge)
+  store.selectEdge(edge)
+}
+
+function withCell(cell: [number, number], fn: (c: CellJson) => void) {
+  const c = getCell(cell[0], cell[1])
+  if (!c) return
+  fn(c)
+  store.markModified()
+}
+
+function setCellNumber(cell: [number, number]) {
+  const val = store.currentNumber
+  if (val == null) return
+  withCell(cell, (c) => { c.number = val })
+}
+
+function setWatchtower(vertex: [number, number]) {
+  const v = vertexAt(p.value, vertex[0], vertex[1])
+  if (!v) return
+  const val = store.currentNumber
+  if (val == null || val < 1 || val > 4) return
+  v.watchtower = val
+  store.markModified()
+}
+
+/** Right-click: the block tool starts an "unblock" drag, everything else opens
+ * the context menu for the topmost target under the pointer. */
+function openContextMenu(t: PointerTarget) {
+  if (store.mode === 'block' && t.cell) {
+    blockDragging.value = true
+    blockPaint.value = false
+    paintBlocked(t.cell[0], t.cell[1], false)
+    store.selectCell(t.cell[0], t.cell[1])
     return
   }
-  if (store.mode === 'boundary' && boundaryDragging.value && lastBoundaryVertex.value) {
-    const v = vertex
-    if (v && !(v[0] === lastBoundaryVertex.value[0] && v[1] === lastBoundaryVertex.value[1]) && verticesAdjacent(lastBoundaryVertex.value, v)) {
-      drawSegment(lastBoundaryVertex.value, v)
-      lastBoundaryVertex.value = v
-      store.selectVertex(v[0], v[1])
-    }
-    hoverVertex.value = vertex
-    return
-  }
-  if (store.mode === 'watchtower' || (store.mode === 'boundary' && !boundaryDragging.value)) {
-    hoverVertex.value = vertex
-    hoverEdge.value = edge
-    hoverCell.value = null
-    return
-  }
+  const { clientX: x, clientY: y } = t.ev
+  if (t.vertex) ctxMenu.value = { x, y, kind: 'vertex', vertex: t.vertex }
+  else if (t.edge) ctxMenu.value = { x, y, kind: 'edge', edge: t.edge }
+  else if (t.cell) ctxMenu.value = { x, y, kind: 'cell', cell: t.cell }
+  else ctxMenu.value = null
+}
+
+/** Per-tool left-click action, dispatched by `store.mode`. */
+const TOOL_DOWN: Record<string, (t: PointerTarget) => void> = {
+  boundary: (t) => {
+    if (t.edge) { toggleEdgeTarget(t.edge); return }
+    if (!t.vertex) return
+    boundaryDragging.value = true
+    lastBoundaryVertex.value = t.vertex
+    store.selectVertex(t.vertex[0], t.vertex[1])
+  },
+  watchtower: (t) => {
+    if (!t.vertex) return
+    setWatchtower(t.vertex)
+    store.selectVertex(t.vertex[0], t.vertex[1])
+  },
+  block: (t) => {
+    if (!t.cell) return
+    blockDragging.value = true
+    blockPaint.value = true
+    paintBlocked(t.cell[0], t.cell[1], true)
+    store.selectCell(t.cell[0], t.cell[1])
+  },
+  number: (t) => {
+    if (!t.cell) return
+    setCellNumber(t.cell)
+    inlineNumber.value = ''
+    store.selectCell(t.cell[0], t.cell[1])
+  },
+  symbol: (t) => {
+    if (!t.cell) return
+    withCell(t.cell, (c) => { c.symbol = store.currentSymbol ?? undefined })
+    store.selectCell(t.cell[0], t.cell[1])
+  },
+  compass: (t) => {
+    if (!t.cell) return
+    withCell(t.cell, (c) => { c.compass = store.currentCompass ?? undefined })
+    store.selectCell(t.cell[0], t.cell[1])
+  },
+  select: (t) => {
+    if (t.vertex) store.selectVertex(t.vertex[0], t.vertex[1])
+    else if (t.edge) store.selectEdge(t.edge)
+    else if (t.cell) store.selectCell(t.cell[0], t.cell[1])
+    else store.clearSelection()
+  },
+}
+
+function onMouseDown(e: MouseEvent) {
+  const t = pointerTarget(e)
+  if (e.button === 2) { openContextMenu(t); return }
+  if (e.button !== 0) return
+  TOOL_DOWN[store.mode]?.(t)
+}
+
+function setHover(
+  vertex: [number, number] | null,
+  edge: [number, number, number, number] | null,
+  cell: [number, number] | null,
+) {
   hoverVertex.value = vertex
   hoverEdge.value = edge
   hoverCell.value = cell
+}
+
+function dragBoundary(vertex: [number, number] | null) {
+  const last = lastBoundaryVertex.value
+  if (!last || !vertex) return
+  if (vertex[0] === last[0] && vertex[1] === last[1]) return
+  if (!verticesAdjacent(last, vertex)) return
+  drawSegment(last, vertex)
+  lastBoundaryVertex.value = vertex
+  store.selectVertex(vertex[0], vertex[1])
+}
+
+/** Drag-painting in progress (block fill / boundary chain) — handled first. */
+function onDragMove(t: PointerTarget): boolean {
+  if (store.mode === 'block' && blockDragging.value) {
+    if (t.cell) paintBlocked(t.cell[0], t.cell[1], blockPaint.value)
+    hoverCell.value = t.cell
+    return true
+  }
+  if (store.mode === 'boundary' && boundaryDragging.value && lastBoundaryVertex.value) {
+    dragBoundary(t.vertex)
+    hoverVertex.value = t.vertex
+    return true
+  }
+  return false
+}
+
+/** Tools that aim at vertices: they never highlight the cell under the cursor. */
+function vertexOnlyTool(): boolean {
+  if (store.mode === 'watchtower') return true
+  return store.mode === 'boundary' && !boundaryDragging.value
+}
+
+function onMouseMove(e: MouseEvent) {
+  const t = pointerTarget(e)
+  if (onDragMove(t)) return
+  if (vertexOnlyTool()) setHover(t.vertex, t.edge, null)
+  else setHover(t.vertex, t.edge, t.cell)
 }
 
 function onMouseUp() {
@@ -464,30 +595,59 @@ function onWheel(e: WheelEvent) {
 }
 
 // ── keyboard ─────────────────────────────────────────────────────────────────
+function onEscapeKey() {
+  store.clearSelection()
+  inlineNumber.value = ''
+  ctxMenu.value = null
+}
+
+function clearSelectedCell() {
+  const sel = store.selectedCell
+  if (!sel) return
+  const c = getCell(sel[0], sel[1])
+  if (!c || c.blocked) return
+  clearCellProps(c)
+  store.markModified()
+}
+
+const ZOOM_KEYS: Record<string, number> = { '+': 6, '=': 6, '-': -6, '_': -6 }
+
+/** Zoom / fit shortcuts — suppressed in number mode, where digits are input. */
+function handleViewKey(k: string): boolean {
+  const step = ZOOM_KEYS[k]
+  if (step !== undefined) { zoomBy(step); return true }
+  if (k === '0' || k.toLowerCase() === 'f') { fit(); return true }
+  return false
+}
+
+const MODE_KEYS: Record<string, string> = { v: 'select', b: 'boundary', x: 'block', n: 'number', s: 'symbol', c: 'compass', w: 'watchtower' }
+
+function typeNumberDigit(k: string) {
+  const sel = store.selectedCell
+  if (!sel || !/^[0-9]$/.test(k)) return
+  inlineNumber.value += k
+  withCell(sel, (c) => { c.number = parseInt(inlineNumber.value) })
+}
+
+/** Keys that mean the same thing whatever the active tool is. */
+const GLOBAL_KEYS: Record<string, (k: string) => void> = {
+  Escape: onEscapeKey,
+  Delete: clearSelectedCell,
+  Backspace: clearSelectedCell,
+  ArrowUp: moveSelection,
+  ArrowDown: moveSelection,
+  ArrowLeft: moveSelection,
+  ArrowRight: moveSelection,
+}
+
 function onKey(e: KeyboardEvent) {
   const k = e.key
-  if (k === 'Escape') { store.clearSelection(); inlineNumber.value = ''; ctxMenu.value = null; return }
-  if (k === 'Delete' || k === 'Backspace') {
-    if (store.selectedCell) {
-      const c = getCell(store.selectedCell[0], store.selectedCell[1])
-      if (c && !c.blocked) { clearCellProps(c); store.markModified() }
-    }
-    return
-  }
-  if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') { moveSelection(k); return }
-  if (store.mode !== 'number') {
-    if (k === '+' || k === '=') { zoomBy(6); return }
-    if (k === '-' || k === '_') { zoomBy(-6); return }
-    if (k === '0') { fit(); return }
-    if (k.toLowerCase() === 'f') { fit(); return }
-  }
-  const modeKeys: Record<string, string> = { v: 'select', b: 'boundary', x: 'block', n: 'number', s: 'symbol', c: 'compass', w: 'watchtower' }
-  if (modeKeys[k.toLowerCase()]) { store.mode = modeKeys[k.toLowerCase()]; return }
-  if (store.mode === 'number' && store.selectedCell && /^[0-9]$/.test(k)) {
-    inlineNumber.value += k
-    const c = getCell(store.selectedCell[0], store.selectedCell[1])
-    if (c) { c.number = parseInt(inlineNumber.value); store.markModified() }
-  }
+  const global = GLOBAL_KEYS[k]
+  if (global) { global(k); return }
+  if (store.mode !== 'number' && handleViewKey(k)) return
+  const mode = MODE_KEYS[k.toLowerCase()]
+  if (mode) { store.mode = mode; return }
+  if (store.mode === 'number') typeNumberDigit(k)
 }
 
 function moveSelection(k: string) {

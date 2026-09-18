@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional
 
 
 class Direction(Enum):
@@ -21,10 +20,14 @@ class CompassClue:
 
     def get(self, d: Direction) -> int:
         match d:
-            case Direction.UP: return self.up
-            case Direction.DOWN: return self.down
-            case Direction.LEFT: return self.left
-            case Direction.RIGHT: return self.right
+            case Direction.UP:
+                return self.up
+            case Direction.DOWN:
+                return self.down
+            case Direction.LEFT:
+                return self.left
+            case Direction.RIGHT:
+                return self.right
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,19 +57,19 @@ class EdgeConstraintType(Enum):
 @dataclass(slots=True)
 class EdgeConstraint:
     type: EdgeConstraintType
-    value: Optional[int] = None
+    value: int | None = None
 
 
 @dataclass(slots=True)
 class Cell:
     row: int
     col: int
-    region_id: Optional[int] = None
-    number: Optional[int] = None
-    symbol: Optional[str] = None
-    shape_pattern: Optional[Shape] = None
-    compass: Optional[CompassClue] = None
-    fence_pattern: Optional[Shape] = None
+    region_id: int | None = None
+    number: int | None = None
+    symbol: str | None = None
+    shape_pattern: Shape | None = None
+    compass: CompassClue | None = None
+    fence_pattern: Shape | None = None
     blocked: bool = False
 
     @property
@@ -85,7 +88,7 @@ class Edge:
     r2: int
     c2: int
     is_boundary: bool = False
-    constraint: Optional[EdgeConstraint] = None
+    constraint: EdgeConstraint | None = None
 
     def other_end(self, r: int, c: int) -> tuple[int, int]:
         if (r, c) == (self.r1, self.c1):
@@ -97,7 +100,7 @@ class Edge:
 class Vertex:
     row: int
     col: int
-    watchtower: Optional[int] = None
+    watchtower: int | None = None
 
 
 class Board:
@@ -107,8 +110,7 @@ class Board:
         self.height = height
         self.width = width
         self._cells: list[list[Cell]] = [
-            [Cell(row=r, col=c) for c in range(width)]
-            for r in range(height)
+            [Cell(row=r, col=c) for c in range(width)] for r in range(height)
         ]
         self._edges: list[Edge] = []
         self._vertices: list[Vertex] = []
@@ -159,14 +161,15 @@ class Board:
                 result.append((nr, nc))
         return result
 
-    def edge_between(self, r1: int, c1: int, r2: int, c2: int) -> Optional[Edge]:
+    def edge_between(self, r1: int, c1: int, r2: int, c2: int) -> Edge | None:
         for e in self._edges:
-            if (e.r1 == r1 and e.c1 == c1 and e.r2 == r2 and e.c2 == c2) or \
-               (e.r1 == r2 and e.c1 == c2 and e.r2 == r1 and e.c2 == c1):
+            if (e.r1 == r1 and e.c1 == c1 and e.r2 == r2 and e.c2 == c2) or (
+                e.r1 == r2 and e.c1 == c2 and e.r2 == r1 and e.c2 == c1
+            ):
                 return e
         return None
 
-    def vertex_at(self, r: int, c: int) -> Optional[Vertex]:
+    def vertex_at(self, r: int, c: int) -> Vertex | None:
         for v in self._vertices:
             if v.row == r and v.col == c:
                 return v
@@ -202,20 +205,20 @@ class Board:
         b = Board(self.height, self.width)
         for r in range(self.height):
             for c in range(self.width):
-                src = self._cells[r][c]
-                dst = b._cells[r][c]
-                dst.region_id = src.region_id
-                dst.number = src.number
-                dst.symbol = src.symbol
-                dst.shape_pattern = src.shape_pattern
-                dst.compass = src.compass
-                dst.fence_pattern = src.fence_pattern
-                dst.blocked = src.blocked
-        for i, src in enumerate(self._edges):
-            b._edges[i].is_boundary = src.is_boundary
-            b._edges[i].constraint = src.constraint
-        for i, src in enumerate(self._vertices):
-            b._vertices[i].watchtower = src.watchtower
+                src_cell = self._cells[r][c]
+                dst_cell = b._cells[r][c]
+                dst_cell.region_id = src_cell.region_id
+                dst_cell.number = src_cell.number
+                dst_cell.symbol = src_cell.symbol
+                dst_cell.shape_pattern = src_cell.shape_pattern
+                dst_cell.compass = src_cell.compass
+                dst_cell.fence_pattern = src_cell.fence_pattern
+                dst_cell.blocked = src_cell.blocked
+        for i, src_edge in enumerate(self._edges):
+            b._edges[i].is_boundary = src_edge.is_boundary
+            b._edges[i].constraint = src_edge.constraint
+        for i, src_vertex in enumerate(self._vertices):
+            b._vertices[i].watchtower = src_vertex.watchtower
         # Preserve pre-drawn outer boundaries — otherwise a cloned board silently
         # loses its outer boundary edges (bug L5).
         b.outer_boundaries = list(self.outer_boundaries)

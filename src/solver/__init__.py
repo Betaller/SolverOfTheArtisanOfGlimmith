@@ -13,10 +13,20 @@ from src.solver.shapes import (
 )
 
 __all__ = [
-    "Solver", "SolverRouter", "default_router",
-    "normalize", "canonical_key", "shapes_equal", "match_shape_pool",
-    "is_rectangle", "shape_from_cells", "all_transformations",
+    "Solver",
+    "SolverRouter",
+    "default_router",
+    "normalize",
+    "canonical_key",
+    "shapes_equal",
+    "match_shape_pool",
+    "is_rectangle",
+    "shape_from_cells",
+    "all_transformations",
     "enumerate_polyominoes",
     "RULE_CHECKERS",
-    "SolverError", "NoSolutionError", "SolverTimeoutError", "ValidationError",
+    "SolverError",
+    "NoSolutionError",
+    "SolverTimeoutError",
+    "ValidationError",
 ]

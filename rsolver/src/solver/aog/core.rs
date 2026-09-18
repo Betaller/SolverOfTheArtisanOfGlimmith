@@ -528,6 +528,427 @@ pub fn palisade_type_from_fence(fp: &[[usize; 2]]) -> u32 {
     (t << AREA_PALISADE_INDEX_BIT_SHIFT) & AREA_PALISADE_INDEX_BIT
 }
 
+/// Translate the puzzle's rule list into solver `Config` flags.
+fn build_config(puzzle: &Puzzle, active: &HashSet<&str>) -> Config {
+    let mut config = Config::default();
+    for rule in &puzzle.rules {
+        match rule.ctype.as_str() {
+            "precise" => {
+                if let Some(v) = rule.params.get("area").and_then(|v| v.as_i64()) {
+                    config.shape_size_lower_bound = v as i32;
+                    config.shape_size_upper_bound = v as i32;
+                }
+            }
+            "range" => {
+                if let Some(v) = rule.params.get("min").and_then(|v| v.as_i64()) {
+                    config.shape_size_lower_bound = config.shape_size_lower_bound.max(v as i32);
+                }
+                if let Some(v) = rule.params.get("max").and_then(|v| v.as_i64()) {
+                    config.shape_size_upper_bound = if config.shape_size_upper_bound < 0 {
+                        v as i32
+                    } else {
+                        config.shape_size_upper_bound.min(v as i32)
+                    };
+                }
+            }
+            "different" => config.all_shapes_different = true,
+            "same" => config.all_shapes_same = true,
+            "mixed" => config.adjacent_shapes_different = true,
+            "differentiation" => config.adjacent_sizes_different = true,
+            "block" => config.only_rectangles = true,
+            "non_block" => {
+                config.no_rectangles = true;
+                // A3: non_block regions have area >= 3 (13号 O5 verified
+                // 70/70 official solutions). Tighten the lower bound so aog
+                // skips enumerating size-1/2 regions. (doc 16 §2 A3.)
+                if config.shape_size_lower_bound < 3 {
+                    config.shape_size_lower_bound = 3;
+                }
+            }
+            "brick" => config.no_4_way_intersections = true,
+            "ring" => config.no_3_way_intersections = true,
+            "solitary" => config.one_symbol_per_region = true,
+            _ => {}
+        }
+    }
+
+    // Only enforce clues whose rule is present.
+    // predefine_shapes_only only when a `shape_pool` RULE requires every
+    // region to come from the pool.  puzzle_piece puzzles carry a pool
+    // array for its markers but allow arbitrary shapes elsewhere.
+    config.predefine_shapes_only = active.contains("shape_pool");
+    // W3: gate `check_radar` on whether the puzzle actually has watchtower
+    // vertices (rule present). 1100+ puzzles have none and would otherwise
+    // pay 4 useless puzzle[vx][vy] reads per cell expansion.
+    config.has_watchtower = active.contains("watchtower");
+    config
+}
+
+/// Padded puzzle grid plus the four per-cell compass direction arrays.
+struct PaddedGrids {
+    grid: Vec<Vec<u32>>,
+    up: Vec<Vec<i32>>,
+    down: Vec<Vec<i32>>,
+    left: Vec<Vec<i32>>,
+    right: Vec<Vec<i32>>,
+}
+
+/// Encode every cell of `puzzle` into the padded grid (and the compass arrays).
+fn build_puzzle_grid(
+    puzzle: &Puzzle,
+    h: usize,
+    w: usize,
+    rose_types: &[String],
+    active: &HashSet<&str>,
+) -> PaddedGrids {
+    // Padded grid: rows/cols 0..=2n+4 (5 border rows/cols).
+    let gh = 2 * h + 5;
+    let gw = 2 * w + 5;
+    let mut grid = vec![vec![LINE_BLOCK; gw]; gh];
+    for i in 2..=2 * h + 2 {
+        for j in 2..=2 * w + 2 {
+            grid[i][j] = LINE_NORMAL;
+        }
+    }
+
+    let mut up = vec![vec![-1i32; gw]; gh];
+    let mut down = vec![vec![-1i32; gw]; gh];
+    let mut left = vec![vec![-1i32; gw]; gh];
+    let mut right = vec![vec![-1i32; gw]; gh];
+
+    let use_area_numbers = active.contains("area");
+    let use_compass = active.contains("compass");
+    let use_puzzle_piece = active.contains("puzzle_piece");
+    let use_fence = active.contains("fence");
+
+    // Cells.
+    for row in &puzzle.cells {
+        for cell in row {
+            let r = cell.row;
+            let c = cell.col;
+            if r >= h || c >= w {
+                continue;
+            }
+            let px = to_puzzle_x((r + 1) as i32) as usize;
+            let py = to_puzzle_y((c + 1) as i32) as usize;
+            if cell.blocked {
+                grid[px][py] = AREA_BLOCK;
+                continue;
+            }
+            let mut v: u32 = AREA_NORMAL;
+            if use_area_numbers {
+                if let Some(n) = cell.number {
+                    if n >= 1 && n <= 255 {
+                        v |= ((n as u32) << AREA_SHAPE_SIZE_BIT_SHIFT) & AREA_SHAPE_SIZE_BIT;
+                    }
+                }
+            }
+            if use_compass {
+                if let Some(ref comp) = cell.compass {
+                    v |= AREA_COMPASS_ENABLE;
+                    up[px][py] = comp.up.map(|x| x as i32).unwrap_or(-1);
+                    down[px][py] = comp.down.map(|x| x as i32).unwrap_or(-1);
+                    left[px][py] = comp.left.map(|x| x as i32).unwrap_or(-1);
+                    right[px][py] = comp.right.map(|x| x as i32).unwrap_or(-1);
+                }
+            }
+            if use_puzzle_piece {
+                if cell.shape_pattern.is_some() {
+                    v |= AREA_SHAPE_INDEX_BIT; // index fixed after catalog build
+                }
+            }
+            if use_fence {
+                if let Some(ref fp) = cell.fence_pattern {
+                    v |= palisade_type_from_fence(fp);
+                }
+            }
+            if let Some(sym) = cell.symbol.as_ref() {
+                v |= AREA_SYMBOL_BIT;
+                if !rose_types.is_empty() {
+                    let idx = rose_types.iter().position(|t| t == sym).unwrap_or(0);
+                    v |= ((idx as u32) << AREA_SLASH_INDEX_BIT_SHIFT) & AREA_SLASH_INDEX_BIT;
+                }
+            }
+            grid[px][py] = v;
+        }
+    }
+
+    PaddedGrids { grid, up, down, left, right }
+}
+
+/// Horizontal edges: forced boundaries and edge-rule line bits.
+fn build_h_edges(
+    puzzle: &Puzzle,
+    h: usize,
+    w: usize,
+    use_edge_rules: bool,
+    grid: &mut Vec<Vec<u32>>,
+) {
+    for r in 0..h {
+        for c in 0..w.saturating_sub(1) {
+            let e = &puzzle.h_edges[r][c];
+            let forced = e.is_boundary || (e.constraint.is_some() && use_edge_rules);
+            let px = to_puzzle_x((r + 1) as i32) as usize;
+            let py = to_puzzle_x((c + 1) as i32) as usize + 1;
+            let mut lv = grid[px][py];
+            if forced {
+                lv |= LINE_BLOCK;
+            }
+            if let Some(ref ec) = e.constraint {
+                if use_edge_rules {
+                    lv = apply_line_constraint(lv, ec, true);
+                }
+            }
+            grid[px][py] = lv;
+        }
+    }
+}
+
+/// Vertical edges: forced boundaries and edge-rule line bits.
+fn build_v_edges(
+    puzzle: &Puzzle,
+    h: usize,
+    w: usize,
+    use_edge_rules: bool,
+    grid: &mut Vec<Vec<u32>>,
+) {
+    for r in 0..h.saturating_sub(1) {
+        for c in 0..w {
+            let e = &puzzle.v_edges[r][c];
+            let forced = e.is_boundary || (e.constraint.is_some() && use_edge_rules);
+            let px = to_puzzle_x((r + 1) as i32) as usize + 1;
+            let py = to_puzzle_y((c + 1) as i32) as usize;
+            let mut lv = grid[px][py];
+            if forced {
+                lv |= LINE_BLOCK;
+            }
+            if let Some(ref ec) = e.constraint {
+                if use_edge_rules {
+                    lv = apply_line_constraint(lv, ec, true);
+                }
+            }
+            grid[px][py] = lv;
+        }
+    }
+}
+
+/// Vertices (watchtowers / radar).  Vertex (r,c) is the ABSOLUTE grid
+/// corner at (r,c) — r in 0..=h, c in 0..=w, border corners included.
+/// In the padded grid a grid corner (r,c) sits at (2r+2, 2c+2): a cell
+/// (r,c) sits at (2r+3, 2c+3), so its top-left corner is (2r+2, 2c+2).
+/// Border corners (r=0/h, c=0/w) are valid padded positions (>= 2).
+fn build_watchtower_vertices(puzzle: &Puzzle, h: usize, w: usize, grid: &mut Vec<Vec<u32>>) {
+    for r in 0..=h {
+        for c in 0..=w {
+            if let Some(val) = puzzle.vertices[r][c].watchtower {
+                if val >= 1 && val <= 4 {
+                    let px = 2 * r + 2;
+                    let py = 2 * c + 2;
+                    grid[px][py] |= (val as u32) << VERTEX_RADAR_BIT_SHIFT;
+                }
+            }
+        }
+    }
+}
+
+/// Register puzzle-piece patterns and fix up their shape index markers.
+fn register_puzzle_pieces(core: &mut AoGCore, puzzle: &Puzzle, h: usize, w: usize) {
+    let mut index_map: HashMap<String, u32> = HashMap::new();
+    for row in &puzzle.cells {
+        for cell in row {
+            if cell.row >= h || cell.col >= w || cell.blocked {
+                continue;
+            }
+            if let Some(ref pattern) = cell.shape_pattern {
+                let (mut grid, size) = shape_grid_from_cells(pattern);
+                let key = pattern_key(pattern);
+                let idx = if let Some(&idx) = index_map.get(&key) {
+                    idx
+                } else {
+                    core.shapes_insert(&mut grid, size);
+                    let found = core.shapes_search(&grid, size);
+                    let idx = if found == NO_SHAPE_INDEX {
+                        continue;
+                    } else {
+                        found
+                    };
+                    index_map.insert(key, idx);
+                    idx
+                };
+                let px = to_puzzle_x((cell.row + 1) as i32) as usize;
+                let py = to_puzzle_y((cell.col + 1) as i32) as usize;
+                let cur = core.puzzle[px][py];
+                core.puzzle[px][py] =
+                    (cur & !AREA_SHAPE_INDEX_BIT) | ((idx & 0x0f) << AREA_SHAPE_INDEX_BIT_SHIFT);
+            }
+        }
+    }
+}
+
+/// Shape size nodes (cells with an area number), sorted ascending by size.
+fn collect_shape_size_nodes(puzzle: &Puzzle, h: usize, w: usize, use_area_numbers: bool) -> Vec<Node> {
+    let mut ssn: Vec<(i32, Node)> = Vec::new();
+    for row in &puzzle.cells {
+        for cell in row {
+            if cell.row >= h || cell.col >= w || cell.blocked {
+                continue;
+            }
+            if use_area_numbers {
+                if let Some(n) = cell.number {
+                    let node = Node {
+                        x: (cell.row + 1) as i32,
+                        y: (cell.col + 1) as i32,
+                    };
+                    ssn.push((n as i32, node));
+                }
+            }
+        }
+    }
+    ssn.sort_by_key(|&(s, _)| s);
+    ssn.into_iter().map(|(_, n)| n).collect()
+}
+
+/// Number of non-blocked cells (the default upper bound on region size).
+fn count_fillable_cells(puzzle: &Puzzle, h: usize, w: usize) -> usize {
+    let mut empty_area_cnt = 0usize;
+    for row in &puzzle.cells {
+        for cell in row {
+            if cell.row < h && cell.col < w && !cell.blocked {
+                empty_area_cnt += 1;
+            }
+        }
+    }
+    empty_area_cnt
+}
+
+/// Default size bounds (mirrors main.cpp).
+fn apply_size_bounds(core: &mut AoGCore, empty_area_cnt: usize) {
+    // rose_window: every region holds one of each symbol type, so its size
+    // is at least the number of types (mirrors main.cpp slash lower bound).
+    if core.rose_type_count > 0 {
+        core.config.shape_size_lower_bound =
+            core.config.shape_size_lower_bound.max(core.rose_type_count as i32);
+    }
+    if core.config.predefine_shapes_only {
+        let mut lo = usize::MAX;
+        let mut hi = 0usize;
+        for s in &core.shapes {
+            lo = lo.min(s.nodes.len());
+            hi = hi.max(s.nodes.len());
+        }
+        core.config.shape_size_lower_bound = lo as i32;
+        core.config.shape_size_upper_bound = hi as i32;
+    } else if core.config.shape_size_lower_bound < 1 {
+        core.config.shape_size_lower_bound = 1;
+    }
+    if core.config.shape_size_upper_bound < 1 {
+        core.config.shape_size_upper_bound = empty_area_cnt as i32;
+    }
+}
+
+/// B-CompassUB: when solitary is present (1 compass cell per region, no
+/// double-count), each compass cell's region has a known area lower
+/// bound LB = 1 + max(up+down, left+right) (doc 13 O11). With K regions
+/// (solitary = K = clue-cell count), the tight global UB is:
+///   global_UB = fillable - sum(LBs) + max(LB)
+/// (one region keeps its max, others freed by their LBs). (doc 16 §1 A2.)
+fn apply_compass_upper_bound(core: &mut AoGCore, puzzle: &Puzzle, empty_area_cnt: usize) {
+    let h = core.n_row;
+    let w = core.n_col;
+    let mut total_lb: i32 = 0;
+    let mut max_lb: i32 = 0;
+    let mut k_computed: usize = 0;
+    for r in 0..h {
+        for c in 0..w {
+            if let Some(ref comp) = puzzle.cells[r][c].compass {
+                let up = comp.up.unwrap_or(0).max(0) as i32;
+                let down = comp.down.unwrap_or(0).max(0) as i32;
+                let left = comp.left.unwrap_or(0).max(0) as i32;
+                let right = comp.right.unwrap_or(0).max(0) as i32;
+                let lb = 1 + (up + down).max(left + right);
+                total_lb += lb;
+                max_lb = max_lb.max(lb);
+                k_computed += 1;
+            }
+        }
+    }
+    if k_computed > 0 {
+        let tight = empty_area_cnt as i32 - total_lb + max_lb;
+        if tight > 0
+            && (core.config.shape_size_upper_bound < 1 || tight < core.config.shape_size_upper_bound)
+        {
+            core.config.shape_size_upper_bound = tight;
+        }
+    }
+}
+
+/// only_rectangles (block rule): generate all rectangle shapes into the
+/// catalog, mirroring main.cpp's ONLY_RECTANGLES handling.
+fn insert_rectangle_shapes(core: &mut AoGCore) {
+    let lo = core.config.shape_size_lower_bound.max(1) as usize;
+    let hi = core.config.shape_size_upper_bound.max(1) as usize;
+    for size in lo..=hi {
+        let mut l = 1usize;
+        while l * l <= size {
+            if size % l == 0 {
+                let hh = size / l;
+                // H2: a `size`-cell rectangle can be placed either as an
+                // `l × hh` bar (l rows, hh cols) or as an `hh × l` bar.  The
+                // old code only inserted when the `l × hh` orientation fit
+                // (`l <= n_row && hh <= n_col`); the 90° rotation is added by
+                // `shapes_insert`, but if the `l × hh` orientation itself
+                // was rejected, its rotation was never generated — so a
+                // rectangle that only fits VERTICALLY (`hh <= n_row &&
+                // l <= n_col`) was missing from the catalog and the puzzle
+                // could be reported unsolvable.  Insert whenever EITHER
+                // orientation fits the board (the catalog is board-
+                // independent, so the other orientation is covered by the
+                // dihedral rotations of whatever we insert).
+                if (l <= core.n_row && hh <= core.n_col)
+                    || (hh <= core.n_row && l <= core.n_col)
+                {
+                    let dim = hh.max(l);
+                    let mut grid = vec![vec![0u32; dim]; dim];
+                    for i in 0..l {
+                        for j in 0..hh {
+                            grid[i][j] = 1;
+                        }
+                    }
+                    core.shapes_insert(&mut grid, dim);
+                }
+            }
+            l += 1;
+        }
+    }
+}
+
+/// rose_window: per-type node lists (mirrors main.cpp slash_nodes).
+fn collect_slash_nodes(
+    puzzle: &Puzzle,
+    h: usize,
+    w: usize,
+    rose_types: &[String],
+    rose_type_count: usize,
+) -> Vec<Vec<Node>> {
+    let mut sn: Vec<Vec<Node>> = vec![Vec::new(); rose_type_count];
+    for row in &puzzle.cells {
+        for cell in row {
+            if cell.row >= h || cell.col >= w || cell.blocked {
+                continue;
+            }
+            if let Some(sym) = cell.symbol.as_ref() {
+                if let Some(t) = rose_types.iter().position(|x| x == sym) {
+                    sn[t].push(Node {
+                        x: (cell.row + 1) as i32,
+                        y: (cell.col + 1) as i32,
+                    });
+                }
+            }
+        }
+    }
+    sn
+}
+
 impl AoGCore {
     /// Build the solver state from a rsolver `Puzzle`. Returns None when the
     /// puzzle cannot be handled by this solver (e.g. rose_window).
@@ -538,65 +959,14 @@ impl AoGCore {
             return None;
         }
 
-        if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
-            // rose_window is supported natively; continue.
-        }
+        // rose_window is supported natively; continue.
         // Symbol type list (shared helper: rule params, else distinct cell
         // symbols — unified with rose / validate).
         let rose_types: Vec<String> = crate::shapes::rose_symbol_types(puzzle);
 
-        let mut config = Config::default();
-        for rule in &puzzle.rules {
-            match rule.ctype.as_str() {
-                "precise" => {
-                    if let Some(v) = rule.params.get("area").and_then(|v| v.as_i64()) {
-                        config.shape_size_lower_bound = v as i32;
-                        config.shape_size_upper_bound = v as i32;
-                    }
-                }
-                "range" => {
-                    if let Some(v) = rule.params.get("min").and_then(|v| v.as_i64()) {
-                        config.shape_size_lower_bound = config.shape_size_lower_bound.max(v as i32);
-                    }
-                    if let Some(v) = rule.params.get("max").and_then(|v| v.as_i64()) {
-                        config.shape_size_upper_bound = if config.shape_size_upper_bound < 0 {
-                            v as i32
-                        } else {
-                            config.shape_size_upper_bound.min(v as i32)
-                        };
-                    }
-                }
-                "different" => config.all_shapes_different = true,
-                "same" => config.all_shapes_same = true,
-                "mixed" => config.adjacent_shapes_different = true,
-                "differentiation" => config.adjacent_sizes_different = true,
-                "block" => config.only_rectangles = true,
-                "non_block" => {
-                    config.no_rectangles = true;
-                    // A3: non_block regions have area >= 3 (13号 O5 verified
-                    // 70/70 official solutions). Tighten the lower bound so aog
-                    // skips enumerating size-1/2 regions. (doc 16 §2 A3.)
-                    if config.shape_size_lower_bound < 3 {
-                        config.shape_size_lower_bound = 3;
-                    }
-                }
-                "brick" => config.no_4_way_intersections = true,
-                "ring" => config.no_3_way_intersections = true,
-                "solitary" => config.one_symbol_per_region = true,
-                _ => {}
-            }
-        }
-
         // Only enforce clues whose rule is present.
         let active: HashSet<&str> = puzzle.rules.iter().map(|r| r.ctype.as_str()).collect();
-        // predefine_shapes_only only when a `shape_pool` RULE requires every
-        // region to come from the pool.  puzzle_piece puzzles carry a pool
-        // array for its markers but allow arbitrary shapes elsewhere.
-        config.predefine_shapes_only = active.contains("shape_pool");
-        // W3: gate `check_radar` on whether the puzzle actually has watchtower
-        // vertices (rule present). 1100+ puzzles have none and would otherwise
-        // pay 4 useless puzzle[vx][vy] reads per cell expansion.
-        config.has_watchtower = active.contains("watchtower");
+        let config = build_config(puzzle, &active);
 
         // Collect pool shapes from both the top-level array and the rule params.
         let pool_shapes = crate::shapes::collect_pool_shapes(puzzle);
@@ -605,145 +975,27 @@ impl AoGCore {
         let use_compass = active.contains("compass");
         let use_watchtower = active.contains("watchtower");
         let use_puzzle_piece = active.contains("puzzle_piece");
-        let use_fence = active.contains("fence");
         let use_edge_rules = active.contains("heterogeneous")
             || active.contains("homogeneous")
             || active.contains("inequality")
             || active.contains("difference");
 
-        // Padded grid: rows/cols 0..=2n+4 (5 border rows/cols).
-        let gh = 2 * h + 5;
-        let gw = 2 * w + 5;
-        let mut puzzle_grid = vec![vec![LINE_BLOCK; gw]; gh];
-        for i in 2..=2 * h + 2 {
-            for j in 2..=2 * w + 2 {
-                puzzle_grid[i][j] = LINE_NORMAL;
-            }
-        }
-
-        let mut compass_up = vec![vec![-1i32; gw]; gh];
-        let mut compass_down = vec![vec![-1i32; gw]; gh];
-        let mut compass_left = vec![vec![-1i32; gw]; gh];
-        let mut compass_right = vec![vec![-1i32; gw]; gh];
-
-        // Cells.
-        for row in &puzzle.cells {
-            for cell in row {
-                let r = cell.row;
-                let c = cell.col;
-                if r >= h || c >= w {
-                    continue;
-                }
-                let px = to_puzzle_x((r + 1) as i32) as usize;
-                let py = to_puzzle_y((c + 1) as i32) as usize;
-                if cell.blocked {
-                    puzzle_grid[px][py] = AREA_BLOCK;
-                    continue;
-                }
-                let mut v: u32 = AREA_NORMAL;
-                if use_area_numbers {
-                    if let Some(n) = cell.number {
-                        if n >= 1 && n <= 255 {
-                            v |= ((n as u32) << AREA_SHAPE_SIZE_BIT_SHIFT) & AREA_SHAPE_SIZE_BIT;
-                        }
-                    }
-                }
-                if use_compass {
-                    if let Some(ref comp) = cell.compass {
-                        v |= AREA_COMPASS_ENABLE;
-                        compass_up[px][py] = comp.up.map(|x| x as i32).unwrap_or(-1);
-                        compass_down[px][py] = comp.down.map(|x| x as i32).unwrap_or(-1);
-                        compass_left[px][py] = comp.left.map(|x| x as i32).unwrap_or(-1);
-                        compass_right[px][py] = comp.right.map(|x| x as i32).unwrap_or(-1);
-                    }
-                }
-                if use_puzzle_piece {
-                    if cell.shape_pattern.is_some() {
-                        v |= AREA_SHAPE_INDEX_BIT; // index fixed after catalog build
-                    }
-                }
-                if use_fence {
-                    if let Some(ref fp) = cell.fence_pattern {
-                        v |= palisade_type_from_fence(fp);
-                    }
-                }
-                if let Some(sym) = cell.symbol.as_ref() {
-                    v |= AREA_SYMBOL_BIT;
-                    if !rose_types.is_empty() {
-                        let idx = rose_types.iter().position(|t| t == sym).unwrap_or(0);
-                        v |= ((idx as u32) << AREA_SLASH_INDEX_BIT_SHIFT) & AREA_SLASH_INDEX_BIT;
-                    }
-                }
-                puzzle_grid[px][py] = v;
-            }
-        }
-
-        // Edges.
-        for r in 0..h {
-            for c in 0..w.saturating_sub(1) {
-                let e = &puzzle.h_edges[r][c];
-                let forced = e.is_boundary || (e.constraint.is_some() && use_edge_rules);
-                let px = to_puzzle_x((r + 1) as i32) as usize;
-                let py = to_puzzle_x((c + 1) as i32) as usize + 1;
-                let mut lv = puzzle_grid[px][py];
-                if forced {
-                    lv |= LINE_BLOCK;
-                }
-                if let Some(ref ec) = e.constraint {
-                    if use_edge_rules {
-                        lv = apply_line_constraint(lv, ec, true);
-                    }
-                }
-                puzzle_grid[px][py] = lv;
-            }
-        }
-        for r in 0..h.saturating_sub(1) {
-            for c in 0..w {
-                let e = &puzzle.v_edges[r][c];
-                let forced = e.is_boundary || (e.constraint.is_some() && use_edge_rules);
-                let px = to_puzzle_x((r + 1) as i32) as usize + 1;
-                let py = to_puzzle_y((c + 1) as i32) as usize;
-                let mut lv = puzzle_grid[px][py];
-                if forced {
-                    lv |= LINE_BLOCK;
-                }
-                if let Some(ref ec) = e.constraint {
-                    if use_edge_rules {
-                        lv = apply_line_constraint(lv, ec, true);
-                    }
-                }
-                puzzle_grid[px][py] = lv;
-            }
-        }
-
-        // Vertices (watchtowers / radar).  Vertex (r,c) is the ABSOLUTE grid
-        // corner at (r,c) — r in 0..=h, c in 0..=w, border corners included.
-        // In the padded grid a grid corner (r,c) sits at (2r+2, 2c+2): a cell
-        // (r,c) sits at (2r+3, 2c+3), so its top-left corner is (2r+2, 2c+2).
-        // Border corners (r=0/h, c=0/w) are valid padded positions (>= 2).
+        let mut grids = build_puzzle_grid(puzzle, h, w, &rose_types, &active);
+        build_h_edges(puzzle, h, w, use_edge_rules, &mut grids.grid);
+        build_v_edges(puzzle, h, w, use_edge_rules, &mut grids.grid);
         if use_watchtower {
-            for r in 0..=h {
-                for c in 0..=w {
-                    if let Some(val) = puzzle.vertices[r][c].watchtower {
-                        if val >= 1 && val <= 4 {
-                            let px = 2 * r + 2;
-                            let py = 2 * c + 2;
-                            puzzle_grid[px][py] |= (val as u32) << VERTEX_RADAR_BIT_SHIFT;
-                        }
-                    }
-                }
-            }
+            build_watchtower_vertices(puzzle, h, w, &mut grids.grid);
         }
 
         let mut core = AoGCore {
             n_row: h,
             n_col: w,
             config,
-            puzzle: puzzle_grid,
-            puzzle_compass_up: compass_up,
-            puzzle_compass_down: compass_down,
-            puzzle_compass_left: compass_left,
-            puzzle_compass_right: compass_right,
+            puzzle: grids.grid,
+            puzzle_compass_up: grids.up,
+            puzzle_compass_down: grids.down,
+            puzzle_compass_left: grids.left,
+            puzzle_compass_right: grids.right,
             slash_nodes: Vec::new(),
             shape_size_nodes: Vec::new(),
             all_shapes_same_check_shape_index: -1,
@@ -790,181 +1042,25 @@ impl AoGCore {
 
         // Register puzzle-piece patterns and fix up their shape index markers.
         if use_puzzle_piece {
-            let mut index_map: HashMap<String, u32> = HashMap::new();
-            for row in &puzzle.cells {
-                for cell in row {
-                    if cell.row >= h || cell.col >= w || cell.blocked {
-                        continue;
-                    }
-                    if let Some(ref pattern) = cell.shape_pattern {
-                        let (mut grid, size) = shape_grid_from_cells(pattern);
-                        let key = pattern_key(pattern);
-                        let idx = if let Some(&idx) = index_map.get(&key) {
-                            idx
-                        } else {
-                            core.shapes_insert(&mut grid, size);
-                            let found = core.shapes_search(&grid, size);
-                            let idx = if found == NO_SHAPE_INDEX {
-                                continue;
-                            } else {
-                                found
-                            };
-                            index_map.insert(key, idx);
-                            idx
-                        };
-                        let px = to_puzzle_x((cell.row + 1) as i32) as usize;
-                        let py = to_puzzle_y((cell.col + 1) as i32) as usize;
-                        let cur = core.puzzle[px][py];
-                        core.puzzle[px][py] = (cur & !AREA_SHAPE_INDEX_BIT)
-                            | ((idx & 0x0f) << AREA_SHAPE_INDEX_BIT_SHIFT);
-                    }
-                }
-            }
+            register_puzzle_pieces(&mut core, puzzle, h, w);
         }
 
-        // Shape size nodes (cells with an area number), sorted ascending by size.
-        let mut ssn: Vec<(i32, Node)> = Vec::new();
-        for row in &puzzle.cells {
-            for cell in row {
-                if cell.row >= h || cell.col >= w || cell.blocked {
-                    continue;
-                }
-                if use_area_numbers {
-                    if let Some(n) = cell.number {
-                        let node = Node {
-                            x: (cell.row + 1) as i32,
-                            y: (cell.col + 1) as i32,
-                        };
-                        ssn.push((n as i32, node));
-                    }
-                }
-            }
-        }
-        ssn.sort_by_key(|&(s, _)| s);
-        core.shape_size_nodes = ssn.into_iter().map(|(_, n)| n).collect();
+        core.shape_size_nodes = collect_shape_size_nodes(puzzle, h, w, use_area_numbers);
 
         // Default size bounds (mirrors main.cpp).
-        let mut empty_area_cnt = 0usize;
-        for row in &puzzle.cells {
-            for cell in row {
-                if cell.row < h && cell.col < w && !cell.blocked {
-                    empty_area_cnt += 1;
-                }
-            }
-        }
-        // rose_window: every region holds one of each symbol type, so its size
-        // is at least the number of types (mirrors main.cpp slash lower bound).
-        if core.rose_type_count > 0 {
-            core.config.shape_size_lower_bound =
-                core.config.shape_size_lower_bound.max(core.rose_type_count as i32);
-        }
-        if core.config.predefine_shapes_only {
-            let mut lo = usize::MAX;
-            let mut hi = 0usize;
-            for s in &core.shapes {
-                lo = lo.min(s.nodes.len());
-                hi = hi.max(s.nodes.len());
-            }
-            core.config.shape_size_lower_bound = lo as i32;
-            core.config.shape_size_upper_bound = hi as i32;
-        } else if core.config.shape_size_lower_bound < 1 {
-            core.config.shape_size_lower_bound = 1;
-        }
-        if core.config.shape_size_upper_bound < 1 {
-            core.config.shape_size_upper_bound = empty_area_cnt as i32;
-        }
-
-        // B-CompassUB: when solitary is present (1 compass cell per region, no
-        // double-count), each compass cell's region has a known area lower
-        // bound LB = 1 + max(up+down, left+right) (doc 13 O11). With K regions
-        // (solitary = K = clue-cell count), the tight global UB is:
-        //   global_UB = fillable - sum(LBs) + max(LB)
-        // (one region keeps its max, others freed by their LBs). (doc 16 §1 A2.)
+        let empty_area_cnt = count_fillable_cells(puzzle, h, w);
+        apply_size_bounds(&mut core, empty_area_cnt);
         if use_compass && config.one_symbol_per_region {
-            let mut total_lb: i32 = 0;
-            let mut max_lb: i32 = 0;
-            let mut k_computed: usize = 0;
-            for r in 0..h {
-                for c in 0..w {
-                    if let Some(ref comp) = puzzle.cells[r][c].compass {
-                        let up = comp.up.unwrap_or(0).max(0) as i32;
-                        let down = comp.down.unwrap_or(0).max(0) as i32;
-                        let left = comp.left.unwrap_or(0).max(0) as i32;
-                        let right = comp.right.unwrap_or(0).max(0) as i32;
-                        let lb = 1 + (up + down).max(left + right);
-                        total_lb += lb;
-                        max_lb = max_lb.max(lb);
-                        k_computed += 1;
-                    }
-                }
-            }
-            if k_computed > 0 {
-                let tight = empty_area_cnt as i32 - total_lb + max_lb;
-                if tight > 0 && (core.config.shape_size_upper_bound < 1 || tight < core.config.shape_size_upper_bound) {
-                    core.config.shape_size_upper_bound = tight;
-                }
-            }
+            apply_compass_upper_bound(&mut core, puzzle, empty_area_cnt);
         }
 
-        // only_rectangles (block rule): generate all rectangle shapes into the
-        // catalog, mirroring main.cpp's ONLY_RECTANGLES handling.
         if core.config.only_rectangles {
-            let lo = core.config.shape_size_lower_bound.max(1) as usize;
-            let hi = core.config.shape_size_upper_bound.max(1) as usize;
-            for size in lo..=hi {
-                let mut l = 1usize;
-                while l * l <= size {
-                    if size % l == 0 {
-                        let h = size / l;
-                        // H2: a `size`-cell rectangle can be placed either as an
-                        // `l × h` bar (l rows, h cols) or as an `h × l` bar.  The
-                        // old code only inserted when the `l × h` orientation fit
-                        // (`l <= n_row && h <= n_col`); the 90° rotation is added by
-                        // `shapes_insert`, but if the `l × h` orientation itself
-                        // was rejected, its rotation was never generated — so a
-                        // rectangle that only fits VERTICALLY (`h <= n_row &&
-                        // l <= n_col`) was missing from the catalog and the puzzle
-                        // could be reported unsolvable.  Insert whenever EITHER
-                        // orientation fits the board (the catalog is board-
-                        // independent, so the other orientation is covered by the
-                        // dihedral rotations of whatever we insert).
-                        if (l <= core.n_row && h <= core.n_col)
-                            || (h <= core.n_row && l <= core.n_col)
-                        {
-                            let dim = h.max(l);
-                            let mut grid = vec![vec![0u32; dim]; dim];
-                            for i in 0..l {
-                                for j in 0..h {
-                                    grid[i][j] = 1;
-                                }
-                            }
-                            core.shapes_insert(&mut grid, dim);
-                        }
-                    }
-                    l += 1;
-                }
-            }
+            insert_rectangle_shapes(&mut core);
         }
 
-        // rose_window: per-type node lists (mirrors main.cpp slash_nodes).
         if core.rose_type_count > 0 {
-            let mut sn: Vec<Vec<Node>> = vec![Vec::new(); core.rose_type_count];
-            for row in &puzzle.cells {
-                for cell in row {
-                    if cell.row >= h || cell.col >= w || cell.blocked {
-                        continue;
-                    }
-                    if let Some(sym) = cell.symbol.as_ref() {
-                        if let Some(t) = rose_types.iter().position(|x| x == sym) {
-                            sn[t].push(Node {
-                                x: (cell.row + 1) as i32,
-                                y: (cell.col + 1) as i32,
-                            });
-                        }
-                    }
-                }
-            }
-            core.slash_nodes = sn;
+            core.slash_nodes =
+                collect_slash_nodes(puzzle, h, w, &rose_types, core.rose_type_count);
         }
 
         Some(core)

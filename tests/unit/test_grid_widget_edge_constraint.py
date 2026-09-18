@@ -6,11 +6,8 @@ only brought in `EdgeConstraintType`.  Every edge-constraint menu action
 ("设异生/设双生/设不等号/设差值") therefore raised `NameError` at runtime.
 These tests drive that handler so the crash is caught in CI.
 """
+
 from __future__ import annotations
-
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtWidgets import QApplication

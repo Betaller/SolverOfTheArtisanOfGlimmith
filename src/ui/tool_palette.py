@@ -1,17 +1,22 @@
 from __future__ import annotations
 
-from typing import Optional
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QPushButton, QLabel, QLineEdit,
-    QHBoxLayout, QButtonGroup, QGridLayout, QGroupBox,
-    QSpinBox, QFrame,
-)
 from PySide6.QtGui import QIntValidator
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from src.models.board import CompassClue
 from src.ui.theme import MODE_COLORS
-
 
 MODE_BUTTON_STYLE = """
 QPushButton {
@@ -79,9 +84,7 @@ class ToolPalette(QWidget):
 
     def _add_section_header(self, layout: QVBoxLayout, text: str) -> None:
         label = QLabel(text)
-        label.setStyleSheet(
-            "font-size: 10px; font-weight: bold; padding: 1px 0;"
-        )
+        label.setStyleSheet("font-size: 10px; font-weight: bold; padding: 1px 0;")
         layout.addWidget(label)
 
     def _add_separator(self, layout: QVBoxLayout) -> None:
@@ -105,13 +108,13 @@ class ToolPalette(QWidget):
         self._btn_group.setExclusive(True)
 
         tools: list[tuple[str, str, str]] = [
-            ("select", "\U0001F4CC 选择", "选择/查看单元格属性 (V)"),
+            ("select", "\U0001f4cc 选择", "选择/查看单元格属性 (V)"),
             ("boundary", "\u2501 边框绘制", "点击顶点拖拽绘制分割线 (B)"),
             ("block", "\u2716 障碍格", "点击切换障碍格 (X)"),
             ("number", "# 数字标注", "点击输入数字线索 (N)"),
             ("symbol", "\u2605 符号标注", "点击输入符号 (S)"),
-            ("compass", "\u25CE 罗盘标注", "点击设置四方向计数 (C)"),
-            ("watchtower", "\u25C9 望塔标注", "点击顶点设置望塔值 (W)"),
+            ("compass", "\u25ce 罗盘标注", "点击设置四方向计数 (C)"),
+            ("watchtower", "\u25c9 望塔标注", "点击顶点设置望塔值 (W)"),
         ]
 
         for mode, label, tip in tools:
@@ -119,7 +122,7 @@ class ToolPalette(QWidget):
             btn.setToolTip(tip)
             if mode == "select":
                 btn.setChecked(True)
-            btn.clicked.connect(lambda checked, m=mode: self._on_mode_selected(m))
+            btn.clicked.connect(lambda _checked, m=mode: self._on_mode_selected(m))
             self._btn_group.addButton(btn)
             layout.addWidget(btn)
 
@@ -196,7 +199,7 @@ class ToolPalette(QWidget):
                 "border: 2px solid palette(mid); }"
                 "QPushButton:checked { background: #7C3AED; color: white; border-color: #7C3AED; }"
             )
-            btn.clicked.connect(lambda checked, val=v: self._on_watchtower_selected(val))
+            btn.clicked.connect(lambda _checked, val=v: self._on_watchtower_selected(val))
             self._watchtower_btns.append(btn)
             btn_row.addWidget(btn)
         layout.addLayout(btn_row)
@@ -215,14 +218,12 @@ class ToolPalette(QWidget):
 
         quick_row = QHBoxLayout()
         quick_row.setSpacing(2)
-        for sym in ["\u2605", "\u25CF", "\u25C6", "\u25B2", "\u2665", "\u25A0"]:
+        for sym in ["\u2605", "\u25cf", "\u25c6", "\u25b2", "\u2665", "\u25a0"]:
             btn = QPushButton(sym)
             btn.setFixedSize(30, 24)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setStyleSheet(
-                "QPushButton { font-size: 12px; border-radius: 3px; padding: 1px; }"
-            )
-            btn.clicked.connect(lambda checked, s=sym: self._set_symbol(s))
+            btn.setStyleSheet("QPushButton { font-size: 12px; border-radius: 3px; padding: 1px; }")
+            btn.clicked.connect(lambda _checked, s=sym: self._set_symbol(s))
             quick_row.addWidget(btn)
         layout.addLayout(quick_row)
 
@@ -259,7 +260,7 @@ class ToolPalette(QWidget):
         self._compass_right.setFixedWidth(52)
         self._compass_right.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        center = QLabel("\u25C9")
+        center = QLabel("\u25c9")
         center.setAlignment(Qt.AlignmentFlag.AlignCenter)
         center.setStyleSheet("font-size: 14px;")
 
@@ -300,11 +301,11 @@ class ToolPalette(QWidget):
         try:
             u = int(self._compass_up.text()) if self._compass_up.text() else -1
             d = int(self._compass_down.text()) if self._compass_down.text() else -1
-            l = int(self._compass_left.text()) if self._compass_left.text() else -1
+            left = int(self._compass_left.text()) if self._compass_left.text() else -1
             r = int(self._compass_right.text()) if self._compass_right.text() else -1
         except ValueError:
             return
-        clue = CompassClue(up=u, down=d, left=l, right=r)
+        clue = CompassClue(up=u, down=d, left=left, right=r)
         self.compass_applied.emit(clue)
 
     @property

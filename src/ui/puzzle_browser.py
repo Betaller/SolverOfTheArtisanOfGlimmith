@@ -1,24 +1,28 @@
 from __future__ import annotations
 
+import glob
 import json
 import logging
 import os
-import glob
-from typing import Optional
+from typing import Any, NamedTuple
 
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF
-from PySide6.QtGui import (
-    QPainter, QPen, QBrush, QColor, QFont, QPixmap,
-)
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
-    QTreeWidget, QTreeWidgetItem, QLabel, QSplitter, QFrame,
+    QComboBox,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-
-from src.ui import theme as _ui_theme
 
 from src.models.puzzle import RULE_NAMES
-
+from src.ui import theme as _ui_theme
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +32,30 @@ ALL_RULES = sorted(RULE_NAMES.keys())
 
 
 class PuzzleInfo:
-    __slots__ = ("name", "path", "category", "height", "width",
-                 "rules", "blocked_count", "has_boundaries", "difficulty")
+    __slots__ = (
+        "name",
+        "path",
+        "category",
+        "height",
+        "width",
+        "rules",
+        "blocked_count",
+        "has_boundaries",
+        "difficulty",
+    )
 
-    def __init__(self, name: str, path: str, category: str,
-                 height: int, width: int, rules: list[str],
-                 blocked_count: int, has_boundaries: bool,
-                 difficulty: int | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        path: str,
+        category: str,
+        height: int,
+        width: int,
+        rules: list[str],
+        blocked_count: int,
+        has_boundaries: bool,
+        difficulty: int | None = None,
+    ) -> None:
         self.name = name
         self.path = path
         self.category = category
@@ -64,15 +85,131 @@ def _rule_type_matches(rule_type: str, token: str) -> bool:
     return token in name.lower()
 
 
+class _PreviewGeom(NamedTuple):
+    """Layout of the preview grid inside the widget."""
+
+    ox: float
+    oy: float
+    cell_size: int
+    total_w: int
+    total_h: int
+
+
+def _preview_geom(view_w: int, view_h: int, gw: int, gh: int) -> _PreviewGeom | None:
+    if gw <= 0 or gh <= 0:
+        return None
+    margin = 8
+    avail_w = view_w - margin * 2
+    avail_h = view_h - margin * 2
+    cell_size = max(4, min(avail_w // max(gw, 1), avail_h // max(gh, 1)))
+    cell_size = min(cell_size, 14)
+    total_w = gw * cell_size
+    total_h = gh * cell_size
+    ox = margin + (avail_w - total_w) / 2
+    oy = margin + (avail_h - total_h) / 2
+    return _PreviewGeom(ox, oy, cell_size, total_w, total_h)
+
+
+def _blocked_cells(cells: list[dict[str, Any]]) -> set[tuple[int, int]]:
+    return {(int(c["row"]), int(c["col"])) for c in cells if c.get("blocked")}
+
+
+def _cell_numbers(cells: list[dict[str, Any]]) -> dict[tuple[int, int], Any]:
+    return {(int(c["row"]), int(c["col"])): c["number"] for c in cells if "number" in c}
+
+
+def _cell_symbols(cells: list[dict[str, Any]]) -> dict[tuple[int, int], Any]:
+    return {(int(c["row"]), int(c["col"])): c["symbol"] for c in cells if "symbol" in c}
+
+
+def _draw_cells(
+    p: QPainter, geom: _PreviewGeom, gw: int, gh: int, blocked: set[tuple[int, int]]
+) -> None:
+    border = QPen(QColor(_ui_theme.colors.preview_cell_border), 0.5)
+    normal = QColor(_ui_theme.colors.preview_cell_normal)
+    blocked_bg = QColor(_ui_theme.colors.preview_blocked_bg)
+    for r in range(gh):
+        for c in range(gw):
+            rect = QRectF(
+                geom.ox + c * geom.cell_size,
+                geom.oy + r * geom.cell_size,
+                geom.cell_size,
+                geom.cell_size,
+            )
+            p.fillRect(rect, blocked_bg if (r, c) in blocked else normal)
+            p.setPen(border)
+            p.drawRect(rect)
+
+
+def _draw_boundaries(p: QPainter, geom: _PreviewGeom, edges: list[dict[str, Any]]) -> None:
+    drawn = [e for e in edges if e.get("is_boundary")]
+    if not drawn:
+        return
+    p.setPen(QPen(QColor(_ui_theme.colors.preview_boundary), max(1.5, geom.cell_size * 0.12)))
+    for e in drawn:
+        r1, c1, r2, c2 = e["r1"], e["c1"], e["r2"], e["c2"]
+        if r1 == r2:
+            x = geom.ox + max(c1, c2) * geom.cell_size
+            y1 = geom.oy + r1 * geom.cell_size
+            y2 = geom.oy + (r1 + 1) * geom.cell_size
+            p.drawLine(QPointF(x, y1), QPointF(x, y2))
+        else:
+            y = geom.oy + max(r1, r2) * geom.cell_size
+            x1 = geom.ox + c1 * geom.cell_size
+            x2 = geom.ox + (c1 + 1) * geom.cell_size
+            p.drawLine(QPointF(x1, y), QPointF(x2, y))
+
+
+def _draw_annotations(
+    p: QPainter,
+    geom: _PreviewGeom,
+    numbers: dict[tuple[int, int], Any],
+    symbols: dict[tuple[int, int], Any],
+) -> None:
+    p.setFont(QFont("Segoe UI", max(5, geom.cell_size // 2), QFont.Weight.Bold))
+    for mapping, color in (
+        (numbers, _ui_theme.colors.number_text),
+        (symbols, _ui_theme.colors.symbol_text),
+    ):
+        p.setPen(QColor(color))
+        for (r, c), value in mapping.items():
+            rect = QRectF(
+                geom.ox + c * geom.cell_size,
+                geom.oy + r * geom.cell_size,
+                geom.cell_size,
+                geom.cell_size,
+            )
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(value))
+
+
+def _draw_summary(
+    p: QPainter, geom: _PreviewGeom, info: PuzzleInfo, has_numbers: bool, has_symbols: bool
+) -> None:
+    p.setFont(QFont("Segoe UI", 8))
+    p.setPen(QColor(_ui_theme.colors.preview_summary_text))
+    summary = f"{info.height}×{info.width}"
+    if info.blocked_count:
+        summary += f"  {info.blocked_count}障碍"
+    if has_numbers:
+        summary += " #"
+    if has_symbols:
+        summary += " 符"
+    p.drawText(
+        QRectF(geom.ox, geom.oy + geom.total_h + 2, geom.total_w, 16),
+        Qt.AlignmentFlag.AlignCenter,
+        summary,
+    )
+
+
 class PuzzlePreviewWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._info: PuzzleInfo | None = None
-        self._grid_data: dict | None = None
+        self._grid_data: dict[str, Any] | None = None
         self.setMinimumSize(200, 160)
         self.setMaximumHeight(200)
 
-    def set_puzzle(self, info: PuzzleInfo, grid_data: dict) -> None:
+    def set_puzzle(self, info: PuzzleInfo, grid_data: dict[str, Any]) -> None:
         self._info = info
         self._grid_data = grid_data
         self.update()
@@ -82,7 +219,7 @@ class PuzzlePreviewWidget(QWidget):
         self._grid_data = None
         self.update()
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt override
         super().paintEvent(event)
         if self._info is None or self._grid_data is None:
             return
@@ -92,109 +229,19 @@ class PuzzlePreviewWidget(QWidget):
         p.fillRect(self.rect(), QColor(_ui_theme.colors.preview_bg))
 
         info = self._info
-        gw = info.width
-        gh = info.height
-        if gw <= 0 or gh <= 0:
+        geom = _preview_geom(self.width(), self.height(), info.width, info.height)
+        if geom is None:
             return
 
-        margin = 8
-        avail_w = self.width() - margin * 2
-        avail_h = self.height() - margin * 2
-        cell_size = max(4, min(avail_w // max(gw, 1), avail_h // max(gh, 1)))
-        cell_size = min(cell_size, 14)
-
-        total_w = gw * cell_size
-        total_h = gh * cell_size
-        ox = margin + (avail_w - total_w) / 2
-        oy = margin + (avail_h - total_h) / 2
-
-        blocked_set: set[tuple[int, int]] = set()
-        boundary_set: set[tuple[int, int, int, int]] = set()
-        cell_symbols: dict[tuple[int, int], str] = {}
-        cell_numbers: dict[tuple[int, int], int] = {}
-        has_numbers = False
-        has_symbols = False
-
-        grid = self._grid_data.get("grid", {})
         cells = self._grid_data.get("cells", [])
         edges = self._grid_data.get("edges", [])
+        numbers = _cell_numbers(cells)
+        symbols = _cell_symbols(cells)
 
-        for c in cells:
-            r, c_ = int(c["row"]), int(c["col"])
-            if c.get("blocked"):
-                blocked_set.add((r, c_))
-            if "number" in c:
-                has_numbers = True
-                cell_numbers[(r, c_)] = c["number"]
-            if "symbol" in c:
-                has_symbols = True
-                cell_symbols[(r, c_)] = c["symbol"]
-
-        for e in edges:
-            if e.get("is_boundary"):
-                r1, c1, r2, c2 = e["r1"], e["c1"], e["r2"], e["c2"]
-                boundary_set.add((r1, c1, r2, c2))
-
-        # Draw cells
-        for r in range(gh):
-            for c in range(gw):
-                x = ox + c * cell_size
-                y = oy + r * cell_size
-                rect = QRectF(x, y, cell_size, cell_size)
-                if (r, c) in blocked_set:
-                    p.fillRect(rect, QColor(_ui_theme.colors.preview_blocked_bg))
-                else:
-                    p.fillRect(rect, QColor(_ui_theme.colors.preview_cell_normal))
-                p.setPen(QPen(QColor(_ui_theme.colors.preview_cell_border), 0.5))
-                p.drawRect(rect)
-
-        # Draw boundaries
-        if boundary_set:
-            p.setPen(QPen(QColor(_ui_theme.colors.preview_boundary), max(1.5, cell_size * 0.12)))
-        for e in edges:
-            if e.get("is_boundary"):
-                r1, c1, r2, c2 = e["r1"], e["c1"], e["r2"], e["c2"]
-                if r1 == r2:
-                    x = ox + max(c1, c2) * cell_size
-                    y1 = oy + r1 * cell_size
-                    y2 = oy + (r1 + 1) * cell_size
-                    p.drawLine(QPointF(x, y1), QPointF(x, y2))
-                else:
-                    y = oy + max(r1, r2) * cell_size
-                    x1 = ox + c1 * cell_size
-                    x2 = ox + (c1 + 1) * cell_size
-                    p.drawLine(QPointF(x1, y), QPointF(x2, y))
-
-        # Draw numbers and symbols
-        small_font = QFont("Segoe UI", max(5, cell_size // 2), QFont.Weight.Bold)
-        p.setFont(small_font)
-        for (r, c_), num in cell_numbers.items():
-            x = ox + c_ * cell_size
-            y = oy + r * cell_size
-            rect = QRectF(x, y, cell_size, cell_size)
-            p.setPen(QColor(_ui_theme.colors.number_text))
-            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(num))
-        for (r, c_), sym in cell_symbols.items():
-            x = ox + c_ * cell_size
-            y = oy + r * cell_size
-            rect = QRectF(x, y, cell_size, cell_size)
-            p.setPen(QColor(_ui_theme.colors.symbol_text))
-            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, sym)
-
-        # Summary overlay
-        font = QFont("Segoe UI", 8)
-        p.setFont(font)
-        p.setPen(QColor(_ui_theme.colors.preview_summary_text))
-        summary = f"{gh}×{gw}"
-        if info.blocked_count:
-            summary += f"  {info.blocked_count}障碍"
-        if has_numbers:
-            summary += " #"
-        if has_symbols:
-            summary += " 符"
-        p.drawText(QRectF(ox, oy + total_h + 2, total_w, 16),
-                   Qt.AlignmentFlag.AlignCenter, summary)
-
+        _draw_cells(p, geom, info.width, info.height, _blocked_cells(cells))
+        _draw_boundaries(p, geom, edges)
+        _draw_annotations(p, geom, numbers, symbols)
+        _draw_summary(p, geom, info, bool(numbers), bool(symbols))
         p.end()
 
 
@@ -208,7 +255,7 @@ class PuzzleBrowser(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._all_puzzles: list[PuzzleInfo] = []
-        self._grid_cache: dict[str, dict] = {}
+        self._grid_cache: dict[str, dict[str, Any]] = {}
         self._setup_ui()
         self._scan_puzzles()
 
@@ -332,70 +379,81 @@ class PuzzleBrowser(QWidget):
 
         layout.addWidget(splitter, 1)
 
+    def _collect_category_dirs(self) -> list[tuple[str, str]]:
+        """Walk ``PUZZLE_BASE`` and return ``(label, directory)`` pairs."""
+        seen: set[str] = set()
+        found: list[tuple[str, str]] = []
+        if not os.path.isdir(PUZZLE_BASE):
+            return found
+        for root, _dirs, files in os.walk(PUZZLE_BASE):
+            if not any(f.endswith(".json") for f in files):
+                continue
+            rel = os.path.relpath(root, PUZZLE_BASE).replace("\\", "/")
+            # 跳过官方解 answer 目录（`*-answer`），它们不是可解谜题。
+            if any(part.endswith("-answer") for part in rel.split("/")):
+                continue
+            label = rel if rel != "." else os.path.basename(root)
+            if label not in seen:
+                seen.add(label)
+                found.append((label, root))
+        return found
+
+    def _sync_category_combo(self, category_dirs: list[tuple[str, str]]) -> None:
+        current = [self._category_combo.itemText(i) for i in range(1, self._category_combo.count())]
+        if current == [label for label, _ in category_dirs]:
+            return
+        self._category_combo.blockSignals(True)
+        while self._category_combo.count() > 1:
+            self._category_combo.removeItem(1)
+        for label, _ in category_dirs:
+            self._category_combo.addItem(label)
+        self._category_combo.blockSignals(False)
+
+    @staticmethod
+    def _parse_puzzle(fpath: str, label: str) -> tuple[PuzzleInfo, Any]:
+        with open(fpath, encoding="utf-8") as f:
+            data = json.load(f)
+        grid = data.get("grid", {})
+        cells = data.get("cells", [])
+        edges = data.get("edges", [])
+        info = PuzzleInfo(
+            name=os.path.splitext(os.path.basename(fpath))[0],
+            path=fpath,
+            category=label,
+            height=int(grid.get("height", 0)),
+            width=int(grid.get("width", 0)),
+            rules=[r["type"] for r in data.get("rules", [])],
+            blocked_count=sum(1 for c in cells if c.get("blocked")),
+            has_boundaries=any(e.get("is_boundary") for e in edges),
+            difficulty=data.get("_meta", {}).get("archive_difficulty"),
+        )
+        return info, data
+
+    def _load_puzzle(self, fpath: str, label: str) -> None:
+        try:
+            info, data = self._parse_puzzle(fpath, label)
+        except Exception as e:
+            # Surface the failure instead of silently swallowing it, so a
+            # corrupt/malformed puzzle file is at least logged (bug L7).
+            logger.warning("解析谜题失败 %s: %s", fpath, e)
+            return
+        self._all_puzzles.append(info)
+        # Key the cache by the FULL file path, not the basename: two
+        # puzzles can share a basename in different directories and
+        # must not collide (bug L7).
+        self._grid_cache[fpath] = data
+
     def _scan_puzzles(self) -> None:
         self._all_puzzles.clear()
         self._grid_cache.clear()
 
-        seen_categories: set[str] = set()
-        category_dirs: list[tuple[str, str]] = []
-
-        if os.path.isdir(PUZZLE_BASE):
-            for root, dirs, files in os.walk(PUZZLE_BASE):
-                if not any(f.endswith(".json") for f in files):
-                    continue
-                rel = os.path.relpath(root, PUZZLE_BASE).replace("\\", "/")
-                # 跳过官方解 answer 目录（`*-answer`），它们不是可解谜题。
-                if any(part.endswith("-answer") for part in rel.split("/")):
-                    continue
-                label = rel if rel != "." else os.path.basename(root)
-                if label not in seen_categories:
-                    seen_categories.add(label)
-                    category_dirs.append((label, root))
-
+        category_dirs = self._collect_category_dirs()
         category_dirs.sort(key=lambda x: x[0])
-
-        current_categories = [self._category_combo.itemText(i)
-                              for i in range(1, self._category_combo.count())]
-        new_categories = [c for c, _ in category_dirs]
-        if current_categories != new_categories:
-            self._category_combo.blockSignals(True)
-            while self._category_combo.count() > 1:
-                self._category_combo.removeItem(1)
-            for label, _ in category_dirs:
-                self._category_combo.addItem(label)
-            self._category_combo.blockSignals(False)
+        self._sync_category_combo(category_dirs)
 
         for label, directory in category_dirs:
             for fpath in sorted(glob.glob(os.path.join(directory, "*.json"))):
-                try:
-                    name = os.path.splitext(os.path.basename(fpath))[0]
-                    with open(fpath, encoding="utf-8") as f:
-                        data = json.load(f)
-                    grid = data.get("grid", {})
-                    h, w = int(grid.get("height", 0)), int(grid.get("width", 0))
-                    rules = [r["type"] for r in data.get("rules", [])]
-                    cells = data.get("cells", [])
-                    blocked = sum(1 for c in cells if c.get("blocked"))
-                    edges = data.get("edges", [])
-                    has_bd = any(e.get("is_boundary") for e in edges)
-                    meta = data.get("_meta", {})
-                    difficulty = meta.get("archive_difficulty")
-
-                    info = PuzzleInfo(
-                        name=name, path=fpath, category=label,
-                        height=h, width=w, rules=rules,
-                        blocked_count=blocked, has_boundaries=has_bd,
-                        difficulty=difficulty,
-                    )
-                    self._all_puzzles.append(info)
-                    # Key the cache by the FULL file path, not the basename: two
-                    # puzzles can share a basename in different directories and
-                    # must not collide (bug L7).
-                    self._grid_cache[fpath] = data
-                except Exception as e:
-                    # Surface the failure instead of silently swallowing it, so a
-                    # corrupt/malformed puzzle file is at least logged (bug L7).
-                    logger.warning("解析谜题失败 %s: %s", fpath, e)
+                self._load_puzzle(fpath, label)
 
         self._apply_filters()
 
@@ -418,10 +476,7 @@ class PuzzleBrowser(QWidget):
         mode = self._rule_mode_combo.currentText()
         if mode == self.MODE_ALL:
             # every token must match at least one rule
-            for tok in tokens:
-                if not any(_rule_type_matches(r, tok) for r in info.rules):
-                    return False
-            return True
+            return all(any(_rule_type_matches(r, tok) for r in info.rules) for tok in tokens)
         if mode == self.MODE_ANY:
             return bool(matched)
         # MODE_NONE: exclude puzzles having any listed rule
@@ -438,32 +493,64 @@ class PuzzleBrowser(QWidget):
             return area > 64
         return True
 
-    def _matches_extra(self, info: PuzzleInfo) -> bool:
-        blk = self._blocked_combo.currentText()
-        if blk == "有障碍格" and info.blocked_count == 0:
-            return False
-        if blk == "无障碍格" and info.blocked_count > 0:
-            return False
-
-        bnd = self._boundary_combo.currentText()
-        if bnd == "有预画边界" and not info.has_boundaries:
-            return False
-        if bnd == "无预画边界" and info.has_boundaries:
-            return False
-
-        diff = self._difficulty_combo.currentText()
-        if diff.startswith("难度"):
-            try:
-                want = int(diff.split()[1].rstrip("+"))
-            except Exception:
-                want = None
-            if want is not None:
-                d = info.difficulty if info.difficulty is not None else 0
-                if diff.endswith("+") and d < want:
-                    return False
-                if not diff.endswith("+") and d != want:
-                    return False
+    def _matches_blocked(self, info: PuzzleInfo) -> bool:
+        text = self._blocked_combo.currentText()
+        if text == "有障碍格":
+            return info.blocked_count > 0
+        if text == "无障碍格":
+            return info.blocked_count == 0
         return True
+
+    def _matches_boundary(self, info: PuzzleInfo) -> bool:
+        text = self._boundary_combo.currentText()
+        if text == "有预画边界":
+            return info.has_boundaries
+        if text == "无预画边界":
+            return not info.has_boundaries
+        return True
+
+    @staticmethod
+    def _parse_difficulty(text: str) -> int | None:
+        try:
+            return int(text.split()[1].rstrip("+"))
+        except Exception:
+            return None
+
+    def _matches_difficulty(self, info: PuzzleInfo) -> bool:
+        text = self._difficulty_combo.currentText()
+        if not text.startswith("难度"):
+            return True
+        want = self._parse_difficulty(text)
+        if want is None:
+            return True
+        actual = info.difficulty if info.difficulty is not None else 0
+        return actual >= want if text.endswith("+") else actual == want
+
+    def _matches_extra(self, info: PuzzleInfo) -> bool:
+        return (
+            self._matches_blocked(info)
+            and self._matches_boundary(info)
+            and self._matches_difficulty(info)
+        )
+
+    def _matches_search(self, info: PuzzleInfo, search_text: str) -> bool:
+        if not search_text:
+            return True
+        if search_text in info.name.lower():
+            return True
+        if any(search_text in r.lower() for r in info.rules):
+            return True
+        return any(search_text in RULE_NAMES.get(r, r).lower() for r in info.rules)
+
+    def _accepts(self, info: PuzzleInfo, category: str, search_text: str) -> bool:
+        if category != "全部目录" and info.category != category:
+            return False
+        return (
+            self._matches_rules(info)
+            and self._matches_size(info)
+            and self._matches_extra(info)
+            and self._matches_search(info, search_text)
+        )
 
     def _apply_filters(self) -> None:
         search_text = self._search_input.text().strip().lower()
@@ -472,21 +559,12 @@ class PuzzleBrowser(QWidget):
         self._tree.clear()
         grouped: dict[str, list[PuzzleInfo]] = {}
         for info in self._all_puzzles:
-            if category != "全部目录" and info.category != category:
-                continue
-            if not self._matches_rules(info):
-                continue
-            if not self._matches_size(info):
-                continue
-            if not self._matches_extra(info):
-                continue
-            if search_text:
-                if search_text not in info.name.lower():
-                    if not any(search_text in r.lower() for r in info.rules):
-                        if not any(search_text in RULE_NAMES.get(r, r).lower() for r in info.rules):
-                            continue
-            grouped.setdefault(info.category, []).append(info)
+            if self._accepts(info, category, search_text):
+                grouped.setdefault(info.category, []).append(info)
 
+        self._populate_tree(grouped)
+
+    def _populate_tree(self, grouped: dict[str, list[PuzzleInfo]]) -> None:
         total = 0
         for cat in sorted(grouped):
             top = QTreeWidgetItem([f"{cat}  ({len(grouped[cat])})"])
@@ -508,8 +586,11 @@ class PuzzleBrowser(QWidget):
     def _find_info(self, path: str) -> PuzzleInfo | None:
         return next((p for p in self._all_puzzles if p.path == path), None)
 
-    def _on_selection_changed(self, current: QTreeWidgetItem | None,
-                              previous: QTreeWidgetItem | None) -> None:
+    def _on_selection_changed(
+        self,
+        current: QTreeWidgetItem | None,
+        previous: QTreeWidgetItem | None,  # noqa: ARG002 - required by Qt signal
+    ) -> None:
         if current is None:
             self._preview_widget.clear()
             self._preview_label.setText("选择题目以预览")
@@ -535,7 +616,7 @@ class PuzzleBrowser(QWidget):
             f"<br>{rules_text}"
         )
 
-    def _on_item_activated(self, item: QTreeWidgetItem, column: int) -> None:
+    def _on_item_activated(self, item: QTreeWidgetItem, column: int) -> None:  # noqa: ARG002
         key = item.data(0, Qt.ItemDataRole.UserRole)
         if not key:
             return

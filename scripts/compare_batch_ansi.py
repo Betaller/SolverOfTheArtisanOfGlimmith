@@ -10,6 +10,7 @@ Usage:
     python scripts/compare_batch_ansi.py --ref third_party/AoG_Solver/Zone1.ansi \
         --new /tmp/zone1_run.ansi
 """
+
 from __future__ import annotations
 
 import argparse
@@ -17,6 +18,22 @@ import re
 import sys
 
 _ANSI_STRIP = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _classify_status(lines: list[str], i: int) -> str | None:
+    """Look at the next up-to-3 lines after the 处理: marker and return its status."""
+    for j in range(i + 1, min(i + 4, len(lines))):
+        if "答案正确" in lines[j]:
+            return "correct"
+        if "答案错误" in lines[j]:
+            return "wrong"
+        if "超时终止" in lines[j]:
+            return "timeout"
+        if "未输出 SOLUTION" in lines[j]:
+            return "no_solution"
+        if "运行失败" in lines[j]:
+            return "error"
+    return None
 
 
 def parse_log(text: str) -> list[tuple[str, str]]:
@@ -31,20 +48,7 @@ def parse_log(text: str) -> list[tuple[str, str]]:
             i += 1
             continue
         path = line.split("处理: ", 1)[1].strip()
-        status = None
-        for j in range(i + 1, min(i + 4, len(lines))):
-            if "答案正确" in lines[j]:
-                status = "correct"
-            elif "答案错误" in lines[j]:
-                status = "wrong"
-            elif "超时终止" in lines[j]:
-                status = "timeout"
-            elif "未输出 SOLUTION" in lines[j]:
-                status = "no_solution"
-            elif "运行失败" in lines[j]:
-                status = "error"
-            if status is not None:
-                break
+        status = _classify_status(lines, i)
         if status is None:
             sys.exit(f"无法解析 {path!r} 的状态")
         result.append((path, status))
@@ -58,13 +62,15 @@ def main() -> None:
     parser.add_argument("--new", required=True, help="new batch_run.sh output file")
     args = parser.parse_args()
 
-    ref = parse_log(open(args.ref).read())
-    new = parse_log(open(args.new).read())
+    with open(args.ref) as ref_fh:
+        ref = parse_log(ref_fh.read())
+    with open(args.new) as new_fh:
+        new = parse_log(new_fh.read())
 
     mismatches = []
     if len(ref) != len(new):
         mismatches.append(f"数量不同: ref={len(ref)} new={len(new)}")
-    for i, ((r_path, r_status), (n_path, n_status)) in enumerate(zip(ref, new)):
+    for i, ((r_path, r_status), (n_path, n_status)) in enumerate(zip(ref, new, strict=False)):
         if r_path != n_path or r_status != n_status:
             mismatches.append(f"[{i}] ref=({r_path}, {r_status}) new=({n_path}, {n_status})")
 

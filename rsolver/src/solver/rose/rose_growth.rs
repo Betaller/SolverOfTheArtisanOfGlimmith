@@ -15,6 +15,305 @@ const MULTI_REPAIR_ITER: usize = 200;
 
 const DIRS: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
 
+/// Region ids touching `idx` across non-pre-boundary edges.
+#[inline]
+fn adjacent_regions(
+    region_of: &[Option<usize>],
+    idx: usize,
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> HashSet<usize> {
+    let (r, c) = (idx / w, idx % w);
+    let mut adj: HashSet<usize> = HashSet::new();
+    for (dr, dc) in DIRS {
+        let nr = r as i32 + dr;
+        let nc = c as i32 + dc;
+        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
+            let nidx = nr as usize * w + nc as usize;
+            if let Some(nrid) = region_of[nidx] {
+                if !pre.contains(r, c, nr as usize, nc as usize) {
+                    adj.insert(nrid);
+                }
+            }
+        }
+    }
+    adj
+}
+
+/// Pre-boundary edge whose two endpoints currently share a region id.
+#[inline]
+fn collect_violations(region_of: &[Option<usize>], pre: &PreBoundaries, w: usize) -> Vec<[usize; 4]> {
+    pre.iter()
+        .filter(|[r1, c1, r2, c2]| {
+            let a = region_of[r1 * w + c1];
+            let b = region_of[r2 * w + c2];
+            matches!((a, b), (Some(x), Some(y)) if x == y)
+        })
+        .collect()
+}
+
+/// True when some neighbour of `(r, c)` sits in region `rid` behind a
+/// pre-boundary edge — i.e. adding `(r, c)` to `rid` would violate.
+#[inline]
+fn has_pre_neighbor_in(
+    region_of: &[Option<usize>],
+    pre: &PreBoundaries,
+    rid: usize,
+    r: usize,
+    c: usize,
+    h: usize,
+    w: usize,
+) -> bool {
+    for (dr, dc) in DIRS {
+        let nr = r as i32 + dr;
+        let nc = c as i32 + dc;
+        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
+            let nidx = nr as usize * w + nc as usize;
+            if region_of[nidx] == Some(rid) && pre.contains(r, c, nr as usize, nc as usize) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// `can_move_neighbor` half of the chain move: no neighbour of `(nru, ncu)`
+/// (other than the mover itself) lies in region `cur` behind a pre-boundary.
+#[inline]
+fn can_move_neighbor(
+    region_of: &[Option<usize>],
+    pre: &PreBoundaries,
+    cur: usize,
+    cell_r: usize,
+    cell_c: usize,
+    nru: usize,
+    ncu: usize,
+    h: usize,
+    w: usize,
+) -> bool {
+    for (ddr, ddc) in DIRS {
+        let nnr = nru as i32 + ddr;
+        let nnc = ncu as i32 + ddc;
+        if nnr >= 0 && nnc >= 0 && (nnr as usize) < h && (nnc as usize) < w {
+            let nnidx = nnr as usize * w + nnc as usize;
+            if nnidx != cell_r * w + cell_c
+                && region_of[nnidx] == Some(cur)
+                && pre.contains(nru, ncu, nnr as usize, nnc as usize)
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// `can_move_self` half of the chain move: no neighbour of `(cell_r, cell_c)`
+/// (other than the swap target `nidx`) lies in region `n_rid` behind a
+/// pre-boundary.
+#[inline]
+fn can_move_self(
+    region_of: &[Option<usize>],
+    pre: &PreBoundaries,
+    n_rid: usize,
+    nidx: usize,
+    cell_r: usize,
+    cell_c: usize,
+    h: usize,
+    w: usize,
+) -> bool {
+    for (ddr, ddc) in DIRS {
+        let nnr = cell_r as i32 + ddr;
+        let nnc = cell_c as i32 + ddc;
+        if nnr >= 0 && nnc >= 0 && (nnr as usize) < h && (nnc as usize) < w {
+            let nnidx = nnr as usize * w + nnc as usize;
+            if nnidx != nidx
+                && region_of[nnidx] == Some(n_rid)
+                && pre.contains(cell_r, cell_c, nnr as usize, nnc as usize)
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Wavefront growth: repeatedly attach the unassigned cell with the most
+/// adjacent regions to the smallest such region.  Returns `false` when the
+/// deadline expired (caller must bail out).
+fn wavefront_growth(
+    region_of: &mut [Option<usize>],
+    region_cells: &mut [CellSet],
+    unassigned: &mut CellSet,
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+    deadline: Instant,
+) -> bool {
+    let mut steps: u64 = 0;
+    while !unassigned.is_empty() {
+        steps += 1;
+        if steps % 4096 == 0 && Instant::now() >= deadline {
+            return false;
+        }
+        let mut best_cell: Option<usize> = None;
+        let mut best_adj: Vec<usize> = Vec::new();
+        for idx in unassigned.iter() {
+            let adj = adjacent_regions(region_of, idx, pre, h, w);
+            if adj.len() > best_adj.len() {
+                best_cell = Some(idx);
+                best_adj = adj.into_iter().collect();
+            }
+        }
+        let Some(cell) = best_cell else { break };
+        if best_adj.is_empty() {
+            break;
+        }
+        best_adj.sort_by_key(|&rid| region_cells[rid].len());
+        let (cr, cc) = (cell / w, cell % w);
+        let mut assigned = false;
+        for &rid in &best_adj {
+            if would_violate(region_of, cr, cc, rid, pre, w) {
+                continue;
+            }
+            region_of[cell] = Some(rid);
+            region_cells[rid].insert(cell);
+            unassigned.remove(cell);
+            assigned = true;
+            break;
+        }
+        if !assigned {
+            let rid = best_adj[0];
+            region_of[cell] = Some(rid);
+            region_cells[rid].insert(cell);
+            unassigned.remove(cell);
+        }
+    }
+    true
+}
+
+/// First repair strategy: move one endpoint of a violating pre-boundary edge
+/// into an adjacent region that has no pre-boundary conflict with it.
+fn try_swap_fix(
+    region_of: &mut [Option<usize>],
+    region_cells: &mut [CellSet],
+    violations: &[[usize; 4]],
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> bool {
+    for [r1, c1, r2, c2] in violations {
+        for (cell_r, cell_c) in [(*r1, *c1), (*r2, *c2)] {
+            let Some(cur) = region_of[cell_r * w + cell_c] else {
+                continue;
+            };
+            let mut alts: Vec<usize> = Vec::new();
+            for (dr, dc) in DIRS {
+                let nr = cell_r as i32 + dr;
+                let nc = cell_c as i32 + dc;
+                if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
+                    let nidx = nr as usize * w + nc as usize;
+                    if let Some(nrid) = region_of[nidx] {
+                        if nrid != cur && !pre.contains(cell_r, cell_c, nr as usize, nc as usize) {
+                            alts.push(nrid);
+                        }
+                    }
+                }
+            }
+            alts.sort_by_key(|&rid| region_cells[rid].len());
+            for &nrid in &alts {
+                if has_pre_neighbor_in(region_of, pre, nrid, cell_r, cell_c, h, w) {
+                    continue;
+                }
+                region_of[cell_r * w + cell_c] = Some(nrid);
+                region_cells[cur].remove(cell_r * w + cell_c);
+                region_cells[nrid].insert(cell_r * w + cell_c);
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Second repair strategy: swap a violating cell with an adjacent cell of
+/// another region (a "chain move") when a plain reassignment is impossible.
+fn try_chain_move(
+    region_of: &mut [Option<usize>],
+    region_cells: &mut [CellSet],
+    violations: &[[usize; 4]],
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> bool {
+    for [r1, c1, r2, c2] in violations {
+        for (cell_r, cell_c) in [(*r1, *c1), (*r2, *c2)] {
+            let Some(cur) = region_of[cell_r * w + cell_c] else {
+                continue;
+            };
+            for (dr, dc) in DIRS {
+                let nr = cell_r as i32 + dr;
+                let nc = cell_c as i32 + dc;
+                if nr < 0 || nc < 0 || (nr as usize) >= h || (nc as usize) >= w {
+                    continue;
+                }
+                let (nru, ncu) = (nr as usize, nc as usize);
+                let nidx = nru * w + ncu;
+                let Some(n_rid) = region_of[nidx] else { continue };
+                if n_rid == cur || pre.contains(cell_r, cell_c, nru, ncu) {
+                    continue;
+                }
+                if !can_move_neighbor(region_of, pre, cur, cell_r, cell_c, nru, ncu, h, w) {
+                    continue;
+                }
+                if can_move_self(region_of, pre, n_rid, nidx, cell_r, cell_c, h, w) {
+                    region_of[nidx] = Some(cur);
+                    region_cells[n_rid].remove(nidx);
+                    region_cells[cur].insert(nidx);
+                    region_of[cell_r * w + cell_c] = Some(n_rid);
+                    region_cells[cur].remove(cell_r * w + cell_c);
+                    region_cells[n_rid].insert(cell_r * w + cell_c);
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// One iteration of the swap-repair loop; `false` means no further progress is
+/// possible (either clean or stuck).
+fn swap_repair_iteration(
+    region_of: &mut [Option<usize>],
+    region_cells: &mut [CellSet],
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> bool {
+    let violations = collect_violations(region_of, pre, w);
+    if violations.is_empty() {
+        return false;
+    }
+    if try_swap_fix(region_of, region_cells, &violations, pre, h, w) {
+        return true;
+    }
+    try_chain_move(region_of, region_cells, &violations, pre, h, w)
+}
+
+/// Bundles the per-solve run state shared by `solve_singlesymbol` /
+/// `solve_multisymbol`, replacing the 9-11 flat parameters they used to take.
+/// Pure signature-level change — no solving logic is altered.
+struct RoseGrowthCtx<'a> {
+    puzzle: &'a Puzzle,
+    pre: &'a PreBoundaries,
+    m: usize,
+    seeds: &'a [usize],
+    h: usize,
+    w: usize,
+    n_bits: usize,
+    all_positions: &'a CellSet,
+    deadline: Instant,
+}
+
 /// Port of `rose_growth.solve_rose_growth`.
 pub fn solve_rose_growth(
     puzzle: &Puzzle,
@@ -46,26 +345,35 @@ pub fn solve_rose_growth(
     }
 
     let symbol_of = super::cells::symbol_index_map(puzzle, symbol_types);
+    let ctx = RoseGrowthCtx {
+        puzzle,
+        pre,
+        m,
+        seeds: &seeds,
+        h,
+        w,
+        n_bits,
+        all_positions,
+        deadline,
+    };
     let result = if symbol_types.len() >= 2 {
-        solve_multisymbol(puzzle, pre, symbol_types, m, &seeds, &symbol_of, h, w, all_positions, n_bits, deadline)
+        solve_multisymbol(&ctx, symbol_types, &symbol_of)
     } else {
-        solve_singlesymbol(puzzle, pre, m, &seeds, &symbol_of, h, w, all_positions, n_bits, deadline)
+        solve_singlesymbol(&ctx)
     };
     result
 }
 
-fn solve_singlesymbol(
-    puzzle: &Puzzle,
-    pre: &PreBoundaries,
-    m: usize,
-    seeds: &[usize],
-    _symbol_of: &std::collections::HashMap<usize, usize>,
-    h: usize,
-    w: usize,
-    all_positions: &CellSet,
-    n_bits: usize,
-    deadline: Instant,
-) -> Option<Vec<crate::types::RegionInfo>> {
+fn solve_singlesymbol(ctx: &RoseGrowthCtx) -> Option<Vec<crate::types::RegionInfo>> {
+    let puzzle = ctx.puzzle;
+    let pre = ctx.pre;
+    let m = ctx.m;
+    let seeds = ctx.seeds;
+    let h = ctx.h;
+    let w = ctx.w;
+    let all_positions = ctx.all_positions;
+    let n_bits = ctx.n_bits;
+    let deadline = ctx.deadline;
     let mut region_of = vec![None; n_bits];
     let mut region_cells: Vec<CellSet> = vec![CellSet::new(n_bits); m];
     for (i, &seed) in seeds.iter().enumerate() {
@@ -77,198 +385,24 @@ fn solve_singlesymbol(
         unassigned.remove(s);
     }
 
-    // Wavefront growth.
-    let mut steps: u64 = 0;
-    while !unassigned.is_empty() {
-        steps += 1;
-        if steps % 4096 == 0 && Instant::now() >= deadline {
-            return None;
-        }
-        let mut best_cell: Option<usize> = None;
-        let mut best_adj: Vec<usize> = Vec::new();
-        for idx in unassigned.iter() {
-            let (r, c) = (idx / w, idx % w);
-            let mut adj: HashSet<usize> = HashSet::new();
-            for (dr, dc) in DIRS {
-                let nr = r as i32 + dr;
-                let nc = c as i32 + dc;
-                if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
-                    let nidx = nr as usize * w + nc as usize;
-                    if let Some(nrid) = region_of[nidx] {
-                        if !pre.contains(r, c, nr as usize, nc as usize) {
-                            adj.insert(nrid);
-                        }
-                    }
-                }
-            }
-            if adj.len() > best_adj.len() {
-                best_cell = Some(idx);
-                best_adj = adj.into_iter().collect();
-            }
-        }
-        let Some(cell) = best_cell else { break };
-        if best_adj.is_empty() {
-            break;
-        }
-        best_adj.sort_by_key(|&rid| region_cells[rid].len());
-        let (cr, cc) = (cell / w, cell % w);
-        let mut assigned = false;
-        for &rid in &best_adj {
-            if would_violate(&region_of, cr, cc, rid, pre, w) {
-                continue;
-            }
-            region_of[cell] = Some(rid);
-            region_cells[rid].insert(cell);
-            unassigned.remove(cell);
-            assigned = true;
-            break;
-        }
-        if !assigned {
-            let rid = best_adj[0];
-            region_of[cell] = Some(rid);
-            region_cells[rid].insert(cell);
-            unassigned.remove(cell);
-        }
+    // Wavefront growth (delegates to the shared, byte-identical helper).
+    if !wavefront_growth(
+        &mut region_of,
+        &mut region_cells,
+        &mut unassigned,
+        pre,
+        h,
+        w,
+        deadline,
+    ) {
+        return None;
     }
 
-    // Swap repair.
+    // Swap repair (delegates to the shared, byte-identical helper).  Runs up to
+    // SWAP_REPAIR_ITER passes, stopping as soon as a pass makes no progress
+    // (clean or stuck) — exactly the original early-exit semantics.
     for _ in 0..SWAP_REPAIR_ITER {
-        let violations: Vec<[usize; 4]> = pre
-            .iter()
-            .filter(|[r1, c1, r2, c2]| {
-                let a = region_of[r1 * w + c1];
-                let b = region_of[r2 * w + c2];
-                matches!((a, b), (Some(x), Some(y)) if x == y)
-            })
-            .collect();
-        if violations.is_empty() {
-            break;
-        }
-        let mut fixed = false;
-        for [r1, c1, r2, c2] in &violations {
-            for (cell_r, cell_c) in [(*r1, *c1), (*r2, *c2)] {
-                let Some(cur) = region_of[cell_r * w + cell_c] else {
-                    continue;
-                };
-                let mut alts: Vec<usize> = Vec::new();
-                for (dr, dc) in DIRS {
-                    let nr = cell_r as i32 + dr;
-                    let nc = cell_c as i32 + dc;
-                    if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
-                        let nidx = nr as usize * w + nc as usize;
-                        if let Some(nrid) = region_of[nidx] {
-                            if nrid != cur && !pre.contains(cell_r, cell_c, nr as usize, nc as usize)
-                            {
-                                alts.push(nrid);
-                            }
-                        }
-                    }
-                }
-                alts.sort_by_key(|&rid| region_cells[rid].len());
-                for &nrid in &alts {
-                    let mut conflict = false;
-                    for (dr, dc) in DIRS {
-                        let nr = cell_r as i32 + dr;
-                        let nc = cell_c as i32 + dc;
-                        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
-                            let nidx = nr as usize * w + nc as usize;
-                            if region_of[nidx] == Some(nrid)
-                                && pre.contains(cell_r, cell_c, nr as usize, nc as usize)
-                            {
-                                conflict = true;
-                                break;
-                            }
-                        }
-                    }
-                    if conflict {
-                        continue;
-                    }
-                    region_of[cell_r * w + cell_c] = Some(nrid);
-                    region_cells[cur].remove(cell_r * w + cell_c);
-                    region_cells[nrid].insert(cell_r * w + cell_c);
-                    fixed = true;
-                    break;
-                }
-                if fixed {
-                    break;
-                }
-            }
-            if fixed {
-                break;
-            }
-        }
-        if fixed {
-            continue;
-        }
-        // Chain move.
-        for [r1, c1, r2, c2] in &violations {
-            for (cell_r, cell_c) in [(*r1, *c1), (*r2, *c2)] {
-                let Some(cur) = region_of[cell_r * w + cell_c] else {
-                    continue;
-                };
-                for (dr, dc) in DIRS {
-                    let nr = cell_r as i32 + dr;
-                    let nc = cell_c as i32 + dc;
-                    if nr < 0 || nc < 0 || (nr as usize) >= h || (nc as usize) >= w {
-                        continue;
-                    }
-                    let (nru, ncu) = (nr as usize, nc as usize);
-                    let nidx = nru * w + ncu;
-                    let Some(n_rid) = region_of[nidx] else { continue };
-                    if n_rid == cur || pre.contains(cell_r, cell_c, nru, ncu) {
-                        continue;
-                    }
-                    let mut can_move_neighbor = true;
-                    for (ddr, ddc) in DIRS {
-                        let nnr = nru as i32 + ddr;
-                        let nnc = ncu as i32 + ddc;
-                        if nnr >= 0 && nnc >= 0 && (nnr as usize) < h && (nnc as usize) < w {
-                            let nnidx = nnr as usize * w + nnc as usize;
-                            if nnidx != cell_r * w + cell_c && region_of[nnidx] == Some(cur)
-                                && pre.contains(nru, ncu, nnr as usize, nnc as usize)
-                            {
-                                can_move_neighbor = false;
-                                break;
-                            }
-                        }
-                    }
-                    if !can_move_neighbor {
-                        continue;
-                    }
-                    let mut can_move_self = true;
-                    for (ddr, ddc) in DIRS {
-                        let nnr = cell_r as i32 + ddr;
-                        let nnc = cell_c as i32 + ddc;
-                        if nnr >= 0 && nnc >= 0 && (nnr as usize) < h && (nnc as usize) < w {
-                            let nnidx = nnr as usize * w + nnc as usize;
-                            if nnidx != nidx && region_of[nnidx] == Some(n_rid)
-                                && pre.contains(cell_r, cell_c, nnr as usize, nnc as usize)
-                            {
-                                can_move_self = false;
-                                break;
-                            }
-                        }
-                    }
-                    if can_move_self {
-                        region_of[nidx] = Some(cur);
-                        region_cells[n_rid].remove(nidx);
-                        region_cells[cur].insert(nidx);
-                        region_of[cell_r * w + cell_c] = Some(n_rid);
-                        region_cells[cur].remove(cell_r * w + cell_c);
-                        region_cells[n_rid].insert(cell_r * w + cell_c);
-                        fixed = true;
-                        break;
-                    }
-                }
-                if fixed {
-                    break;
-                }
-            }
-            if fixed {
-                break;
-            }
-        }
-        if !fixed {
+        if !swap_repair_iteration(&mut region_of, &mut region_cells, pre, h, w) {
             break;
         }
     }
@@ -292,18 +426,19 @@ fn solve_singlesymbol(
 }
 
 fn solve_multisymbol(
-    puzzle: &Puzzle,
-    pre: &PreBoundaries,
+    ctx: &RoseGrowthCtx,
     symbol_types: &[String],
-    m: usize,
-    seeds: &[usize],
     symbol_of: &std::collections::HashMap<usize, usize>,
-    h: usize,
-    w: usize,
-    all_positions: &CellSet,
-    n_bits: usize,
-    deadline: Instant,
 ) -> Option<Vec<crate::types::RegionInfo>> {
+    let puzzle = ctx.puzzle;
+    let pre = ctx.pre;
+    let m = ctx.m;
+    let seeds = ctx.seeds;
+    let h = ctx.h;
+    let w = ctx.w;
+    let all_positions = ctx.all_positions;
+    let n_bits = ctx.n_bits;
+    let deadline = ctx.deadline;
     // Honor the caller's deadline in every potentially-long loop below. The
     // previous signature took `_deadline` (unused) — a latent hang that was
     // masked while region_match always found the solution, but surfaces as a
@@ -326,56 +461,18 @@ fn solve_multisymbol(
         region_symbols[i] = 1u64 << symbol_of.get(&seed).copied().unwrap_or(0);
     }
 
-    let mut queue: VecDeque<(usize, usize)> = seeds.iter().enumerate().map(|(i, &s)| (s, i)).collect();
-    while let Some((idx, rid)) = queue.pop_front() {
-        let (r, c) = (idx / w, idx % w);
-        for (dr, dc) in DIRS {
-            let nr = r as i32 + dr;
-            let nc = c as i32 + dc;
-            if nr < 0 || nc < 0 || (nr as usize) >= h || (nc as usize) >= w {
-                continue;
-            }
-            let (nru, ncu) = (nr as usize, nc as usize);
-            let nidx = nru * w + ncu;
-            if puzzle.cells[nru][ncu].blocked || region_of[nidx].is_some() {
-                continue;
-            }
-            if pre.contains(r, c, nru, ncu) {
-                continue;
-            }
-            let sym = symbol_of.get(&nidx).copied();
-            if let Some(si) = sym {
-                if (region_symbols[rid] & (1u64 << si)) != 0 {
-                    continue;
-                }
-            }
-            if boundary_endpoints.contains(nidx) {
-                let mut in_same = false;
-                for (ddr, ddc) in DIRS {
-                    let nnr = nru as i32 + ddr;
-                    let nnc = ncu as i32 + ddc;
-                    if nnr >= 0 && nnc >= 0 && (nnr as usize) < h && (nnc as usize) < w {
-                        let nnidx = nnr as usize * w + nnc as usize;
-                        if region_of[nnidx] == Some(rid)
-                            && pre.contains(nru, ncu, nnr as usize, nnc as usize)
-                        {
-                            in_same = true;
-                            break;
-                        }
-                    }
-                }
-                if in_same {
-                    continue;
-                }
-            }
-            region_of[nidx] = Some(rid);
-            if let Some(si) = sym {
-                region_symbols[rid] |= 1u64 << si;
-            }
-            region_sizes[rid] += 1;
-            queue.push_back((nidx, rid));
-        }
-    }
+    grow_initial_regions(
+        &mut region_of,
+        &mut region_symbols,
+        &mut region_sizes,
+        pre,
+        puzzle,
+        seeds,
+        symbol_of,
+        &boundary_endpoints,
+        h,
+        w,
+    );
 
     let mut unassigned = all_positions.clone();
     for idx in region_of.iter().enumerate().filter_map(|(i, r)| r.map(|_| i)) {
@@ -383,125 +480,31 @@ fn solve_multisymbol(
     }
 
     // Second pass: assign leftovers to smallest compatible region.
-    if !unassigned.is_empty() {
-        let mut changed = true;
-        let mut pass: u64 = 0;
-        while changed {
-            changed = false;
-            pass += 1;
-            if pass % 64 == 0 && Instant::now() >= deadline {
-                return None;
-            }
-            for idx in unassigned.iter().collect::<Vec<_>>() {
-                let (r, c) = (idx / w, idx % w);
-                let mut candidates: HashSet<usize> = HashSet::new();
-                for (dr, dc) in DIRS {
-                    let nr = r as i32 + dr;
-                    let nc = c as i32 + dc;
-                    if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
-                        let nidx = nr as usize * w + nc as usize;
-                        if let Some(nrid) = region_of[nidx] {
-                            if !pre.contains(r, c, nr as usize, nc as usize) {
-                                candidates.insert(nrid);
-                            }
-                        }
-                    }
-                }
-                if candidates.is_empty() {
-                    continue;
-                }
-                let sym = symbol_of.get(&idx).copied();
-                let mut valid: Vec<usize> = candidates
-                    .into_iter()
-                    .filter(|&i| {
-                        !(sym.is_some() && (region_symbols[i] & (1u64 << sym.unwrap())) != 0)
-                    })
-                    .collect();
-                if valid.is_empty() {
-                    continue;
-                }
-                valid.sort_by_key(|&i| region_sizes[i]);
-                let best = valid[0];
-                region_of[idx] = Some(best);
-                if let Some(si) = sym {
-                    region_symbols[best] |= 1u64 << si;
-                }
-                region_sizes[best] += 1;
-                unassigned.remove(idx);
-                changed = true;
-            }
-        }
+    if !assign_leftovers(
+        &mut region_of,
+        &mut region_symbols,
+        &mut region_sizes,
+        &mut unassigned,
+        symbol_of,
+        pre,
+        deadline,
+        h,
+        w,
+    ) {
+        return None;
     }
 
     // Repair (multi-symbol).
     for _ in 0..MULTI_REPAIR_ITER {
-        let mut repaired = false;
-        for [r1, c1, r2, c2] in pre.iter().collect::<Vec<_>>() {
-            let rid1 = region_of[r1 * w + c1];
-            let rid2 = region_of[r2 * w + c2];
-            let Some(rid) = rid1 else { continue };
-            if rid2 != Some(rid) {
-                continue;
-            }
-            for (cell_r, cell_c, cur_rid) in [(r1, c1, rid), (r2, c2, rid)] {
-                let mut neigh: HashSet<usize> = HashSet::new();
-                for (dr, dc) in DIRS {
-                    let nr = cell_r as i32 + dr;
-                    let nc = cell_c as i32 + dc;
-                    if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
-                        let nidx = nr as usize * w + nc as usize;
-                        if let Some(nrid) = region_of[nidx] {
-                            if nrid != cur_rid
-                                && !pre.contains(cell_r, cell_c, nr as usize, nc as usize)
-                            {
-                                neigh.insert(nrid);
-                            }
-                        }
-                    }
-                }
-                let sym = symbol_of.get(&(cell_r * w + cell_c)).copied();
-                let mut sorted: Vec<usize> = neigh.into_iter().collect();
-                sorted.sort_unstable();
-                for nrid in sorted {
-                    if sym.is_some() && (region_symbols[nrid] & (1u64 << sym.unwrap())) != 0 {
-                        continue;
-                    }
-                    let mut conflict = false;
-                    for (dr, dc) in DIRS {
-                        let nr = cell_r as i32 + dr;
-                        let nc = cell_c as i32 + dc;
-                        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
-                            let nidx = nr as usize * w + nc as usize;
-                            if region_of[nidx] == Some(nrid)
-                                && pre.contains(cell_r, cell_c, nr as usize, nc as usize)
-                            {
-                                conflict = true;
-                                break;
-                            }
-                        }
-                    }
-                    if conflict {
-                        continue;
-                    }
-                    if let Some(si) = sym {
-                        region_symbols[cur_rid] &= !(1u64 << si);
-                        region_symbols[nrid] |= 1u64 << si;
-                    }
-                    region_of[cell_r * w + cell_c] = Some(nrid);
-                    region_sizes[cur_rid] -= 1;
-                    region_sizes[nrid] += 1;
-                    repaired = true;
-                    break;
-                }
-                if repaired {
-                    break;
-                }
-            }
-            if repaired {
-                break;
-            }
-        }
-        if !repaired {
+        if !repair_multisymbol(
+            &mut region_of,
+            &mut region_symbols,
+            &mut region_sizes,
+            pre,
+            symbol_of,
+            h,
+            w,
+        ) {
             break;
         }
     }
@@ -600,4 +603,311 @@ fn repair_symbol_distribution(
         }
     }
     (0..m).all(|i| sym_count(&region_cells[i]) > 0)
+}
+
+/// True when some neighbour of `(nru, ncu)` already lies in region `rid` behind
+/// a pre-boundary edge — i.e. attaching `(nru, ncu)` to `rid` would fuse two
+/// regions a pre-boundary is meant to keep apart.  Pure helper for
+/// `process_growth_neighbor`.
+#[inline]
+fn boundary_in_same_region(
+    region_of: &[Option<usize>],
+    pre: &PreBoundaries,
+    nru: usize,
+    ncu: usize,
+    rid: usize,
+    h: usize,
+    w: usize,
+) -> bool {
+    for (ddr, ddc) in DIRS {
+        let nnr = nru as i32 + ddr;
+        let nnc = ncu as i32 + ddc;
+        if nnr >= 0 && nnc >= 0 && (nnr as usize) < h && (nnc as usize) < w {
+            let nnidx = nnr as usize * w + nnc as usize;
+            if region_of[nnidx] == Some(rid) && pre.contains(nru, ncu, nnr as usize, nnc as usize) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Grow `region_of` one BFS step from `(rid)` in direction `(dr, dc)`.  Returns
+/// `true` if the neighbour was attached.  Byte-identical to the inner body of
+/// `solve_multisymbol`'s initial BFS.
+#[inline]
+fn process_growth_neighbor(
+    region_of: &mut [Option<usize>],
+    region_symbols: &mut [u64],
+    region_sizes: &mut [usize],
+    queue: &mut VecDeque<(usize, usize)>,
+    r: usize,
+    c: usize,
+    rid: usize,
+    dr: i32,
+    dc: i32,
+    pre: &PreBoundaries,
+    puzzle: &Puzzle,
+    symbol_of: &std::collections::HashMap<usize, usize>,
+    boundary_endpoints: &CellSet,
+    h: usize,
+    w: usize,
+) -> bool {
+    let nr = r as i32 + dr;
+    let nc = c as i32 + dc;
+    if nr < 0 || nc < 0 || (nr as usize) >= h || (nc as usize) >= w {
+        return false;
+    }
+    let (nru, ncu) = (nr as usize, nc as usize);
+    let nidx = nru * w + ncu;
+    if puzzle.cells[nru][ncu].blocked || region_of[nidx].is_some() {
+        return false;
+    }
+    if pre.contains(r, c, nru, ncu) {
+        return false;
+    }
+    let sym = symbol_of.get(&nidx).copied();
+    if let Some(si) = sym {
+        if (region_symbols[rid] & (1u64 << si)) != 0 {
+            return false;
+        }
+    }
+    if boundary_endpoints.contains(nidx)
+        && boundary_in_same_region(region_of, pre, nru, ncu, rid, h, w)
+    {
+        return false;
+    }
+    region_of[nidx] = Some(rid);
+    if let Some(si) = sym {
+        region_symbols[rid] |= 1u64 << si;
+    }
+    region_sizes[rid] += 1;
+    queue.push_back((nidx, rid));
+    true
+}
+
+/// Initial rose-region BFS from every seed (multi-symbol path).  Same traversal
+/// and pruning as the inlined loop it replaces.
+fn grow_initial_regions(
+    region_of: &mut [Option<usize>],
+    region_symbols: &mut [u64],
+    region_sizes: &mut [usize],
+    pre: &PreBoundaries,
+    puzzle: &Puzzle,
+    seeds: &[usize],
+    symbol_of: &std::collections::HashMap<usize, usize>,
+    boundary_endpoints: &CellSet,
+    h: usize,
+    w: usize,
+) {
+    let mut queue: VecDeque<(usize, usize)> = seeds.iter().enumerate().map(|(i, &s)| (s, i)).collect();
+    while let Some((idx, rid)) = queue.pop_front() {
+        let (r, c) = (idx / w, idx % w);
+        for (dr, dc) in DIRS {
+            process_growth_neighbor(
+                region_of,
+                region_symbols,
+                region_sizes,
+                &mut queue,
+                r,
+                c,
+                rid,
+                dr,
+                dc,
+                pre,
+                puzzle,
+                symbol_of,
+                boundary_endpoints,
+                h,
+                w,
+            );
+        }
+    }
+}
+
+/// Try to assign one unassigned `idx` to its smallest compatible region.
+/// Returns `true` if it assigned (caller then removes `idx` from `unassigned`).
+#[inline]
+fn assign_one_leftover(
+    region_of: &mut [Option<usize>],
+    region_symbols: &mut [u64],
+    region_sizes: &mut [usize],
+    idx: usize,
+    symbol_of: &std::collections::HashMap<usize, usize>,
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> bool {
+    let (r, c) = (idx / w, idx % w);
+    let mut candidates: HashSet<usize> = HashSet::new();
+    for (dr, dc) in DIRS {
+        let nr = r as i32 + dr;
+        let nc = c as i32 + dc;
+        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
+            let nidx = nr as usize * w + nc as usize;
+            if let Some(nrid) = region_of[nidx] {
+                if !pre.contains(r, c, nr as usize, nc as usize) {
+                    candidates.insert(nrid);
+                }
+            }
+        }
+    }
+    if candidates.is_empty() {
+        return false;
+    }
+    let sym = symbol_of.get(&idx).copied();
+    let mut valid: Vec<usize> = candidates
+        .into_iter()
+        .filter(|&i| !(sym.is_some() && (region_symbols[i] & (1u64 << sym.unwrap())) != 0))
+        .collect();
+    if valid.is_empty() {
+        return false;
+    }
+    valid.sort_by_key(|&i| region_sizes[i]);
+    let best = valid[0];
+    region_of[idx] = Some(best);
+    if let Some(si) = sym {
+        region_symbols[best] |= 1u64 << si;
+    }
+    region_sizes[best] += 1;
+    true
+}
+
+/// Second-pass assignment of leftover cells to the smallest compatible region.
+/// Returns `false` only if the caller's deadline expired (signalling bail-out).
+fn assign_leftovers(
+    region_of: &mut [Option<usize>],
+    region_symbols: &mut [u64],
+    region_sizes: &mut [usize],
+    unassigned: &mut CellSet,
+    symbol_of: &std::collections::HashMap<usize, usize>,
+    pre: &PreBoundaries,
+    deadline: Instant,
+    h: usize,
+    w: usize,
+) -> bool {
+    if unassigned.is_empty() {
+        return true;
+    }
+    let mut changed = true;
+    let mut pass: u64 = 0;
+    while changed {
+        changed = false;
+        pass += 1;
+        if pass % 64 == 0 && Instant::now() >= deadline {
+            return false;
+        }
+        for idx in unassigned.iter().collect::<Vec<_>>() {
+            if assign_one_leftover(region_of, region_symbols, region_sizes, idx, symbol_of, pre, h, w) {
+                unassigned.remove(idx);
+                changed = true;
+            }
+        }
+    }
+    true
+}
+
+/// Region ids of `cur_rid`-free neighbours of `(cell_r, cell_c)` across
+/// non-pre-boundary edges — candidates to receive this cell during repair.
+#[inline]
+fn collect_repair_neighbors(
+    region_of: &[Option<usize>],
+    pre: &PreBoundaries,
+    cell_r: usize,
+    cell_c: usize,
+    cur_rid: usize,
+    h: usize,
+    w: usize,
+) -> Vec<usize> {
+    let mut neigh: HashSet<usize> = HashSet::new();
+    for (dr, dc) in DIRS {
+        let nr = cell_r as i32 + dr;
+        let nc = cell_c as i32 + dc;
+        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
+            let nidx = nr as usize * w + nc as usize;
+            if let Some(nrid) = region_of[nidx] {
+                if nrid != cur_rid && !pre.contains(cell_r, cell_c, nr as usize, nc as usize) {
+                    neigh.insert(nrid);
+                }
+            }
+        }
+    }
+    neigh.into_iter().collect()
+}
+
+/// True when moving `(cell_r, cell_c)` into `nrid` would violate a pre-boundary
+/// (some neighbour of the cell already sits in `nrid` behind a pre-boundary).
+#[inline]
+fn repair_move_conflicts(
+    region_of: &[Option<usize>],
+    pre: &PreBoundaries,
+    cell_r: usize,
+    cell_c: usize,
+    nrid: usize,
+    h: usize,
+    w: usize,
+) -> bool {
+    for (dr, dc) in DIRS {
+        let nr = cell_r as i32 + dr;
+        let nc = cell_c as i32 + dc;
+        if nr >= 0 && nc >= 0 && (nr as usize) < h && (nc as usize) < w {
+            let nidx = nr as usize * w + nc as usize;
+            if region_of[nidx] == Some(nrid) && pre.contains(cell_r, cell_c, nr as usize, nc as usize) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// One repair pass for the multi-symbol solver: try to move each violating cell
+/// into a compatible adjacent region.  Returns `true` if any cell was moved.
+fn repair_multisymbol(
+    region_of: &mut [Option<usize>],
+    region_symbols: &mut [u64],
+    region_sizes: &mut [usize],
+    pre: &PreBoundaries,
+    symbol_of: &std::collections::HashMap<usize, usize>,
+    h: usize,
+    w: usize,
+) -> bool {
+    let mut repaired = false;
+    for [r1, c1, r2, c2] in pre.iter().collect::<Vec<_>>() {
+        let rid1 = region_of[r1 * w + c1];
+        let rid2 = region_of[r2 * w + c2];
+        let Some(rid) = rid1 else { continue };
+        if rid2 != Some(rid) {
+            continue;
+        }
+        for (cell_r, cell_c, cur_rid) in [(r1, c1, rid), (r2, c2, rid)] {
+            let neigh = collect_repair_neighbors(region_of, pre, cell_r, cell_c, cur_rid, h, w);
+            let sym = symbol_of.get(&(cell_r * w + cell_c)).copied();
+            let mut sorted: Vec<usize> = neigh.into_iter().collect();
+            sorted.sort_unstable();
+            for nrid in sorted {
+                if sym.is_some() && (region_symbols[nrid] & (1u64 << sym.unwrap())) != 0 {
+                    continue;
+                }
+                if repair_move_conflicts(region_of, pre, cell_r, cell_c, nrid, h, w) {
+                    continue;
+                }
+                if let Some(si) = sym {
+                    region_symbols[cur_rid] &= !(1u64 << si);
+                    region_symbols[nrid] |= 1u64 << si;
+                }
+                region_of[cell_r * w + cell_c] = Some(nrid);
+                region_sizes[cur_rid] -= 1;
+                region_sizes[nrid] += 1;
+                repaired = true;
+                break;
+            }
+            if repaired {
+                break;
+            }
+        }
+        if repaired {
+            break;
+        }
+    }
+    repaired
 }

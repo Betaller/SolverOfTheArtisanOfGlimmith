@@ -1,0 +1,13 @@
+# Cyclomatic / cognitive complexity gate for the Rust solver.
+#
+# `clippy::cognitive_complexity` is the Rust analogue of detekt's
+# CyclomaticComplexMethod: it counts branching + nesting of a function.
+# It lives in clippy's `nursery` group, so it is allow-by-default and must be
+# turned on explicitly (see scripts/complexity_gate.py, which runs it).
+#
+# Threshold rationale: clippy's own default is 25, but the project targets the
+# same discipline as the Python side (CC <= 10 on radon's cyclomatic scale).
+# Clippy's cognitive score also charges for *nesting depth*, which radon does
+# not, so a straight 1:1 mapping is impossible; 20 was chosen as the point
+# where the remaining functions are genuinely hard to follow.
+cognitive-complexity-threshold = 20

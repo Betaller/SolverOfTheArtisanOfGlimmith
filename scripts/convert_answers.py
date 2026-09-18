@@ -24,6 +24,7 @@ Usage:
     python scripts/convert_answers.py            # write all answer files
     python scripts/convert_answers.py --dry-run  # only report, don't write
 """
+
 from __future__ import annotations
 
 import json
@@ -87,8 +88,10 @@ def convert_all(dry_run: bool = False) -> tuple[int, int, list[str]]:
 def main() -> None:
     dry_run = "--dry-run" in sys.argv
     written, skipped, errors = convert_all(dry_run=dry_run)
-    print(f"{'Dry-run' if dry_run else 'Converted'} {written} answer files "
-          f"({skipped} without official solution)")
+    print(
+        f"{'Dry-run' if dry_run else 'Converted'} {written} answer files "
+        f"({skipped} without official solution)"
+    )
     if errors:
         print(f"Errors ({len(errors)}):")
         for e in errors:

@@ -17,7 +17,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
 
     // Build region->cell lookup and check all fillable cells assigned.
     let mut by_rid: HashMap<usize, Vec<[usize; 2]>> = HashMap::new();
-    // B-V1: flat cell→region-id index for O(1) `region_of` lookups (was O(R·N)
+    // B-V1: flat cell->region-id index for O(1) `region_of` lookups (was O(R.N)
     // linear scan). Built in the same pass as by_rid; blocked cells stay None.
     let mut cell_to_rid: Vec<Option<usize>> = vec![None; h * w];
     for r in 0..h {
@@ -46,8 +46,6 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
             return false;
         }
     }
-
-    let active: HashSet<&str> = puzzle.rules.iter().map(|r| r.ctype.as_str()).collect();
 
     // Pre-drawn boundaries separate regions.
     for r in 0..h {
@@ -79,254 +77,321 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
         .map(|reg| dihedral_key(&reg.cells))
         .collect();
 
+    let ctx = ValidateCtx {
+        puzzle,
+        regions,
+        by_rid: &by_rid,
+        cell_to_rid: &cell_to_rid,
+        h,
+        w,
+        shape_key_of: &shape_key_of,
+    };
     for rule in &puzzle.rules {
-        match rule.ctype.as_str() {
-            "shape_pool" => {
-                let pool: HashSet<String> = collect_pool_shapes(puzzle)
-                    .iter()
-                    .map(|s| dihedral_key(s))
-                    .collect();
-                for key in &shape_key_of {
-                    if !pool.contains(key) {
-                        return false;
-                    }
-                }
-            }
-            "precise" => {
-                let target = rule.params.get("area").and_then(|v| v.as_i64()).unwrap_or(0);
-                for reg in regions {
-                    if reg.area as i64 != target {
-                        return false;
-                    }
-                }
-            }
-            "range" => {
-                let lo = rule.params.get("min").and_then(|v| v.as_i64()).unwrap_or(1);
-                let hi = rule.params.get("max").and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
-                for reg in regions {
-                    if (reg.area as i64) < lo || (reg.area as i64) > hi {
-                        return false;
-                    }
-                }
-            }
-            "area" => {
-                for r in 0..h {
-                    for c in 0..w {
-                        let cell = &puzzle.cells[r][c];
-                        if let Some(n) = cell.number {
-                            if let Some(rid) = region_of(&cell_to_rid, r, c, w) {
-                                if by_rid[&rid].len() != n as usize {
-                                    return false;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            "same" => {
-                let set: HashSet<&String> = shape_key_of.iter().collect();
-                if set.len() > 1 {
-                    return false;
-                }
-            }
-            "different" => {
-                let set: HashSet<&String> = shape_key_of.iter().collect();
-                if set.len() != shape_key_of.len() {
-                    return false;
-                }
-            }
-            "mixed" => {
-                if !adjacent_pairs_satisfy(puzzle, regions, &by_rid, &cell_to_rid, w, |a, b| {
-                    shape_key_of[a] != shape_key_of[b]
-                }) {
-                    return false;
-                }
-            }
-            "differentiation" => {
-                if !adjacent_pairs_satisfy(puzzle, regions, &by_rid, &cell_to_rid, w, |a, b| {
-                    regions[a].area != regions[b].area
-                }) {
-                    return false;
-                }
-            }
-            "solitary" => {
-                for reg in regions {
-                    let mut clues = 0;
-                    for &[r, c] in &reg.cells {
-                        let cell = &puzzle.cells[r][c];
-                        if cell.symbol.is_some()
-                            || cell.compass.is_some()
-                            || cell.number.is_some()
-                            || cell.shape_pattern.is_some()
-                            || cell.fence_pattern.is_some()
-                        {
-                            clues += 1;
-                        }
-                    }
-                    if clues != 1 {
-                        return false;
-                    }
-                }
-            }
-            "block" => {
-                for reg in regions {
-                    if !is_rectangle(&reg.cells) {
-                        return false;
-                    }
-                }
-            }
-            "non_block" => {
-                for reg in regions {
-                    if is_rectangle(&reg.cells) {
-                        return false;
-                    }
-                }
-            }
-            "puzzle_piece" => {
-                for reg in regions {
-                    for &[r, c] in &reg.cells {
-                        if let Some(ref pat) = puzzle.cells[r][c].shape_pattern {
-                            if dihedral_key(&reg.cells) != dihedral_key(pat) {
-                                return false;
-                            }
-                        }
-                    }
-                }
-            }
-            "fence" => {
-                for r in 0..h {
-                    for c in 0..w {
-                        let cell = &puzzle.cells[r][c];
-                        if let Some(ref fp) = cell.fence_pattern {
-                            if let Some(rid) = region_of(&cell_to_rid, r, c, w) {
-                                let bits = region_boundary_bits(puzzle, &cell_to_rid, w, rid, r, c);
-                                let pat = fence_pattern_shape(bits);
-                                if dihedral_key(&pat) != dihedral_key(fp) {
-                                    return false;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            "compass" => {
-                for r in 0..h {
-                    for c in 0..w {
-                        let cell = &puzzle.cells[r][c];
-                        if let Some(ref comp) = cell.compass {
-                            if let Some(rid) = region_of(&cell_to_rid, r, c, w) {
-                                let cells = &by_rid[&rid];
-                                for (dr, dc, attr) in
-                                    [(-1i64, 0i64, 0usize), (1, 0, 1), (0, -1, 2), (0, 1, 3)]
-                                {
-                                    let expected = match attr {
-                                        0 => comp.up,
-                                        1 => comp.down,
-                                        2 => comp.left,
-                                        _ => comp.right,
-                                    };
-                                    let expected = match expected {
-                                        Some(v) if v >= 0 => v,
-                                        _ => continue,
-                                    };
-                                    let mut count = 0i64;
-                                    for &[rr, cc] in cells {
-                                        if rr == r && cc == c {
-                                            continue;
-                                        }
-                                        if dr == -1 && (rr as i64) < (r as i64) {
-                                            count += 1;
-                                        } else if dr == 1 && (rr as i64) > (r as i64) {
-                                            count += 1;
-                                        } else if dc == -1 && (cc as i64) < (c as i64) {
-                                            count += 1;
-                                        } else if dc == 1 && (cc as i64) > (c as i64) {
-                                            count += 1;
-                                        }
-                                    }
-                                    if count != expected {
-                                        return false;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            "rose_window" => {
-                if !check_rose_window(puzzle, regions) {
-                    return false;
-                }
-            }
-            "heterogeneous" | "homogeneous" | "inequality" | "difference" => {
-                if !check_edge_constraints(puzzle, &by_rid, &cell_to_rid, w) {
-                    return false;
-                }
-            }
-            "watchtower" => {
-                // Vertex (r,c) is the ABSOLUTE grid corner (r in 0..=h,
-                // c in 0..=w, border corners included).  The cells touching it
-                // are the in-bounds ones of {(r-1,c-1),(r-1,c),(r,c-1),(r,c)}.
-                // A border corner is touched by 2 (edge) or 1 (grid corner)
-                // cells; blocked cells add no region (not in by_rid).
-                for r in 0..=h {
-                    for c in 0..=w {
-                        if let Some(val) = puzzle.vertices[r][c].watchtower {
-                            let mut distinct = HashSet::new();
-                            for (dr, dc) in [(-1i64, -1i64), (-1, 0), (0, -1), (0, 0)] {
-                                let nr = r as i64 + dr;
-                                let nc = c as i64 + dc;
-                                if nr < 0 || nc < 0 || nr >= h as i64 || nc >= w as i64 {
-                                    continue;
-                                }
-                                if let Some(rid) = region_of(&cell_to_rid, nr as usize, nc as usize, w) {
-                                    distinct.insert(rid);
-                                }
-                            }
-                            if distinct.len() != val as usize {
-                                return false;
-                            }
-                        }
-                    }
-                }
-            }
-            "brick" => {
-                // A 4-way junction can involve a blocked cell: its edges count
-                // as border segments (blocked is a distinct value from every
-                // region, though blocked-blocked shares one AREA_BLOCK and is
-                // NOT a boundary — count_boundary_edges_at_vertex handles that).
-                // So do NOT skip blocked vertices (a vertex with one blocked +
-                // three distinct regions IS a 4-way, e.g. 1301's twin singleton
-                // at (7,6)).  Mirrors the C++ check_tatami and the game.
-                for r in 0..h.saturating_sub(1) {
-                    for c in 0..w.saturating_sub(1) {
-                        if count_boundary_edges_at_vertex(puzzle, &cell_to_rid, w, r as i32, c as i32) == 4 {
-                            return false;
-                        }
-                    }
-                }
-            }
-            "ring" => {
-                // A 3-way junction can form where an internal boundary meets
-                // the OUTER border, so check every geometric grid point
-                // (0..=h x 0..=w), not just interior vertices.  Vertex (r,c)
-                // is geometric point (r+1,c+1), so r/c go from -1 to h-1/w-1.
-                let hi = h as i32;
-                let wi = w as i32;
-                for r in -1..hi {
-                    for c in -1..wi {
-                        if count_boundary_edges_at_vertex(puzzle, &cell_to_rid, w, r, c) == 3 {
-                            return false;
-                        }
-                    }
-                }
-            }
-            _ => {}
+        if !ctx.dispatch(rule) {
+            return false;
         }
     }
-    let _ = active;
     true
 }
+
+/// Shared, borrow-free view of the data `validate` needs, so each rule check can
+/// be a small named function instead of one 22-arm `match`. Mirrors the Python
+/// `RULE_CHECKERS` registry in `src/solver/constraints.py`.
+struct ValidateCtx<'a> {
+    puzzle: &'a Puzzle,
+    regions: &'a [RegionInfo],
+    by_rid: &'a HashMap<usize, Vec<[usize; 2]>>,
+    cell_to_rid: &'a [Option<usize>],
+    h: usize,
+    w: usize,
+    shape_key_of: &'a [String],
+}
+
+impl<'a> ValidateCtx<'a> {
+    /// Dispatch one rule to its registered checker; unknown rule types pass.
+    fn dispatch(&self, rule: &Rule) -> bool {
+        let ctype: &str = rule.ctype.as_str();
+        for entry in RULE_CHECKERS.iter() {
+            if entry.0 == ctype {
+                return (entry.1)(self, rule);
+            }
+        }
+        true
+    }
+}
+
+type RuleChecker = fn(&ValidateCtx, &Rule) -> bool;
+
+/// Registry of per-rule validators (one entry per `ctype`). The four
+/// edge-constraint types share `check_edge_constraints_rule`; the original
+/// 22-arm `match` in `validate` is now this table lookup.
+const RULE_CHECKERS: &[(&str, RuleChecker)] = &[
+    ("shape_pool", check_shape_pool),
+    ("precise", check_precise),
+    ("range", check_range),
+    ("area", check_area),
+    ("same", check_same),
+    ("different", check_different),
+    ("mixed", check_mixed),
+    ("differentiation", check_differentiation),
+    ("solitary", check_solitary),
+    ("block", check_block),
+    ("non_block", check_non_block),
+    ("puzzle_piece", check_puzzle_piece),
+    ("fence", check_fence),
+    ("compass", check_compass),
+    ("rose_window", check_rose_window_rule),
+    ("heterogeneous", check_edge_constraints_rule),
+    ("homogeneous", check_edge_constraints_rule),
+    ("inequality", check_edge_constraints_rule),
+    ("difference", check_edge_constraints_rule),
+    ("watchtower", check_watchtower),
+    ("brick", check_brick),
+    ("ring", check_ring),
+];
+
+fn check_shape_pool(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    let pool: HashSet<String> = collect_pool_shapes(ctx.puzzle)
+        .iter()
+        .map(|s| dihedral_key(s))
+        .collect();
+    for key in ctx.shape_key_of {
+        if !pool.contains(key) {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_precise(ctx: &ValidateCtx, rule: &Rule) -> bool {
+    let target = rule.params.get("area").and_then(|v| v.as_i64()).unwrap_or(0);
+    for reg in ctx.regions {
+        if reg.area as i64 != target {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_range(ctx: &ValidateCtx, rule: &Rule) -> bool {
+    let lo = rule.params.get("min").and_then(|v| v.as_i64()).unwrap_or(1);
+    let hi = rule.params.get("max").and_then(|v| v.as_i64()).unwrap_or(i64::MAX);
+    for reg in ctx.regions {
+        if (reg.area as i64) < lo || (reg.area as i64) > hi {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_area(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    for r in 0..ctx.h {
+        for c in 0..ctx.w {
+            let cell = &ctx.puzzle.cells[r][c];
+            if let Some(n) = cell.number {
+                if let Some(rid) = region_of(ctx.cell_to_rid, r, c, ctx.w) {
+                    if ctx.by_rid[&rid].len() != n as usize {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+fn check_same(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    let set: HashSet<&String> = ctx.shape_key_of.iter().collect();
+    set.len() <= 1
+}
+
+fn check_different(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    let set: HashSet<&String> = ctx.shape_key_of.iter().collect();
+    set.len() == ctx.shape_key_of.len()
+}
+
+fn check_mixed(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    adjacent_pairs_satisfy(ctx.puzzle, ctx.regions, ctx.by_rid, ctx.cell_to_rid, ctx.w, |a, b| {
+        ctx.shape_key_of[a] != ctx.shape_key_of[b]
+    })
+}
+
+fn check_differentiation(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    adjacent_pairs_satisfy(ctx.puzzle, ctx.regions, ctx.by_rid, ctx.cell_to_rid, ctx.w, |a, b| {
+        ctx.regions[a].area != ctx.regions[b].area
+    })
+}
+
+fn check_solitary(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    for reg in ctx.regions {
+        let mut clues = 0;
+        for &[r, c] in &reg.cells {
+            let cell = &ctx.puzzle.cells[r][c];
+            if cell.symbol.is_some()
+                || cell.compass.is_some()
+                || cell.number.is_some()
+                || cell.shape_pattern.is_some()
+                || cell.fence_pattern.is_some()
+            {
+                clues += 1;
+            }
+        }
+        if clues != 1 {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_block(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    for reg in ctx.regions {
+        if !is_rectangle(&reg.cells) {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_non_block(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    for reg in ctx.regions {
+        if is_rectangle(&reg.cells) {
+            return false;
+        }
+    }
+    true
+}
+
+fn check_puzzle_piece(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    for reg in ctx.regions {
+        for &[r, c] in &reg.cells {
+            if let Some(ref pat) = ctx.puzzle.cells[r][c].shape_pattern {
+                if dihedral_key(&reg.cells) != dihedral_key(pat) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn check_fence(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    for r in 0..ctx.h {
+        for c in 0..ctx.w {
+            let cell = &ctx.puzzle.cells[r][c];
+            if let Some(ref fp) = cell.fence_pattern {
+                if let Some(rid) = region_of(ctx.cell_to_rid, r, c, ctx.w) {
+                    let bits = region_boundary_bits(ctx.puzzle, ctx.cell_to_rid, ctx.w, rid, r, c);
+                    let pat = fence_pattern_shape(bits);
+                    if dihedral_key(&pat) != dihedral_key(fp) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+fn check_compass(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    for r in 0..ctx.h {
+        for c in 0..ctx.w {
+            let cell = &ctx.puzzle.cells[r][c];
+            if let Some(ref comp) = cell.compass {
+                if let Some(rid) = region_of(ctx.cell_to_rid, r, c, ctx.w) {
+                    let cells = &ctx.by_rid[&rid];
+                    for (dr, dc, attr) in [(-1i64, 0i64, 0usize), (1, 0, 1), (0, -1, 2), (0, 1, 3)] {
+                        let expected = match attr {
+                            0 => comp.up,
+                            1 => comp.down,
+                            2 => comp.left,
+                            _ => comp.right,
+                        };
+                        let expected = match expected {
+                            Some(v) if v >= 0 => v,
+                            _ => continue,
+                        };
+                        let mut count = 0i64;
+                        for &[rr, cc] in cells {
+                            if rr == r && cc == c {
+                                continue;
+                            }
+                            if dr == -1 && (rr as i64) < (r as i64) {
+                                count += 1;
+                            } else if dr == 1 && (rr as i64) > (r as i64) {
+                                count += 1;
+                            } else if dc == -1 && (cc as i64) < (c as i64) {
+                                count += 1;
+                            } else if dc == 1 && (cc as i64) > (c as i64) {
+                                count += 1;
+                            }
+                        }
+                        if count != expected {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
+fn check_rose_window_rule(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    check_rose_window(ctx.puzzle, ctx.regions)
+}
+
+fn check_edge_constraints_rule(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    check_edge_constraints(ctx.puzzle, ctx.by_rid, ctx.cell_to_rid, ctx.w)
+}
+
+fn check_watchtower(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    for r in 0..=ctx.h {
+        for c in 0..=ctx.w {
+            if let Some(val) = ctx.puzzle.vertices[r][c].watchtower {
+                let mut distinct = HashSet::new();
+                for (dr, dc) in [(-1i64, -1i64), (-1, 0), (0, -1), (0, 0)] {
+                    let nr = r as i64 + dr;
+                    let nc = c as i64 + dc;
+                    if nr < 0 || nc < 0 || nr >= ctx.h as i64 || nc >= ctx.w as i64 {
+                        continue;
+                    }
+                    if let Some(rid) = region_of(ctx.cell_to_rid, nr as usize, nc as usize, ctx.w) {
+                        distinct.insert(rid);
+                    }
+                }
+                if distinct.len() != val as usize {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn check_brick(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    for r in 0..ctx.h.saturating_sub(1) {
+        for c in 0..ctx.w.saturating_sub(1) {
+            if count_boundary_edges_at_vertex(ctx.puzzle, ctx.cell_to_rid, ctx.w, r as i32, c as i32) == 4 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn check_ring(ctx: &ValidateCtx, _rule: &Rule) -> bool {
+    let hi = ctx.h as i32;
+    let wi = ctx.w as i32;
+    for r in -1..hi {
+        for c in -1..wi {
+            if count_boundary_edges_at_vertex(ctx.puzzle, ctx.cell_to_rid, ctx.w, r, c) == 3 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 
 /// O(1) cell→region-id lookup via the pre-built `cell_to_rid` index (B-V1).
 /// Was O(R·N) linear scan over `by_rid` — called ~15× per validate, the

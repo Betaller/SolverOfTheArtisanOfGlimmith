@@ -10,8 +10,14 @@ from src.solver.base import Solver, SolverRouter
 
 def _puzzle() -> Puzzle:
     b = Board(2, 2)
-    return Puzzle(height=2, width=2, cells=b.cells(), edges=b.edges(),
-                  vertices=b.vertices(), rules=[Rule.precise(4)])
+    return Puzzle(
+        height=2,
+        width=2,
+        cells=b.cells(),
+        edges=b.edges(),
+        vertices=b.vertices(),
+        rules=[Rule.precise(4)],
+    )
 
 
 def _solution_board(regions) -> Board:
@@ -25,25 +31,33 @@ def _solution_board(regions) -> Board:
 class BadSolver(Solver):
     name = "bad"
 
-    def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
+    def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:  # noqa: ARG002 — stub
         # returns a wrong answer: two separate regions violate precise(4)
-        return Solution(board=_solution_board([[(0, 0), (0, 1)], [(1, 0), (1, 1)]]),
-                        solved=True, regions=[])
+        return Solution(
+            board=_solution_board([[(0, 0), (0, 1)], [(1, 0), (1, 1)]]), solved=True, regions=[]
+        )
 
 
 class GoodSolver(Solver):
     name = "good"
 
-    def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:
+    def solve(self, puzzle: Puzzle, timeout: float = 30.0) -> Solution:  # noqa: ARG002 — stub
         board = _solution_board([[(0, 0), (0, 1), (1, 0), (1, 1)]])
-        return Solution(board=board, solved=True, regions=[
-            __import__('src.models.solution', fromlist=['RegionInfo']).RegionInfo(
-                region_id=0, cells=[(0, 0), (0, 1), (1, 0), (1, 1)], area=4,
-                shape=__import__('src.models.board', fromlist=['Shape']).Shape(
-                    cells=frozenset({(0, 0), (0, 1), (1, 0), (1, 1)})),
-                normalized_shape_key="",
-            )
-        ])
+        return Solution(
+            board=board,
+            solved=True,
+            regions=[
+                __import__("src.models.solution", fromlist=["RegionInfo"]).RegionInfo(
+                    region_id=0,
+                    cells=[(0, 0), (0, 1), (1, 0), (1, 1)],
+                    area=4,
+                    shape=__import__("src.models.board", fromlist=["Shape"]).Shape(
+                        cells=frozenset({(0, 0), (0, 1), (1, 0), (1, 1)})
+                    ),
+                    normalized_shape_key="",
+                )
+            ],
+        )
 
 
 class TestRouterValidationFallback:

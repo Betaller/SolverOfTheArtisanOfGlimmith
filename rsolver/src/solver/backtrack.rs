@@ -341,6 +341,16 @@ fn check_edge_area_mid_search(state: &BacktrackState) -> bool {
     true
 }
 
+// TODO(complexity): above the threshold (37 vs 20).  Same rule as
+// `aog/search.rs`: this is a hot search kernel ported from the C++ reference,
+// and a previous attempt to decompose it (extracting `assignment_checks_ok` /
+// `try_join_existing_region` / `collect_adjacent_regions`) was REVERTED because
+// it made the solver return solutions that fail rule validation
+// (`tests/integration/test_solver_end_to_end.py` — 4 failures).  It is normally
+// disabled (BACKTRACK_ON) and solves 0/1258, so the benchmark does not cover it
+// either way: any refactor here must be validated with the test suite, not the
+// benchmark.  Every other function in the crate is within the threshold.
+#[allow(clippy::cognitive_complexity)]
 fn dfs(puzzle: &Puzzle, state: &mut BacktrackState) -> bool {
     if state.undecided_count == 0 {
         let regions = build_regions(state);

@@ -75,7 +75,7 @@ class SolverAttempt:
             return None
         if self.note:
             return self.note
-        return self.status.value
+        return str(self.status.value)
 
 
 @dataclass(slots=True)

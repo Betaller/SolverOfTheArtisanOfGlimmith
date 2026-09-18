@@ -1,19 +1,21 @@
 from __future__ import annotations
 
-from typing import Optional, Callable
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QLabel,
-    QSpinBox, QPushButton, QScrollArea, QGroupBox, QFormLayout,
-    QListWidget, QListWidgetItem, QFrame,
+    QCheckBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
-from src.models.board import Shape
-from src.models.puzzle import Puzzle, Rule, RULE_NAMES
+from src.models.puzzle import RULE_NAMES, Puzzle, Rule
 from src.ui.shape_editor import ShapeEditorDialog
 from src.ui.theme import RULE_CATEGORIES
-
 
 RULE_DESCRIPTIONS: dict[str, str] = {
     "shape_pool": "区域形状必须来自形状池",
@@ -79,9 +81,7 @@ class ConstraintPanel(QWidget):
         btn_layout = QHBoxLayout()
         clear_btn = QPushButton("全部清除")
         clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear_btn.setStyleSheet(
-            "QPushButton { font-size: 12px; padding: 6px 16px; }"
-        )
+        clear_btn.setStyleSheet("QPushButton { font-size: 12px; padding: 6px 16px; }")
         clear_btn.clicked.connect(self._clear_all)
         btn_layout.addStretch()
         btn_layout.addWidget(clear_btn)
@@ -166,14 +166,18 @@ class ConstraintPanel(QWidget):
             min_spin = QSpinBox()
             min_spin.setRange(1, 256)
             min_spin.setValue(1)
-            min_spin.valueChanged.connect(lambda v, t=rule_type: self._on_param_changed(t, "min", v))
+            min_spin.valueChanged.connect(
+                lambda v, t=rule_type: self._on_param_changed(t, "min", v)
+            )
             self._param_spin(rule_type, "min", min_spin)
             layout.addWidget(min_spin)
             layout.addWidget(QLabel("最大:"))
             max_spin = QSpinBox()
             max_spin.setRange(1, 256)
             max_spin.setValue(256)
-            max_spin.valueChanged.connect(lambda v, t=rule_type: self._on_param_changed(t, "max", v))
+            max_spin.valueChanged.connect(
+                lambda v, t=rule_type: self._on_param_changed(t, "max", v)
+            )
             self._param_spin(rule_type, "max", max_spin)
             layout.addWidget(max_spin)
             layout.addStretch()
@@ -243,14 +247,14 @@ class ConstraintPanel(QWidget):
                 self._puzzle.rules = [r for r in self._puzzle.rules if r.type != rule_type]
         self.rules_changed.emit()
 
-    def _collect_params(self, rule_type: str) -> dict:
+    def _collect_params(self, rule_type: str) -> dict[str, int]:
         """Read the current param-spin values for a rule type.
 
         Used when a rule is toggled ON so its params are seeded from the UI
         defaults rather than left empty (bug C3).  Rules without param spins
         (e.g. shape_pool, rose_window) return an empty dict.
         """
-        params: dict = {}
+        params: dict[str, int] = {}
         if hasattr(self, "_param_spins"):
             for pname, spin in self._param_spins.get(rule_type, {}).items():
                 params[pname] = spin.value()

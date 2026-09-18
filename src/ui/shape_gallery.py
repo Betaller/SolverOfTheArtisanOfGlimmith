@@ -3,20 +3,57 @@
 配合“相异 (different)”规则使用——所有区域形状必须互不相同，本工具列出
 给定大小下所有可能的形状，便于设计与核对。
 """
+
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Callable
+from typing import Any
 
-from PySide6.QtCore import Qt, QRectF, QSize, QEvent
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPaintEvent, QPen, QResizeEvent
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QScrollArea,
+    QComboBox,
     QDialog,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
+from src.models.board import Shape
 from src.models.puzzle import Puzzle
 from src.solver.shapes import enumerate_polyominoes
 from src.ui import theme as _ui_theme
+
+
+def _size_from_precise(rule: Any, _puzzle: Puzzle) -> int | None:
+    return int(rule.params.get("area", 0)) or None
+
+
+def _size_from_range(rule: Any, _puzzle: Puzzle) -> int | None:
+    lo = rule.params.get("min")
+    hi = rule.params.get("max")
+    return int(lo) if lo is not None and lo == hi else None
+
+
+def _size_from_area(_rule: Any, puzzle: Puzzle) -> int | None:
+    nums = {c.number for c in puzzle.cells if c.number is not None}
+    return next(iter(nums)) if len(nums) == 1 else None
+
+
+def _size_from_pool(rule: Any, _puzzle: Puzzle) -> int | None:
+    areas = {s.area for s in rule.params.get("shapes", [])}
+    return next(iter(areas)) if len(areas) == 1 else None
+
+
+# Fallback chain: the first rule that yields a size wins; a rule that yields
+# `None` (e.g. a "range" rule whose min != max) falls through to the next one.
+_REGION_SIZE_FALLBACKS: tuple[tuple[str, Callable[[Any, Puzzle], int | None]], ...] = (
+    ("range", _size_from_range),
+    ("area", _size_from_area),
+    ("shape_pool", _size_from_pool),
+)
 
 
 class ShapeGridView(QWidget):
@@ -31,11 +68,11 @@ class ShapeGridView(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._shapes: list = []
+        self._shapes: list[Shape] = []
         self._cell = 16
         self._slot = 24
 
-    def set_shapes(self, shapes: list) -> None:
+    def set_shapes(self, shapes: list[Shape]) -> None:
         self._shapes = list(shapes)
         max_dim = 1
         if shapes:
@@ -64,11 +101,11 @@ class ShapeGridView(QWidget):
         self.setMinimumHeight(h)
         self.setMaximumHeight(h)
 
-    def resizeEvent(self, event) -> None:
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 - Qt override
         super().resizeEvent(event)
         self._update_height()
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt override
         super().paintEvent(event)
         if not self._shapes:
             return
@@ -105,9 +142,11 @@ class ShapeGridView(QWidget):
 
             p.setFont(label_font)
             p.setPen(QColor(_ui_theme.colors.preview_summary_text))
-            p.drawText(QRectF(slot_x + 2, slot_y, self._slot - 4, 12),
-                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
-                       str(i))
+            p.drawText(
+                QRectF(slot_x + 2, slot_y, self._slot - 4, 12),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop,
+                str(i),
+            )
         p.end()
 
 
@@ -141,8 +180,7 @@ class ShapeGalleryWidget(QWidget):
         top.addStretch()
         layout.addLayout(top)
 
-        hint = QLabel("按大小列出所有不同的形状（忽略旋转/翻转），"
-                      "用于“相异”等形状规则。")
+        hint = QLabel("按大小列出所有不同的形状（忽略旋转/翻转），用于“相异”等形状规则。")
         hint.setWordWrap(True)
         hint.setStyleSheet("font-size: 11px; color: #777;")
         layout.addWidget(hint)
@@ -173,25 +211,17 @@ class ShapeGalleryWidget(QWidget):
 
     @staticmethod
     def _region_size(puzzle: Puzzle) -> int | None:
+        # "precise" is authoritative: when the rule exists it decides the size
+        # even if its area is 0 (which maps to "unknown" -> None).
         precise = puzzle.get_rule("precise")
         if precise is not None:
-            return int(precise.params.get("area", 0)) or None
-        range_rule = puzzle.get_rule("range")
-        if range_rule is not None:
-            lo = range_rule.params.get("min")
-            hi = range_rule.params.get("max")
-            if lo is not None and lo == hi:
-                return int(lo)
-        area_rule = puzzle.get_rule("area")
-        if area_rule is not None:
-            nums = {c.number for c in puzzle.cells if c.number is not None}
-            if len(nums) == 1:
-                return next(iter(nums))
-        pool = puzzle.get_rule("shape_pool")
-        if pool is not None:
-            areas = {s.area for s in pool.params.get("shapes", [])}
-            if len(areas) == 1:
-                return next(iter(areas))
+            return _size_from_precise(precise, puzzle)
+        for name, extractor in _REGION_SIZE_FALLBACKS:
+            rule = puzzle.get_rule(name)
+            if rule is not None:
+                size = extractor(rule, puzzle)
+                if size is not None:
+                    return size
         return None
 
 

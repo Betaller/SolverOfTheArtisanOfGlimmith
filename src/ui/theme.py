@@ -2,11 +2,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PySide6.QtWidgets import QApplication
+
 REGION_COLORS = [
-    "#4E79A7", "#F28E2B", "#59A14F", "#76B7B2", "#499894",
-    "#E15759", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC",
-    "#86BCB6", "#D37295", "#8CD17D", "#74C476", "#AF7AA1",
-    "#79706E", "#D4A6C8", "#A0CBE8", "#FFBE7D", "#CAB2D6",
+    "#4E79A7",
+    "#F28E2B",
+    "#59A14F",
+    "#76B7B2",
+    "#499894",
+    "#E15759",
+    "#B07AA1",
+    "#FF9DA7",
+    "#9C755F",
+    "#BAB0AC",
+    "#86BCB6",
+    "#D37295",
+    "#8CD17D",
+    "#74C476",
+    "#AF7AA1",
+    "#79706E",
+    "#D4A6C8",
+    "#A0CBE8",
+    "#FFBE7D",
+    "#CAB2D6",
 ]
 
 MODE_COLORS = {
@@ -883,7 +901,7 @@ QComboBox QAbstractItemView {
 STYLESHEET = LIGHT_STYLESHEET
 
 
-def apply_theme(app, dark: bool) -> None:
+def apply_theme(app: QApplication, dark: bool) -> None:
     """Apply light or dark stylesheet and color theme."""
     global colors
     if dark:

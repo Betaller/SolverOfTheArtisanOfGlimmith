@@ -3,8 +3,15 @@ from __future__ import annotations
 import pytest
 
 from src.models.board import (
-    Board, Cell, Edge, EdgeConstraint, EdgeConstraintType,
-    Vertex, Shape, CompassClue, Direction,
+    Board,
+    Cell,
+    CompassClue,
+    Direction,
+    Edge,
+    EdgeConstraint,
+    EdgeConstraintType,
+    Shape,
+    Vertex,
 )
 
 
@@ -31,14 +38,6 @@ class TestBoardConstruction:
     def test_invalid_height_too_small(self) -> None:
         with pytest.raises(ValueError, match="Grid size"):
             Board(1, 4)
-
-    def test_invalid_height_too_small(self) -> None:
-        with pytest.raises(ValueError, match="Grid size"):
-            Board(1, 4)
-
-    def test_invalid_width_too_small(self) -> None:
-        with pytest.raises(ValueError, match="Grid size"):
-            Board(4, 1)
 
     def test_invalid_width_too_small(self) -> None:
         with pytest.raises(ValueError, match="Grid size"):
@@ -72,7 +71,7 @@ class TestBoardConstruction:
         b = Board(2, 2)
         assert len(b.vertices()) == 9
 
-    def test_vertices_count_1xN(self) -> None:
+    def test_vertices_count_1xn(self) -> None:
         # minimum valid: 2x2, so 1xN is not valid
         pass
 
@@ -103,9 +102,14 @@ class TestCell:
         compass = CompassClue(up=1, down=2, left=-1, right=-1)
         fence = Shape(cells=frozenset([(0, 0), (0, 1), (1, 0), (1, 1)]))
         c = Cell(
-            row=2, col=3, region_id=5, number=4,
-            symbol="A", shape_pattern=shape,
-            compass=compass, fence_pattern=fence,
+            row=2,
+            col=3,
+            region_id=5,
+            number=4,
+            symbol="A",
+            shape_pattern=shape,
+            compass=compass,
+            fence_pattern=fence,
         )
         assert c.row == 2
         assert c.col == 3

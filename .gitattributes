@@ -6,3 +6,4 @@ results/bin/rsolver-7c05d41-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bin/rsolver-a8172ff-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bin/rsolver-0500078-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bin/rsolver-142c6a2-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-2e23db1-linux-x86_64 filter=lfs diff=lfs merge=lfs -text

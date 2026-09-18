@@ -126,6 +126,16 @@ pub(crate) struct Solver<'a> {
     /// cell outside every compass bbox could still join that clue's piece, so
     /// an empty bitmask would be a false contradiction.
     pub solitary_feasible_active: bool,
+    /// Exact number of pieces when it follows from a *structural* rule, as
+    /// opposed to the (unsound to enable) rose-window deduction that flips on
+    /// the two-piece parity seeding — see
+    /// `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
+    ///
+    /// Currently only the `precise` rule supplies it: every region has area
+    /// `A`, so with `F` fillable cells the partition has exactly `F / A`
+    /// pieces (set only when `A` divides `F`).  Consumed by
+    /// `propagate_dual_connectivity`.
+    pub structural_pieces: Option<usize>,
 }
 
 /// `avail[cell] = [N, S, E, W]` — count of *existing* cells strictly in each
@@ -283,6 +293,7 @@ impl<'a> Solver<'a> {
             compass_halfplane_avail,
             solitary_feasible: Vec::new(),
             solitary_feasible_active: false,
+            structural_pieces: None,
         };
 
         // Rose-window state: map each distinct symbol string to a type index and
@@ -409,6 +420,24 @@ impl<'a> Solver<'a> {
     /// or timed out).  The router re-validates via `validate::validate`.
     pub fn solve(&mut self) -> Option<Vec<RegionInfo>> {
         self.total_cells = self.grid.total_existing_cells();
+
+        // Structural piece count from the `precise` rule (see the field doc).
+        // Deliberately NOT the rose-window deduction: that one flips on the
+        // two-piece parity seeding, which forces wrong Cuts at the root
+        // (`docs/优化/27-exact-piece-count与two-piece-parity证伪.md`).
+        if let Some(a) = self
+            .puzzle
+            .rules
+            .iter()
+            .find(|r| r.ctype == "precise")
+            .and_then(|r| r.params.get("area"))
+            .and_then(|v| v.as_u64())
+        {
+            let a = a as usize;
+            if a >= 1 && self.total_cells % a == 0 {
+                self.structural_pieces = Some(self.total_cells / a);
+            }
+        }
 
         // Edges adjacent to a blocked/outside cell are outer borders → Cut.
         for e in 0..self.grid.num_edges() {

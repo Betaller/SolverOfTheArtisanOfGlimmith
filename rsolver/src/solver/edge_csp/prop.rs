@@ -154,6 +154,10 @@ impl<'a> Solver<'a> {
                 progress |= self.propagate_delta_gemini_interaction()?;
             }
             progress |= self.propagate_area_bounds()?;
+        if self.structural_pieces.is_some() {
+            let num_comp = self.curr_comp_sz.len();
+            progress |= self.propagate_dual_connectivity(num_comp)?;
+        }
             if !self.vertex_clues.is_empty() {
                 progress |= self.propagate_watchtower()?;
             }
@@ -900,6 +904,128 @@ impl<'a> Solver<'a> {
             }
         }
 
+        Ok(progress)
+    }
+
+    /// Dual connectivity (port of `third_party/aog/src/solver/propagation/
+    /// dual.rs`, checks D1/D2).  Gated on `structural_pieces` — an exact piece
+    /// count derived from a *structural* rule (`precise`), never from the
+    /// rose-window deduction (doc 27).
+    ///
+    /// * **D1** a component that must still grow (size below its target or
+    ///   `curr_min_area`) and has exactly one Unknown growth edge has no other
+    ///   way to reach its size → that edge must be Uncut.
+    /// * **D2** view components as nodes and Unknown edges between distinct
+    ///   components as edges.  Every connected component of this graph must
+    ///   become at least one piece, so `cc > pieces` is a contradiction; when
+    ///   `cc == pieces` each graph component is exactly one piece and all its
+    ///   internal Unknown edges must be Uncut.
+    ///
+    /// D3 (bridge analysis) is deliberately not ported: it needs a finer
+    /// argument about the two sides of each bridge and is the riskiest of the
+    /// three.
+    pub(crate) fn propagate_dual_connectivity(&mut self, num_comp: usize) -> Result<bool, ()> {
+        let Some(pieces) = self.structural_pieces else {
+            return Ok(false);
+        };
+        if pieces < 2 {
+            return Ok(false);
+        }
+        let mut progress = false;
+
+        // D1: single growth edge on a component that still needs to grow.
+        let mut to_uncut: Vec<EdgeId> = Vec::new();
+        for ci in 0..num_comp {
+            let sz = self.curr_comp_sz[ci];
+            let must_grow = match self.curr_target_area[ci] {
+                Some(t) => sz < t,
+                None => sz < self.prop.curr_min_area[ci],
+            };
+            if !must_grow {
+                continue;
+            }
+            let mut unknown: Option<EdgeId> = None;
+            let mut count = 0usize;
+            for &e in &self.prop.growth_edges[ci] {
+                if self.edges[e] == EdgeState::Unknown {
+                    count += 1;
+                    if count > 1 {
+                        break;
+                    }
+                    unknown = Some(e);
+                }
+            }
+            if count == 1 {
+                to_uncut.push(unknown.unwrap());
+            }
+        }
+        for e in to_uncut {
+            if self.edges[e] == EdgeState::Unknown {
+                if !self.set_edge(e, EdgeState::Uncut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+        if progress {
+            // Uncut merges components; the fixed-point loop rebuilds them.
+            return Ok(true);
+        }
+
+        // D2: connected-component count of the component graph.
+        // Union-Find over components, joined by Unknown edges.
+        let mut parent: Vec<usize> = (0..num_comp).collect();
+        fn find(parent: &mut Vec<usize>, x: usize) -> usize {
+            let mut r = x;
+            while parent[r] != r {
+                r = parent[r];
+            }
+            let mut cur = x;
+            while parent[cur] != r {
+                let next = parent[cur];
+                parent[cur] = r;
+                cur = next;
+            }
+            r
+        }
+        let mut cross_edges: Vec<EdgeId> = Vec::new();
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Unknown {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let (ci1, ci2) = (self.curr_comp_id[c1], self.curr_comp_id[c2]);
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            cross_edges.push(e);
+            let (r1, r2) = (find(&mut parent, ci1), find(&mut parent, ci2));
+            if r1 != r2 {
+                parent[r1] = r2;
+            }
+        }
+        let mut cc = 0usize;
+        for ci in 0..num_comp {
+            if find(&mut parent, ci) == ci {
+                cc += 1;
+            }
+        }
+        if cc > pieces {
+            return Err(());
+        }
+        if cc == pieces {
+            for e in cross_edges {
+                if self.edges[e] == EdgeState::Unknown {
+                    if !self.set_edge(e, EdgeState::Uncut) {
+                        return Err(());
+                    }
+                    progress = true;
+                }
+            }
+        }
         Ok(progress)
     }
 

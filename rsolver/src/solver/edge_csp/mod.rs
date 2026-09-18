@@ -253,15 +253,17 @@ impl<'a> Solver<'a> {
 
                 // NOTE: AOG deduces `exact_piece_count` from the rose window
                 // here ("all types occur N times => exactly N pieces",
-                // `third_party/aog/src/solver/mod.rs:139`) and uses it to seed
-                // Cut edges as parity-1 facts.  We deliberately do NOT: our type
-                // set is built from *any* cell symbol, not just rose clues, so a
-                // puzzle carrying non-rose symbols gets a wrong count and the
-                // resulting pruning drops real solutions.
-                //
-                // Measured 2026-09-03 on the 187 rose_window puzzles: enabling
-                // the deduction and the extra parity seeding gained 0987 but
-                // lost 0213nopad, 1135 and 1392 (-2 net).  Reverted.
+                // `third_party/aog/src/solver/mod.rs:139`).  We deliberately
+                // leave it `None`: writing `Some(n)` flips on the two-piece
+                // branch of `rose.rs::propagate_parity`, which seeds every Cut
+                // edge as parity=1 and — on 1135 / 1392 — forces edges Cut at
+                // the ROOT (nodes=0) that the official solution has Uncut.
+                // Count-only (no extra seeding) was re-tried 2026-09-18 with
+                // the same result: the seeding lives behind
+                // `two_piece == exact_piece_count == Some(2)`, so the count
+                // cannot be enabled without it.  Blocks the loop_closure /
+                // dual_connectivity ports (doc 26 §2.1-2.2).
+                // Full analysis: `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
                 solver.exact_piece_count = None;
             }
         }

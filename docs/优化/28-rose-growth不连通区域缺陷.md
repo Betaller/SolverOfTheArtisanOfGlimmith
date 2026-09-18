@@ -57,6 +57,12 @@ BFS，区域规模小、代价可接受），在三处搬移点加守卫——
 守卫只拒绝"切开采源区域"的搬移，不引入新的强制，声音性由 153 道 rose
 PASS 题 0 回归背书。
 
+**第二处缺陷（同批修复）：`assign_one_leftover` 漏检预划边界。** 该函数
+只检查格子"入口边"是否跨越预划边界，未检查其余三侧——格经非边界边并入
+区域后，另一侧可能正压在预划边界上。补上 `would_violate` 全侧检查后，
+1433 从 `validation_failed`（产出非法候选）变为 `exhausted`（诚实无解），
+即非法候选消失但该题本身 rose_growth 仍解不出。同样 0 PASS 增益。
+
 ## 4. 关联
 
 - `rsolver/src/solver/rose/rose_growth.rs`（swap_repair / symbol repair）

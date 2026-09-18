@@ -31,6 +31,7 @@ Usage:
     python scripts/convert_puzzles_json_to_aog.py [--out aog_puzzles]
     python scripts/convert_puzzles_json_to_aog.py --ids 0008 0079   # debug a subset
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,6 +61,15 @@ AREA_BOUNDS: list[tuple[str, str]] = [
 ]
 
 
+def _advance(ci: int, pred) -> int:
+    """One compass direction step: consume 1-2 chars then the separator."""
+    if pred(ci + 1) and pred(ci + 2):
+        ci += 2
+    elif pred(ci + 1):
+        ci += 1
+    return ci + 1
+
+
 def _compass_end(j: int, line: str) -> int:
     """Replicate the C++ compass-cell parsing to find where the cell ends.
 
@@ -72,32 +82,15 @@ def _compass_end(j: int, line: str) -> int:
     def g(i: int) -> str:
         return line[i] if i < n else "\0"
 
+    def not_marker(marker: str):
+        return lambda i: g(i) != marker
+
     ci = j
-    # up: marker 'D'
-    if g(ci + 1) != "D" and g(ci + 2) != "D":
-        ci += 2
-    elif g(ci + 1) != "D":
-        ci += 1
-    ci += 1
-    # down: marker 'L'
-    if g(ci + 1) != "L" and g(ci + 2) != "L":
-        ci += 2
-    elif g(ci + 1) != "L":
-        ci += 1
-    ci += 1
-    # left: marker 'R'
-    if g(ci + 1) != "R" and g(ci + 2) != "R":
-        ci += 2
-    elif g(ci + 1) != "R":
-        ci += 1
-    ci += 1
+    # up / down / left are terminated by their marker char ('D' / 'L' / 'R').
+    for marker in ("D", "L", "R"):
+        ci = _advance(ci, not_marker(marker))
     # right: trailing digits
-    if g(ci + 1).isdigit() and g(ci + 2).isdigit():
-        ci += 2
-    elif g(ci + 1).isdigit():
-        ci += 1
-    ci += 1
-    return ci
+    return _advance(ci, lambda i: g(i).isdigit())
 
 
 def _area_line_min_width(line: str, w: int) -> int:
@@ -140,12 +133,35 @@ def _pad_grid_lines(rows: list[str], w: int) -> list[str]:
     min_node = 3 * w + 1
     result = []
     for i, ln in enumerate(rows):
-        if i % 2 == 0:
-            need = min_node
-        else:
-            need = _area_line_min_width(ln, w)
+        need = min_node if i % 2 == 0 else _area_line_min_width(ln, w)
         result.append(ln if len(ln) >= need else ln.ljust(need))
     return result
+
+
+def _shape_lines(p: dict) -> list[str]:
+    """SHAPE definitions + optional SHAPE_BANK directive."""
+    lines: list[str] = []
+    for shape in p.get("shapes", []):
+        grid = shape["grid"]
+        pad = max((len(r) for r in grid), default=0)
+        lines.append(f"SHAPE {shape['id']} {len(grid)}")
+        lines.extend(r.ljust(pad) for r in grid)
+    if p.get("shape_bank"):
+        lines.append(f"SHAPE_BANK {len(p['shape_bank'])}")
+    return lines
+
+
+def _rule_lines(p: dict) -> list[str]:
+    """Rule flags and area-bound directives."""
+    flags = [directive for key, directive in RULE_FLAGS if p.get(key)]
+    bounds = [f"{directive} {p[key]}" for key, directive in AREA_BOUNDS if p.get(key) is not None]
+    return flags + bounds
+
+
+def _pad_solution_lines(rows: list[str], w: int) -> list[str]:
+    """Solutions are fixed-width boundary renderings, so 3*width+1 is enough."""
+    grid_width = 3 * w + 1
+    return [ln if len(ln) >= grid_width else ln.ljust(grid_width) for ln in rows]
 
 
 def build_puz(p: dict) -> str:
@@ -156,50 +172,75 @@ def build_puz(p: dict) -> str:
     # Optional headers, all skipped by the C++ parser.
     lines.append("VERSION 1")
     lines.append("PUZZLE_VERSION 2")
-    lines.append("DIFFICULTY %s" % p["difficulty"])
+    lines.append(f"DIFFICULTY {p['difficulty']}")
 
     # Shape definitions: the C++ assigns indices 1..n by insertion order, and the
-    # archive's S1/S2 cell markers reference those ids, so emit in id order.
-    # The archive stores each shape grid with trailing spaces trimmed; the C++
-    # SHAPE parser sizes the shape as max(last-row length, n_rows), so an
-    # un-padded last row silently drops cells.  Pad every row to the max width.
-    for shape in p.get("shapes", []):
-        grid = shape["grid"]
-        pad = max((len(r) for r in grid), default=0)
-        lines.append("SHAPE %s %d" % (shape["id"], len(grid)))
-        lines.extend(r.ljust(pad) for r in grid)
-    if p.get("shape_bank"):
-        # Enables 'predefined shapes only' in the solver.  The count must sit on the
-        # same line (main() consumes the rest of it with getline).
-        lines.append("SHAPE_BANK %d" % len(p["shape_bank"]))
-
+    # archive's S1/S2 cell markers reference those ids, so emit in id order
+    # (_shape_lines).  The archive stores each shape grid with trailing spaces
+    # trimmed, so every row is padded to the max width there.
+    lines += _shape_lines(p)
     # Rule / area-bound directives.
-    for key, directive in RULE_FLAGS:
-        if p.get(key):
-            lines.append(directive)
-    for key, directive in AREA_BOUNDS:
-        if p.get(key) is not None:
-            lines.append("%s %s" % (directive, p[key]))
+    lines += _rule_lines(p)
 
-    lines.append("DIMENSIONS %d %d" % (w, h))
+    lines.append(f"DIMENSIONS {w} {h}")
 
     # Grid sections: pad each line with trailing spaces (the archive trims them).
     # Node lines need 3*width+1 chars; area lines may need more because compass/S
-    # cells widen them in the C++ parser.  Solutions are fixed-width boundary
-    # renderings, so 3*width+1 is enough.  Longer lines are never truncated.
-    grid_width = 3 * w + 1
+    # cells widen them in the C++ parser (_pad_grid_lines).  Longer lines are
+    # never truncated.
     lines.append("PUZZLE")
     lines.extend(_pad_grid_lines(p["puzzle_grid"], w))
     lines.append("SOLUTION")
-    for ln in p["solution"]:
-        lines.append(ln if len(ln) >= grid_width else ln.ljust(grid_width))
+    lines.extend(_pad_solution_lines(p["solution"], w))
 
     return "\n".join(lines) + "\n"
 
 
 def load_archive() -> dict[str, dict]:
     """id -> archive puzzle dict."""
-    return {str(p["id"]): p for p in json.load(open(ARCHIVE_JSON))}
+    with open(ARCHIVE_JSON) as f:
+        return {str(p["id"]): p for p in json.load(f)}
+
+
+def _select_items(archive: dict[str, dict], ids: list[str] | None) -> list[tuple[str, dict]]:
+    if ids:
+        return [(i, archive[i]) for i in ids if i in archive]
+    return sorted(archive.items())
+
+
+def _existing_solution(dest: str) -> str | None:
+    """Solution text already baked into dest (fix_puz_solutions.py), if any."""
+    try:
+        with open(dest, encoding="utf-8") as f:
+            existing_sol = f.read().partition("\nSOLUTION\n")[2]
+    except FileNotFoundError:
+        return None
+    return existing_sol
+
+
+def _final_text(text: str, p: dict, dest: str) -> str:
+    if p.get("solution"):
+        return text
+    # The archive has no official solution for this puzzle (0067, 1130); keep a
+    # SOLUTION baked by fix_puz_solutions.py if one already exists, otherwise the
+    # next batch_run would report it 'wrong'.
+    existing_sol = _existing_solution(dest)
+    if existing_sol and existing_sol.strip():
+        return text.split("\nSOLUTION\n", 1)[0] + "\nSOLUTION\n" + existing_sol
+    return text
+
+
+def _convert_one(pid: str, p: dict, out_root: str) -> bool:
+    """Write one .puz; False when the entry is not a game puzzle."""
+    if not p["zone"] or not p["zone"].startswith("Zone"):
+        return False  # skip the non-game 'Puzzles'/'Data' entries
+    out_dir = os.path.join(out_root, p["zone"], p["type"])
+    os.makedirs(out_dir, exist_ok=True)
+    dest = os.path.join(out_dir, f"{pid}.puz")
+    text = _final_text(build_puz(p), p, dest)
+    with open(dest, "w", encoding="utf-8") as f:
+        f.write(text)
+    return True
 
 
 def main() -> None:
@@ -213,33 +254,8 @@ def main() -> None:
     args = parser.parse_args()
 
     archive = load_archive()
-    if args.ids:
-        items = [(i, archive[i]) for i in args.ids if i in archive]
-    else:
-        items = sorted(archive.items())
-
-    converted = 0
-    for pid, p in items:
-        if not p["zone"] or not p["zone"].startswith("Zone"):
-            continue  # skip the non-game 'Puzzles'/'Data' entries
-        out_dir = os.path.join(args.out, p["zone"], p["type"])
-        os.makedirs(out_dir, exist_ok=True)
-        dest = os.path.join(out_dir, f"{pid}.puz")
-        text = build_puz(p)
-        if not p.get("solution"):
-            # The archive has no official solution for this puzzle (0067, 1130);
-            # keep a SOLUTION baked by fix_puz_solutions.py if one already exists,
-            # otherwise the next batch_run would report it 'wrong'.
-            existing_sol = None
-            try:
-                _head, _sep, existing_sol = open(dest, encoding="utf-8").read().partition("\nSOLUTION\n")
-            except FileNotFoundError:
-                pass
-            if existing_sol and existing_sol.strip():
-                text = text.split("\nSOLUTION\n", 1)[0] + "\nSOLUTION\n" + existing_sol
-        with open(dest, "w", encoding="utf-8") as f:
-            f.write(text)
-        converted += 1
+    items = _select_items(archive, args.ids)
+    converted = sum(1 for pid, p in items if _convert_one(pid, p, args.out))
 
     print(f"转换 {converted} 个谜题 -> {os.path.abspath(args.out)}")
     if not args.ids:

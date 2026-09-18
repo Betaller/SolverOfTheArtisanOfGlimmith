@@ -1,11 +1,9 @@
 """Tests for RustSolver.solve_batch, focused on the stderr-deadlock bug (L6)."""
+
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
-
-import pytest
 
 from src.models.board import Board
 from src.models.puzzle import Puzzle
@@ -23,9 +21,7 @@ def test_solve_batch_no_deadlock_when_stderr_flooded(monkeypatch) -> None:
     batch returns promptly even when the child floods stderr.
     """
     # The constructor looks for the real binary; we never actually launch it.
-    monkeypatch.setattr(
-        "src.solver.rust_solver._find_binary", lambda: "/tmp/dummy_rsolver"
-    )
+    monkeypatch.setattr("src.solver.rust_solver._find_binary", lambda: "/tmp/dummy_rsolver")
 
     script = (
         "import sys, json; "
@@ -35,7 +31,7 @@ def test_solve_batch_no_deadlock_when_stderr_flooded(monkeypatch) -> None:
         "sys.stderr.flush()"
     )
 
-    def fake_popen(args, **kwargs):
+    def fake_popen(_args, **kwargs):
         # Ignore the requested binary; run a helper that floods stderr and emits
         # exactly one JSON result line on stdout.
         return subprocess.Popen([sys.executable, "-c", script], **kwargs)

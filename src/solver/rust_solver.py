@@ -8,6 +8,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import IO, Any, cast
 
 from src.io.puzzle_codec import puzzle_to_dict
 from src.models.board import Board, Shape
@@ -82,6 +83,16 @@ class _BatchLineReader:
             self.buf += chunk
 
 
+def _rect_placement_ok(
+    board: Board, r0: int, c0: int, rh: int, rw: int, fillable: set[tuple[int, int]]
+) -> bool:
+    """True if a rh×rw rectangle at (r0, c0) sits entirely on fillable cells and
+    avoids every pre-drawn boundary edge."""
+    if any((r0 + r, c0 + c) not in fillable for r in range(rh) for c in range(rw)):
+        return False
+    return not _crosses_boundary(board, r0, c0, rh, rw)
+
+
 def _fitting_rectangles(puzzle: Puzzle) -> list[list[list[int]]]:
     """All rectangle shapes (1x1 .. HxW) that fit at least one valid placement
     on the actual board — within fillable cells and not crossing any pre-drawn
@@ -99,17 +110,11 @@ def _fitting_rectangles(puzzle: Puzzle) -> list[list[list[int]]]:
     shapes: list[list[list[int]]] = []
     for rh in range(1, h + 1):
         for rw in range(1, w + 1):
-            fits = False
-            for r0 in range(h - rh + 1):
-                for c0 in range(w - rw + 1):
-                    if any((r0 + r, c0 + c) not in fillable for r in range(rh) for c in range(rw)):
-                        continue
-                    if _crosses_boundary(board, r0, c0, rh, rw):
-                        continue
-                    fits = True
-                    break
-                if fits:
-                    break
+            fits = any(
+                _rect_placement_ok(board, r0, c0, rh, rw, fillable)
+                for r0 in range(h - rh + 1)
+                for c0 in range(w - rw + 1)
+            )
             if fits:
                 shapes.append([[r, c] for r in range(rh) for c in range(rw)])
     return shapes
@@ -149,7 +154,7 @@ class RustSolver(Solver):
 
     def __init__(self) -> None:
         self._binary = _find_binary()
-        self._proc: subprocess.Popen | None = None
+        self._proc: subprocess.Popen[str] | None = None
         self._cancelled = False
 
     # The Rust binary runs solver parts sequentially (aog → rose → edge_csp →
@@ -191,7 +196,7 @@ class RustSolver(Solver):
             data["shape_pool"] = _fitting_rectangles(puzzle)
         return json.dumps(data, ensure_ascii=True)
 
-    def _parse_solution(self, data: dict, puzzle: Puzzle) -> Solution:
+    def _parse_solution(self, data: dict[str, Any], puzzle: Puzzle) -> Solution:
         """Turn one solution-JSON dict into a Solution."""
         attempts = self._parse_attempts(data.get("attempts", []))
         if not data.get("solved"):
@@ -233,7 +238,7 @@ class RustSolver(Solver):
         )
 
     @staticmethod
-    def _parse_attempts(raw: list) -> list[SolverAttempt]:
+    def _parse_attempts(raw: list[object]) -> list[SolverAttempt]:
         """Parse the Rust `attempts` JSON array into `SolverAttempt` objects.
 
         Tolerant of missing/old binaries that emit no `attempts` field: returns
@@ -314,7 +319,7 @@ class RustSolver(Solver):
         return self._parse_solution(data, puzzle)
 
     def _pump(
-        self, proc: subprocess.Popen, input_json: str, budget: float
+        self, proc: subprocess.Popen[str], input_json: str, budget: float
     ) -> tuple[str, str, bool]:
         """Feed `input_json`, drain both pipes, and wait with a deadline.
 
@@ -358,6 +363,47 @@ class RustSolver(Solver):
 
         return captured.get("out", ""), captured.get("err", ""), killed
 
+    @staticmethod
+    def _batch_failed(puzzles: list[Puzzle], msg: str) -> list[Solution]:
+        return [Solution(solved=False, error_message=msg) for _ in puzzles]
+
+    @staticmethod
+    def _fill_failures(puzzles: list[Puzzle], results: list[Solution], msg: str) -> list[Solution]:
+        """Pad `results` with `msg` failures up to one entry per puzzle.
+
+        Solutions parsed before the failure are kept — a batch that dies on
+        puzzle N must still report the N-1 answers it already produced.
+        """
+        while len(results) < len(puzzles):
+            results.append(Solution(solved=False, error_message=msg))
+        return results
+
+    def _batch_dead(
+        self,
+        proc: subprocess.Popen[bytes],
+        puzzles: list[Puzzle],
+        results: list[Solution],
+        timeout: float,
+    ) -> list[Solution]:
+        code = proc.poll()
+        err = (
+            f"Rust batch died (exit {code})"
+            if code is not None
+            else f"Rust batch timed out after {timeout:.0f}s"
+        )
+        with contextlib.suppress(Exception):
+            proc.kill()
+        self._fill_failures(puzzles, results, err)
+        with contextlib.suppress(Exception):
+            proc.wait()
+        return results
+
+    def _parse_batch_line(self, line: str, puzzle: Puzzle, i: int) -> Solution:
+        try:
+            return self._parse_solution(json.loads(line), puzzle)
+        except json.JSONDecodeError as e:
+            return Solution(solved=False, error_message=f"Invalid JSON from batch line {i}: {e}")
+
     def solve_batch(self, puzzles: list[Puzzle], timeout: float = 30.0) -> list[Solution]:
         """Solve many puzzles in ONE rsolver `--batch` subprocess (line-delimited
         JSON in/out), reusing the process instead of spawning one per puzzle.
@@ -372,9 +418,6 @@ class RustSolver(Solver):
         lines = [self._prepare_input(p) for p in puzzles]
         input_data = "\n".join(lines) + "\n"
         per_puzzle = self._wall_budget(timeout)
-        failed = lambda msg: [  # noqa: E731
-            Solution(solved=False, error_message=msg) for _ in puzzles
-        ]
 
         try:
             # Binary mode: the per-puzzle reader does `os.read` on the raw fd,
@@ -393,75 +436,59 @@ class RustSolver(Solver):
                 env=self._subprocess_env(timeout),
             )
         except FileNotFoundError:
-            return failed(f"Rust solver binary not found: {self._binary}")
+            return self._batch_failed(puzzles, f"Rust solver binary not found: {self._binary}")
         except Exception as e:
-            return failed(str(e))
+            return self._batch_failed(puzzles, str(e))
 
         # Feed stdin in a thread so a large input can't deadlock against Rust's
         # stdout (Rust reads all input up front, then solves and writes output).
+        # `stdin=subprocess.PIPE` guarantees a stream; bound once here (a
+        # `cast`, i.e. a no-op at runtime) so the thread body needs no narrowing.
+        stdin = cast(IO[bytes], proc.stdin)
+
         def _feed() -> None:
             try:
-                proc.stdin.write(input_data.encode("utf-8"))
-                proc.stdin.flush()
+                stdin.write(input_data.encode("utf-8"))
+                stdin.flush()
             finally:
-                proc.stdin.close()
+                stdin.close()
 
         threading.Thread(target=_feed, daemon=True).start()
 
         results: list[Solution] = []
-        reader = _BatchLineReader(proc.stdout.fileno())
+        stdout = cast(IO[bytes], proc.stdout)
+        reader = _BatchLineReader(stdout.fileno())
         try:
             for i, puzzle in enumerate(puzzles):
                 line = reader.readline(time.monotonic() + per_puzzle)
                 if line is None:
                     # This puzzle exceeded its budget or the process died.
-                    code = proc.poll()
-                    err = (
-                        f"Rust batch died (exit {code})"
-                        if code is not None
-                        else f"Rust batch timed out after {timeout:.0f}s"
-                    )
-                    with contextlib.suppress(Exception):
-                        proc.kill()
-                    while len(results) < len(puzzles):
-                        results.append(Solution(solved=False, error_message=err))
-                    with contextlib.suppress(Exception):
-                        proc.wait()
-                    return results
-                try:
-                    results.append(self._parse_solution(json.loads(line), puzzle))
-                except json.JSONDecodeError as e:
-                    results.append(
-                        Solution(
-                            solved=False,
-                            error_message=f"Invalid JSON from batch line {i}: {e}",
-                        )
-                    )
+                    return self._batch_dead(proc, puzzles, results, timeout)
+                results.append(self._parse_batch_line(line, puzzle, i))
             with contextlib.suppress(Exception):
                 proc.wait()
         except Exception as e:
             with contextlib.suppress(Exception):
                 proc.kill()
-            while len(results) < len(puzzles):
-                results.append(Solution(solved=False, error_message=str(e)))
+            return self._fill_failures(puzzles, results, str(e))
         return results
 
     @staticmethod
     def _board_from_regions(puzzle: Puzzle, regions: list[RegionInfo]) -> Board:
         board = Board(puzzle.height, puzzle.width)
-        for c in puzzle.cells:
-            dst = board.cell(c.row, c.col)
-            dst.number = c.number
-            dst.symbol = c.symbol
-            dst.shape_pattern = c.shape_pattern
-            dst.compass = c.compass
-            dst.fence_pattern = c.fence_pattern
-            dst.blocked = c.blocked
+        for cell in puzzle.cells:
+            dst = board.cell(cell.row, cell.col)
+            dst.number = cell.number
+            dst.symbol = cell.symbol
+            dst.shape_pattern = cell.shape_pattern
+            dst.compass = cell.compass
+            dst.fence_pattern = cell.fence_pattern
+            dst.blocked = cell.blocked
         for region in regions:
             for r, c in region.cells:
                 board.cell(r, c).region_id = region.region_id
         return board
 
     @classmethod
-    def supports(cls, puzzle: Puzzle) -> bool:
+    def supports(cls, puzzle: Puzzle) -> bool:  # noqa: ARG003 — hook for subclasses
         return True

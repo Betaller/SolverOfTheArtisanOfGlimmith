@@ -1,20 +1,34 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
+from collections.abc import Callable
+from typing import cast
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QSize
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QPainter, QPen, QBrush, QColor, QFont, QMouseEvent, QKeyEvent,
-    QPaintEvent, QWheelEvent, QAction,
+    QBrush,
+    QColor,
+    QFont,
+    QFontMetrics,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QWheelEvent,
 )
-from PySide6.QtWidgets import QWidget, QMenu
+from PySide6.QtWidgets import QMenu, QWidget
 
 from src.models.board import (
-    Board, Cell, Edge, EdgeConstraint, EdgeConstraintType, Vertex, Shape, CompassClue
+    Board,
+    Cell,
+    CompassClue,
+    Edge,
+    EdgeConstraint,
+    EdgeConstraintType,
+    Shape,
 )
 from src.ui import theme as _ui_theme
-
 
 MODE_CURSORS = {
     "select": Qt.CursorShape.ArrowCursor,
@@ -39,6 +53,20 @@ FENCE_EDGES: dict[str, tuple[int, int, int, int]] = {
     "F4": (1, 1, 1, 1),
     "F7": (1, 1, 0, 0),
 }
+
+# Arrow key -> (dr, dc) applied to the current selection.
+ARROW_STEPS: dict[int, tuple[int, int]] = {
+    Qt.Key.Key_Up: (-1, 0),
+    Qt.Key.Key_Down: (1, 0),
+    Qt.Key.Key_Left: (0, -1),
+    Qt.Key.Key_Right: (0, 1),
+}
+
+# Keys that delete the content of the selected cell.
+DELETE_KEYS = (Qt.Key.Key_Delete, Qt.Key.Key_Backspace)
+
+# Keys that commit an in-progress inline number.
+COMMIT_KEYS = (Qt.Key.Key_Return, Qt.Key.Key_Enter)
 
 
 class GridWidget(QWidget):
@@ -112,14 +140,14 @@ class GridWidget(QWidget):
         self._inline_number = ""
         self.update()
 
-    def sizeHint(self) -> QSize:
+    def sizeHint(self) -> QSize:  # noqa: N802 — Qt override
         if self.board is None:
             return QSize(400, 300)
         w = self._padding * 2 + self.board.width * self._cell_size
         h = self._padding * 2 + self.board.height * self._cell_size
         return QSize(w, h)
 
-    def minimumSizeHint(self) -> QSize:
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 — Qt override
         return self.sizeHint()
 
     def _cache_rects(self) -> None:
@@ -193,7 +221,7 @@ class GridWidget(QWidget):
     def _hit_test_cell(self, pos: QPointF) -> tuple[int, int] | None:
         if self.board is None:
             return None
-        if not hasattr(self, '_cell_rects') or not self._cell_rects:
+        if not hasattr(self, "_cell_rects") or not self._cell_rects:
             return None
         for (r, c), rect in self._cell_rects.items():
             if rect.contains(pos):
@@ -203,7 +231,7 @@ class GridWidget(QWidget):
     def _hit_test_vertex(self, pos: QPointF) -> tuple[int, int] | None:
         if self.board is None:
             return None
-        if not hasattr(self, '_vertex_positions') or not self._vertex_positions:
+        if not hasattr(self, "_vertex_positions") or not self._vertex_positions:
             return None
         threshold = max(10, self._cell_size // 7)
         for (r, c), pt in self._vertex_positions.items():
@@ -214,7 +242,7 @@ class GridWidget(QWidget):
     def _hit_test_edge(self, pos: QPointF) -> tuple[int, int, int, int] | None:
         if self.board is None:
             return None
-        if not hasattr(self, '_edge_rects') or not self._edge_rects:
+        if not hasattr(self, "_edge_rects") or not self._edge_rects:
             return None
         threshold = max(10, self._cell_size // 7)
         best: tuple[float, tuple[int, int, int, int]] | None = None
@@ -229,9 +257,8 @@ class GridWidget(QWidget):
             px = x1 + t_val * dx
             py = y1 + t_val * dy
             dist = ((pos.x() - px) ** 2 + (pos.y() - py) ** 2) ** 0.5
-            if dist < threshold:
-                if best is None or dist < best[0]:
-                    best = (dist, key)
+            if dist < threshold and (best is None or dist < best[0]):
+                best = (dist, key)
         return best[1] if best is not None else None
 
     def _edge_endpoints(self, e: Edge) -> tuple[float, float, float, float]:
@@ -251,18 +278,21 @@ class GridWidget(QWidget):
         dc = abs(c1 - c2)
         return (dr == 1 and dc == 0) or (dr == 0 and dc == 1)
 
-    def _outer_key(self, v1: tuple[int, int], v2: tuple[int, int]) -> tuple[int, int, int, int] | None:
+    def _outer_key(
+        self, v1: tuple[int, int], v2: tuple[int, int]
+    ) -> tuple[int, int, int, int] | None:
         r1, c1 = v1
         r2, c2 = v2
-        if not (abs(r1 - r2) + abs(c1 - c2) == 1):
+        if abs(r1 - r2) + abs(c1 - c2) != 1:
             return None
+        board = cast("Board", self.board)
         if r1 == r2:
             c = min(c1, c2)
-            if r1 == 0 or r1 == self.board.height:
+            if r1 == 0 or r1 == board.height:
                 return (r1, c, r1, c + 1)
         if c1 == c2:
             r = min(r1, r2)
-            if c1 == 0 or c1 == self.board.width:
+            if c1 == 0 or c1 == board.width:
                 return (r, c1, r + 1, c1)
         return None
 
@@ -292,7 +322,7 @@ class GridWidget(QWidget):
         cell.region_id = None
 
     def _cell_context_menu(self, pos: QPointF, r: int, c: int) -> None:
-        cell = self.board.cell(r, c)
+        cell = cast("Board", self.board).cell(r, c)
         menu = QMenu(self)
 
         if cell.blocked:
@@ -313,10 +343,15 @@ class GridWidget(QWidget):
         act_clear_sym.triggered.connect(lambda: self._set_cell_attr(r, c, "symbol", None))
 
         act_clear_all = menu.addAction("清除全部")
-        act_clear_all.setEnabled(not cell.blocked and (
-            cell.number is not None or cell.symbol is not None or
-            cell.compass is not None or cell.shape_pattern is not None
-        ))
+        act_clear_all.setEnabled(
+            not cell.blocked
+            and (
+                cell.number is not None
+                or cell.symbol is not None
+                or cell.compass is not None
+                or cell.shape_pattern is not None
+            )
+        )
         act_clear_all.triggered.connect(lambda: self._clear_cell_properties(r, c))
 
         menu.addSeparator()
@@ -327,7 +362,7 @@ class GridWidget(QWidget):
         menu.exec(self.mapToGlobal(pos.toPoint()))
 
     def _edge_context_menu(self, pos: QPointF, r1: int, c1: int, r2: int, c2: int) -> None:
-        e = self.board.edge_between(r1, c1, r2, c2)
+        e = cast("Board", self.board).edge_between(r1, c1, r2, c2)
         if e is None:
             return
         menu = QMenu(self)
@@ -337,18 +372,30 @@ class GridWidget(QWidget):
         menu.addSeparator()
 
         act_hetero = menu.addAction("设异生 (≠)")
-        act_hetero.setChecked(e.constraint is not None and e.constraint.type == EdgeConstraintType.HETEROGENEOUS)
-        act_hetero.triggered.connect(lambda: self._set_edge_constraint(r1, c1, r2, c2, EdgeConstraintType.HETEROGENEOUS))
+        act_hetero.setChecked(
+            e.constraint is not None and e.constraint.type == EdgeConstraintType.HETEROGENEOUS
+        )
+        act_hetero.triggered.connect(
+            lambda: self._set_edge_constraint(r1, c1, r2, c2, EdgeConstraintType.HETEROGENEOUS)
+        )
 
         act_homo = menu.addAction("设双生 (=)")
-        act_homo.setChecked(e.constraint is not None and e.constraint.type == EdgeConstraintType.HOMOGENEOUS)
-        act_homo.triggered.connect(lambda: self._set_edge_constraint(r1, c1, r2, c2, EdgeConstraintType.HOMOGENEOUS))
+        act_homo.setChecked(
+            e.constraint is not None and e.constraint.type == EdgeConstraintType.HOMOGENEOUS
+        )
+        act_homo.triggered.connect(
+            lambda: self._set_edge_constraint(r1, c1, r2, c2, EdgeConstraintType.HOMOGENEOUS)
+        )
 
         act_ineq = menu.addAction("设不等号 (箭头)")
-        act_ineq.triggered.connect(lambda: self._set_edge_constraint(r1, c1, r2, c2, EdgeConstraintType.INEQUALITY))
+        act_ineq.triggered.connect(
+            lambda: self._set_edge_constraint(r1, c1, r2, c2, EdgeConstraintType.INEQUALITY)
+        )
 
         act_diff = menu.addAction("设差值")
-        act_diff.triggered.connect(lambda: self._set_edge_constraint(r1, c1, r2, c2, EdgeConstraintType.DIFFERENCE, 1))
+        act_diff.triggered.connect(
+            lambda: self._set_edge_constraint(r1, c1, r2, c2, EdgeConstraintType.DIFFERENCE, 1)
+        )
 
         if e.constraint is not None:
             menu.addSeparator()
@@ -358,7 +405,7 @@ class GridWidget(QWidget):
         menu.exec(self.mapToGlobal(pos.toPoint()))
 
     def _vertex_context_menu(self, pos: QPointF, r: int, c: int) -> None:
-        v = self.board.vertex_at(r, c)
+        v = cast("Board", self.board).vertex_at(r, c)
         if v is None:
             return
         menu = QMenu(self)
@@ -369,7 +416,7 @@ class GridWidget(QWidget):
         menu.exec(self.mapToGlobal(pos.toPoint()))
 
     def _paint_blocked(self, r: int, c: int, blocked: bool) -> None:
-        cell = self.board.cell(r, c)
+        cell = cast("Board", self.board).cell(r, c)
         if cell.blocked != blocked:
             cell.blocked = blocked
             if blocked:
@@ -378,7 +425,7 @@ class GridWidget(QWidget):
         self.update()
 
     def _toggle_blocked(self, r: int, c: int) -> None:
-        cell = self.board.cell(r, c)
+        cell = cast("Board", self.board).cell(r, c)
         cell.blocked = not cell.blocked
         if cell.blocked:
             self._clear_cell(cell)
@@ -386,14 +433,14 @@ class GridWidget(QWidget):
         self.board_modified.emit()
         self.update()
 
-    def _set_cell_attr(self, r: int, c: int, attr: str, value) -> None:
-        cell = self.board.cell(r, c)
+    def _set_cell_attr(self, r: int, c: int, attr: str, value: object) -> None:
+        cell = cast("Board", self.board).cell(r, c)
         setattr(cell, attr, value)
         self.board_modified.emit()
         self.update()
 
     def _clear_cell_properties(self, r: int, c: int) -> None:
-        cell = self.board.cell(r, c)
+        cell = cast("Board", self.board).cell(r, c)
         if not cell.blocked:
             cell.number = None
             cell.symbol = None
@@ -405,22 +452,29 @@ class GridWidget(QWidget):
             self.update()
 
     def _toggle_cell_boundary(self, r: int, c: int) -> None:
-        for e in self.board.edges():
+        for e in cast("Board", self.board).edges():
             if (e.r1 == r and e.c1 == c) or (e.r2 == r and e.c2 == c):
                 e.is_boundary = not e.is_boundary
         self.board_modified.emit()
         self.update()
 
     def _toggle_edge_boundary(self, r1: int, c1: int, r2: int, c2: int) -> None:
-        e = self.board.edge_between(r1, c1, r2, c2)
+        e = cast("Board", self.board).edge_between(r1, c1, r2, c2)
         if e is not None:
             e.is_boundary = not e.is_boundary
             self.board_modified.emit()
             self.update()
 
-    def _set_edge_constraint(self, r1: int, c1: int, r2: int, c2: int,
-                             ctype: EdgeConstraintType, value: int | None = None) -> None:
-        e = self.board.edge_between(r1, c1, r2, c2)
+    def _set_edge_constraint(
+        self,
+        r1: int,
+        c1: int,
+        r2: int,
+        c2: int,
+        ctype: EdgeConstraintType,
+        value: int | None = None,
+    ) -> None:
+        e = cast("Board", self.board).edge_between(r1, c1, r2, c2)
         if e is not None:
             e.constraint = EdgeConstraint(type=ctype, value=value)
             self.board_modified.emit()
@@ -428,7 +482,7 @@ class GridWidget(QWidget):
             self.update()
 
     def _clear_edge_constraint(self, r1: int, c1: int, r2: int, c2: int) -> None:
-        e = self.board.edge_between(r1, c1, r2, c2)
+        e = cast("Board", self.board).edge_between(r1, c1, r2, c2)
         if e is not None:
             e.constraint = None
             self.board_modified.emit()
@@ -436,13 +490,13 @@ class GridWidget(QWidget):
             self.update()
 
     def _clear_watchtower(self, r: int, c: int) -> None:
-        v = self.board.vertex_at(r, c)
+        v = cast("Board", self.board).vertex_at(r, c)
         if v is not None:
             v.watchtower = None
             self.board_modified.emit()
             self.update()
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 — Qt override
         if self.board is None:
             return
         pos = event.position()
@@ -452,79 +506,97 @@ class GridWidget(QWidget):
         cell = self._hit_test_cell(pos)
 
         if event.button() == Qt.MouseButton.RightButton:
-            if self._mode == self.MODE_BLOCK:
-                if cell is not None:
-                    self._block_dragging = True
-                    self._block_paint_blocked = False
-                    self._paint_blocked(cell[0], cell[1], False)
-                    self._selected_cell = cell
-                    self.update()
-                return
-            if vertex is not None:
-                vr, vc = vertex[0], vertex[1]
-                self._vertex_context_menu(pos, vr, vc)
-            elif edge is not None:
-                self._edge_context_menu(pos, *edge)
-            elif cell is not None:
-                self._cell_context_menu(pos, cell[0], cell[1])
+            self._press_right_button(pos, vertex, edge, cell)
             return
 
         if event.button() != Qt.MouseButton.LeftButton:
             return
 
-        if self._mode == self.MODE_BOUNDARY:
-            if vertex is not None:
-                # Single click on a vertex: toggle the edge to an adjacent vertex
-                if edge is not None:
-                    self._toggle_edge_boundary(*edge)
-                    self._selected_edge = edge
-                    self._selected_vertex = None
-                    self._selected_cell = None
-                    self.update()
-                    return
-                # Start dragging from vertex
-                self._boundary_dragging = True
-                self._last_boundary_vertex = vertex
-                self._selected_vertex = vertex
-                self._boundary_start_vertex = None
+        handlers: dict[str, Callable[[], None]] = {
+            self.MODE_BOUNDARY: lambda: self._press_boundary(pos, vertex, edge),
+            self.MODE_WATCHTOWER: lambda: self._press_watchtower(vertex),
+            self.MODE_BLOCK: lambda: self._press_block(cell),
+            self.MODE_NUMBER: lambda: self._press_number(cell),
+            self.MODE_SYMBOL: lambda: self._press_symbol(cell),
+            self.MODE_COMPASS: lambda: self._press_compass(cell),
+            self.MODE_SELECT: lambda: self._press_select(vertex, edge, cell),
+        }
+        handler = handlers.get(self._mode)
+        if handler is not None:
+            handler()
+
+    def _press_right_button(
+        self,
+        pos: QPointF,
+        vertex: tuple[int, int] | None,
+        edge: tuple[int, int, int, int] | None,
+        cell: tuple[int, int] | None,
+    ) -> None:
+        if self._mode == self.MODE_BLOCK:
+            if cell is not None:
+                self._block_dragging = True
+                self._block_paint_blocked = False
+                self._paint_blocked(cell[0], cell[1], False)
+                self._selected_cell = cell
                 self.update()
-            elif edge is not None:
-                # Click directly on edge to toggle
+            return
+        if vertex is not None:
+            vr, vc = vertex[0], vertex[1]
+            self._vertex_context_menu(pos, vr, vc)
+        elif edge is not None:
+            self._edge_context_menu(pos, *edge)
+        elif cell is not None:
+            self._cell_context_menu(pos, cell[0], cell[1])
+
+    def _press_boundary(
+        self, _pos: QPointF, vertex: tuple[int, int] | None, edge: tuple[int, int, int, int] | None
+    ) -> None:
+        if vertex is not None:
+            if edge is not None:
                 self._toggle_edge_boundary(*edge)
                 self._selected_edge = edge
                 self._selected_vertex = None
                 self._selected_cell = None
                 self.update()
-            return
+                return
+            self._boundary_dragging = True
+            self._last_boundary_vertex = vertex
+            self._selected_vertex = vertex
+            self._boundary_start_vertex = None
+            self.update()
+        elif edge is not None:
+            self._toggle_edge_boundary(*edge)
+            self._selected_edge = edge
+            self._selected_vertex = None
+            self._selected_cell = None
+            self.update()
 
-        if self._mode == self.MODE_WATCHTOWER:
-            if vertex is not None:
-                # Board vertex coords == absolute grid corner coords.
-                vr, vc = vertex[0], vertex[1]
-                v = self.board.vertex_at(vr, vc)
-                if v is not None:
-                    val = self._current_number
-                    if val is not None and 1 <= val <= 4:
-                        v.watchtower = val
-                    self._selected_vertex = vertex
-                    self._selected_cell = None
-                    self._selected_edge = None
-                    self.board_modified.emit()
-                    self.vertex_clicked.emit(vr, vc)
-                    self.update()
-            return
-
-        if self._mode == self.MODE_BLOCK:
-            if cell is not None:
-                self._block_dragging = True
-                self._block_paint_blocked = True
-                self._paint_blocked(cell[0], cell[1], True)
-                self._selected_cell = cell
+    def _press_watchtower(self, vertex: tuple[int, int] | None) -> None:
+        if vertex is not None:
+            vr, vc = vertex[0], vertex[1]
+            v = cast("Board", self.board).vertex_at(vr, vc)
+            if v is not None:
+                val = self._current_number
+                if val is not None and 1 <= val <= 4:
+                    v.watchtower = val
+                self._selected_vertex = vertex
+                self._selected_cell = None
+                self._selected_edge = None
+                self.board_modified.emit()
+                self.vertex_clicked.emit(vr, vc)
                 self.update()
-            return
 
-        if self._mode == self.MODE_NUMBER and cell is not None:
-            c_obj = self.board.cell(cell[0], cell[1])
+    def _press_block(self, cell: tuple[int, int] | None) -> None:
+        if cell is not None:
+            self._block_dragging = True
+            self._block_paint_blocked = True
+            self._paint_blocked(cell[0], cell[1], True)
+            self._selected_cell = cell
+            self.update()
+
+    def _press_number(self, cell: tuple[int, int] | None) -> None:
+        if cell is not None:
+            c_obj = cast("Board", self.board).cell(cell[0], cell[1])
             if self._current_number is not None:
                 c_obj.number = self._current_number
             self._selected_cell = cell
@@ -535,10 +607,10 @@ class GridWidget(QWidget):
             self.setFocus()
             self.update()
             self.cell_clicked.emit(cell[0], cell[1])
-            return
 
-        if self._mode == self.MODE_SYMBOL and cell is not None:
-            c_obj = self.board.cell(cell[0], cell[1])
+    def _press_symbol(self, cell: tuple[int, int] | None) -> None:
+        if cell is not None:
+            c_obj = cast("Board", self.board).cell(cell[0], cell[1])
             c_obj.symbol = self._current_symbol
             self._selected_cell = cell
             self._selected_edge = None
@@ -546,10 +618,10 @@ class GridWidget(QWidget):
             self.board_modified.emit()
             self.update()
             self.cell_clicked.emit(cell[0], cell[1])
-            return
 
-        if self._mode == self.MODE_COMPASS and cell is not None:
-            c_obj = self.board.cell(cell[0], cell[1])
+    def _press_compass(self, cell: tuple[int, int] | None) -> None:
+        if cell is not None:
+            c_obj = cast("Board", self.board).cell(cell[0], cell[1])
             c_obj.compass = self._current_compass
             self._selected_cell = cell
             self._selected_edge = None
@@ -557,27 +629,52 @@ class GridWidget(QWidget):
             self.board_modified.emit()
             self.update()
             self.cell_clicked.emit(cell[0], cell[1])
-            return
 
-        if self._mode == self.MODE_SELECT:
-            # Vertex first (more specific than edge), then edge, then cell
-            if vertex is not None:
-                self._selected_vertex = vertex
-                self._selected_cell = None
-                self._selected_edge = None
-                self.vertex_clicked.emit(vertex[0], vertex[1])
-            elif edge is not None:
-                self._selected_edge = edge
-                self._selected_cell = None
-                self._selected_vertex = None
-                self.edge_clicked.emit(edge[0], edge[1], edge[2], edge[3])
-            elif cell is not None:
-                self._selected_cell = cell
-                self._selected_edge = None
-                self._selected_vertex = None
-                self.setFocus()
-                self.cell_clicked.emit(cell[0], cell[1])
-            self.update()
+    def _press_select(
+        self,
+        vertex: tuple[int, int] | None,
+        edge: tuple[int, int, int, int] | None,
+        cell: tuple[int, int] | None,
+    ) -> None:
+        if vertex is not None:
+            self._selected_vertex = vertex
+            self._selected_cell = None
+            self._selected_edge = None
+            self.vertex_clicked.emit(vertex[0], vertex[1])
+        elif edge is not None:
+            self._selected_edge = edge
+            self._selected_cell = None
+            self._selected_vertex = None
+            self.edge_clicked.emit(edge[0], edge[1], edge[2], edge[3])
+        elif cell is not None:
+            self._selected_cell = cell
+            self._selected_edge = None
+            self._selected_vertex = None
+            self.setFocus()
+            self.cell_clicked.emit(cell[0], cell[1])
+        self.update()
+
+    def _toggle_boundary_segment(self, start: tuple[int, int], vertex: tuple[int, int]) -> None:
+        """Toggle the boundary between two adjacent vertices (inner edge, or
+        an outer-boundary edge). Emits ``edge_clicked`` for inner edges; the
+        caller is responsible for ``board_modified``/``update``."""
+        e = self._vertices_to_edge(start, vertex)
+        if e is not None:
+            e.is_boundary = not e.is_boundary
+            self.edge_clicked.emit(e.r1, e.c1, e.r2, e.c2)
+            return
+        okey = self._outer_key(start, vertex)
+        if okey is not None:
+            if okey in self._outer_boundaries:
+                self._outer_boundaries.discard(okey)
+                if self.board is not None:
+                    self.board.outer_boundaries = [
+                        k for k in self.board.outer_boundaries if k != okey
+                    ]
+            else:
+                self._outer_boundaries.add(okey)
+                if self.board is not None:
+                    self.board.outer_boundaries.append(okey)
 
     def _handle_boundary_draw(self, vertex: tuple[int, int]) -> None:
         if self._boundary_start_vertex is None:
@@ -594,194 +691,217 @@ class GridWidget(QWidget):
             return
 
         if self._vertices_adjacent(start, vertex):
-            e = self._vertices_to_edge(start, vertex)
-            if e is not None:
-                e.is_boundary = not e.is_boundary
-                self.edge_clicked.emit(e.r1, e.c1, e.r2, e.c2)
-            else:
-                okey = self._outer_key(start, vertex)
-                if okey is not None:
-                    if okey in self._outer_boundaries:
-                        self._outer_boundaries.discard(okey)
-                        if self.board is not None:
-                            self.board.outer_boundaries = [k for k in self.board.outer_boundaries if k != okey]
-                    else:
-                        self._outer_boundaries.add(okey)
-                        if self.board is not None:
-                            self.board.outer_boundaries.append(okey)
+            self._toggle_boundary_segment(start, vertex)
 
         self._boundary_start_vertex = None
         self._selected_vertex = None
         self.board_modified.emit()
         self.update()
 
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 — Qt override
         if self.board is None:
             return
         pos = event.position()
 
         if self._mode == self.MODE_BLOCK and self._block_dragging:
+            self._drag_block_mouse(pos)
+            return
+
+        if self._mode == self.MODE_WATCHTOWER:
+            self._hover_vertex_mode_mouse(pos)
+            return
+
+        if self._mode == self.MODE_BOUNDARY:
+            if self._boundary_dragging and self._last_boundary_vertex is not None:
+                self._drag_boundary_mouse(pos)
+            else:
+                self._hover_vertex_mode_mouse(pos)
+            return
+
+        self._hover_select_mode_mouse(pos)
+
+    def _drag_block_mouse(self, pos: QPointF) -> None:
+        cell = self._hit_test_cell(pos)
+        if cell is not None:
+            self._paint_blocked(cell[0], cell[1], self._block_paint_blocked)
+            self._hover_cell = cell
+            self.status_message.emit(f"障碍模式: 单元格 ({cell[0]}, {cell[1]})")
+
+    def _drag_boundary_mouse(self, pos: QPointF) -> None:
+        v = self._hit_test_vertex(pos)
+        last = self._last_boundary_vertex
+        if v is not None and last is not None and v != last and self._vertices_adjacent(last, v):
+            self._toggle_boundary_segment(last, v)
+            self.board_modified.emit()
+            self._last_boundary_vertex = v
+            self._selected_vertex = v
+            self.update()
+        elif v is not None and v != self._hover_vertex:
+            self._hover_vertex = v
+            self._hover_cell = None
+            self.update()
+        if v is not None:
+            self.status_message.emit(f"边框模式: 顶点 ({v[0]}, {v[1]})")
+
+    def _hover_vertex_mode_mouse(self, pos: QPointF) -> None:
+        v = self._hit_test_vertex(pos)
+        if v != self._hover_vertex:
+            self._hover_vertex = v
+            self._hover_cell = None
+            self.update()
+        if v is not None:
+            self.status_message.emit(f"顶点 ({v[0]}, {v[1]})")
+        elif self._mode != self.MODE_BOUNDARY:
             cell = self._hit_test_cell(pos)
             if cell is not None:
-                self._paint_blocked(cell[0], cell[1], self._block_paint_blocked)
-                self._hover_cell = cell
-                self.status_message.emit(f"障碍模式: 单元格 ({cell[0]}, {cell[1]})")
-            return
+                self.status_message.emit(f"单元格 ({cell[0]}, {cell[1]})")
 
-        if self._mode == self.MODE_BOUNDARY and self._boundary_dragging and self._last_boundary_vertex is not None:
-            v = self._hit_test_vertex(pos)
-            if v is not None and v != self._last_boundary_vertex and self._vertices_adjacent(self._last_boundary_vertex, v):
-                e = self._vertices_to_edge(self._last_boundary_vertex, v)
-                if e is not None:
-                    e.is_boundary = not e.is_boundary
-                    self.edge_clicked.emit(e.r1, e.c1, e.r2, e.c2)
-                else:
-                    okey = self._outer_key(self._last_boundary_vertex, v)
-                    if okey is not None:
-                        if okey in self._outer_boundaries:
-                            self._outer_boundaries.discard(okey)
-                            if self.board is not None:
-                                self.board.outer_boundaries = [k for k in self.board.outer_boundaries if k != okey]
-                        else:
-                            self._outer_boundaries.add(okey)
-                            if self.board is not None:
-                                self.board.outer_boundaries.append(okey)
-                self.board_modified.emit()
-                self._last_boundary_vertex = v
-                self._selected_vertex = v
-                self.update()
-            elif v is not None and v != self._hover_vertex:
-                self._hover_vertex = v
-                self._hover_cell = None
-                self.update()
-            if v is not None:
-                self.status_message.emit(f"边框模式: 顶点 ({v[0]}, {v[1]})")
-
-        elif self._mode == self.MODE_WATCHTOWER or (self._mode == self.MODE_BOUNDARY and not self._boundary_dragging):
-            v = self._hit_test_vertex(pos)
-            if v != self._hover_vertex:
-                self._hover_vertex = v
-                self._hover_cell = None
-                self.update()
-            if v is not None:
-                self.status_message.emit(f"顶点 ({v[0]}, {v[1]})")
-            elif self._mode != self.MODE_BOUNDARY:
-                cell = self._hit_test_cell(pos)
-                if cell is not None:
-                    self.status_message.emit(f"单元格 ({cell[0]}, {cell[1]})")
+    def _hover_select_mode_mouse(self, pos: QPointF) -> None:
+        v = self._hit_test_vertex(pos)
+        e = self._hit_test_edge(pos)
+        changed = False
+        if v is not None:
+            changed = self._set_hover_vertex(v)
+            self.status_message.emit(f"顶点 ({v[0]}, {v[1]})")
+        elif e is not None:
+            changed = self._set_hover_edge(e)
+            self.status_message.emit(f"边框 ({e[0]},{e[1]})-({e[2]},{e[3]})")
         else:
-            # SELECT / NUMBER / SYMBOL / COMPASS modes: check vertex → edge → cell
-            v = self._hit_test_vertex(pos)
-            e = self._hit_test_edge(pos)
-            changed = False
-            if v is not None:
-                if v != self._hover_vertex:
-                    self._hover_vertex = v
-                    self._hover_cell = None
-                    self._hover_edge = None
-                    changed = True
-                self.status_message.emit(f"顶点 ({v[0]}, {v[1]})")
-            elif e is not None:
-                if e != self._hover_edge:
-                    self._hover_edge = e
-                    self._hover_cell = None
-                    self._hover_vertex = None
-                    changed = True
-                self.status_message.emit(f"边框 ({e[0]},{e[1]})-({e[2]},{e[3]})")
-            else:
-                cell = self._hit_test_cell(pos)
-                if self._hover_edge is not None or self._hover_vertex is not None:
-                    changed = True
-                self._hover_edge = None
-                self._hover_vertex = None
-                if cell != self._hover_cell:
-                    self._hover_cell = cell
-                    changed = True
-                if cell is not None:
-                    c_obj = self.board.cell(cell[0], cell[1])
-                    extras = []
-                    if c_obj.number is not None:
-                        extras.append(f"#{c_obj.number}")
-                    if c_obj.symbol is not None:
-                        extras.append(f"符号:{c_obj.symbol}")
-                    if c_obj.blocked:
-                        extras.append("障碍")
-                    suffix = f" [{' '.join(extras)}]" if extras else ""
-                    self.status_message.emit(f"单元格 ({cell[0]}, {cell[1]}){suffix}")
-                elif not self._hover_vertex:
-                    self.status_message.emit("")
-            if changed:
-                self.update()
+            changed = self._set_hover_cell(pos)
+        if changed:
+            self.update()
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
+    def _set_hover_vertex(self, v: tuple[int, int]) -> bool:
+        if v != self._hover_vertex:
+            self._hover_vertex = v
+            self._hover_cell = None
+            self._hover_edge = None
+            return True
+        return False
+
+    def _set_hover_edge(self, e: tuple[int, int, int, int]) -> bool:
+        if e != self._hover_edge:
+            self._hover_edge = e
+            self._hover_cell = None
+            self._hover_vertex = None
+            return True
+        return False
+
+    def _set_hover_cell(self, pos: QPointF) -> bool:
+        cell = self._hit_test_cell(pos)
+        changed = False
+        if self._hover_edge is not None or self._hover_vertex is not None:
+            changed = True
+        self._hover_edge = None
+        self._hover_vertex = None
+        if cell != self._hover_cell:
+            self._hover_cell = cell
+            changed = True
+        if cell is not None:
+            self._emit_cell_status(cell)
+        elif not self._hover_vertex:
+            self.status_message.emit("")
+        return changed
+
+    def _emit_cell_status(self, cell: tuple[int, int]) -> None:
+        c_obj = cast("Board", self.board).cell(cell[0], cell[1])
+        extras = []
+        if c_obj.number is not None:
+            extras.append(f"#{c_obj.number}")
+        if c_obj.symbol is not None:
+            extras.append(f"符号:{c_obj.symbol}")
+        if c_obj.blocked:
+            extras.append("障碍")
+        suffix = f" [{' '.join(extras)}]" if extras else ""
+        self.status_message.emit(f"单元格 ({cell[0]}, {cell[1]}){suffix}")
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 — Qt override
         if self.board is None:
             return
+        if self._handle_key(event):
+            return
+        step = ARROW_STEPS.get(event.key())
+        if step is None:
+            super().keyPressEvent(event)
+        else:
+            self._move_selection(*step)
 
+    def _handle_key(self, event: QKeyEvent) -> bool:
+        """Handle a key press; return True when the event was consumed."""
         key = event.key()
         text = event.text()
-
         if key == Qt.Key.Key_Escape:
-            self._selected_cell = None
-            self._selected_edge = None
-            self._selected_vertex = None
+            self._clear_selection_state()
+            return True
+        if key in DELETE_KEYS:
+            return self._clear_selected_cell()
+        if self._selected_cell is None:
+            return False
+        if self._mode == self.MODE_NUMBER and self._handle_number_key(key, text):
+            return True
+        if text.isdigit():
+            self._assign_digit(int(text))
+            return True
+        return False
+
+    def _clear_selection_state(self) -> None:
+        self._selected_cell = None
+        self._selected_edge = None
+        self._selected_vertex = None
+        self._inline_number = ""
+        self.update()
+
+    def _clear_selected_cell(self) -> bool:
+        if self._selected_cell is None:
+            return False
+        r, c = self._selected_cell
+        cell = cast("Board", self.board).cell(r, c)
+        if not cell.blocked:
+            cell.number = None
+            cell.symbol = None
+            cell.compass = None
             self._inline_number = ""
+            self.board_modified.emit()
             self.update()
-            return
+        return True
 
-        if key == Qt.Key.Key_Delete or key == Qt.Key.Key_Backspace:
-            if self._selected_cell is not None:
-                r, c = self._selected_cell
-                cell = self.board.cell(r, c)
-                if not cell.blocked:
-                    cell.number = None
-                    cell.symbol = None
-                    cell.compass = None
-                    self._inline_number = ""
-                    self.board_modified.emit()
-                    self.update()
-                return
-
-        if self._mode == self.MODE_NUMBER and self._selected_cell is not None:
-            if text.isdigit():
-                self._inline_number += text
-                r, c = self._selected_cell
-                cell = self.board.cell(r, c)
-                cell.number = int(self._inline_number)
+    def _handle_number_key(self, key: int, text: str) -> bool:
+        """Number-mode editing: digits extend the inline buffer, Enter commits."""
+        if text.isdigit():
+            self._inline_number += text
+            self._write_selected_number(int(self._inline_number))
+            self.board_modified.emit()
+            self.update()
+            return True
+        if key in COMMIT_KEYS:
+            if self._inline_number:
+                self._write_selected_number(int(self._inline_number))
+                self._inline_number = ""
                 self.board_modified.emit()
+                self._move_selection(0, 1)
                 self.update()
-                return
-            elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
-                if self._inline_number:
-                    r, c = self._selected_cell
-                    cell = self.board.cell(r, c)
-                    cell.number = int(self._inline_number)
-                    self._inline_number = ""
-                    self.board_modified.emit()
-                    self._move_selection(0, 1)
-                    self.update()
-                return
+            return True
+        return False
 
-        if self._selected_cell is not None:
-            if text.isdigit():
-                r, c = self._selected_cell
-                cell = self.board.cell(r, c)
-                if not cell.blocked:
-                    cell.number = int(text)
-                    self._inline_number = ""
-                    self.board_modified.emit()
-                    self.update()
-                return
+    def _write_selected_number(self, value: int) -> None:
+        selected = self._selected_cell
+        if selected is None:
+            return
+        r, c = selected
+        cast("Board", self.board).cell(r, c).number = value
 
-        if key == Qt.Key.Key_Up:
-            self._move_selection(-1, 0)
-        elif key == Qt.Key.Key_Down:
-            self._move_selection(1, 0)
-        elif key == Qt.Key.Key_Left:
-            self._move_selection(0, -1)
-        elif key == Qt.Key.Key_Right:
-            self._move_selection(0, 1)
-        else:
-            super().keyPressEvent(event)
+    def _assign_digit(self, value: int) -> None:
+        selected = self._selected_cell
+        if selected is None:
+            return
+        r, c = selected
+        cell = cast("Board", self.board).cell(r, c)
+        if cell.blocked:
+            return
+        cell.number = value
+        self._inline_number = ""
+        self.board_modified.emit()
+        self.update()
 
     def _move_selection(self, dr: int, dc: int) -> None:
         if self.board is None:
@@ -802,7 +922,7 @@ class GridWidget(QWidget):
             self._selected_vertex = (nr, nc)
             self.update()
 
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 — Qt override
         if self._block_dragging:
             self._block_dragging = False
         if event.button() == Qt.MouseButton.LeftButton and self._boundary_dragging:
@@ -810,7 +930,7 @@ class GridWidget(QWidget):
             self._last_boundary_vertex = None
             self.update()
 
-    def wheelEvent(self, event: QWheelEvent) -> None:
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 — Qt override
         if event.angleDelta().y() > 0:
             self._cell_size = min(120, self._cell_size + 5)
         else:
@@ -818,7 +938,7 @@ class GridWidget(QWidget):
         self._cache_rects()
         self.update()
 
-    def paintEvent(self, event: QPaintEvent) -> None:
+    def paintEvent(self, _event: QPaintEvent) -> None:  # noqa: N802 — Qt override
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -843,16 +963,21 @@ class GridWidget(QWidget):
         Such edges are not drawn as grid lines so each region renders as one
         contiguous colour block instead of a patchwork of bordered cells.
         """
-        c1 = self.board.cell(e.r1, e.c1)
-        c2 = self.board.cell(e.r2, e.c2)
-        return (not c1.blocked and not c2.blocked
-                and c1.region_id is not None
-                and c1.region_id == c2.region_id)
+        board = cast("Board", self.board)
+        c1 = board.cell(e.r1, e.c1)
+        c2 = board.cell(e.r2, e.c2)
+        return (
+            not c1.blocked
+            and not c2.blocked
+            and c1.region_id is not None
+            and c1.region_id == c2.region_id
+        )
 
     def _draw_cells(self, painter: QPainter) -> None:
-        for r in range(self.board.height):
-            for c in range(self.board.width):
-                cell = self.board.cell(r, c)
+        board = cast("Board", self.board)
+        for r in range(board.height):
+            for c in range(board.width):
+                cell = board.cell(r, c)
                 rect = self._cell_rect(r, c)
 
                 if cell.blocked:
@@ -888,15 +1013,17 @@ class GridWidget(QWidget):
         the edge as a pre-drawn boundary, so the playable area's outline stays
         visible on irregular boards.
         """
-        c1 = self.board.cell(e.r1, e.c1)
-        c2 = self.board.cell(e.r2, e.c2)
+        board = cast("Board", self.board)
+        c1 = board.cell(e.r1, e.c1)
+        c2 = board.cell(e.r2, e.c2)
         return c1.blocked != c2.blocked
 
     def _draw_boundary_edges(self, painter: QPainter) -> None:
+        board = cast("Board", self.board)
         pen = QPen(QColor(_ui_theme.colors.boundary_edge), 6)
         pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
-        for e in self.board.edges():
+        for e in board.edges():
             if e.is_boundary or self._is_auto_boundary(e):
                 x1, y1, x2, y2 = self._edge_endpoints(e)
                 painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
@@ -904,7 +1031,7 @@ class GridWidget(QWidget):
             self._draw_outer_edge(painter, key)
 
         painter.setPen(QPen(QColor(_ui_theme.colors.boundary_highlight), 2.5))
-        for e in self.board.edges():
+        for e in board.edges():
             if e.is_boundary or self._is_auto_boundary(e):
                 x1, y1, x2, y2 = self._edge_endpoints(e)
                 painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
@@ -912,8 +1039,9 @@ class GridWidget(QWidget):
             self._draw_outer_edge(painter, key)
 
     def _draw_grid_lines(self, painter: QPainter) -> None:
+        board = cast("Board", self.board)
         painter.setPen(QPen(QColor(_ui_theme.colors.grid_line), 1))
-        for e in self.board.edges():
+        for e in board.edges():
             if self._is_same_region_internal(e):
                 continue
             x1, y1, x2, y2 = self._edge_endpoints(e)
@@ -921,11 +1049,11 @@ class GridWidget(QWidget):
         # outer perimeter so the board outline stays visible even when the
         # puzzle carries no explicit outer_boundaries
         pad, sz = self._padding, self._cell_size
-        painter.drawRect(QRectF(pad, pad,
-                                self.board.width * sz, self.board.height * sz))
+        board = cast("Board", self.board)
+        painter.drawRect(QRectF(pad, pad, board.width * sz, board.height * sz))
 
     def _draw_edge_constraints(self, painter: QPainter) -> None:
-        for e in self.board.edges():
+        for e in cast("Board", self.board).edges():
             if e.constraint is None:
                 continue
             x1, y1, x2, y2 = self._edge_endpoints(e)
@@ -943,47 +1071,65 @@ class GridWidget(QWidget):
             painter.setPen(QPen(QColor(_ui_theme.colors.edge_constr_text)))
 
             ct = e.constraint.type
-            if ct == EdgeConstraintType.HETEROGENEOUS:
-                # diff (异生): black box with δ, matches the archive viewer
-                bx = QRectF(mx - sz * 0.55, my - sz * 0.55, sz * 1.1, sz * 1.1)
-                painter.setPen(QPen(QColor("#555"), 1))
-                painter.setBrush(QBrush(QColor("#111")))
-                painter.drawRect(bx)
-                painter.setPen(QPen(QColor("#ffffff"), 1))
-                painter.setFont(QFont("Segoe UI Symbol", int(sz * 0.7), QFont.Weight.Bold))
-                painter.drawText(bx, Qt.AlignmentFlag.AlignCenter, "δ")
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-            elif ct == EdgeConstraintType.HOMOGENEOUS:
-                # twins (双生): white box with ♂, matches the archive viewer
-                bx = QRectF(mx - sz * 0.55, my - sz * 0.55, sz * 1.1, sz * 1.1)
-                painter.setPen(QPen(QColor("#555"), 1))
-                painter.setBrush(QBrush(QColor("#ffffff")))
-                painter.drawRect(bx)
-                painter.setPen(QPen(QColor("#111"), 1))
-                painter.setFont(QFont("Segoe UI Symbol", int(sz * 0.7), QFont.Weight.Bold))
-                painter.drawText(bx, Qt.AlignmentFlag.AlignCenter, "♂")
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-            elif ct == EdgeConstraintType.INEQUALITY:
-                # 不等号：value==1 → 第一端点 (r1,c1) 更大；否则第二端点更大。
-                # 用数学不等号直接表达“哪一侧更大”：
-                #   '>' 左侧更大 · '<' 右侧更大 · '^' 上方更大 · 'v' 下方更大
-                # （符号尖始终指向面积更小的一侧，与游戏规则一致）
-                rev = e.constraint.value == 1 if e.constraint is not None else False
-                if e.c1 == e.c2:
-                    # 垂直边：更大侧在 r1 或 r2 端
-                    sym = ("^" if e.r1 < e.r2 else "v") if rev else ("v" if e.r1 < e.r2 else "^")
-                else:
-                    # 水平边：更大侧在 c1 或 c2 端
-                    sym = (">" if e.c1 < e.c2 else "<") if rev else ("<" if e.c1 < e.c2 else ">")
-                painter.drawText(QRectF(mx - 14, my - 10, 28, 20),
-                                 Qt.AlignmentFlag.AlignCenter, sym)
-            elif ct == EdgeConstraintType.DIFFERENCE:
-                val = str(e.constraint.value or "")
-                painter.drawText(QRectF(mx - 14, my - 10, 28, 20),
-                                 Qt.AlignmentFlag.AlignCenter, val)
+            handler: Callable[[], None] | None = {
+                EdgeConstraintType.HETEROGENEOUS: lambda mx=mx, my=my, sz=sz: (
+                    self._draw_edge_heterogeneous(painter, mx, my, sz)
+                ),
+                EdgeConstraintType.HOMOGENEOUS: lambda mx=mx, my=my, sz=sz: (
+                    self._draw_edge_homogeneous(painter, mx, my, sz)
+                ),
+                EdgeConstraintType.INEQUALITY: lambda e=e, mx=mx, my=my: self._draw_edge_inequality(
+                    painter, e, mx, my
+                ),
+                EdgeConstraintType.DIFFERENCE: lambda e=e, mx=mx, my=my: self._draw_edge_difference(
+                    painter, e, mx, my
+                ),
+            }.get(ct)
+            if handler is not None:
+                handler()
+
+    def _draw_edge_heterogeneous(self, painter: QPainter, mx: float, my: float, sz: float) -> None:
+        # diff (异生): black box with δ, matches the archive viewer
+        bx = QRectF(mx - sz * 0.55, my - sz * 0.55, sz * 1.1, sz * 1.1)
+        painter.setPen(QPen(QColor("#555"), 1))
+        painter.setBrush(QBrush(QColor("#111")))
+        painter.drawRect(bx)
+        painter.setPen(QPen(QColor("#ffffff"), 1))
+        painter.setFont(QFont("Segoe UI Symbol", int(sz * 0.7), QFont.Weight.Bold))
+        painter.drawText(bx, Qt.AlignmentFlag.AlignCenter, "δ")
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _draw_edge_homogeneous(self, painter: QPainter, mx: float, my: float, sz: float) -> None:
+        # twins (双生): white box with ♂, matches the archive viewer
+        bx = QRectF(mx - sz * 0.55, my - sz * 0.55, sz * 1.1, sz * 1.1)
+        painter.setPen(QPen(QColor("#555"), 1))
+        painter.setBrush(QBrush(QColor("#ffffff")))
+        painter.drawRect(bx)
+        painter.setPen(QPen(QColor("#111"), 1))
+        painter.setFont(QFont("Segoe UI Symbol", int(sz * 0.7), QFont.Weight.Bold))
+        painter.drawText(bx, Qt.AlignmentFlag.AlignCenter, "♂")
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    def _draw_edge_inequality(self, painter: QPainter, e: Edge, mx: float, my: float) -> None:
+        # 不等号：value==1 → 第一端点 (r1,c1) 更大；否则第二端点更大。
+        # 用数学不等号直接表达“哪一侧更大”：
+        #   '>' 左侧更大 · '<' 右侧更大 · '^' 上方更大 · 'v' 下方更大
+        # （符号尖始终指向面积更小的一侧，与游戏规则一致）
+        rev = e.constraint is not None and e.constraint.value == 1
+        if e.c1 == e.c2:
+            # 垂直边：更大侧在 r1 或 r2 端
+            sym = ("^" if e.r1 < e.r2 else "v") if rev else ("v" if e.r1 < e.r2 else "^")
+        else:
+            # 水平边：更大侧在 c1 或 c2 端
+            sym = (">" if e.c1 < e.c2 else "<") if rev else ("<" if e.c1 < e.c2 else ">")
+        painter.drawText(QRectF(mx - 14, my - 10, 28, 20), Qt.AlignmentFlag.AlignCenter, sym)
+
+    def _draw_edge_difference(self, painter: QPainter, e: Edge, mx: float, my: float) -> None:
+        val = "" if e.constraint is None else str(e.constraint.value or "")
+        painter.drawText(QRectF(mx - 14, my - 10, 28, 20), Qt.AlignmentFlag.AlignCenter, val)
 
     def _draw_vertices(self, painter: QPainter) -> None:
-        for v in self.board.vertices():
+        for v in cast("Board", self.board).vertices():
             if v.watchtower is not None:
                 # Vertex (r,c) is the ABSOLUTE grid corner (0..=h × 0..=w).
                 x = self._padding + v.col * self._cell_size
@@ -1013,48 +1159,63 @@ class GridWidget(QWidget):
                     font = QFont("Segoe UI", int(self._cell_size // 4), QFont.Weight.Bold)
                     painter.setFont(font)
                     painter.setPen(QPen(QColor(_ui_theme.colors.watchtower_text)))
-                    painter.drawText(QRectF(x - r, y - r, r * 2, r * 2),
-                                     Qt.AlignmentFlag.AlignCenter, str(v.watchtower))
+                    painter.drawText(
+                        QRectF(x - r, y - r, r * 2, r * 2),
+                        Qt.AlignmentFlag.AlignCenter,
+                        str(v.watchtower),
+                    )
 
     def _draw_clues(self, painter: QPainter) -> None:
-        for r in range(self.board.height):
-            for c in range(self.board.width):
-                cell = self.board.cell(r, c)
+        board = cast("Board", self.board)
+        for r in range(board.height):
+            for c in range(board.width):
+                cell = board.cell(r, c)
                 rect = self._cell_rect(r, c)
                 cx = rect.center().x()
                 cy = rect.center().y()
 
-                if cell.symbol is not None and cell.symbol:
-                    if re.fullmatch(r"P[1-9]", cell.symbol):
-                        self._draw_p_circle(painter, cx, cy, int(cell.symbol[1]))
-                    else:
-                        font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)
-                        painter.setFont(font)
-                        painter.setPen(QPen(QColor(_ui_theme.colors.symbol_text)))
-                        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, cell.symbol)
-
+                self._draw_cell_symbol(painter, cell, rect, cx, cy)
                 if cell.fence_pattern is not None:
-                    self._draw_fence_diamond(painter, cx, cy, self._fence_diamond(cell.fence_pattern))
-
-                if cell.number is not None and cell.symbol is None:
-                    font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)
-                    painter.setFont(font)
-                    painter.setPen(QPen(QColor(_ui_theme.colors.number_text)))
-                    painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(cell.number))
-                elif cell.number is not None:
-                    font = QFont("Segoe UI", self._cell_size // 3, QFont.Weight.Bold)
-                    painter.setFont(font)
-                    painter.setPen(QPen(QColor(_ui_theme.colors.number_text)))
-                    painter.drawText(QRectF(rect.x() + 4, rect.y() + 3,
-                                              rect.width() - 8, rect.height() * 0.4),
-                                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, str(cell.number))
-
+                    self._draw_fence_diamond(
+                        painter, cx, cy, self._fence_diamond(cell.fence_pattern)
+                    )
+                self._draw_cell_number(painter, cell, rect, cx, cy)
                 if cell.compass is not None:
                     self._draw_compass(painter, cell, cx, cy)
-
                 if cell.shape_pattern is not None:
                     self._draw_mini_shape_centered(
-                        painter, cell.shape_pattern, cx, cy, self._cell_size * 0.6)
+                        painter, cell.shape_pattern, cx, cy, self._cell_size * 0.6
+                    )
+
+    def _draw_cell_symbol(
+        self, painter: QPainter, cell: Cell, rect: QRectF, cx: float, cy: float
+    ) -> None:
+        if cell.symbol is not None and cell.symbol:
+            if re.fullmatch(r"P[1-9]", cell.symbol):
+                self._draw_p_circle(painter, cx, cy, int(cell.symbol[1]))
+            else:
+                font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)
+                painter.setFont(font)
+                painter.setPen(QPen(QColor(_ui_theme.colors.symbol_text)))
+                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, cell.symbol)
+
+    def _draw_cell_number(
+        self, painter: QPainter, cell: Cell, rect: QRectF, _cx: float, _cy: float
+    ) -> None:
+        if cell.number is not None and cell.symbol is None:
+            font = QFont("Segoe UI", self._cell_size // 2, QFont.Weight.Bold)
+            painter.setFont(font)
+            painter.setPen(QPen(QColor(_ui_theme.colors.number_text)))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(cell.number))
+        elif cell.number is not None:
+            font = QFont("Segoe UI", self._cell_size // 3, QFont.Weight.Bold)
+            painter.setFont(font)
+            painter.setPen(QPen(QColor(_ui_theme.colors.number_text)))
+            painter.drawText(
+                QRectF(rect.x() + 4, rect.y() + 3, rect.width() - 8, rect.height() * 0.4),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+                str(cell.number),
+            )
 
     def _draw_p_circle(self, painter: QPainter, cx: float, cy: float, n: int) -> None:
         """P-number coloured circle (matches the archive viewer)."""
@@ -1099,8 +1260,8 @@ class GridWidget(QWidget):
         t = QPointF(cx, cy - r)
         rp = QPointF(cx + r, cy)
         b = QPointF(cx, cy + r)
-        l = QPointF(cx - r, cy)
-        segments = [(nw, t, l), (ne, t, rp), (sw, l, b), (se, rp, b)]
+        lft = QPointF(cx - r, cy)
+        segments = [(nw, t, lft), (ne, t, rp), (sw, lft, b), (se, rp, b)]
 
         painter.setPen(QPen(QColor(80, 60, 30, 70), 1, Qt.PenStyle.DashLine))
         for present, p1, p2 in segments:
@@ -1117,6 +1278,8 @@ class GridWidget(QWidget):
 
     def _draw_compass(self, painter: QPainter, cell: Cell, cx: float, cy: float) -> None:
         cp = cell.compass
+        if cp is None:
+            return
         off = self._cell_size * 0.3
         font_small = QFont("Segoe UI", self._cell_size // 7)
         painter.setFont(font_small)
@@ -1125,8 +1288,9 @@ class GridWidget(QWidget):
         def draw_at(value: int, dx: float, dy: float) -> None:
             if value < 0:
                 return  # unconstrained direction: not drawn (matches the archive)
-            painter.drawText(QRectF(cx + dx - 12, cy + dy - 8, 24, 16),
-                             Qt.AlignmentFlag.AlignCenter, str(value))
+            painter.drawText(
+                QRectF(cx + dx - 12, cy + dy - 8, 24, 16), Qt.AlignmentFlag.AlignCenter, str(value)
+            )
 
         draw_at(cp.up, 0, -off)
         draw_at(cp.down, 0, off)
@@ -1140,65 +1304,102 @@ class GridWidget(QWidget):
         painter.drawLine(QPointF(cx, cy), QPointF(cx + off - 8, cy))
 
     def _draw_selection(self, painter: QPainter) -> None:
-        if self._selected_cell is not None:
-            r, c = self._selected_cell
-            rect = self._cell_rect(r, c)
-            painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 3))
-            painter.drawRect(rect)
-            if self._inline_number:
-                font = QFont("Segoe UI", self._cell_size // 4, QFont.Weight.Bold)
-                painter.setFont(font)
-                painter.setPen(QPen(QColor(_ui_theme.colors.inline_number)))
-                painter.drawText(QRectF(rect.x() + 4, rect.bottom() - rect.height() * 0.35,
-                                          rect.width() * 0.6, rect.height() * 0.3),
-                                 Qt.AlignmentFlag.AlignLeft, self._inline_number + "|")
+        self._draw_selected_cell(painter)
+        self._draw_selected_edge(painter)
+        self._draw_selected_vertex(painter)
+        self._draw_boundary_start_marker(painter)
+        self._draw_hover_cell(painter)
+        self._draw_hover_vertex(painter)
+        self._draw_hover_edge(painter)
 
-        if self._selected_edge is not None:
-            r1, c1, r2, c2 = self._selected_edge
-            e = self.board.edge_between(r1, c1, r2, c2) if self.board is not None else None
-            if e is not None:
-                x1, y1, x2, y2 = self._edge_endpoints(e)
-                painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 5))
-                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+    def _draw_selected_cell(self, painter: QPainter) -> None:
+        if self._selected_cell is None:
+            return
+        r, c = self._selected_cell
+        rect = self._cell_rect(r, c)
+        painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 3))
+        painter.drawRect(rect)
+        if not self._inline_number:
+            return
+        font = QFont("Segoe UI", self._cell_size // 4, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.setPen(QPen(QColor(_ui_theme.colors.inline_number)))
+        painter.drawText(
+            QRectF(
+                rect.x() + 4,
+                rect.bottom() - rect.height() * 0.35,
+                rect.width() * 0.6,
+                rect.height() * 0.3,
+            ),
+            Qt.AlignmentFlag.AlignLeft,
+            self._inline_number + "|",
+        )
 
-        if self._selected_vertex is not None or self._boundary_start_vertex is not None:
-            v = self._selected_vertex if self._selected_vertex is not None else self._boundary_start_vertex
-            if v is not None:
-                x = self._padding + v[1] * self._cell_size
-                y = self._padding + v[0] * self._cell_size
-                painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 3))
-                painter.setBrush(QBrush(QColor(_ui_theme.colors.selection_vertex_fill)))
-                painter.drawEllipse(QPointF(x, y), self._cell_size // 6, self._cell_size // 6)
+    def _draw_selected_edge(self, painter: QPainter) -> None:
+        if self._selected_edge is None:
+            return
+        r1, c1, r2, c2 = self._selected_edge
+        e = self.board.edge_between(r1, c1, r2, c2) if self.board is not None else None
+        if e is None:
+            return
+        x1, y1, x2, y2 = self._edge_endpoints(e)
+        painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 5))
+        painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
-        if self._boundary_start_vertex is not None:
-            x = self._padding + self._boundary_start_vertex[1] * self._cell_size
-            y = self._padding + self._boundary_start_vertex[0] * self._cell_size
-            painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 2, Qt.PenStyle.DashLine))
-            painter.drawEllipse(QPointF(x, y), self._cell_size // 4, self._cell_size // 4)
+    def _draw_selected_vertex(self, painter: QPainter) -> None:
+        selected = self._selected_vertex
+        v = selected if selected is not None else self._boundary_start_vertex
+        if v is None:
+            return
+        x = self._padding + v[1] * self._cell_size
+        y = self._padding + v[0] * self._cell_size
+        painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 3))
+        painter.setBrush(QBrush(QColor(_ui_theme.colors.selection_vertex_fill)))
+        painter.drawEllipse(QPointF(x, y), self._cell_size // 6, self._cell_size // 6)
 
-        if self._hover_cell is not None and self._hover_cell != self._selected_cell:
-            r, c = self._hover_cell
-            rect = self._cell_rect(r, c)
-            painter.setPen(QPen(QColor(_ui_theme.colors.hover_cell), 2))
-            painter.drawRect(rect)
+    def _draw_boundary_start_marker(self, painter: QPainter) -> None:
+        if self._boundary_start_vertex is None:
+            return
+        x = self._padding + self._boundary_start_vertex[1] * self._cell_size
+        y = self._padding + self._boundary_start_vertex[0] * self._cell_size
+        painter.setPen(QPen(QColor(_ui_theme.colors.selection_border), 2, Qt.PenStyle.DashLine))
+        painter.drawEllipse(QPointF(x, y), self._cell_size // 4, self._cell_size // 4)
 
-        if self._hover_vertex is not None and self._hover_vertex != self._selected_vertex:
-            x = self._padding + self._hover_vertex[1] * self._cell_size
-            y = self._padding + self._hover_vertex[0] * self._cell_size
-            painter.setPen(QPen(QColor(_ui_theme.colors.hover_vertex), 2))
-            painter.drawEllipse(QPointF(x, y), self._cell_size // 8, self._cell_size // 8)
+    def _draw_hover_cell(self, painter: QPainter) -> None:
+        if self._hover_cell is None or self._hover_cell == self._selected_cell:
+            return
+        r, c = self._hover_cell
+        rect = self._cell_rect(r, c)
+        painter.setPen(QPen(QColor(_ui_theme.colors.hover_cell), 2))
+        painter.drawRect(rect)
 
-        if self._hover_edge is not None and self._hover_edge != self._selected_edge:
-            e = self.board.edge_between(*self._hover_edge)
-            if e is not None:
-                x1, y1, x2, y2 = self._edge_endpoints(e)
-                painter.setPen(QPen(QColor(_ui_theme.colors.hover_cell), 3))
-                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+    def _vertex_center(self, v: tuple[int, int]) -> QPointF:
+        return QPointF(
+            self._padding + v[1] * self._cell_size, self._padding + v[0] * self._cell_size
+        )
+
+    def _draw_hover_vertex(self, painter: QPainter) -> None:
+        if self._hover_vertex is None or self._hover_vertex == self._selected_vertex:
+            return
+        painter.setPen(QPen(QColor(_ui_theme.colors.hover_vertex), 2))
+        painter.drawEllipse(
+            self._vertex_center(self._hover_vertex), self._cell_size // 8, self._cell_size // 8
+        )
+
+    def _draw_hover_edge(self, painter: QPainter) -> None:
+        if self._hover_edge is None or self._hover_edge == self._selected_edge:
+            return
+        e = cast("Board", self.board).edge_between(*self._hover_edge)
+        if e is None:
+            return
+        x1, y1, x2, y2 = self._edge_endpoints(e)
+        painter.setPen(QPen(QColor(_ui_theme.colors.hover_cell), 3))
+        painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
     def _draw_rule_overlay(self, painter: QPainter) -> None:
         if not self._overlay_rules and not self._overlay_shapes:
             return
-        grid_right = self._padding + self.board.width * self._cell_size
+        grid_right = self._padding + cast("Board", self.board).width * self._cell_size
         grid_top = self._padding
         sz = 32
         pad = 8
@@ -1207,32 +1408,12 @@ class GridWidget(QWidget):
         painter.setFont(font)
         fm = painter.fontMetrics()
 
-        # Build lines: rules first
-        lines = list(self._overlay_rules)
         line_h = fm.height() + 4
-        rules_h = len(lines) * line_h + gap
-
-        # Shape pool section
+        rules_h = len(self._overlay_rules) * line_h + gap
+        shape_rows = self._pack_shape_rows() if self._overlay_shapes else []
         shapes_h = 0
-        shape_rows: list[list[Shape]] = []
         if self._overlay_shapes:
-            shapes_h += fm.height() + gap
-            row: list[Shape] = []
-            row_w = 0
-            max_row_w = 160
-            for s in self._overlay_shapes:
-                rs2 = [r for r, _ in s.cells]
-                cs2 = [c for _, c in s.cells]
-                sw = (max(cs2) - min(cs2) + 2) * 14
-                if row and row_w + sw > max_row_w:
-                    shape_rows.append(row)
-                    row = []
-                    row_w = 0
-                row.append(s)
-                row_w += sw + 4
-            if row:
-                shape_rows.append(row)
-            shapes_h += len(shape_rows) * (sz + gap)
+            shapes_h = fm.height() + gap + len(shape_rows) * (sz + gap)
 
         total_h = rules_h + shapes_h + pad * 2
         total_w = 180
@@ -1251,37 +1432,73 @@ class GridWidget(QWidget):
         cy = y0 + pad
 
         painter.setPen(QPen(QColor(_ui_theme.colors.overlay_text)))
-        for ln in lines:
+        for ln in self._overlay_rules:
             painter.drawText(QPointF(cx, cy + fm.ascent()), ln)
             cy += line_h
 
         if self._overlay_shapes:
-            cy += gap
-            painter.setPen(QPen(QColor(_ui_theme.colors.overlay_header)))
-            painter.drawText(QPointF(cx, cy + fm.ascent()), "形状池")
-            cy += fm.height() + gap
-            painter.setPen(QPen(QColor(_ui_theme.colors.shape_mini_pen)))
-            painter.setBrush(QBrush(QColor(_ui_theme.colors.shape_mini_fill)))
-            for row in shape_rows:
-                rx = cx
-                for s in row:
-                    rs2 = [r for r, _ in s.cells]
-                    cs2 = [c for _, c in s.cells]
-                    min_r2, max_r2 = min(rs2), max(rs2)
-                    min_c2, max_c2 = min(cs2), max(cs2)
-                    h2 = max_r2 - min_r2 + 1
-                    w2 = max_c2 - min_c2 + 1
-                    sc = min(12, (sz - 2) / max(h2, w2))
-                    sh = sc * h2
-                    sw2 = sc * w2
-                    for r, c in s.cells:
-                        nx = rx + (c - min_c2) * sc + (sw2 - w2 * sc) / 2
-                        ny = cy + (r - min_r2) * sc
-                        painter.drawRoundedRect(QRectF(nx, ny, sc - 0.5, sc - 0.5), 0.5, 0.5)
-                    rx += sw2 + 6
-                cy += sz + gap
+            self._draw_overlay_shapes(painter, shape_rows, cx, cy + gap, fm, sz, gap)
 
-    def _draw_mini_shape(self, painter: QPainter, shape: Shape, x0: float, y0: float, cell_sz: float) -> None:
+    def _pack_shape_rows(self, max_row_w: int = 160) -> list[list[Shape]]:
+        """Group the overlay shapes into rows whose total width fits max_row_w."""
+        rows: list[list[Shape]] = []
+        row: list[Shape] = []
+        row_w = 0
+        for s in self._overlay_shapes:
+            cs = [c for _, c in s.cells]
+            sw = (max(cs) - min(cs) + 2) * 14
+            if row and row_w + sw > max_row_w:
+                rows.append(row)
+                row = []
+                row_w = 0
+            row.append(s)
+            row_w += sw + 4
+        if row:
+            rows.append(row)
+        return rows
+
+    def _draw_overlay_shapes(
+        self,
+        painter: QPainter,
+        shape_rows: list[list[Shape]],
+        cx: float,
+        cy: float,
+        fm: QFontMetrics,
+        sz: float,
+        gap: int,
+    ) -> None:
+        painter.setPen(QPen(QColor(_ui_theme.colors.overlay_header)))
+        painter.drawText(QPointF(cx, cy + fm.ascent()), "形状池")
+        cy += fm.height() + gap
+        painter.setPen(QPen(QColor(_ui_theme.colors.shape_mini_pen)))
+        painter.setBrush(QBrush(QColor(_ui_theme.colors.shape_mini_fill)))
+        for row in shape_rows:
+            rx = cx
+            for s in row:
+                rx = self._draw_overlay_shape(painter, s, rx, cy, sz)
+            cy += sz + gap
+
+    def _draw_overlay_shape(
+        self, painter: QPainter, s: Shape, rx: float, cy: float, sz: float
+    ) -> float:
+        """Draw one mini shape at (rx, cy); return the next row x offset."""
+        rs = [r for r, _ in s.cells]
+        cs = [c for _, c in s.cells]
+        min_r, max_r = min(rs), max(rs)
+        min_c, max_c = min(cs), max(cs)
+        h = max_r - min_r + 1
+        w = max_c - min_c + 1
+        sc = min(12, (sz - 2) / max(h, w))
+        sw = sc * w
+        for r, c in s.cells:
+            nx = rx + (c - min_c) * sc + (sw - w * sc) / 2
+            ny = cy + (r - min_r) * sc
+            painter.drawRoundedRect(QRectF(nx, ny, sc - 0.5, sc - 0.5), 0.5, 0.5)
+        return rx + sw + 6
+
+    def _draw_mini_shape(
+        self, painter: QPainter, shape: Shape, x0: float, y0: float, cell_sz: float
+    ) -> None:
         if not shape.cells:
             return
         rs = [r for r, _ in shape.cells]
@@ -1300,8 +1517,9 @@ class GridWidget(QWidget):
             ny = y0 + (r - min_r) * (scale + gap)
             painter.drawRoundedRect(QRectF(nx, ny, scale, scale), 1, 1)
 
-    def _draw_mini_shape_centered(self, painter: QPainter, shape: Shape,
-                                   cx: float, cy: float, cell_sz: float) -> None:
+    def _draw_mini_shape_centered(
+        self, painter: QPainter, shape: Shape, cx: float, cy: float, cell_sz: float
+    ) -> None:
         """Draw a mini shape scaled to cell_sz, centered on (cx, cy).
 
         Used to render puzzle-piece (shape_pattern) clues as a shape thumbnail

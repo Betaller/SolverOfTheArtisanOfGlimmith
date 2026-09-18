@@ -1,17 +1,14 @@
 """Headless (offscreen) tests for the UI bug fixes C1, C3, L7.
 
-These exercise the Qt widgets directly.  They require PySide6; run with the
-offscreen platform plugin so no display is needed.
+These exercise the Qt widgets directly.  They require PySide6; no display is
+needed because ``tests/conftest.py`` defaults ``QT_QPA_PLATFORM`` to
+``offscreen``.
 """
+
 from __future__ import annotations
-
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import json
 import logging
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -29,7 +26,7 @@ def qapp():
     yield app
 
 
-def test_set_puzzle_does_not_duplicate_rules(qapp) -> None:
+def test_set_puzzle_does_not_duplicate_rules(qapp) -> None:  # noqa: ARG001 — qapp fixture
     """Bug C1: set_puzzle must not re-append rules already present in the loaded
     puzzle (the checkbox `setChecked` used to fire `toggled` → `_on_rule_toggled`
     which appended the rule again, producing [area,block,area,block]).
@@ -37,9 +34,7 @@ def test_set_puzzle_does_not_duplicate_rules(qapp) -> None:
     from src.ui.constraint_panel import ConstraintPanel
 
     panel = ConstraintPanel()
-    puzzle = Puzzle.from_board(
-        Board(4, 4), rules=[Rule(type="area"), Rule(type="block")]
-    )
+    puzzle = Puzzle.from_board(Board(4, 4), rules=[Rule(type="area"), Rule(type="block")])
     panel.set_puzzle(puzzle)
     assert len(puzzle.rules) == 2
     assert puzzle.rules.count(Rule(type="area")) == 1
@@ -50,7 +45,7 @@ def test_set_puzzle_does_not_duplicate_rules(qapp) -> None:
     assert len(puzzle.rules) == 2
 
 
-def test_toggling_rule_on_populates_default_params(qapp) -> None:
+def test_toggling_rule_on_populates_default_params(qapp) -> None:  # noqa: ARG001 — qapp fixture
     """Bug C3: toggling a parameterized rule ON must seed its params from the
     spin widgets, otherwise an empty params dict resolves `area`/`min` to 0 and
     makes the puzzle silently unsolvable.
@@ -72,7 +67,11 @@ def test_toggling_rule_on_populates_default_params(qapp) -> None:
     assert puzzle.get_rule("precise") is None
 
 
-def test_puzzle_browser_keys_by_path_and_surfaces_errors(qapp, tmp_path, caplog) -> None:
+def test_puzzle_browser_keys_by_path_and_surfaces_errors(
+    qapp,  # noqa: ARG001 — qapp fixture
+    tmp_path,
+    caplog,
+) -> None:
     """Bug L7: the cache/lookup must be keyed by full path (same basename in
     different dirs must not collide), and corrupt JSON must be surfaced (logged)
     rather than silently swallowed.
@@ -92,9 +91,11 @@ def test_puzzle_browser_keys_by_path_and_surfaces_errors(qapp, tmp_path, caplog)
     bad = tmp_path / "cat1" / "bad.json"
     bad.write_text("{ not valid json")
 
-    with patch.object(pb, "PUZZLE_BASE", str(tmp_path)):
-        with caplog.at_level(logging.WARNING, logger=pb.logger.name):
-            browser = pb.PuzzleBrowser()
+    with (
+        patch.object(pb, "PUZZLE_BASE", str(tmp_path)),
+        caplog.at_level(logging.WARNING, logger=pb.logger.name),
+    ):
+        browser = pb.PuzzleBrowser()
 
     # Cache keyed by full path: the two same-basename files do not collide.
     assert str(f1) in browser._grid_cache

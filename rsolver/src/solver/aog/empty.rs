@@ -331,6 +331,119 @@ fn ring_t_junction_check(core: &AoGCore, sp: &Vec<Vec<u32>>) -> bool {
     true
 }
 
+/// Max-area / shape-size feasibility for the empty area just flood-filled by
+/// `dfs_empty_area`.  Pure reads of `core.dfs_ctx`.
+#[inline]
+fn empty_area_shape_size_ok(core: &AoGCore) -> bool {
+    let max_area_size = core.dfs_ctx.empty_count - core.dfs_ctx.empty_block_line_count;
+    if max_area_size < core.config.shape_size_lower_bound as usize {
+        return false;
+    }
+
+    let mut seen_size = [false; 256];
+    let mut required = 0usize;
+    for &val in &core.dfs_ctx.area_shape_sizes {
+        if val < 256 && !seen_size[val] {
+            seen_size[val] = true;
+            required += val;
+        }
+    }
+    if required > core.dfs_ctx.empty_count {
+        return false;
+    }
+
+    if core.config.shape_size_lower_bound == core.config.shape_size_upper_bound {
+        let lb = core.config.shape_size_lower_bound as usize;
+        if core.dfs_ctx.empty_count % lb != 0 {
+            return false;
+        }
+        if core.dfs_ctx.empty_count == lb && core.dfs_ctx.empty_block_line_count != 0 {
+            return false;
+        }
+    }
+
+    if core.config.all_shapes_same && core.all_shapes_same_check_shape_index != -1 {
+        let shape_size =
+            core.shape_size_by_index[core.all_shapes_same_check_shape_index as usize];
+        if core.dfs_ctx.empty_count % shape_size != 0 {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Symbol-count feasibility for the empty area just flood-filled.  Pure reads
+/// of `core.dfs_ctx`; the checks only ever reject, so their relative order is
+/// unobservable.
+#[inline]
+fn empty_area_symbol_ok(core: &AoGCore) -> bool {
+    if core.config.one_symbol_per_region {
+        if core.dfs_ctx.symbol_count == 0 {
+            return false;
+        }
+        if core.dfs_ctx.symbol_count == 1 && core.dfs_ctx.empty_block_line_count != 0 {
+            return false;
+        }
+    }
+
+    // rose_window: every remaining empty area must contain the same
+    // number of each symbol type (mirrors C++ slash_count check).
+    if core.rose_type_count > 0 {
+        let first = core.dfs_ctx.slash_count[0];
+        for t in 1..core.rose_type_count {
+            if core.dfs_ctx.slash_count[t] != first {
+                return false;
+            }
+        }
+        if first == 0 {
+            return false;
+        }
+        if first == 1 && core.dfs_ctx.empty_block_line_count != 0 {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// All checks for one freshly discovered empty area (seeded at `(x, y)`).
+#[inline]
+fn empty_region_check(core: &mut AoGCore, sp: &Vec<Vec<u32>>, x: i32, y: i32) -> bool {
+    dfs_empty_area(x, y, core, sp);
+    if !empty_area_shape_size_ok(core) {
+        return false;
+    }
+    if !empty_area_symbol_ok(core) {
+        return false;
+    }
+    if !core.dfs_ctx.compass_nodes.is_empty() && !dfs_empty_compass_check(x, y, core, sp) {
+        return false;
+    }
+    true
+}
+
+/// Palisade marker on a still-empty cell: the four orthogonal neighbours must
+/// match the marker's required pattern.
+#[inline]
+fn palisade_marker_check(core: &AoGCore, sp: &Vec<Vec<u32>>, px: usize, py: usize) -> bool {
+    let palisade_type =
+        (core.puzzle[px][py] & AREA_PALISADE_INDEX_BIT) >> AREA_PALISADE_INDEX_BIT_SHIFT;
+    let left = core.puzzle[px - 2][py] != AREA_BLOCK && sp[px - 2][py] == AREA_NORMAL;
+    let right = core.puzzle[px + 2][py] != AREA_BLOCK && sp[px + 2][py] == AREA_NORMAL;
+    let up = core.puzzle[px][py - 2] != AREA_BLOCK && sp[px][py - 2] == AREA_NORMAL;
+    let down = core.puzzle[px][py + 2] != AREA_BLOCK && sp[px][py + 2] == AREA_NORMAL;
+    let sum = (up as i32) + (down as i32) + (left as i32) + (right as i32);
+    match palisade_type {
+        1 => up && down && left && right,
+        2 => sum >= 3,
+        3 => !((!up && !right) || (!right && !down) || (!down && !left) || (!left && !up)),
+        4 => up || down || left || right,
+        5 => !((!up && !down) || (!right && !left)),
+        _ => true,
+    }
+}
+
 pub fn empty_area_check(core: &mut AoGCore, sp: &Vec<Vec<u32>>) -> bool {
     if core.config.no_3_way_intersections && !ring_t_junction_check(core, sp) {
         return false;
@@ -352,130 +465,17 @@ pub fn empty_area_check(core: &mut AoGCore, sp: &Vec<Vec<u32>>) -> bool {
             if core.puzzle[px][py] != AREA_BLOCK
                 && sp[px][py] == AREA_NORMAL
                 && !dfs_in_group_mark(x, y, core)
+                && !empty_region_check(core, sp, x, y)
             {
-                dfs_empty_area(x, y, core, sp);
-
-                let max_area_size = core.dfs_ctx.empty_count - core.dfs_ctx.empty_block_line_count;
-                if max_area_size < core.config.shape_size_lower_bound as usize {
-                    return false;
-                }
-
-                let mut seen_size = [false; 256];
-                let mut required = 0usize;
-                for &val in &core.dfs_ctx.area_shape_sizes {
-                    if val < 256 && !seen_size[val] {
-                        seen_size[val] = true;
-                        required += val;
-                    }
-                }
-                if required > core.dfs_ctx.empty_count {
-                    return false;
-                }
-
-                if core.config.one_symbol_per_region {
-                    if core.dfs_ctx.symbol_count == 0 {
-                        return false;
-                    }
-                    if core.dfs_ctx.symbol_count == 1 && core.dfs_ctx.empty_block_line_count != 0 {
-                        return false;
-                    }
-                }
-
-                // rose_window: every remaining empty area must contain the same
-                // number of each symbol type (mirrors C++ slash_count check).
-                if core.rose_type_count > 0 {
-                    let first = core.dfs_ctx.slash_count[0];
-                    let mut rose_ok = true;
-                    for t in 1..core.rose_type_count {
-                        if core.dfs_ctx.slash_count[t] != first {
-                            rose_ok = false;
-                            break;
-                        }
-                    }
-                    if !rose_ok || first == 0 {
-                        return false;
-                    }
-                    if first == 1 && core.dfs_ctx.empty_block_line_count != 0 {
-                        return false;
-                    }
-                }
-
-                if core.config.shape_size_lower_bound == core.config.shape_size_upper_bound {
-                    let lb = core.config.shape_size_lower_bound as usize;
-                    if core.dfs_ctx.empty_count % lb != 0 {
-                        return false;
-                    }
-                    if core.dfs_ctx.empty_count == lb && core.dfs_ctx.empty_block_line_count != 0 {
-                        return false;
-                    }
-                }
-
-                if core.config.all_shapes_same && core.all_shapes_same_check_shape_index != -1 {
-                    let shape_size = core.shape_size_by_index
-                        [core.all_shapes_same_check_shape_index as usize];
-                    if core.dfs_ctx.empty_count % shape_size != 0 {
-                        return false;
-                    }
-                }
-
-                if !core.dfs_ctx.compass_nodes.is_empty() {
-                    if !dfs_empty_compass_check(x, y, core, sp) {
-                        return false;
-                    }
-                }
+                return false;
             }
             // Palisade markers on still-empty cells.
             if core.puzzle[px][py] != AREA_BLOCK
                 && sp[px][py] == AREA_NORMAL
                 && (core.puzzle[px][py] & AREA_PALISADE_INDEX_BIT) != 0
+                && !palisade_marker_check(core, sp, px, py)
             {
-                let palisade_type = (core.puzzle[px][py] & AREA_PALISADE_INDEX_BIT)
-                    >> AREA_PALISADE_INDEX_BIT_SHIFT;
-                let mut up = false;
-                let mut down = false;
-                let mut left = false;
-                let mut right = false;
-                if core.puzzle[px - 2][py] != AREA_BLOCK && sp[px - 2][py] == AREA_NORMAL {
-                    left = true;
-                }
-                if core.puzzle[px + 2][py] != AREA_BLOCK && sp[px + 2][py] == AREA_NORMAL {
-                    right = true;
-                }
-                if core.puzzle[px][py - 2] != AREA_BLOCK && sp[px][py - 2] == AREA_NORMAL {
-                    up = true;
-                }
-                if core.puzzle[px][py + 2] != AREA_BLOCK && sp[px][py + 2] == AREA_NORMAL {
-                    down = true;
-                }
-                let sum = (up as i32) + (down as i32) + (left as i32) + (right as i32);
-                match palisade_type {
-                    1 => {
-                        if !(up && down && left && right) {
-                            return false;
-                        }
-                    }
-                    2 => {
-                        if sum < 3 {
-                            return false;
-                        }
-                    }
-                    3 => {
-                        if (!up && !right) || (!right && !down) || (!down && !left) || (!left && !up) {
-                            return false;
-                        }
-                    }
-                    4 => {
-                        if !up && !down && !left && !right {
-                            return false;
-                        }
-                    }
-                    5 => {
-                        if (!up && !down) || (!right && !left) {
-                            return false;
-                        }
-                    }
-                    _ => {}
-                }
+                return false;
             }
         }
     }

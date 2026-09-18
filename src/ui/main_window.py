@@ -1,32 +1,39 @@
 from __future__ import annotations
 
 import os
-import copy
-from typing import Optional
+from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (
-    QMainWindow, QSplitter, QTabWidget, QWidget, QVBoxLayout,
-    QHBoxLayout, QStatusBar, QMenuBar, QMenu, QFileDialog,
-    QMessageBox, QLabel, QPushButton, QSpinBox, QProgressBar,
-    QDialog, QFormLayout, QDialogButtonBox, QFrame,
-)
 from PySide6.QtGui import QAction, QKeyEvent
+from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSpinBox,
+    QSplitter,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
+from src.io.puzzle_codec import dict_to_puzzle, puzzle_to_dict
 from src.models.board import Board, CompassClue
-from src.models.puzzle import Puzzle
+from src.models.puzzle import Puzzle, Rule
 from src.models.solution import Solution
 from src.services.puzzle_service import PuzzleService
-from src.io.puzzle_codec import puzzle_to_dict, dict_to_puzzle
-from src.ui.grid_widget import GridWidget
 from src.ui.constraint_panel import ConstraintPanel
-from src.ui.tool_palette import ToolPalette
+from src.ui.grid_widget import GridWidget
 from src.ui.property_panel import PropertyPanel
 from src.ui.puzzle_browser import PuzzleBrowser
-from src.ui.shape_gallery import ShapeGalleryWidget, ShapeGalleryDialog
+from src.ui.shape_gallery import ShapeGalleryDialog, ShapeGalleryWidget
 from src.ui.solver_runner import SolverThread
-from src.ui.theme import MODE_COLORS
-
+from src.ui.tool_palette import ToolPalette
 
 # Status → (label, color) for the attempts table.  Matches `AttemptStatus`
 # values; unknown statuses fall back to a neutral grey.
@@ -50,9 +57,7 @@ def _attempts_html(solution: Solution) -> str:
         return ""
     rows = []
     for a in solution.attempts:
-        label, color = _ATTEMPT_STATUS_STYLE.get(
-            a.status.value, (a.status.value, "#64748B")
-        )
+        label, color = _ATTEMPT_STATUS_STYLE.get(a.status.value, (a.status.value, "#64748B"))
         note = a.note or ""
         rows.append(
             f"<tr>"
@@ -64,9 +69,7 @@ def _attempts_html(solution: Solution) -> str:
         )
     return (
         "<br><span style='color:#64748B; font-size:11px;'>求解器链:</span>"
-        "<table style='font-size:11px; margin-top:2px;'>"
-        + "".join(rows)
-        + "</table>"
+        "<table style='font-size:11px; margin-top:2px;'>" + "".join(rows) + "</table>"
     )
 
 
@@ -91,17 +94,21 @@ class NewPuzzleDialog(QDialog):
         self._width_spin.setFixedWidth(80)
         layout.addRow("宽度:", self._width_spin)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
 
+    # `height` / `width` shadow QWidget's same-named methods; the dialog API is
+    # the documented one here, so the Qt signature clash is expected.
     @property
-    def height(self) -> int:
+    def height(self) -> int:  # type: ignore[override]
         return self._height_spin.value()
 
     @property
-    def width(self) -> int:
+    def width(self) -> int:  # type: ignore[override]
         return self._width_spin.value()
 
 
@@ -130,20 +137,22 @@ class MainWindow(QMainWindow):
         self._puzzle_service = PuzzleService()
         self._puzzle: Puzzle | None = None
         self._current_file: str | None = None
-        self._initial_puzzle_data: dict | None = None
-        self._undo_stack: list[dict] = []
-        self._redo_stack: list[dict] = []
+        self._initial_puzzle_data: dict[str, Any] | None = None
+        self._undo_stack: list[dict[str, Any]] = []
+        self._redo_stack: list[dict[str, Any]] = []
         self._undo_depth = 100
         # State of the board most recently committed to the undo stack.  Used to
         # compute the *pre-edit* snapshot so the first Ctrl+Z undoes the last
         # edit instead of being a no-op (bug L2).
-        self._last_synced_state: dict | None = None
+        self._last_synced_state: dict[str, Any] | None = None
         # Monotonic token identifying the currently-active solve request.  A
         # solution/error callback is only applied if its token still matches,
         # so a solve that finishes after the puzzle was switched is ignored
         # (bug C2).
         self._solve_request_id = 0
         self._solver_thread: SolverThread | None = None
+        # Lazily created on first board modification; None until then.
+        self._undo_timer: QTimer | None = None
 
         self.setWindowTitle("格里米斯的工匠 - 求解器")
         self.resize(1500, 900)
@@ -217,8 +226,7 @@ class MainWindow(QMainWindow):
         self._result_label = QLabel("就绪")
         self._result_label.setWordWrap(True)
         self._result_label.setStyleSheet(
-            "font-size: 12px; padding: 8px; "
-            "border: 1px solid palette(mid); border-radius: 6px;"
+            "font-size: 12px; padding: 8px; border: 1px solid palette(mid); border-radius: 6px;"
         )
         self._result_label.setAlignment(Qt.AlignmentFlag.AlignTop)
         control_layout.addWidget(self._result_label)
@@ -355,9 +363,7 @@ class MainWindow(QMainWindow):
         """
         self._undo_stack.clear()
         self._redo_stack.clear()
-        self._last_synced_state = (
-            puzzle_to_dict(self._puzzle) if self._puzzle is not None else None
-        )
+        self._last_synced_state = puzzle_to_dict(self._puzzle) if self._puzzle is not None else None
 
     def _save_undo_snapshot(self) -> None:
         """Record the *pre-edit* state so undo restores the prior edit.
@@ -387,7 +393,7 @@ class MainWindow(QMainWindow):
     def _on_undo(self) -> None:
         if not self._undo_stack:
             return
-        if hasattr(self, "_undo_timer"):
+        if self._undo_timer is not None:
             self._undo_timer.stop()
         self._sync_puzzle_from_ui()
         cur = puzzle_to_dict(self._puzzle) if self._puzzle else None
@@ -403,7 +409,7 @@ class MainWindow(QMainWindow):
     def _on_redo(self) -> None:
         if not self._redo_stack:
             return
-        if hasattr(self, "_undo_timer"):
+        if self._undo_timer is not None:
             self._undo_timer.stop()
         self._sync_puzzle_from_ui()
         cur = puzzle_to_dict(self._puzzle) if self._puzzle else None
@@ -416,7 +422,7 @@ class MainWindow(QMainWindow):
 
     def _on_board_modified(self) -> None:
         """Debounced undo snapshot save after user modifications."""
-        if hasattr(self, '_undo_timer'):
+        if self._undo_timer is not None:
             self._undo_timer.stop()
         else:
             self._undo_timer = QTimer()
@@ -424,7 +430,7 @@ class MainWindow(QMainWindow):
             self._undo_timer.timeout.connect(self._save_undo_snapshot)
         self._undo_timer.start(300)
 
-    def _apply_snapshot(self, data: dict) -> None:
+    def _apply_snapshot(self, data: dict[str, Any]) -> None:
         self._puzzle = dict_to_puzzle(data)
         board = Board(self._puzzle.height, self._puzzle.width)
         self._copy_puzzle_to_board(board)
@@ -435,14 +441,16 @@ class MainWindow(QMainWindow):
         self._update_overlay()
 
     def _show_about(self) -> None:
-        QMessageBox.about(self, "关于",
+        QMessageBox.about(
+            self,
+            "关于",
             "格里米斯的工匠 - 求解器 v0.1.0\n\n"
             "基于回溯搜索 + 约束传播的自动求解工具。\n"
             "支持全部 22 条规则。\n\n"
-            "Powered by PySide6"
+            "Powered by PySide6",
         )
 
-    def _rule_overlay_label(self, rule) -> str:
+    def _rule_overlay_label(self, rule: Rule) -> str:
         """Display name for a rule, including parameters where relevant."""
         from src.models.puzzle import RULE_NAMES
 
@@ -543,7 +551,10 @@ class MainWindow(QMainWindow):
 
     def _on_open(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "打开谜题", "", "谜题文件 (*.json);;所有文件 (*)",
+            self,
+            "打开谜题",
+            "",
+            "谜题文件 (*.json);;所有文件 (*)",
         )
         if not path:
             return
@@ -603,7 +614,10 @@ class MainWindow(QMainWindow):
             return
         self._sync_puzzle_from_ui()
         path, _ = QFileDialog.getSaveFileName(
-            self, "保存谜题", "puzzles/user/", "谜题文件 (*.json);;所有文件 (*)",
+            self,
+            "保存谜题",
+            "puzzles/user/",
+            "谜题文件 (*.json);;所有文件 (*)",
         )
         if not path:
             return
@@ -612,6 +626,8 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     def _copy_puzzle_to_board(self, board: Board) -> None:
+        if self._puzzle is None:
+            return
         for c in self._puzzle.cells:
             dst = board.cell(c.row, c.col)
             dst.number = c.number
@@ -708,9 +724,7 @@ class MainWindow(QMainWindow):
         self._solver_thread.finished.connect(
             lambda sol, rid=req_id: self._on_solution_ready(sol, rid)
         )
-        self._solver_thread.error.connect(
-            lambda msg, rid=req_id: self._on_solver_error(msg, rid)
-        )
+        self._solver_thread.error.connect(lambda msg, rid=req_id: self._on_solver_error(msg, rid))
         self._solver_thread.start()
 
     def _on_solution_ready(self, solution: Solution, request_id: int = 0) -> None:
@@ -723,46 +737,55 @@ class MainWindow(QMainWindow):
 
         board = Board(self._puzzle.height, self._puzzle.width)
         self._copy_puzzle_to_board(board)
-
-        if solution.solved:
-            for region in solution.regions:
-                for r, c in region.cells:
-                    board.cell(r, c).region_id = region.region_id
-
-            for e in board.edges():
-                c1 = board.cell(e.r1, e.c1)
-                c2 = board.cell(e.r2, e.c2)
-                if c1.assigned and c2.assigned:
-                    e.is_boundary = c1.region_id != c2.region_id
-
-            self._status_label.setText(
-                f"求解成功! {solution.elapsed_ms}ms, {solution.steps_taken}步, {len(solution.regions)}个区域"
-            )
-            self._result_label.setText(
-                f'<b style="color: #059669; font-size: 14px;">求解成功!</b><br>'
-                f'<span style="color: #64748B;">耗时:</span> {solution.elapsed_ms}ms<br>'
-                f'<span style="color: #64748B;">搜索步数:</span> {solution.steps_taken}<br>'
-                f'<span style="color: #64748B;">区域数:</span> {len(solution.regions)}'
-                f'{_attempts_html(solution)}'
-            )
-            self._result_label.setTextFormat(Qt.TextFormat.RichText)
-        else:
-            self._status_label.setText(
-                f"求解失败: {solution.error_message or '无解'}"
-            )
-            self._result_label.setText(
-                f'<b style="color: #DC2626; font-size: 14px;">求解失败</b><br>'
-                f'<span style="color: #64748B;">原因:</span> {solution.error_message or "无解"}<br>'
-                f'<span style="color: #64748B;">耗时:</span> {solution.elapsed_ms}ms'
-                f'{_attempts_html(solution)}'
-            )
-            self._result_label.setTextFormat(Qt.TextFormat.RichText)
+        self._apply_solution(board, solution)
+        self._show_solution_result(solution)
 
         self._grid_widget.set_board(board)
         self._property_panel.set_board(board)
         self._solve_btn.setEnabled(True)
         self._solve_btn.setText("求解")
         self._progress_bar.setVisible(False)
+
+    def _apply_solution(self, board: Board, solution: Solution) -> None:
+        if not solution.solved:
+            return
+        self._apply_solution_regions(board, solution)
+        self._apply_solution_boundaries(board)
+
+    def _apply_solution_regions(self, board: Board, solution: Solution) -> None:
+        for region in solution.regions:
+            for r, c in region.cells:
+                board.cell(r, c).region_id = region.region_id
+
+    def _apply_solution_boundaries(self, board: Board) -> None:
+        for e in board.edges():
+            c1 = board.cell(e.r1, e.c1)
+            c2 = board.cell(e.r2, e.c2)
+            if c1.assigned and c2.assigned:
+                e.is_boundary = c1.region_id != c2.region_id
+
+    def _show_solution_result(self, solution: Solution) -> None:
+        if solution.solved:
+            self._status_label.setText(
+                f"求解成功! {solution.elapsed_ms}ms, {solution.steps_taken}步, "
+                f"{len(solution.regions)}个区域"
+            )
+            self._result_label.setText(
+                f'<b style="color: #059669; font-size: 14px;">求解成功!</b><br>'
+                f'<span style="color: #64748B;">耗时:</span> {solution.elapsed_ms}ms<br>'
+                f'<span style="color: #64748B;">搜索步数:</span> {solution.steps_taken}<br>'
+                f'<span style="color: #64748B;">区域数:</span> {len(solution.regions)}'
+                f"{_attempts_html(solution)}"
+            )
+        else:
+            self._status_label.setText(f"求解失败: {solution.error_message or '无解'}")
+            self._result_label.setText(
+                f'<b style="color: #DC2626; font-size: 14px;">求解失败</b><br>'
+                f'<span style="color: #64748B;">原因:</span> {solution.error_message or "无解"}<br>'
+                f'<span style="color: #64748B;">耗时:</span> {solution.elapsed_ms}ms'
+                f"{_attempts_html(solution)}"
+            )
+        self._result_label.setTextFormat(Qt.TextFormat.RichText)
 
     def _on_solver_error(self, err_msg: str, request_id: int = 0) -> None:
         if request_id != self._solve_request_id:
@@ -774,8 +797,8 @@ class MainWindow(QMainWindow):
         self._solve_btn.setText("求解")
         self._progress_bar.setVisible(False)
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        key_map = {
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 (Qt override)
+        key_map: dict[int, str] = {
             Qt.Key.Key_V: "select",
             Qt.Key.Key_B: "boundary",
             Qt.Key.Key_X: "block",

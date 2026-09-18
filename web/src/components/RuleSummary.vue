@@ -10,18 +10,35 @@ const { theme } = useTheme()
 
 const p = computed(() => store.puzzle as PuzzleJson)
 
-function ruleLabel(r: { type: string; params?: Record<string, any> }): string {
+type RuleRef = { type: string; params?: Record<string, any> }
+
+// Per-rule labelers: return `null` to fall back to the bare rule name.
+const RULE_LABELERS: Record<string, (name: string, pr: Record<string, any>) => string | null> = {
+  range: rangeLabel,
+  precise: preciseLabel,
+  rose_window: roseWindowLabel,
+}
+
+function rangeLabel(name: string, pr: Record<string, any>): string | null {
+  const lo = pr.min, hi = pr.max
+  if (lo != null && hi != null) return `${name} ${lo}~${hi}`
+  if (lo != null) return `${name} ≥${lo}`
+  if (hi != null) return `${name} ≤${hi}`
+  return null
+}
+function preciseLabel(name: string, pr: Record<string, any>): string | null {
+  if (pr.area != null) return `${name} ${pr.area}`
+  return null
+}
+function roseWindowLabel(name: string, pr: Record<string, any>): string | null {
+  if (pr.symbol_types) return `${name} ${pr.symbol_types.length}种`
+  return null
+}
+
+function ruleLabel(r: RuleRef): string {
   const name = RULE_NAMES[r.type] ?? r.type
-  const pr = r.params ?? {}
-  if (r.type === 'range') {
-    const lo = pr.min, hi = pr.max
-    if (lo != null && hi != null) return `${name} ${lo}~${hi}`
-    if (lo != null) return `${name} ≥${lo}`
-    if (hi != null) return `${name} ≤${hi}`
-  }
-  if (r.type === 'precise' && pr.area != null) return `${name} ${pr.area}`
-  if (r.type === 'rose_window' && pr.symbol_types) return `${name} ${pr.symbol_types.length}种`
-  return name
+  const label = RULE_LABELERS[r.type]?.(name, r.params ?? {})
+  return label ?? name
 }
 
 const rules = computed(() => [...new Set(p.value.rules.map((r) => ruleLabel(r)))])

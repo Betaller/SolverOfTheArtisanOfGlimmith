@@ -43,10 +43,7 @@ def all_transformations(cells: frozenset[tuple[int, int]]) -> list[frozenset[tup
 
 def canonical_key(cells: frozenset[tuple[int, int]]) -> str:
     normalized_transforms = all_transformations(cells)
-    best = min(
-        sorted((r, c) for r, c in t)
-        for t in normalized_transforms
-    )
+    best = min(sorted((r, c) for r, c in t) for t in normalized_transforms)
     return str(best)
 
 
@@ -106,11 +103,11 @@ def enumerate_polyominoes(n: int) -> list[Shape]:
         return []
     if n == 1:
         return [Shape(cells=frozenset([(0, 0)]))]
-    
+
     smaller = enumerate_polyominoes(n - 1)
     seen: set[str] = set()
     result: list[Shape] = []
-    
+
     for shape in smaller:
         for r, c in shape.cells:
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
@@ -124,5 +121,5 @@ def enumerate_polyominoes(n: int) -> list[Shape]:
                 if key not in seen:
                     seen.add(key)
                     result.append(Shape(cells=norm))
-    
+
     return result

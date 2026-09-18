@@ -98,25 +98,55 @@ const MODE_LABELS: Record<string, string> = {
   select: '选择', boundary: '边框', block: '障碍', number: '数字', symbol: '符号', compass: '罗盘', watchtower: '望塔',
 }
 
+function undoOrRedo(e: KeyboardEvent) {
+  if (e.shiftKey) store.redo()
+  else store.undo()
+}
+const CTRL_COMMANDS: Record<string, (e: KeyboardEvent) => void> = {
+  z: undoOrRedo,
+  y: () => store.redo(),
+  n: () => openNew(),
+  r: () => doReset(),
+}
+const PLAIN_COMMANDS: Record<string, () => void> = {
+  F5: () => store.solve(),
+  '?': () => { showHelp.value = !showHelp.value },
+}
+
+// Returns true when the keypress was consumed as a command shortcut.
+function runCommand(e: KeyboardEvent, k: string): boolean {
+  const ctrl = e.ctrlKey || e.metaKey
+  const cmd = ctrl ? CTRL_COMMANDS[k.toLowerCase()] : undefined
+  if (cmd) {
+    e.preventDefault()
+    cmd(e)
+    return true
+  }
+  const plain = PLAIN_COMMANDS[k]
+  if (plain) {
+    e.preventDefault()
+    plain()
+    return true
+  }
+  if (k === 'Escape' && showHelp.value) {
+    showHelp.value = false
+    return true
+  }
+  return false
+}
+
+function applyModeKey(e: KeyboardEvent, k: string) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  const mode = MODE_KEYS[k.toLowerCase()]
+  if (!mode) return
+  store.mode = mode
+  toast.info(`工具：${MODE_LABELS[mode]}`, 1200)
+}
+
 function onKey(e: KeyboardEvent) {
   if (isEditableTarget(e)) return
-  const k = e.key
-  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'z') {
-    e.preventDefault()
-    e.shiftKey ? store.redo() : store.undo()
-    return
-  }
-  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'y') { e.preventDefault(); store.redo(); return }
-  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'n') { e.preventDefault(); openNew(); return }
-  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === 'r') { e.preventDefault(); doReset(); return }
-  if (k === 'F5') { e.preventDefault(); store.solve(); return }
-  if (k === '?') { e.preventDefault(); showHelp.value = !showHelp.value; return }
-  if (k === 'Escape' && showHelp.value) { showHelp.value = false; return }
-  const mode = MODE_KEYS[k.toLowerCase()]
-  if (mode && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    store.mode = mode
-    toast.info(`工具：${MODE_LABELS[mode]}`, 1200)
-  }
+  if (runCommand(e, e.key)) return
+  applyModeKey(e, e.key)
 }
 onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))

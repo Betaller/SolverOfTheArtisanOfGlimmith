@@ -142,6 +142,30 @@ export const usePuzzleStore = defineStore('puzzle', () => {
     selectedEdge.value = null
   }
 
+  const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+  function applyResult(s: SolutionJson) {
+    solution.value = s
+    if (s.solved) {
+      showSolution.value = true
+      solveMessage.value = `求解成功 · ${s.elapsed_ms}ms · ${s.regions.length} 个区域`
+    } else {
+      solveMessage.value = `求解失败 · ${s.error_message || '无解'}`
+    }
+  }
+
+  // Runs for `token`; results arriving after a newer solve/cancel are dropped.
+  async function runSolve(token: number) {
+    try {
+      const s = await solvePuzzle(JSON.stringify(puzzle), solveTimeoutMs.value)
+      if (token !== solveToken) return  // superseded by a newer solve/cancel
+      applyResult(s)
+    } catch (e) {
+      if (token !== solveToken) return
+      solveMessage.value = `求解出错 · ${errorText(e)}`
+    }
+  }
+
   async function solve() {
     // Official answer: just reveal it (no solver run).
     if (officialAnswer.value) {
@@ -159,18 +183,7 @@ export const usePuzzleStore = defineStore('puzzle', () => {
     // be dropped instead of overwriting the current one.
     const token = ++solveToken
     try {
-      const s = await solvePuzzle(JSON.stringify(puzzle), solveTimeoutMs.value)
-      if (token !== solveToken) return  // superseded by a newer solve/cancel
-      solution.value = s
-      if (s.solved) {
-        showSolution.value = true
-        solveMessage.value = `求解成功 · ${s.elapsed_ms}ms · ${s.regions.length} 个区域`
-      } else {
-        solveMessage.value = `求解失败 · ${s.error_message || '无解'}`
-      }
-    } catch (e) {
-      if (token !== solveToken) return
-      solveMessage.value = `求解出错 · ${e instanceof Error ? e.message : String(e)}`
+      await runSolve(token)
     } finally {
       if (token === solveToken) solving.value = false
     }

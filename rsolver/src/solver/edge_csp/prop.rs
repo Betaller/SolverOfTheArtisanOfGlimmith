@@ -65,6 +65,69 @@ struct BridgeInfo {
     ciside_lt: Vec<bool>,
 }
 
+/// Pairwise zero-value direction conflict: a direction pinned to `0` forbids a
+/// neighbour in that direction from being in the same piece.
+#[inline]
+fn compass_zero_conflict(
+    ra: usize,
+    rb: usize,
+    cola: usize,
+    colb: usize,
+    pa: &CompassData,
+    pb: &CompassData,
+) -> bool {
+    if pa.n == Some(0) && rb < ra {
+        return true;
+    }
+    if pb.n == Some(0) && ra < rb {
+        return true;
+    }
+    if pa.s == Some(0) && rb > ra {
+        return true;
+    }
+    if pb.s == Some(0) && ra > rb {
+        return true;
+    }
+    if pa.e == Some(0) && colb > cola {
+        return true;
+    }
+    if pb.e == Some(0) && cola > colb {
+        return true;
+    }
+    if pa.w == Some(0) && colb < cola {
+        return true;
+    }
+    if pb.w == Some(0) && cola < colb {
+        return true;
+    }
+    false
+}
+
+/// Pairwise value-ordering conflict along one compass axis (North/South/East/
+/// West).  `before` is true when `a` is strictly before `b` along this axis,
+/// `after` when strictly after.
+#[inline]
+fn compass_dir_conflict(before: bool, after: bool, a_val: Option<usize>, b_val: Option<usize>) -> bool {
+    if before {
+        if let (Some(vb), Some(va)) = (b_val, a_val) {
+            if vb >= va {
+                return true;
+            }
+        }
+    } else if after {
+        if let (Some(va), Some(vb)) = (a_val, b_val) {
+            if va >= vb {
+                return true;
+            }
+        }
+    } else if let (Some(va), Some(vb)) = (a_val, b_val) {
+        if va != vb {
+            return true;
+        }
+    }
+    false
+}
+
 impl<'a> Solver<'a> {
     /// Fixed-point propagation.  Returns `Ok(true)` when stable (no further
     /// progress), `Err(())` on contradiction or timeout.
@@ -403,42 +466,7 @@ impl<'a> Solver<'a> {
         self.prop.curr_max_area.resize(num_comp, self.eff_max_area);
 
         for ci in 0..num_comp {
-            let mut target_area: Option<usize> = None;
-            let mut local_min = self.prop.curr_min_area[ci];
-            let mut local_max = self.prop.curr_max_area[ci];
-
-            for &c in &self.comp_cells[ci] {
-                for &clue_idx in &self.cell_clues_indexed[c] {
-                    let clue = &self.cell_clues[clue_idx];
-                    match clue {
-                        CellClue::Area { value, .. } => {
-                            if let Some(prev) = target_area {
-                                if prev != *value {
-                                    return Err(());
-                                }
-                            }
-                            target_area = Some(*value);
-                        }
-                        CellClue::Compass { cell, compass } => {
-                            let (cmin, cmax, cexact) = self.get_compass_area_bounds(*cell, compass);
-                            if let Some(exact) = cexact {
-                                if let Some(prev) = target_area {
-                                    if prev != exact {
-                                        return Err(());
-                                    }
-                                }
-                                target_area = Some(exact);
-                            }
-                            local_min = local_min.max(cmin);
-                            if let Some(maxv) = cmax {
-                                local_max = local_max.min(maxv);
-                            }
-                        }
-                        // Palisade (fence) carries no area constraint.
-                        CellClue::Palisade { .. } => {}
-                    }
-                }
-            }
+            let (target_area, local_min, local_max) = self.compute_component_area_bounds(ci)?;
 
             if let Some(a0) = target_area {
                 if a0 < local_min || a0 > local_max {
@@ -465,6 +493,71 @@ impl<'a> Solver<'a> {
         }
 
         // Growth-edge pass: classify Unknown edges between different components.
+        self.build_components_growth_edges(num_comp)?;
+
+        self.prop.growing_list.clear();
+        self.prop.sealed_list.clear();
+        for ci in 0..num_comp {
+            if self.can_grow_buf[ci] {
+                self.prop.growing_list.push(ci);
+            } else {
+                self.prop.sealed_list.push(ci);
+            }
+        }
+
+        Ok(num_comp)
+    }
+
+    /// Per-component area bounds: fold `cell_clues`/`compass` constraints into
+    /// `(target_area, min, max)`.  Returns `Err(())` on an internal area clash.
+    fn compute_component_area_bounds(
+        &mut self,
+        ci: usize,
+    ) -> Result<(Option<usize>, usize, usize), ()> {
+        let mut target_area: Option<usize> = None;
+        let mut local_min = self.prop.curr_min_area[ci];
+        let mut local_max = self.prop.curr_max_area[ci];
+
+        for &c in &self.comp_cells[ci] {
+            for &clue_idx in &self.cell_clues_indexed[c] {
+                let clue = &self.cell_clues[clue_idx];
+                match clue {
+                    CellClue::Area { value, .. } => {
+                        if let Some(prev) = target_area {
+                            if prev != *value {
+                                return Err(());
+                            }
+                        }
+                        target_area = Some(*value);
+                    }
+                    CellClue::Compass { cell, compass } => {
+                        let (cmin, cmax, cexact) = self.get_compass_area_bounds(*cell, compass);
+                        if let Some(exact) = cexact {
+                            if let Some(prev) = target_area {
+                                if prev != exact {
+                                    return Err(());
+                                }
+                            }
+                            target_area = Some(exact);
+                        }
+                        local_min = local_min.max(cmin);
+                        if let Some(maxv) = cmax {
+                            local_max = local_max.min(maxv);
+                        }
+                    }
+                    // Palisade (fence) carries no area constraint.
+                    CellClue::Palisade { .. } => {}
+                }
+            }
+        }
+
+        Ok((target_area, local_min, local_max))
+    }
+
+    /// Growth-edge pass: classify Unknown edges straddling two different
+    /// components, force `Cut` where the merged region would violate area
+    /// bounds or a distinct target area, and record remaining growth edges.
+    fn build_components_growth_edges(&mut self, num_comp: usize) -> Result<(), ()> {
         self.can_grow_buf.clear();
         self.can_grow_buf.resize(num_comp, false);
         self.prop.growth_edges.truncate(num_comp);
@@ -528,18 +621,7 @@ impl<'a> Solver<'a> {
                 }
             }
         }
-
-        self.prop.growing_list.clear();
-        self.prop.sealed_list.clear();
-        for ci in 0..num_comp {
-            if self.can_grow_buf[ci] {
-                self.prop.growing_list.push(ci);
-            } else {
-                self.prop.sealed_list.push(ci);
-            }
-        }
-
-        Ok(num_comp)
+        Ok(())
     }
 
     /// Hub: rebuild components, verify no Cut edge straddles a component, then
@@ -920,103 +1002,20 @@ impl<'a> Solver<'a> {
         let (ra, cola) = self.grid.cell_pos(ca);
         let (rb, colb) = self.grid.cell_pos(cb);
 
-        // Zero-value direction conflicts.
-        if pa.n == Some(0) && rb < ra {
+        if compass_zero_conflict(ra, rb, cola, colb, pa, pb) {
             return true;
         }
-        if pb.n == Some(0) && ra < rb {
+        if compass_dir_conflict(rb < ra, ra < rb, pa.n, pb.n) {
             return true;
         }
-        if pa.s == Some(0) && rb > ra {
+        if compass_dir_conflict(rb > ra, ra > rb, pa.s, pb.s) {
             return true;
         }
-        if pb.s == Some(0) && ra > rb {
+        if compass_dir_conflict(colb > cola, cola > colb, pa.e, pb.e) {
             return true;
         }
-        if pa.e == Some(0) && colb > cola {
+        if compass_dir_conflict(colb < cola, cola < colb, pa.w, pb.w) {
             return true;
-        }
-        if pb.e == Some(0) && cola > colb {
-            return true;
-        }
-        if pa.w == Some(0) && colb < cola {
-            return true;
-        }
-        if pb.w == Some(0) && cola < colb {
-            return true;
-        }
-
-        // Value ordering: North.
-        if rb < ra {
-            if let (Some(vb), Some(va)) = (pb.n, pa.n) {
-                if vb >= va {
-                    return true;
-                }
-            }
-        } else if ra < rb {
-            if let (Some(va), Some(vb)) = (pa.n, pb.n) {
-                if va >= vb {
-                    return true;
-                }
-            }
-        } else if let (Some(va), Some(vb)) = (pa.n, pb.n) {
-            if va != vb {
-                return true;
-            }
-        }
-        // Value ordering: South.
-        if rb > ra {
-            if let (Some(vb), Some(va)) = (pb.s, pa.s) {
-                if vb >= va {
-                    return true;
-                }
-            }
-        } else if ra > rb {
-            if let (Some(va), Some(vb)) = (pa.s, pb.s) {
-                if va >= vb {
-                    return true;
-                }
-            }
-        } else if let (Some(va), Some(vb)) = (pa.s, pb.s) {
-            if va != vb {
-                return true;
-            }
-        }
-        // Value ordering: East.
-        if colb > cola {
-            if let (Some(vb), Some(va)) = (pb.e, pa.e) {
-                if vb >= va {
-                    return true;
-                }
-            }
-        } else if cola > colb {
-            if let (Some(va), Some(vb)) = (pa.e, pb.e) {
-                if va >= vb {
-                    return true;
-                }
-            }
-        } else if let (Some(va), Some(vb)) = (pa.e, pb.e) {
-            if va != vb {
-                return true;
-            }
-        }
-        // Value ordering: West.
-        if colb < cola {
-            if let (Some(vb), Some(va)) = (pb.w, pa.w) {
-                if vb >= va {
-                    return true;
-                }
-            }
-        } else if cola < colb {
-            if let (Some(va), Some(vb)) = (pa.w, pb.w) {
-                if va >= vb {
-                    return true;
-                }
-            }
-        } else if let (Some(va), Some(vb)) = (pa.w, pb.w) {
-            if va != vb {
-                return true;
-            }
         }
 
         false
@@ -1089,7 +1088,8 @@ impl<'a> Solver<'a> {
         let mut cut_ef: Vec<EdgeId> = Vec::new();
         let mut uncut_ef: Vec<EdgeId> = Vec::new();
 
-        for &cl_idx in &self.prop.compass_clue_indices {
+        let clue_indices = self.prop.compass_clue_indices.clone();
+        for &cl_idx in &clue_indices {
             let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] else {
                 continue;
             };
@@ -1097,194 +1097,13 @@ impl<'a> Solver<'a> {
             if ci == usize::MAX || ci >= num_comp {
                 continue;
             }
-            let (cr, cc) = self.grid.cell_pos(*cell);
-
-            // Count cells in each compass direction (single pass).
-            let mut counts = [0usize; 4]; // N, S, E, W
-            for &c in &self.comp_cells[ci] {
-                let (pr, pc) = self.grid.cell_pos(c);
-                if pr < cr {
-                    counts[0] += 1;
-                }
-                if pr > cr {
-                    counts[1] += 1;
-                }
-                if pc > cc {
-                    counts[2] += 1;
-                }
-                if pc < cc {
-                    counts[3] += 1;
-                }
-            }
-
-            // Classify growth edges by direction.
-            let mut dir_count = [0usize; 4];
-            let mut dir_last = [0usize; 4];
-            for &e in &self.prop.growth_edges[ci] {
-                let (c1, c2) = self.grid.edge_cells(e);
-                let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
-                let (pr, pc) = self.grid.cell_pos(other);
-                if pr < cr {
-                    dir_count[0] += 1;
-                    dir_last[0] = e;
-                }
-                if pr > cr {
-                    dir_count[1] += 1;
-                    dir_last[1] = e;
-                }
-                if pc > cc {
-                    dir_count[2] += 1;
-                    dir_last[2] = e;
-                }
-                if pc < cc {
-                    dir_count[3] += 1;
-                    dir_last[3] = e;
-                }
-            }
-
-            let compass_vals: [Option<usize>; 4] = [compass.n, compass.s, compass.e, compass.w];
-
-            for idx in 0..4 {
-                let Some(v) = compass_vals[idx] else { continue };
-                if counts[idx] > v {
-                    return Err(());
-                }
-                if counts[idx] == v {
-                    // At limit: cut growth edges in this direction.
-                    for &e in &self.prop.growth_edges[ci] {
-                        let (c1, c2) = self.grid.edge_cells(e);
-                        let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
-                        let (pr, pc) = self.grid.cell_pos(other);
-                        let matches = match idx {
-                            0 => pr < cr,
-                            1 => pr > cr,
-                            2 => pc > cc,
-                            3 => pc < cc,
-                            _ => false,
-                        };
-                        if matches {
-                            cut_ef.push(e);
-                        }
-                    }
-                }
-                if counts[idx] < v {
-                    // Below limit: if only 1 growth edge in this direction and all
-                    // other directions are blocked, force Uncut.
-                    if self.is_growing(ci) && dir_count[idx] == 1 {
-                        let mut all_others_blocked = true;
-                        for pidx in 0..4 {
-                            if pidx == idx {
-                                continue;
-                            }
-                            if let Some(pv) = compass_vals[pidx] {
-                                if counts[pidx] < pv {
-                                    all_others_blocked = false;
-                                    break;
-                                }
-                            } else if dir_count[pidx] > 0 {
-                                all_others_blocked = false;
-                                break;
-                            }
-                        }
-                        if all_others_blocked {
-                            uncut_ef.push(dir_last[idx]);
-                        }
-                    }
-                }
-                // Sealed component with unsatisfied compass constraint.
-                if self.is_sealed(ci) && counts[idx] < v {
-                    return Err(());
-                }
-            }
+            let compass = *compass;
+            self.propagate_compass_clue(*cell, ci, compass, &mut cut_ef, &mut uncut_ef)?;
         }
 
         // Pair-wise compass compatibility + bounding-box pruning.
-        {
-            let cci = &self.prop.compass_clue_indices;
-            for ii in 0..cci.len() {
-                let CellClue::Compass { cell: ca, compass: pa } = &self.cell_clues[cci[ii]] else {
-                    continue;
-                };
-                let ci_a = self.curr_comp_id[*ca];
-                if ci_a == usize::MAX {
-                    continue;
-                }
-                for jj in (ii + 1)..cci.len() {
-                    let CellClue::Compass { cell: cb, compass: pb } = &self.cell_clues[cci[jj]]
-                    else {
-                        continue;
-                    };
-                    if self.curr_comp_id[*cb] == ci_a && self.compass_cells_incompatible(*ca, pa, *cb, pb) {
-                        return Err(());
-                    }
-                }
-            }
-
-            // Bounding box per component.
-            let mut bbox_inited = vec![false; num_comp];
-            let mut bbox_min_r = vec![0isize; num_comp];
-            let mut bbox_max_r = vec![0isize; num_comp];
-            let mut bbox_min_c = vec![0isize; num_comp];
-            let mut bbox_max_c = vec![0isize; num_comp];
-
-            for &cl_idx in &self.prop.compass_clue_indices {
-                let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] else {
-                    continue;
-                };
-                let ci = self.curr_comp_id[*cell];
-                if ci == usize::MAX || ci >= num_comp {
-                    continue;
-                }
-                let (r, c) = self.grid.cell_pos(*cell);
-                let (ri, ci_col) = (r as isize, c as isize);
-                if !bbox_inited[ci] {
-                    bbox_inited[ci] = true;
-                    bbox_max_r[ci] = self.grid.rows as isize - 1;
-                    bbox_max_c[ci] = self.grid.cols as isize - 1;
-                }
-                if let Some(v) = compass.n {
-                    bbox_min_r[ci] = bbox_min_r[ci].max(ri - v as isize);
-                }
-                if let Some(v) = compass.s {
-                    bbox_max_r[ci] = bbox_max_r[ci].min(ri + v as isize);
-                }
-                if let Some(v) = compass.e {
-                    bbox_max_c[ci] = bbox_max_c[ci].min(ci_col + v as isize);
-                }
-                if let Some(v) = compass.w {
-                    bbox_min_c[ci] = bbox_min_c[ci].max(ci_col - v as isize);
-                }
-            }
-
-            for ci in 0..num_comp {
-                if !bbox_inited[ci] {
-                    continue;
-                }
-                if bbox_min_r[ci] > bbox_max_r[ci] || bbox_min_c[ci] > bbox_max_c[ci] {
-                    return Err(());
-                }
-                for i in 0..self.prop.growth_edges[ci].len() {
-                    let e = self.prop.growth_edges[ci][i];
-                    if self.edges[e] != EdgeState::Unknown {
-                        continue;
-                    }
-                    let (c1, c2) = self.grid.edge_cells(e);
-                    let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
-                    let (pr, pc) = self.grid.cell_pos(other);
-                    let (pri, pci) = (pr as isize, pc as isize);
-                    if pri < bbox_min_r[ci]
-                        || pri > bbox_max_r[ci]
-                        || pci < bbox_min_c[ci]
-                        || pci > bbox_max_c[ci]
-                    {
-                        if !self.set_edge(e, EdgeState::Cut) {
-                            return Err(());
-                        }
-                        progress = true;
-                    }
-                }
-            }
-        }
+        self.propagate_compass_pairwise()?;
+        progress |= self.propagate_compass_bbox(num_comp)?;
 
         // Bridge/gateway forcing (skip during probing to avoid per-probe overhead).
         if !self.in_probing {
@@ -1323,6 +1142,250 @@ impl<'a> Solver<'a> {
         Ok(progress)
     }
 
+    /// Per-compass-clue directional count + limit propagation.  Pushes `Cut`
+    /// (direction at limit) and `Uncut` (single remaining growth edge) candidates
+    /// into `cut_ef` / `uncut_ef`.  Returns `Err(())` on an unsatisfied or
+    /// contradictory count.
+    fn propagate_compass_clue(
+        &mut self,
+        cell: CellId,
+        ci: usize,
+        compass: CompassData,
+        cut_ef: &mut Vec<EdgeId>,
+        uncut_ef: &mut Vec<EdgeId>,
+    ) -> Result<(), ()> {
+        let (cr, cc) = self.grid.cell_pos(cell);
+
+        // Count cells in each compass direction (single pass).
+        let mut counts = [0usize; 4]; // N, S, E, W
+        for &c in &self.comp_cells[ci] {
+            let (pr, pc) = self.grid.cell_pos(c);
+            if pr < cr {
+                counts[0] += 1;
+            }
+            if pr > cr {
+                counts[1] += 1;
+            }
+            if pc > cc {
+                counts[2] += 1;
+            }
+            if pc < cc {
+                counts[3] += 1;
+            }
+        }
+
+        // Classify growth edges by direction.
+        let mut dir_count = [0usize; 4];
+        let mut dir_last = [0usize; 4];
+        for &e in &self.prop.growth_edges[ci] {
+            let (c1, c2) = self.grid.edge_cells(e);
+            let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
+            let (pr, pc) = self.grid.cell_pos(other);
+            if pr < cr {
+                dir_count[0] += 1;
+                dir_last[0] = e;
+            }
+            if pr > cr {
+                dir_count[1] += 1;
+                dir_last[1] = e;
+            }
+            if pc > cc {
+                dir_count[2] += 1;
+                dir_last[2] = e;
+            }
+            if pc < cc {
+                dir_count[3] += 1;
+                dir_last[3] = e;
+            }
+        }
+
+        let compass_vals: [Option<usize>; 4] = [compass.n, compass.s, compass.e, compass.w];
+
+        for idx in 0..4 {
+            let Some(v) = compass_vals[idx] else {
+                continue;
+            };
+            if counts[idx] > v {
+                return Err(());
+            }
+            if counts[idx] == v {
+                self.compass_collect_dir_cut_edges(ci, cr, cc, idx, cut_ef);
+            }
+            if counts[idx] < v {
+                self.compass_maybe_force_uncut(
+                    ci,
+                    idx,
+                    &counts,
+                    &dir_count,
+                    &dir_last,
+                    &compass_vals,
+                    uncut_ef,
+                );
+            }
+            // Sealed component with unsatisfied compass constraint.
+            if self.is_sealed(ci) && counts[idx] < v {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Push every growth edge of `ci` lying in compass direction `idx` into
+    /// `cut_ef` (the direction is already at its required count).
+    fn compass_collect_dir_cut_edges(
+        &mut self,
+        ci: usize,
+        cr: usize,
+        cc: usize,
+        idx: usize,
+        cut_ef: &mut Vec<EdgeId>,
+    ) {
+        for &e in &self.prop.growth_edges[ci] {
+            let (c1, c2) = self.grid.edge_cells(e);
+            let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
+            let (pr, pc) = self.grid.cell_pos(other);
+            let matches = match idx {
+                0 => pr < cr,
+                1 => pr > cr,
+                2 => pc > cc,
+                3 => pc < cc,
+                _ => false,
+            };
+            if matches {
+                cut_ef.push(e);
+            }
+        }
+    }
+
+    /// If `ci` is growing, direction `idx` has exactly one growth edge, and every
+    /// other direction is already blocked, force that edge `Uncut`.
+    fn compass_maybe_force_uncut(
+        &mut self,
+        ci: usize,
+        idx: usize,
+        counts: &[usize; 4],
+        dir_count: &[usize; 4],
+        dir_last: &[usize; 4],
+        compass_vals: &[Option<usize>; 4],
+        uncut_ef: &mut Vec<EdgeId>,
+    ) {
+        if !self.is_growing(ci) || dir_count[idx] != 1 {
+            return;
+        }
+        let mut all_others_blocked = true;
+        for pidx in 0..4 {
+            if pidx == idx {
+                continue;
+            }
+            if let Some(pv) = compass_vals[pidx] {
+                if counts[pidx] < pv {
+                    all_others_blocked = false;
+                    break;
+                }
+            } else if dir_count[pidx] > 0 {
+                all_others_blocked = false;
+                break;
+            }
+        }
+        if all_others_blocked {
+            uncut_ef.push(dir_last[idx]);
+        }
+    }
+
+    /// Pair-wise compass compatibility: two cells in the same component whose
+    /// compass readings forbid coexistence are a contradiction.
+    fn propagate_compass_pairwise(&mut self) -> Result<(), ()> {
+        let cci = &self.prop.compass_clue_indices;
+        for ii in 0..cci.len() {
+            let CellClue::Compass { cell: ca, compass: pa } = &self.cell_clues[cci[ii]] else {
+                continue;
+            };
+            let ci_a = self.curr_comp_id[*ca];
+            if ci_a == usize::MAX {
+                continue;
+            }
+            for jj in (ii + 1)..cci.len() {
+                let CellClue::Compass { cell: cb, compass: pb } = &self.cell_clues[cci[jj]] else {
+                    continue;
+                };
+                if self.curr_comp_id[*cb] == ci_a && self.compass_cells_incompatible(*ca, pa, *cb, pb) {
+                    return Err(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Bounding-box pruning: each compass clue constrains the reachable region of
+    /// its component; growth edges reaching outside the box are forced `Cut`.
+    fn propagate_compass_bbox(&mut self, num_comp: usize) -> Result<bool, ()> {
+        let mut bbox_inited = vec![false; num_comp];
+        let mut bbox_min_r = vec![0isize; num_comp];
+        let mut bbox_max_r = vec![0isize; num_comp];
+        let mut bbox_min_c = vec![0isize; num_comp];
+        let mut bbox_max_c = vec![0isize; num_comp];
+
+        for &cl_idx in &self.prop.compass_clue_indices {
+            let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] else {
+                continue;
+            };
+            let ci = self.curr_comp_id[*cell];
+            if ci == usize::MAX || ci >= num_comp {
+                continue;
+            }
+            let (r, c) = self.grid.cell_pos(*cell);
+            let (ri, ci_col) = (r as isize, c as isize);
+            if !bbox_inited[ci] {
+                bbox_inited[ci] = true;
+                bbox_max_r[ci] = self.grid.rows as isize - 1;
+                bbox_max_c[ci] = self.grid.cols as isize - 1;
+            }
+            if let Some(v) = compass.n {
+                bbox_min_r[ci] = bbox_min_r[ci].max(ri - v as isize);
+            }
+            if let Some(v) = compass.s {
+                bbox_max_r[ci] = bbox_max_r[ci].min(ri + v as isize);
+            }
+            if let Some(v) = compass.e {
+                bbox_max_c[ci] = bbox_max_c[ci].min(ci_col + v as isize);
+            }
+            if let Some(v) = compass.w {
+                bbox_min_c[ci] = bbox_min_c[ci].max(ci_col - v as isize);
+            }
+        }
+
+        let mut progress = false;
+        for ci in 0..num_comp {
+            if !bbox_inited[ci] {
+                continue;
+            }
+            if bbox_min_r[ci] > bbox_max_r[ci] || bbox_min_c[ci] > bbox_max_c[ci] {
+                return Err(());
+            }
+            for i in 0..self.prop.growth_edges[ci].len() {
+                let e = self.prop.growth_edges[ci][i];
+                if self.edges[e] != EdgeState::Unknown {
+                    continue;
+                }
+                let (c1, c2) = self.grid.edge_cells(e);
+                let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
+                let (pr, pc) = self.grid.cell_pos(other);
+                let (pri, pci) = (pr as isize, pc as isize);
+                if pri < bbox_min_r[ci]
+                    || pri > bbox_max_r[ci]
+                    || pci < bbox_min_c[ci]
+                    || pci > bbox_max_c[ci]
+                {
+                    if !self.set_edge(e, EdgeState::Cut) {
+                        return Err(());
+                    }
+                    progress = true;
+                }
+            }
+        }
+        Ok(progress)
+    }
+
     /// Bridge/articulation-point based path forcing + single-gateway-edge forcing
     /// for growing components with unsatisfied compass directions.  Ported from
     /// `third_party/aog/src/solver/propagation/compass.rs:71`.
@@ -1338,115 +1401,19 @@ impl<'a> Solver<'a> {
             }
 
             // Collect unsatisfied directions: (dir_idx, target, compass_row, compass_col).
-            let mut unsatisfied: Vec<(usize, usize, isize, isize)> = Vec::new();
-            for &(cell, compass) in &compass_per_comp[ci] {
-                let (cr, cc) = self.grid.cell_pos(cell);
-                let (cri, cci) = (cr as isize, cc as isize);
-                let mut counts = [0usize; 4];
-                for &c in &self.comp_cells[ci] {
-                    let (pr, pc) = self.grid.cell_pos(c);
-                    let dr = pr as isize - cri;
-                    let dc = pc as isize - cci;
-                    if dr < 0 {
-                        counts[0] += 1;
-                    }
-                    if dr > 0 {
-                        counts[1] += 1;
-                    }
-                    if dc > 0 {
-                        counts[2] += 1;
-                    }
-                    if dc < 0 {
-                        counts[3] += 1;
-                    }
-                }
-                for &(val, idx) in &[
-                    (compass.n, 0usize),
-                    (compass.s, 1),
-                    (compass.e, 2),
-                    (compass.w, 3),
-                ] {
-                    let Some(v) = val else { continue };
-                    if counts[idx] < v {
-                        unsatisfied.push((idx, v, cri, cci));
-                    }
-                }
-            }
+            let unsatisfied = self.collect_unsatisfied_dirs(ci, compass_per_comp);
             if unsatisfied.is_empty() {
                 continue;
             }
 
             // Build reachable subgraph from CI via non-Cut edges (BFS).
-            let nc = self.grid.num_cells();
-            let mut local_id = vec![usize::MAX; nc];
-            let mut local_cells: Vec<CellId> = Vec::new();
-            let mut queue: VecDeque<CellId> = VecDeque::new();
-            for &c in &self.comp_cells[ci] {
-                if local_id[c] == usize::MAX {
-                    local_id[c] = local_cells.len();
-                    local_cells.push(c);
-                    queue.push_back(c);
-                }
-            }
-            while let Some(cur) = queue.pop_front() {
-                for eid in self.grid.cell_edges(cur).into_iter().flatten() {
-                    if self.edges[eid] == EdgeState::Cut {
-                        continue;
-                    }
-                    let (c1, c2) = self.grid.edge_cells(eid);
-                    let other = if c1 == cur { c2 } else { c1 };
-                    if !self.grid.cell_exists[other] {
-                        continue;
-                    }
-                    if local_id[other] == usize::MAX {
-                        local_id[other] = local_cells.len();
-                        local_cells.push(other);
-                        queue.push_back(other);
-                    }
-                }
-            }
-
+            let (local_id, local_cells) = self.build_local_subgraph(ci);
             let n_local = local_cells.len();
             if n_local <= 1 {
                 continue;
             }
-
-            // Direction-reachability contradiction check.
-            for &(dir_idx, v, cri, cci) in &unsatisfied {
-                let reachable_dir = local_cells
-                    .iter()
-                    .filter(|&&c| {
-                        let (pr, pc) = self.grid.cell_pos(c);
-                        match dir_idx {
-                            0 => (pr as isize) < cri,
-                            1 => (pr as isize) > cri,
-                            2 => (pc as isize) > cci,
-                            3 => (pc as isize) < cci,
-                            _ => false,
-                        }
-                    })
-                    .count();
-                if reachable_dir < v {
-                    return Err(());
-                }
-            }
-
-            // Build adjacency for the reachable subgraph.
-            let mut adj: Vec<Vec<(usize, EdgeId)>> = vec![Vec::new(); n_local];
-            for (li, &c) in local_cells.iter().enumerate() {
-                for eid in self.grid.cell_edges(c).into_iter().flatten() {
-                    if self.edges[eid] == EdgeState::Cut {
-                        continue;
-                    }
-                    let (c1, c2) = self.grid.edge_cells(eid);
-                    let other = if c1 == c { c2 } else { c1 };
-                    let lj = local_id[other];
-                    if lj == usize::MAX {
-                        continue;
-                    }
-                    adj[li].push((lj, eid));
-                }
-            }
+            self.check_dir_reachability(&unsatisfied, &local_cells)?;
+            let adj = self.build_subgraph_adj(&local_cells, &local_id, n_local);
 
             // Tarjan bridge detection.
             let bridges = Self::find_bridges_in_subgraph(&adj, n_local);
@@ -1467,89 +1434,8 @@ impl<'a> Solver<'a> {
             // reachable bridge for that direction.  We compute, per direction,
             // how many bridges would isolate dir-cells; a bridge is forced only
             // if that count is exactly 1.
-            let mut infos: Vec<BridgeInfo> = Vec::new();
-            for &bridge_eid in &bridges {
-                if self.edges[bridge_eid] != EdgeState::Unknown {
-                    continue;
-                }
-                let mut ci_side = vec![false; n_local];
-                let mut bfs: VecDeque<usize> = VecDeque::new();
-                for (i, &c) in local_cells.iter().enumerate() {
-                    if self.curr_comp_id[c] == ci {
-                        ci_side[i] = true;
-                        bfs.push_back(i);
-                    }
-                }
-                while let Some(u) = bfs.pop_front() {
-                    for &(v, eid) in &adj[u] {
-                        if eid == bridge_eid {
-                            continue;
-                        }
-                        if !ci_side[v] {
-                            ci_side[v] = true;
-                            bfs.push_back(v);
-                        }
-                    }
-                }
-
-                let mut other = vec![0usize; unsatisfied.len()];
-                let mut ciside_lt = vec![false; unsatisfied.len()];
-                for (di, &(dir_idx, v, cri, cci)) in unsatisfied.iter().enumerate() {
-                    let mut ci_side_count = 0usize;
-                    let mut other_side_count = 0usize;
-                    for (i, &cell) in local_cells.iter().enumerate() {
-                        let cell_comp = self.curr_comp_id[cell];
-                        if cell_comp != ci && cell_comp != usize::MAX {
-                            continue;
-                        }
-                        let (pr, pc) = self.grid.cell_pos(cell);
-                        let in_dir = match dir_idx {
-                            0 => (pr as isize) < cri,
-                            1 => (pr as isize) > cri,
-                            2 => (pc as isize) > cci,
-                            3 => (pc as isize) < cci,
-                            _ => false,
-                        };
-                        if in_dir {
-                            if ci_side[i] {
-                                ci_side_count += 1;
-                            } else {
-                                other_side_count += 1;
-                            }
-                        }
-                    }
-                    other[di] = other_side_count;
-                    ciside_lt[di] = ci_side_count < v;
-                }
-                infos.push(BridgeInfo {
-                    eid: bridge_eid,
-                    other,
-                    ciside_lt,
-                });
-            }
-
-            // For each direction, count bridges that would isolate dir-cells.
-            let mut isolating_count = vec![0usize; unsatisfied.len()];
-            for info in &infos {
-                for di in 0..unsatisfied.len() {
-                    if info.other[di] > 0 && info.ciside_lt[di] {
-                        isolating_count[di] += 1;
-                    }
-                }
-            }
-            for info in &infos {
-                let mut force_uncut = false;
-                for di in 0..unsatisfied.len() {
-                    // Sole reachable bridge for this direction → must stay Uncut.
-                    if info.other[di] > 0 && info.ciside_lt[di] && isolating_count[di] == 1 {
-                        force_uncut = true;
-                        break;
-                    }
-                }
-                if force_uncut {
-                    compass_uncut_ef.push(info.eid);
-                }
-            }
+            let infos = self.collect_bridge_infos(&bridges, ci, &adj, &local_cells, &unsatisfied);
+            self.apply_bridge_forcing(&infos, &unsatisfied, compass_uncut_ef);
 
             // Single-gateway-edge forcing (skip if pending forced cuts — the
             // reachable subgraph would be stale).
@@ -1557,43 +1443,191 @@ impl<'a> Solver<'a> {
                 continue;
             }
 
-            // Fresh CI membership via current Uncut edges.
-            let mut is_fresh_ci = vec![false; n_local];
-            {
-                let mut fc_bfs: VecDeque<usize> = VecDeque::new();
-                for li in 0..n_local {
-                    if self.curr_comp_id[local_cells[li]] == ci {
-                        is_fresh_ci[li] = true;
-                        fc_bfs.push_back(li);
-                    }
+            // Fresh CI membership via current Uncut edges + single-gateway forcing.
+            self.force_compass_gateways(ci, &local_cells, &adj, &unsatisfied, n_local, compass_uncut_ef);
+        }
+        Ok(())
+    }
+
+    /// Collect unsatisfied compass directions for component `ci`: each entry is
+    /// `(dir_idx, required_count, compass_row, compass_col)`.
+    fn collect_unsatisfied_dirs(
+        &self,
+        ci: usize,
+        compass_per_comp: &[Vec<(CellId, CompassData)>],
+    ) -> Vec<(usize, usize, isize, isize)> {
+        let mut unsatisfied: Vec<(usize, usize, isize, isize)> = Vec::new();
+        for &(cell, compass) in &compass_per_comp[ci] {
+            let (cr, cc) = self.grid.cell_pos(cell);
+            let (cri, cci) = (cr as isize, cc as isize);
+            let mut counts = [0usize; 4];
+            for &c in &self.comp_cells[ci] {
+                let (pr, pc) = self.grid.cell_pos(c);
+                let dr = pr as isize - cri;
+                let dc = pc as isize - cci;
+                if dr < 0 {
+                    counts[0] += 1;
                 }
-                while let Some(u) = fc_bfs.pop_front() {
-                    for &(vj, eid) in &adj[u] {
-                        if is_fresh_ci[vj] {
-                            continue;
-                        }
-                        if self.edges[eid] == EdgeState::Uncut {
-                            is_fresh_ci[vj] = true;
-                            fc_bfs.push_back(vj);
-                        }
+                if dr > 0 {
+                    counts[1] += 1;
+                }
+                if dc > 0 {
+                    counts[2] += 1;
+                }
+                if dc < 0 {
+                    counts[3] += 1;
+                }
+            }
+            for &(val, idx) in &[
+                (compass.n, 0usize),
+                (compass.s, 1),
+                (compass.e, 2),
+                (compass.w, 3),
+            ] {
+                let Some(v) = val else {
+                    continue;
+                };
+                if counts[idx] < v {
+                    unsatisfied.push((idx, v, cri, cci));
+                }
+            }
+        }
+        unsatisfied
+    }
+
+    /// BFS the reachable subgraph of `ci` over non-Cut edges, returning a local
+    /// cell id map and the ordered local cells.
+    fn build_local_subgraph(&self, ci: usize) -> (Vec<usize>, Vec<CellId>) {
+        let nc = self.grid.num_cells();
+        let mut local_id = vec![usize::MAX; nc];
+        let mut local_cells: Vec<CellId> = Vec::new();
+        let mut queue: VecDeque<CellId> = VecDeque::new();
+        for &c in &self.comp_cells[ci] {
+            if local_id[c] == usize::MAX {
+                local_id[c] = local_cells.len();
+                local_cells.push(c);
+                queue.push_back(c);
+            }
+        }
+        while let Some(cur) = queue.pop_front() {
+            for eid in self.grid.cell_edges(cur).into_iter().flatten() {
+                if self.edges[eid] == EdgeState::Cut {
+                    continue;
+                }
+                let (c1, c2) = self.grid.edge_cells(eid);
+                let other = if c1 == cur { c2 } else { c1 };
+                if !self.grid.cell_exists[other] {
+                    continue;
+                }
+                if local_id[other] == usize::MAX {
+                    local_id[other] = local_cells.len();
+                    local_cells.push(other);
+                    queue.push_back(other);
+                }
+            }
+        }
+        (local_id, local_cells)
+    }
+
+    /// Contradiction check: every unsatisfied direction must still have at least
+    /// `v` reachable cells in its direction within the subgraph.
+    fn check_dir_reachability(
+        &self,
+        unsatisfied: &[(usize, usize, isize, isize)],
+        local_cells: &[CellId],
+    ) -> Result<(), ()> {
+        for &(dir_idx, v, cri, cci) in unsatisfied {
+            let reachable_dir = local_cells
+                .iter()
+                .filter(|&&c| {
+                    let (pr, pc) = self.grid.cell_pos(c);
+                    match dir_idx {
+                        0 => (pr as isize) < cri,
+                        1 => (pr as isize) > cri,
+                        2 => (pc as isize) > cci,
+                        3 => (pc as isize) < cci,
+                        _ => false,
+                    }
+                })
+                .count();
+            if reachable_dir < v {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Build local-subgraph adjacency (each non-Cut internal edge → `(lj, eid)`).
+    fn build_subgraph_adj(
+        &self,
+        local_cells: &[CellId],
+        local_id: &[usize],
+        n_local: usize,
+    ) -> Vec<Vec<(usize, EdgeId)>> {
+        let mut adj: Vec<Vec<(usize, EdgeId)>> = vec![Vec::new(); n_local];
+        for (li, &c) in local_cells.iter().enumerate() {
+            for eid in self.grid.cell_edges(c).into_iter().flatten() {
+                if self.edges[eid] == EdgeState::Cut {
+                    continue;
+                }
+                let (c1, c2) = self.grid.edge_cells(eid);
+                let other = if c1 == c { c2 } else { c1 };
+                let lj = local_id[other];
+                if lj == usize::MAX {
+                    continue;
+                }
+                adj[li].push((lj, eid));
+            }
+        }
+        adj
+    }
+
+    /// For each Unknown bridge, compute per-unsatisfied-direction reachability
+    /// info (`other` side count + whether the CI side is below `v`).
+    fn collect_bridge_infos(
+        &self,
+        bridges: &[EdgeId],
+        ci: usize,
+        adj: &[Vec<(usize, EdgeId)>],
+        local_cells: &[CellId],
+        unsatisfied: &[(usize, usize, isize, isize)],
+    ) -> Vec<BridgeInfo> {
+        let mut infos: Vec<BridgeInfo> = Vec::new();
+        for &bridge_eid in bridges {
+            if self.edges[bridge_eid] != EdgeState::Unknown {
+                continue;
+            }
+            let mut ci_side = vec![false; local_cells.len()];
+            let mut bfs: VecDeque<usize> = VecDeque::new();
+            for (i, &c) in local_cells.iter().enumerate() {
+                if self.curr_comp_id[c] == ci {
+                    ci_side[i] = true;
+                    bfs.push_back(i);
+                }
+            }
+            while let Some(u) = bfs.pop_front() {
+                for &(v, eid) in &adj[u] {
+                    if eid == bridge_eid {
+                        continue;
+                    }
+                    if !ci_side[v] {
+                        ci_side[v] = true;
+                        bfs.push_back(v);
                     }
                 }
             }
 
-            // For each unsatisfied direction, backward BFS from non-CI dir-cells;
-            // any Unknown edge from CI to a reachable cell is a gateway edge.
-            for &(dir_idx, _v, cri, cci) in &unsatisfied {
-                let mut visited_local = vec![false; n_local];
-                let mut bfs: VecDeque<usize> = VecDeque::new();
-                for li in 0..n_local {
-                    if is_fresh_ci[li] {
+            let mut other = vec![0usize; unsatisfied.len()];
+            let mut ciside_lt = vec![false; unsatisfied.len()];
+            for (di, &(dir_idx, v, cri, cci)) in unsatisfied.iter().enumerate() {
+                let mut ci_side_count = 0usize;
+                let mut other_side_count = 0usize;
+                for (i, &cell) in local_cells.iter().enumerate() {
+                    let cell_comp = self.curr_comp_id[cell];
+                    if cell_comp != ci && cell_comp != usize::MAX {
                         continue;
                     }
-                    let c = local_cells[li];
-                    if self.curr_comp_id[c] != usize::MAX {
-                        continue;
-                    }
-                    let (pr, pc) = self.grid.cell_pos(c);
+                    let (pr, pc) = self.grid.cell_pos(cell);
                     let in_dir = match dir_idx {
                         0 => (pr as isize) < cri,
                         1 => (pr as isize) > cri,
@@ -1602,50 +1636,175 @@ impl<'a> Solver<'a> {
                         _ => false,
                     };
                     if in_dir {
-                        visited_local[li] = true;
-                        bfs.push_back(li);
+                        if ci_side[i] {
+                            ci_side_count += 1;
+                        } else {
+                            other_side_count += 1;
+                        }
                     }
                 }
-                if bfs.is_empty() {
-                    continue;
-                }
-                while let Some(u) = bfs.pop_front() {
-                    for &(vj, _eid) in &adj[u] {
-                        if visited_local[vj] {
-                            continue;
-                        }
-                        if is_fresh_ci[vj] {
-                            continue;
-                        }
-                        if self.curr_comp_id[local_cells[vj]] != usize::MAX {
-                            continue;
-                        }
-                        visited_local[vj] = true;
-                        bfs.push_back(vj);
-                    }
-                }
+                other[di] = other_side_count;
+                ciside_lt[di] = ci_side_count < v;
+            }
+            infos.push(BridgeInfo {
+                eid: bridge_eid,
+                other,
+                ciside_lt,
+            });
+        }
+        infos
+    }
 
-                let mut gateway_edges: Vec<EdgeId> = Vec::new();
-                for li in 0..n_local {
-                    if !is_fresh_ci[li] {
-                        continue;
-                    }
-                    for &(vj, eid) in &adj[li] {
-                        if !visited_local[vj] {
-                            continue;
-                        }
-                        if self.edges[eid] != EdgeState::Unknown {
-                            continue;
-                        }
-                        gateway_edges.push(eid);
-                    }
-                }
-                if gateway_edges.len() == 1 {
-                    compass_uncut_ef.push(gateway_edges[0]);
+    /// H4 (soundness): force Uncut only on bridges that are the SOLE isolating
+    /// bridge for some unsatisfied direction (`isolating_count == 1`).
+    fn apply_bridge_forcing(
+        &self,
+        infos: &[BridgeInfo],
+        unsatisfied: &[(usize, usize, isize, isize)],
+        compass_uncut_ef: &mut Vec<EdgeId>,
+    ) {
+        let mut isolating_count = vec![0usize; unsatisfied.len()];
+        for info in infos {
+            for di in 0..unsatisfied.len() {
+                if info.other[di] > 0 && info.ciside_lt[di] {
+                    isolating_count[di] += 1;
                 }
             }
         }
-        Ok(())
+        for info in infos {
+            let mut force_uncut = false;
+            for di in 0..unsatisfied.len() {
+                if info.other[di] > 0 && info.ciside_lt[di] && isolating_count[di] == 1 {
+                    force_uncut = true;
+                    break;
+                }
+            }
+            if force_uncut {
+                compass_uncut_ef.push(info.eid);
+            }
+        }
+    }
+
+    /// Single-gateway-edge forcing: a growing component with one open gateway
+    /// edge to a needed direction is forced Uncut.
+    fn force_compass_gateways(
+        &self,
+        ci: usize,
+        local_cells: &[CellId],
+        adj: &[Vec<(usize, EdgeId)>],
+        unsatisfied: &[(usize, usize, isize, isize)],
+        n_local: usize,
+        compass_uncut_ef: &mut Vec<EdgeId>,
+    ) {
+        let is_fresh_ci = self.compute_fresh_ci(ci, local_cells, adj, n_local);
+        for &(dir_idx, _v, cri, cci) in unsatisfied {
+            let gateway_edges = self.gateway_edges_for_dir(dir_idx, cri, cci, local_cells, adj, &is_fresh_ci);
+            if gateway_edges.len() == 1 {
+                compass_uncut_ef.push(gateway_edges[0]);
+            }
+        }
+    }
+
+    /// Fresh CI membership from the current Uncut edges (BFS over `adj`).
+    fn compute_fresh_ci(
+        &self,
+        ci: usize,
+        local_cells: &[CellId],
+        adj: &[Vec<(usize, EdgeId)>],
+        n_local: usize,
+    ) -> Vec<bool> {
+        let mut is_fresh_ci = vec![false; n_local];
+        let mut fc_bfs: VecDeque<usize> = VecDeque::new();
+        for li in 0..n_local {
+            if self.curr_comp_id[local_cells[li]] == ci {
+                is_fresh_ci[li] = true;
+                fc_bfs.push_back(li);
+            }
+        }
+        while let Some(u) = fc_bfs.pop_front() {
+            for &(vj, eid) in &adj[u] {
+                if is_fresh_ci[vj] {
+                    continue;
+                }
+                if self.edges[eid] == EdgeState::Uncut {
+                    is_fresh_ci[vj] = true;
+                    fc_bfs.push_back(vj);
+                }
+            }
+        }
+        is_fresh_ci
+    }
+
+    /// Backward BFS from non-CI dir-cells; the Unknown edges from CI into the
+    /// reachable set are this direction's gateway edges.
+    fn gateway_edges_for_dir(
+        &self,
+        dir_idx: usize,
+        cri: isize,
+        cci: isize,
+        local_cells: &[CellId],
+        adj: &[Vec<(usize, EdgeId)>],
+        is_fresh_ci: &[bool],
+    ) -> Vec<EdgeId> {
+        let n_local = local_cells.len();
+        let mut visited_local = vec![false; n_local];
+        let mut bfs: VecDeque<usize> = VecDeque::new();
+        for li in 0..n_local {
+            if is_fresh_ci[li] {
+                continue;
+            }
+            let c = local_cells[li];
+            if self.curr_comp_id[c] != usize::MAX {
+                continue;
+            }
+            let (pr, pc) = self.grid.cell_pos(c);
+            let in_dir = match dir_idx {
+                0 => (pr as isize) < cri,
+                1 => (pr as isize) > cri,
+                2 => (pc as isize) > cci,
+                3 => (pc as isize) < cci,
+                _ => false,
+            };
+            if in_dir {
+                visited_local[li] = true;
+                bfs.push_back(li);
+            }
+        }
+        if bfs.is_empty() {
+            return Vec::new();
+        }
+        while let Some(u) = bfs.pop_front() {
+            for &(vj, _eid) in &adj[u] {
+                if visited_local[vj] {
+                    continue;
+                }
+                if is_fresh_ci[vj] {
+                    continue;
+                }
+                if self.curr_comp_id[local_cells[vj]] != usize::MAX {
+                    continue;
+                }
+                visited_local[vj] = true;
+                bfs.push_back(vj);
+            }
+        }
+
+        let mut gateway_edges: Vec<EdgeId> = Vec::new();
+        for li in 0..n_local {
+            if !is_fresh_ci[li] {
+                continue;
+            }
+            for &(vj, eid) in &adj[li] {
+                if !visited_local[vj] {
+                    continue;
+                }
+                if self.edges[eid] != EdgeState::Unknown {
+                    continue;
+                }
+                gateway_edges.push(eid);
+            }
+        }
+        gateway_edges
     }
 
     /// Iterative Tarjan bridge detection on a local subgraph.
@@ -2177,11 +2336,54 @@ impl<'a> Solver<'a> {
             return Ok(false);
         }
         let ne = self.grid.num_edges();
-        let pair_idx: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
 
         // Collect vertex constraints: (edge_ids, required_parity).
-        let constraints: Vec<(Vec<EdgeId>, u8)> = self
-            .vertex_clues
+        let constraints: Vec<(Vec<EdgeId>, u8)> = self.collect_vertex_parity_constraints();
+
+        if constraints.is_empty() {
+            return Ok(false);
+        }
+
+        let mut uf = ParityUF::new(ne);
+        // ev: 0=Uncut, 1=Cut, 2=Unknown
+        let mut ev: Vec<u8> = self
+            .edges
+            .iter()
+            .map(|&e| match e {
+                EdgeState::Cut => 1,
+                EdgeState::Uncut => 0,
+                EdgeState::Unknown => 2,
+            })
+            .collect();
+
+        // Forced edges to apply after the UF analysis (collected to avoid borrow
+        // conflicts with `uf` / `ev`).
+        let mut forced: Vec<(EdgeId, EdgeState)> = Vec::new();
+
+        Self::vertex_parity_phase1(&constraints, &mut uf, &mut ev, &mut forced)?;
+        Self::vertex_parity_phase2(&constraints, &mut uf, &mut ev, &mut forced)?;
+        Self::vertex_parity_phase3(ne, &mut uf, &mut ev, &mut forced)?;
+
+        if forced.is_empty() {
+            return Ok(false);
+        }
+        let mut progress = false;
+        for (eid, st) in forced {
+            if !self.set_edge(eid, st) {
+                return Err(());
+            }
+            progress = true;
+        }
+        Ok(progress)
+    }
+
+    /// Build the per-vertex edge-parity constraints: each entry is
+    /// `(edge_ids, required_parity)` where `required_parity` is the parity of the
+    /// number of Cut edges around the vertex.  Vertices whose parity is not yet
+    /// fixed are skipped.
+    fn collect_vertex_parity_constraints(&self) -> Vec<(Vec<EdgeId>, u8)> {
+        let pair_idx: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
+        self.vertex_clues
             .iter()
             .filter_map(|clue| {
                 let (vi, vj) = self.grid.vertex_pos(clue.vertex);
@@ -2225,30 +2427,18 @@ impl<'a> Solver<'a> {
                 }
                 Some((edge_ids, (required_k & 1) as u8))
             })
-            .collect();
+            .collect()
+    }
 
-        if constraints.is_empty() {
-            return Ok(false);
-        }
-
-        let mut uf = ParityUF::new(ne);
-        // ev: 0=Uncut, 1=Cut, 2=Unknown
-        let mut ev: Vec<u8> = self
-            .edges
-            .iter()
-            .map(|&e| match e {
-                EdgeState::Cut => 1,
-                EdgeState::Uncut => 0,
-                EdgeState::Unknown => 2,
-            })
-            .collect();
-
-        // Forced edges to apply after the UF analysis (collected to avoid borrow
-        // conflicts with `uf` / `ev`).
-        let mut forced: Vec<(EdgeId, EdgeState)> = Vec::new();
-
-        // Phase 1: build UF from pairwise constraints (0, 1, or 2 unknowns).
-        for (edge_ids, parity) in &constraints {
+    /// Phase 1: build the parity UF from pairwise constraints (0, 1, or 2
+    /// unknowns), fixing single unknowns and detecting contradictions.
+    fn vertex_parity_phase1(
+        constraints: &[(Vec<EdgeId>, u8)],
+        uf: &mut ParityUF,
+        ev: &mut [u8],
+        forced: &mut Vec<(EdgeId, EdgeState)>,
+    ) -> Result<(), ()> {
+        for (edge_ids, parity) in constraints {
             let mut kx = 0u8;
             let mut unks: Vec<EdgeId> = Vec::new();
             for &e in edge_ids {
@@ -2267,10 +2457,7 @@ impl<'a> Solver<'a> {
                 1 => {
                     let v = kx ^ parity;
                     ev[unks[0]] = v;
-                    forced.push((
-                        unks[0],
-                        if v == 1 { EdgeState::Cut } else { EdgeState::Uncut },
-                    ));
+                    forced.push((unks[0], if v == 1 { EdgeState::Cut } else { EdgeState::Uncut }));
                 }
                 2 => {
                     uf.union(unks[0], unks[1], kx ^ parity)?;
@@ -2278,9 +2465,17 @@ impl<'a> Solver<'a> {
                 _ => {}
             }
         }
+        Ok(())
+    }
 
-        // Phase 2: resolve 3+-unknown constraints using UF pairs already merged.
-        for (edge_ids, parity) in &constraints {
+    /// Phase 2: resolve 3+-unknown constraints using UF pairs already merged.
+    fn vertex_parity_phase2(
+        constraints: &[(Vec<EdgeId>, u8)],
+        uf: &mut ParityUF,
+        ev: &mut [u8],
+        forced: &mut Vec<(EdgeId, EdgeState)>,
+    ) -> Result<(), ()> {
+        for (edge_ids, parity) in constraints {
             let mut kx = 0u8;
             let mut unks: Vec<EdgeId> = Vec::new();
             for &e in edge_ids {
@@ -2309,10 +2504,7 @@ impl<'a> Solver<'a> {
                         if rem.len() == 1 {
                             let v = target ^ xij;
                             ev[rem[0]] = v;
-                            forced.push((
-                                rem[0],
-                                if v == 1 { EdgeState::Cut } else { EdgeState::Uncut },
-                            ));
+                            forced.push((rem[0], if v == 1 { EdgeState::Cut } else { EdgeState::Uncut }));
                         } else if rem.len() == 2 {
                             uf.union(rem[0], rem[1], target ^ xij)?;
                         }
@@ -2321,8 +2513,16 @@ impl<'a> Solver<'a> {
                 }
             }
         }
+        Ok(())
+    }
 
-        // Phase 3: cascade known edge values through the UF to resolve unknowns.
+    /// Phase 3: cascade known edge values through the UF to resolve unknowns.
+    fn vertex_parity_phase3(
+        ne: usize,
+        uf: &mut ParityUF,
+        ev: &mut [u8],
+        forced: &mut Vec<(EdgeId, EdgeState)>,
+    ) -> Result<(), ()> {
         let mut rv: Vec<Option<u8>> = vec![None; ne];
         for e in 0..ne {
             if ev[e] > 1 {
@@ -2349,18 +2549,7 @@ impl<'a> Solver<'a> {
                 forced.push((e, if v == 1 { EdgeState::Cut } else { EdgeState::Uncut }));
             }
         }
-
-        if forced.is_empty() {
-            return Ok(false);
-        }
-        let mut progress = false;
-        for (eid, st) in forced {
-            if !self.set_edge(eid, st) {
-                return Err(());
-            }
-            progress = true;
-        }
-        Ok(progress)
+        Ok(())
     }
 
     /// Iterative vertex-level watchtower config probing — port of
@@ -2487,46 +2676,13 @@ impl<'a> Solver<'a> {
                     .filter(|(_, &s)| s == EdgeState::Unknown)
                     .map(|(i, _)| i)
                     .collect();
-                let nm = unk_indices.len();
-                let mut edge_cut_count: Vec<usize> = vec![0; nm];
-                let mut total_surviving = 0usize;
-
-                for &k in possible_ks {
-                    let remaining = k.saturating_sub(n_cut);
-                    if remaining > n_unk {
-                        continue;
-                    }
-                    if remaining == 0 {
-                        total_surviving += 1;
-                    } else {
-                        for mask in 0u32..(1u32 << nm) {
-                            if mask.count_ones() as usize != remaining {
-                                continue;
-                            }
-                            let ok = self.probe(|s| {
-                                for (bit, &idx) in unk_indices.iter().enumerate() {
-                                    let val = if (mask >> bit) & 1 == 1 {
-                                        EdgeState::Cut
-                                    } else {
-                                        EdgeState::Uncut
-                                    };
-                                    if !s.set_edge(edge_ids[idx], val) {
-                                        return false;
-                                    }
-                                }
-                                true
-                            });
-                            if ok {
-                                total_surviving += 1;
-                                for (bit, _) in unk_indices.iter().enumerate() {
-                                    if (mask >> bit) & 1 == 1 {
-                                        edge_cut_count[bit] += 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                let (edge_cut_count, total_surviving) = self.enumerate_watchtower_configs(
+                    possible_ks,
+                    n_cut,
+                    n_unk,
+                    &unk_indices,
+                    edge_ids,
+                );
 
                 if total_surviving == 0 {
                     self.restore(snap_iteration);
@@ -2568,6 +2724,60 @@ impl<'a> Solver<'a> {
 
         self.in_probing = saved;
         total_forced
+    }
+
+    /// Enumerate all valid Cut/Uncut configs of a vertex's unknown edges that
+    /// satisfy `possible_ks`; returns per-unknown Cut-count tallies and the
+    /// number of surviving configs.
+    fn enumerate_watchtower_configs(
+        &mut self,
+        possible_ks: &[usize],
+        n_cut: usize,
+        n_unk: usize,
+        unk_indices: &[usize],
+        edge_ids: &[EdgeId],
+    ) -> (Vec<usize>, usize) {
+        let nm = unk_indices.len();
+        let mut edge_cut_count: Vec<usize> = vec![0; nm];
+        let mut total_surviving = 0usize;
+
+        for &k in possible_ks {
+            let remaining = k.saturating_sub(n_cut);
+            if remaining > n_unk {
+                continue;
+            }
+            if remaining == 0 {
+                total_surviving += 1;
+            } else {
+                for mask in 0u32..(1u32 << nm) {
+                    if mask.count_ones() as usize != remaining {
+                        continue;
+                    }
+                    let ok = self.probe(|s| {
+                        for (bit, &idx) in unk_indices.iter().enumerate() {
+                            let val = if (mask >> bit) & 1 == 1 {
+                                EdgeState::Cut
+                            } else {
+                                EdgeState::Uncut
+                            };
+                            if !s.set_edge(edge_ids[idx], val) {
+                                return false;
+                            }
+                        }
+                        true
+                    });
+                    if ok {
+                        total_surviving += 1;
+                        for (bit, _) in unk_indices.iter().enumerate() {
+                            if (mask >> bit) & 1 == 1 {
+                                edge_cut_count[bit] += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (edge_cut_count, total_surviving)
     }
 
     /// DFS for compass placement enumeration — port of
@@ -2668,6 +2878,255 @@ impl<'a> Solver<'a> {
     /// connected merges satisfying the direction limits via DFS, then force
     /// Cut/Uncut on Unknown growth edges based on the intersection (in_all) and
     /// union (in_any) of valid placements. Self-gates on `in_probing`.
+    /// Tightest bounding box implied by a compass clue's [N, S, E, W] limits.
+    fn compass_bbox(&self, cell: CellId, compass: CompassData) -> (isize, isize, isize, isize) {
+        let (cr, cc) = self.grid.cell_pos(cell);
+        let (cri, cci) = (cr as isize, cc as isize);
+        let limits = [compass.n, compass.s, compass.e, compass.w];
+        let bbox_min_r = limits[0].map_or(0isize, |v| cri - v as isize).max(0);
+        let bbox_max_r = limits[1]
+            .map_or(self.grid.rows as isize - 1, |v| cri + v as isize)
+            .min(self.grid.rows as isize - 1);
+        let bbox_min_c = limits[3].map_or(0isize, |v| cci - v as isize).max(0);
+        let bbox_max_c = limits[2]
+            .map_or(self.grid.cols as isize - 1, |v| cci + v as isize)
+            .min(self.grid.cols as isize - 1);
+        (bbox_min_r, bbox_max_r, bbox_min_c, bbox_max_c)
+    }
+
+    /// Step 1 of compass placement enumeration: BFS from the compass cell over
+    /// non-Cut edges, restricted to `bbox`.
+    fn compass_reachable_bfs(
+        &self,
+        cell: CellId,
+        bbox: (isize, isize, isize, isize),
+    ) -> (Vec<bool>, Vec<CellId>) {
+        let (bbox_min_r, bbox_max_r, bbox_min_c, bbox_max_c) = bbox;
+        let n = self.grid.num_cells();
+        let mut cell_in_reachable = vec![false; n];
+        let mut reachable_cells: Vec<CellId> = Vec::new();
+        cell_in_reachable[cell] = true;
+        reachable_cells.push(cell);
+        let mut bfs_q: VecDeque<CellId> = VecDeque::new();
+        bfs_q.push_back(cell);
+        while let Some(cur) = bfs_q.pop_front() {
+            for eid in self.grid.cell_edges(cur).into_iter().flatten() {
+                if self.edges[eid] == EdgeState::Cut {
+                    continue;
+                }
+                let (c1, c2) = self.grid.edge_cells(eid);
+                let other = if c1 == cur { c2 } else { c1 };
+                if !self.grid.cell_exists[other] || cell_in_reachable[other] {
+                    continue;
+                }
+                let (pr, pc) = self.grid.cell_pos(other);
+                if (pr as isize) < bbox_min_r
+                    || (pr as isize) > bbox_max_r
+                    || (pc as isize) < bbox_min_c
+                    || (pc as isize) > bbox_max_c
+                {
+                    continue;
+                }
+                cell_in_reachable[other] = true;
+                reachable_cells.push(other);
+                bfs_q.push_back(other);
+            }
+        }
+        (cell_in_reachable, reachable_cells)
+    }
+
+    /// Step 2: group the reachable cells into local components joined by current
+    /// Uncut edges (followed GLOBALLY, beyond the bbox, so a cell committed to
+    /// an outside piece drags that piece in).  `None` when the component budget
+    /// is exhausted.
+    fn compass_local_comps(
+        &self,
+        reachable_cells: &[CellId],
+        max_comps: usize,
+    ) -> Option<(Vec<usize>, Vec<Vec<CellId>>)> {
+        let n = self.grid.num_cells();
+        let mut local_comp_of = vec![usize::MAX; n];
+        let mut local_comps: Vec<Vec<CellId>> = Vec::new();
+        for &start in reachable_cells {
+            if local_comp_of[start] != usize::MAX {
+                continue;
+            }
+            if local_comps.len() >= max_comps {
+                return None;
+            }
+            let lc = local_comps.len();
+            let mut lcomp_cells = vec![start];
+            local_comp_of[start] = lc;
+            let mut q: VecDeque<CellId> = VecDeque::new();
+            q.push_back(start);
+            while let Some(cur) = q.pop_front() {
+                for eid in self.grid.cell_edges(cur).into_iter().flatten() {
+                    if self.edges[eid] != EdgeState::Uncut {
+                        continue;
+                    }
+                    let (c1, c2) = self.grid.edge_cells(eid);
+                    let other = if c1 == cur { c2 } else { c1 };
+                    if !self.grid.cell_exists[other] || local_comp_of[other] != usize::MAX {
+                        continue;
+                    }
+                    local_comp_of[other] = lc;
+                    lcomp_cells.push(other);
+                    q.push_back(other);
+                }
+            }
+            local_comps.push(lcomp_cells);
+        }
+        Some((local_comp_of, local_comps))
+    }
+
+    /// Can local component 0 still grow — into another reachable local
+    /// component, or out of the bbox entirely?
+    fn compass_can_grow(
+        &self,
+        lcomp0: &[CellId],
+        cell_in_reachable: &[bool],
+        local_comp_of: &[usize],
+    ) -> bool {
+        lcomp0.iter().any(|&c| {
+            self.grid.cell_edges(c).into_iter().flatten().any(|eid| {
+                if self.edges[eid] != EdgeState::Unknown {
+                    return false;
+                }
+                let (c1, c2) = self.grid.edge_cells(eid);
+                let other = if c1 == c { c2 } else { c1 };
+                if cell_in_reachable[other] {
+                    local_comp_of[other] != 0 && local_comp_of[other] != usize::MAX
+                } else {
+                    self.grid.cell_exists[other]
+                }
+            })
+        })
+    }
+
+    /// Directional cell counts `[N, S, E, W]` and sizes per local component.
+    fn compass_dir_counts(
+        &self,
+        local_comps: &[Vec<CellId>],
+        cri: isize,
+        cci: isize,
+    ) -> (Vec<[usize; 4]>, Vec<usize>) {
+        let mut comp_dir_counts = vec![[0usize; 4]; local_comps.len()];
+        let mut comp_sizes = vec![0usize; local_comps.len()];
+        for (lc, lcomp) in local_comps.iter().enumerate() {
+            for &c in lcomp {
+                let (pr, pc) = self.grid.cell_pos(c);
+                let dr = pr as isize - cri;
+                let dc = pc as isize - cci;
+                if dr < 0 {
+                    comp_dir_counts[lc][0] += 1; // N
+                }
+                if dr > 0 {
+                    comp_dir_counts[lc][1] += 1; // S
+                }
+                if dc > 0 {
+                    comp_dir_counts[lc][2] += 1; // E
+                }
+                if dc < 0 {
+                    comp_dir_counts[lc][3] += 1; // W
+                }
+                comp_sizes[lc] += 1;
+            }
+        }
+        (comp_dir_counts, comp_sizes)
+    }
+
+    /// Bitmask of local components reachable from each local component through
+    /// Unknown edges.
+    fn compass_adj_mask(&self, local_comps: &[Vec<CellId>], local_comp_of: &[usize]) -> Vec<u32> {
+        let mut adj_mask = vec![0u32; local_comps.len()];
+        for lc in 0..local_comps.len() {
+            for ci in 0..local_comps[lc].len() {
+                let c = local_comps[lc][ci];
+                for eid in self.grid.cell_edges(c).into_iter().flatten() {
+                    if self.edges[eid] != EdgeState::Unknown {
+                        continue;
+                    }
+                    let (c1, c2) = self.grid.edge_cells(eid);
+                    let other = if c1 == c { c2 } else { c1 };
+                    if !self.grid.cell_exists[other] {
+                        continue;
+                    }
+                    let l2 = local_comp_of[other];
+                    if l2 == usize::MAX || l2 == lc {
+                        continue;
+                    }
+                    adj_mask[lc] |= 1u32 << l2;
+                }
+            }
+        }
+        adj_mask
+    }
+
+    /// Force Cut/Uncut on the Unknown growth edges out of local component 0:
+    /// merges present in every valid placement are forced Uncut, merges present
+    /// in none are forced Cut, and anything outside the bbox is forced Cut.
+    fn compass_collect_forced(
+        &self,
+        lcomp0: &[CellId],
+        cell_in_reachable: &[bool],
+        local_comp_of: &[usize],
+        in_all: u32,
+        in_any: u32,
+        forced_cuts: &mut Vec<EdgeId>,
+        forced_uncuts: &mut Vec<EdgeId>,
+    ) {
+        for &c in lcomp0 {
+            for eid in self.grid.cell_edges(c).into_iter().flatten() {
+                if self.edges[eid] != EdgeState::Unknown {
+                    continue;
+                }
+                let (c1, c2) = self.grid.edge_cells(eid);
+                let other = if c1 == c { c2 } else { c1 };
+                if !self.grid.cell_exists[other] {
+                    continue;
+                }
+                if !cell_in_reachable[other] {
+                    forced_cuts.push(eid); // outside bbox → Cut
+                    continue;
+                }
+                let lj = local_comp_of[other];
+                if lj == usize::MAX || lj == 0 {
+                    continue;
+                }
+                let bit = 1u32 << lj;
+                if in_all & bit != 0 {
+                    forced_uncuts.push(eid);
+                } else if in_any & bit == 0 {
+                    forced_cuts.push(eid);
+                }
+            }
+        }
+    }
+
+    /// `(min_area, max_area)` of the growing, non-sealed component containing
+    /// `cell`, or `None` when the cell has no usable area bounds.
+    fn compass_area_bounds(&self, cell: CellId) -> Option<(usize, usize)> {
+        let ci = if cell < self.curr_comp_id.len() {
+            self.curr_comp_id[cell]
+        } else {
+            usize::MAX
+        };
+        if ci == usize::MAX || self.is_sealed(ci) {
+            return None;
+        }
+        let max_a = if ci < self.prop.curr_max_area.len() {
+            self.prop.curr_max_area[ci]
+        } else {
+            return None;
+        };
+        let min_a = if ci < self.prop.curr_min_area.len() {
+            self.prop.curr_min_area[ci]
+        } else {
+            return None;
+        };
+        Some((min_a, max_a))
+    }
+
     fn propagate_compass_placement_enumeration(&mut self) -> Result<bool, ()> {
         const MAX_AREA_THRESHOLD: usize = 12;
         const MAX_REACHABLE_COMPS: usize = 16;
@@ -2697,25 +3156,7 @@ impl<'a> Solver<'a> {
             .collect();
 
         'outer: for &(cell, compass) in &compass_entries {
-            let ci = if cell < self.curr_comp_id.len() {
-                self.curr_comp_id[cell]
-            } else {
-                usize::MAX
-            };
-            if ci == usize::MAX {
-                continue;
-            }
-            if self.is_sealed(ci) {
-                continue;
-            }
-            let max_a = if ci < self.prop.curr_max_area.len() {
-                self.prop.curr_max_area[ci]
-            } else {
-                continue;
-            };
-            let min_a = if ci < self.prop.curr_min_area.len() {
-                self.prop.curr_min_area[ci]
-            } else {
+            let Some((min_a, max_a)) = self.compass_area_bounds(cell) else {
                 continue;
             };
             if max_a > MAX_AREA_THRESHOLD {
@@ -2728,84 +3169,20 @@ impl<'a> Solver<'a> {
             let limits = [compass.n, compass.s, compass.e, compass.w];
 
             // Bounding box from compass constraints (tightest possible).
-            let bbox_min_r = limits[0].map_or(0isize, |v| cri - v as isize).max(0);
-            let bbox_max_r = limits[1]
-                .map_or(self.grid.rows as isize - 1, |v| cri + v as isize)
-                .min(self.grid.rows as isize - 1);
-            let bbox_min_c = limits[3].map_or(0isize, |v| cci - v as isize).max(0);
-            let bbox_max_c = limits[2]
-                .map_or(self.grid.cols as isize - 1, |v| cci + v as isize)
-                .min(self.grid.cols as isize - 1);
+            let bbox = self.compass_bbox(cell, compass);
 
-            let n = self.grid.num_cells();
             // Step 1: BFS reachable cells from compass cell via non-Cut edges, in bbox.
-            let mut cell_in_reachable = vec![false; n];
-            let mut reachable_cells: Vec<CellId> = Vec::new();
-            {
-                cell_in_reachable[cell] = true;
-                reachable_cells.push(cell);
-                let mut bfs_q: VecDeque<CellId> = VecDeque::new();
-                bfs_q.push_back(cell);
-                while let Some(cur) = bfs_q.pop_front() {
-                    for eid in self.grid.cell_edges(cur).into_iter().flatten() {
-                        if self.edges[eid] == EdgeState::Cut {
-                            continue;
-                        }
-                        let (c1, c2) = self.grid.edge_cells(eid);
-                        let other = if c1 == cur { c2 } else { c1 };
-                        if !self.grid.cell_exists[other] || cell_in_reachable[other] {
-                            continue;
-                        }
-                        let (pr, pc) = self.grid.cell_pos(other);
-                        if (pr as isize) < bbox_min_r
-                            || (pr as isize) > bbox_max_r
-                            || (pc as isize) < bbox_min_c
-                            || (pc as isize) > bbox_max_c
-                        {
-                            continue;
-                        }
-                        cell_in_reachable[other] = true;
-                        reachable_cells.push(other);
-                        bfs_q.push_back(other);
-                    }
-                }
-            }
+            let (cell_in_reachable, reachable_cells) = self.compass_reachable_bfs(cell, bbox);
 
             // Step 2: group reachable cells into fresh local components via CURRENT
             // Uncut edges. IMPORTANT: follow Uncut edges GLOBALLY (beyond bbox) so a
             // cell committed to an outside piece drags that piece in — prevents false
             // forced-uncuts. The compass cell ends up in local component 0.
-            let mut local_comp_of = vec![usize::MAX; n];
-            let mut local_comps: Vec<Vec<CellId>> = Vec::new();
-            for &start in &reachable_cells {
-                if local_comp_of[start] != usize::MAX {
-                    continue;
-                }
-                if local_comps.len() >= MAX_REACHABLE_COMPS {
-                    continue 'outer;
-                }
-                let lc = local_comps.len();
-                let mut lcomp_cells = vec![start];
-                local_comp_of[start] = lc;
-                let mut q: VecDeque<CellId> = VecDeque::new();
-                q.push_back(start);
-                while let Some(cur) = q.pop_front() {
-                    for eid in self.grid.cell_edges(cur).into_iter().flatten() {
-                        if self.edges[eid] != EdgeState::Uncut {
-                            continue;
-                        }
-                        let (c1, c2) = self.grid.edge_cells(eid);
-                        let other = if c1 == cur { c2 } else { c1 };
-                        if !self.grid.cell_exists[other] || local_comp_of[other] != usize::MAX {
-                            continue;
-                        }
-                        local_comp_of[other] = lc;
-                        lcomp_cells.push(other);
-                        q.push_back(other);
-                    }
-                }
-                local_comps.push(lcomp_cells);
-            }
+            let Some((mut local_comp_of, mut local_comps)) =
+                self.compass_local_comps(&reachable_cells, MAX_REACHABLE_COMPS)
+            else {
+                continue 'outer;
+            };
 
             // Ensure compass cell is in local component 0 (swap if needed).
             let compass_lc = local_comp_of[cell];
@@ -2825,55 +3202,12 @@ impl<'a> Solver<'a> {
             }
 
             // Check if local comp 0 can still grow (Unknown edges to other local comps).
-            let can_grow = local_comps[0].iter().any(|&c| {
-                self.grid.cell_edges(c).into_iter().flatten().any(|eid| {
-                    if self.edges[eid] != EdgeState::Unknown {
-                        return false;
-                    }
-                    let (c1, c2) = self.grid.edge_cells(eid);
-                    let other = if c1 == c { c2 } else { c1 };
-                    cell_in_reachable[other]
-                        && local_comp_of[other] != 0
-                        && local_comp_of[other] != usize::MAX
-                })
-            });
-            let has_outside_growth = local_comps[0].iter().any(|&c| {
-                self.grid.cell_edges(c).into_iter().flatten().any(|eid| {
-                    if self.edges[eid] != EdgeState::Unknown {
-                        return false;
-                    }
-                    let (c1, c2) = self.grid.edge_cells(eid);
-                    let other = if c1 == c { c2 } else { c1 };
-                    self.grid.cell_exists[other] && !cell_in_reachable[other]
-                })
-            });
-            if !can_grow && !has_outside_growth {
+            if !self.compass_can_grow(&local_comps[0], &cell_in_reachable, &local_comp_of) {
                 continue;
             }
 
             // Per-component directional counts and sizes.
-            let mut comp_dir_counts = vec![[0usize; 4]; num_rc];
-            let mut comp_sizes = vec![0usize; num_rc];
-            for (lc, lcomp) in local_comps.iter().enumerate() {
-                for &c in lcomp {
-                    let (pr, pc) = self.grid.cell_pos(c);
-                    let dr = pr as isize - cri;
-                    let dc = pc as isize - cci;
-                    if dr < 0 {
-                        comp_dir_counts[lc][0] += 1; // N
-                    }
-                    if dr > 0 {
-                        comp_dir_counts[lc][1] += 1; // S
-                    }
-                    if dc > 0 {
-                        comp_dir_counts[lc][2] += 1; // E
-                    }
-                    if dc < 0 {
-                        comp_dir_counts[lc][3] += 1; // W
-                    }
-                    comp_sizes[lc] += 1;
-                }
-            }
+            let (comp_dir_counts, comp_sizes) = self.compass_dir_counts(&local_comps, cri, cci);
 
             // Base-count feasibility check on comp 0.
             for d in 0..4 {
@@ -2886,27 +3220,7 @@ impl<'a> Solver<'a> {
 
             // Component adjacency bitmask via Unknown edges (iterate ALL cells in
             // each local comp, including outside-bbox ones from global flood-fill).
-            let mut adj_mask = vec![0u32; num_rc];
-            for lc in 0..num_rc {
-                for ci in 0..local_comps[lc].len() {
-                    let c = local_comps[lc][ci];
-                    for eid in self.grid.cell_edges(c).into_iter().flatten() {
-                        if self.edges[eid] != EdgeState::Unknown {
-                            continue;
-                        }
-                        let (c1, c2) = self.grid.edge_cells(eid);
-                        let other = if c1 == c { c2 } else { c1 };
-                        if !self.grid.cell_exists[other] {
-                            continue;
-                        }
-                        let l2 = local_comp_of[other];
-                        if l2 == usize::MAX || l2 == lc {
-                            continue;
-                        }
-                        adj_mask[lc] |= 1u32 << l2;
-                    }
-                }
-            }
+            let adj_mask = self.compass_adj_mask(&local_comps, &local_comp_of);
 
             // Enumerate valid connected merges via DFS (local comp 0 = mandatory start).
             let mut valid_placements: Vec<u32> = Vec::new();
@@ -2942,32 +3256,15 @@ impl<'a> Solver<'a> {
             in_all &= !1u32; // local comp 0 always merged
 
             // Force Cut/Uncut on Unknown growth edges from local comp 0.
-            for &c in &local_comps[0] {
-                for eid in self.grid.cell_edges(c).into_iter().flatten() {
-                    if self.edges[eid] != EdgeState::Unknown {
-                        continue;
-                    }
-                    let (c1, c2) = self.grid.edge_cells(eid);
-                    let other = if c1 == c { c2 } else { c1 };
-                    if !self.grid.cell_exists[other] {
-                        continue;
-                    }
-                    if !cell_in_reachable[other] {
-                        forced_cuts.push(eid); // outside bbox → Cut
-                        continue;
-                    }
-                    let lj = local_comp_of[other];
-                    if lj == usize::MAX || lj == 0 {
-                        continue;
-                    }
-                    let bit = 1u32 << lj;
-                    if in_all & bit != 0 {
-                        forced_uncuts.push(eid);
-                    } else if in_any & bit == 0 {
-                        forced_cuts.push(eid);
-                    }
-                }
-            }
+            self.compass_collect_forced(
+                &local_comps[0],
+                &cell_in_reachable,
+                &local_comp_of,
+                in_all,
+                in_any,
+                &mut forced_cuts,
+                &mut forced_uncuts,
+            );
         }
 
         let mut progress = false;
@@ -3001,12 +3298,11 @@ impl<'a> Solver<'a> {
     /// 3. For a growing component whose current/target size is forbidden (equals
     ///    a sealed neighbor) → if exactly 1 Unknown growth edge remains, force
     ///    it Uncut (must grow away from the forbidden size); if 0 → Err.
-    fn propagate_size_separation(&mut self, num_comp: usize) -> Result<bool, ()> {
-        if !self.rules.size_separation {
-            return Ok(false);
-        }
-        // Step 1: sealed_neighbor_sizes[ci].
-        let mut sealed_neighbor_sizes: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); num_comp];
+    /// Step 1 of size separation: for every component, the set of sizes of the
+    /// neighbours it may not end up equal to (a sealed neighbour's current size,
+    /// or a still-growing neighbour's already-fixed target area).
+    fn collect_sealed_neighbor_sizes(&self, num_comp: usize) -> Vec<BTreeSet<usize>> {
+        let mut sizes: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); num_comp];
         for e in 0..self.grid.num_edges() {
             if self.edges[e] != EdgeState::Cut {
                 continue;
@@ -3021,25 +3317,31 @@ impl<'a> Solver<'a> {
                 continue;
             }
             if self.is_sealed(ci1) {
-                sealed_neighbor_sizes[ci2].insert(self.curr_comp_sz[ci1]);
+                sizes[ci2].insert(self.curr_comp_sz[ci1]);
             } else if ci1 < self.curr_target_area.len() {
                 if let Some(t) = self.curr_target_area[ci1] {
-                    sealed_neighbor_sizes[ci2].insert(t);
+                    sizes[ci2].insert(t);
                 }
             }
             if self.is_sealed(ci2) {
-                sealed_neighbor_sizes[ci1].insert(self.curr_comp_sz[ci2]);
+                sizes[ci1].insert(self.curr_comp_sz[ci2]);
             } else if ci2 < self.curr_target_area.len() {
                 if let Some(t) = self.curr_target_area[ci2] {
-                    sealed_neighbor_sizes[ci1].insert(t);
+                    sizes[ci1].insert(t);
                 }
             }
         }
+        sizes
+    }
 
-        let mut progress = false;
-
-        // Step 2: merge-conflict forcing (Unknown edge → Cut if merged size forbidden).
-        let mut merge_conflict_cuts: Vec<EdgeId> = Vec::new();
+    /// Step 2: an Unknown edge whose merged component size is forbidden must be
+    /// cut open.
+    fn size_separation_merge_cuts(
+        &mut self,
+        num_comp: usize,
+        sizes: &[BTreeSet<usize>],
+    ) -> Result<bool, ()> {
+        let mut cuts: Vec<EdgeId> = Vec::new();
         for e in 0..self.grid.num_edges() {
             if self.edges[e] != EdgeState::Unknown {
                 continue;
@@ -3054,13 +3356,12 @@ impl<'a> Solver<'a> {
                 continue;
             }
             let merged_sz = self.curr_comp_sz[ci1] + self.curr_comp_sz[ci2];
-            if sealed_neighbor_sizes[ci1].contains(&merged_sz)
-                || sealed_neighbor_sizes[ci2].contains(&merged_sz)
-            {
-                merge_conflict_cuts.push(e);
+            if sizes[ci1].contains(&merged_sz) || sizes[ci2].contains(&merged_sz) {
+                cuts.push(e);
             }
         }
-        for e in merge_conflict_cuts {
+        let mut progress = false;
+        for e in cuts {
             if self.edges[e] == EdgeState::Unknown {
                 if !self.set_edge(e, EdgeState::Cut) {
                     return Err(());
@@ -3068,11 +3369,34 @@ impl<'a> Solver<'a> {
                 progress = true;
             }
         }
+        Ok(progress)
+    }
 
-        // Step 3: forbidden-size checks.
-        let mut forbidden_uncuts: Vec<EdgeId> = Vec::new();
+    /// `(count, last)` Unknown growth edges of component `ci`.
+    fn growth_unknown_edges(&self, ci: usize) -> (usize, Option<EdgeId>) {
+        let mut unk_count = 0usize;
+        let mut last_unk: Option<EdgeId> = None;
+        if ci < self.prop.growth_edges.len() {
+            for &e in &self.prop.growth_edges[ci] {
+                if self.edges[e] == EdgeState::Unknown {
+                    unk_count += 1;
+                    last_unk = Some(e);
+                }
+            }
+        }
+        (unk_count, last_unk)
+    }
+
+    /// Step 3: a component whose current size is forbidden must grow; with
+    /// exactly one Unknown growth edge left that edge is forced Uncut.
+    fn size_separation_forced_uncuts(
+        &mut self,
+        num_comp: usize,
+        sizes: &[BTreeSet<usize>],
+    ) -> Result<bool, ()> {
+        let mut uncuts: Vec<EdgeId> = Vec::new();
         for ci in 0..num_comp {
-            let forbidden = &sealed_neighbor_sizes[ci];
+            let forbidden = &sizes[ci];
             if forbidden.is_empty() {
                 continue;
             }
@@ -3080,36 +3404,28 @@ impl<'a> Solver<'a> {
                 if forbidden.contains(&self.curr_comp_sz[ci]) {
                     return Err(());
                 }
-            } else {
-                if ci < self.curr_target_area.len() {
-                    if let Some(t) = self.curr_target_area[ci] {
-                        if forbidden.contains(&t) {
-                            return Err(());
-                        }
-                    }
-                }
-                if forbidden.contains(&self.curr_comp_sz[ci]) {
-                    // Current size forbidden → must grow.
-                    let mut unk_count = 0usize;
-                    let mut last_unk: Option<EdgeId> = None;
-                    if ci < self.prop.growth_edges.len() {
-                        for &e in &self.prop.growth_edges[ci] {
-                            if self.edges[e] == EdgeState::Unknown {
-                                unk_count += 1;
-                                last_unk = Some(e);
-                            }
-                        }
-                    }
-                    if unk_count == 0 {
+                continue;
+            }
+            if ci < self.curr_target_area.len() {
+                if let Some(t) = self.curr_target_area[ci] {
+                    if forbidden.contains(&t) {
                         return Err(());
-                    }
-                    if unk_count == 1 {
-                        forbidden_uncuts.push(last_unk.unwrap());
                     }
                 }
             }
+            if forbidden.contains(&self.curr_comp_sz[ci]) {
+                // Current size forbidden → must grow.
+                let (unk_count, last_unk) = self.growth_unknown_edges(ci);
+                if unk_count == 0 {
+                    return Err(());
+                }
+                if unk_count == 1 {
+                    uncuts.push(last_unk.unwrap());
+                }
+            }
         }
-        for e in forbidden_uncuts {
+        let mut progress = false;
+        for e in uncuts {
             if self.edges[e] == EdgeState::Unknown {
                 if !self.set_edge(e, EdgeState::Uncut) {
                     return Err(());
@@ -3117,6 +3433,16 @@ impl<'a> Solver<'a> {
                 progress = true;
             }
         }
+        Ok(progress)
+    }
+
+    fn propagate_size_separation(&mut self, num_comp: usize) -> Result<bool, ()> {
+        if !self.rules.size_separation {
+            return Ok(false);
+        }
+        let sizes = self.collect_sealed_neighbor_sizes(num_comp);
+        let mut progress = self.size_separation_merge_cuts(num_comp, &sizes)?;
+        progress |= self.size_separation_forced_uncuts(num_comp, &sizes)?;
         Ok(progress)
     }
 
@@ -3216,20 +3542,28 @@ impl<'a> Solver<'a> {
     /// violate their shape relation, which is what the `homogeneous` /
     /// `heterogeneous` official puzzles actually require (area equality alone is
     /// insufficient: equal area does not imply equal shape).
-    fn propagate_shape_constraints(&mut self, num_comp: usize) -> Result<(), ()> {
-        let has_gemini = self
-            .edge_clues
-            .iter()
-            .any(|cl| matches!(cl.kind, EdgeClueKind::Gemini));
-        let has_delta = self
-            .edge_clues
-            .iter()
-            .any(|cl| matches!(cl.kind, EdgeClueKind::Delta));
-        if !has_gemini && !has_delta {
-            return Ok(());
+    /// Components on both sides of `e` when the edge is Cut and both endpoints
+    /// are live, distinct, in-range components — the shared guard of every
+    /// "compare the two sides of a clue edge" propagation.
+    fn cut_edge_comp_pair(&self, e: usize, num_comp: usize) -> Option<(usize, usize)> {
+        if self.edges[e] != EdgeState::Cut {
+            return None;
         }
+        let (c1, c2) = self.grid.edge_cells(e);
+        if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+            return None;
+        }
+        let ci1 = self.curr_comp_id[c1];
+        let ci2 = self.curr_comp_id[c2];
+        if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+            return None;
+        }
+        Some((ci1, ci2))
+    }
 
-        // Canonical shape per sealed component.
+    /// Canonical shape of every sealed component that already reached its
+    /// target area; components still growing (or not sealed) stay `None`.
+    fn sealed_comp_shapes(&self, num_comp: usize) -> Vec<Option<Shape>> {
         let mut comp_shape: Vec<Option<Shape>> = vec![None; num_comp];
         for &ci in &self.prop.sealed_list {
             let at_limit = match self.curr_target_area[ci] {
@@ -3248,58 +3582,75 @@ impl<'a> Solver<'a> {
                 .collect();
             comp_shape[ci] = Some(canonical(&make_shape(&cells)));
         }
+        comp_shape
+    }
 
-        if has_gemini {
-            for clue in &self.edge_clues {
-                if !matches!(clue.kind, EdgeClueKind::Gemini) {
-                    continue;
-                }
-                let e = clue.edge;
-                if self.edges[e] != EdgeState::Cut {
-                    continue;
-                }
-                let (c1, c2) = self.grid.edge_cells(e);
-                if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
-                    continue;
-                }
-                let ci1 = self.curr_comp_id[c1];
-                let ci2 = self.curr_comp_id[c2];
-                if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
-                    continue;
-                }
-                if self.is_sealed(ci1) && self.is_sealed(ci2) {
-                    match (&comp_shape[ci1], &comp_shape[ci2]) {
-                        (Some(s1), Some(s2)) if s1 != s2 => return Err(()),
-                        _ => {}
+    /// Gemini: the two sealed sides of a Gemini edge must have EQUAL shapes.
+    fn check_gemini_shape_pairs(
+        &self,
+        num_comp: usize,
+        comp_shape: &[Option<Shape>],
+    ) -> Result<(), ()> {
+        for clue in &self.edge_clues {
+            if !matches!(clue.kind, EdgeClueKind::Gemini) {
+                continue;
+            }
+            let Some((ci1, ci2)) = self.cut_edge_comp_pair(clue.edge, num_comp) else {
+                continue;
+            };
+            if self.is_sealed(ci1) && self.is_sealed(ci2) {
+                if let (Some(s1), Some(s2)) = (&comp_shape[ci1], &comp_shape[ci2]) {
+                    if s1 != s2 {
+                        return Err(());
                     }
                 }
             }
         }
+        Ok(())
+    }
 
-        if has_delta {
-            for clue in &self.edge_clues {
-                if !matches!(clue.kind, EdgeClueKind::Delta) {
-                    continue;
-                }
-                let e = clue.edge;
-                if self.edges[e] != EdgeState::Cut {
-                    continue;
-                }
-                let (c1, c2) = self.grid.edge_cells(e);
-                if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
-                    continue;
-                }
-                let ci1 = self.curr_comp_id[c1];
-                let ci2 = self.curr_comp_id[c2];
-                if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
-                    continue;
-                }
-                // Both sealed: shapes must differ.
-                match (&comp_shape[ci1], &comp_shape[ci2]) {
-                    (Some(s1), Some(s2)) if s1 == s2 => return Err(()),
-                    _ => {}
+    /// Delta: the two sealed sides of a Delta edge must have DIFFERENT shapes.
+    fn check_delta_shape_pairs(
+        &self,
+        num_comp: usize,
+        comp_shape: &[Option<Shape>],
+    ) -> Result<(), ()> {
+        for clue in &self.edge_clues {
+            if !matches!(clue.kind, EdgeClueKind::Delta) {
+                continue;
+            }
+            let Some((ci1, ci2)) = self.cut_edge_comp_pair(clue.edge, num_comp) else {
+                continue;
+            };
+            if let (Some(s1), Some(s2)) = (&comp_shape[ci1], &comp_shape[ci2]) {
+                if s1 == s2 {
+                    return Err(());
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn propagate_shape_constraints(&mut self, num_comp: usize) -> Result<(), ()> {
+        let has_gemini = self
+            .edge_clues
+            .iter()
+            .any(|cl| matches!(cl.kind, EdgeClueKind::Gemini));
+        let has_delta = self
+            .edge_clues
+            .iter()
+            .any(|cl| matches!(cl.kind, EdgeClueKind::Delta));
+        if !has_gemini && !has_delta {
+            return Ok(());
+        }
+
+        // Canonical shape per sealed component.
+        let comp_shape = self.sealed_comp_shapes(num_comp);
+        if has_gemini {
+            self.check_gemini_shape_pairs(num_comp, &comp_shape)?;
+        }
+        if has_delta {
+            self.check_delta_shape_pairs(num_comp, &comp_shape)?;
         }
 
         Ok(())

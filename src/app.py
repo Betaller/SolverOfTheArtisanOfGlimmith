@@ -8,11 +8,11 @@ _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt  # noqa: E402 — needs the sys.path bootstrap above
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from src.ui.main_window import MainWindow
-from src.ui.theme import apply_theme
+from src.ui.main_window import MainWindow  # noqa: E402
+from src.ui.theme import apply_theme  # noqa: E402
 
 
 def _is_system_dark(app: QApplication) -> bool:
@@ -25,12 +25,17 @@ def _is_system_dark(app: QApplication) -> bool:
     # Fallback for older Qt: check Windows registry
     try:
         import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+
+        # `winreg` only exposes these on Windows: typeshed gates them behind
+        # `sys.platform == "win32"`, so mypy on Linux can't see them.
+        key = winreg.OpenKey(  # type: ignore[attr-defined]
+            winreg.HKEY_CURRENT_USER,  # type: ignore[attr-defined]
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
         )
-        value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-        return value == 0
+        value, _ = winreg.QueryValueEx(  # type: ignore[attr-defined]
+            key, "AppsUseLightTheme"
+        )
+        return bool(value == 0)
     except Exception:
         return False
 

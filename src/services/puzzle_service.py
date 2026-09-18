@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
 
+from src.io.puzzle_codec import deserialize, serialize
 from src.models.board import Board
 from src.models.puzzle import Puzzle, Rule, check_rule_conflicts
 from src.solver.exceptions import PuzzleFormatError
-from src.io.puzzle_codec import serialize, deserialize
 
 
 class PuzzleService:
@@ -32,7 +31,7 @@ class PuzzleService:
     def validate_rules(self, puzzle: Puzzle) -> list[str]:
         return check_rule_conflicts(puzzle.rules)
 
-    def get_puzzle_info(self, puzzle: Puzzle) -> dict:
+    def get_puzzle_info(self, puzzle: Puzzle) -> dict[str, object]:
         return {
             "size": f"{puzzle.height}x{puzzle.width}",
             "cells": len(puzzle.cells),

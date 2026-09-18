@@ -32,30 +32,36 @@ export function cellAt(p: PuzzleJson, r: number, c: number): CellJson | undefine
  * and overlay the sparse boundary/constraint/watchtower data. Mirror that here
  * so the canvas always has every edge to draw (grid lines, region borders).
  */
-export function normalizePuzzle(p: PuzzleJson): PuzzleJson {
-  const h = p.grid.height
-  const w = p.grid.width
-
-  const cellMap = new Map(p.cells.map((c) => [cellKey(c.row, c.col), c]))
+function fullCells(p: PuzzleJson): CellJson[] {
+  const map = new Map(p.cells.map((c) => [cellKey(c.row, c.col), c]))
   const cells: CellJson[] = []
-  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) cells.push(cellMap.get(cellKey(r, c)) ?? { row: r, col: c })
+  for (let r = 0; r < p.grid.height; r++) for (let c = 0; c < p.grid.width; c++) {
+    cells.push(map.get(cellKey(r, c)) ?? { row: r, col: c })
+  }
+  return cells
+}
 
-  const edgeMap = new Map(p.edges.map((e) => [edgeKey(e.r1, e.c1, e.r2, e.c2), e]))
+function fullEdges(p: PuzzleJson): EdgeJson[] {
+  const map = new Map(p.edges.map((e) => [edgeKey(e.r1, e.c1, e.r2, e.c2), e]))
   const edges: EdgeJson[] = []
-  for (let r = 0; r < h; r++) for (let c = 0; c + 1 < w; c++) {
-    const k = edgeKey(r, c, r, c + 1)
-    edges.push(edgeMap.get(k) ?? { r1: r, c1: c, r2: r, c2: c + 1 })
-  }
-  for (let r = 0; r + 1 < h; r++) for (let c = 0; c < w; c++) {
-    const k = edgeKey(r, c, r + 1, c)
-    edges.push(edgeMap.get(k) ?? { r1: r, c1: c, r2: r + 1, c2: c })
-  }
+  const push = (r1: number, c1: number, r2: number, c2: number) =>
+    edges.push(map.get(edgeKey(r1, c1, r2, c2)) ?? { r1, c1, r2, c2 })
+  for (let r = 0; r < p.grid.height; r++) for (let c = 0; c + 1 < p.grid.width; c++) push(r, c, r, c + 1)
+  for (let r = 0; r + 1 < p.grid.height; r++) for (let c = 0; c < p.grid.width; c++) push(r, c, r + 1, c)
+  return edges
+}
 
-  const vertexMap = new Map(p.vertices.map((v) => [vertexKey(v.row, v.col), v]))
+function fullVertices(p: PuzzleJson): VertexJson[] {
+  const map = new Map(p.vertices.map((v) => [vertexKey(v.row, v.col), v]))
   const vertices: VertexJson[] = []
-  for (let r = 0; r <= h; r++) for (let c = 0; c <= w; c++) vertices.push(vertexMap.get(vertexKey(r, c)) ?? { row: r, col: c })
+  for (let r = 0; r <= p.grid.height; r++) for (let c = 0; c <= p.grid.width; c++) {
+    vertices.push(map.get(vertexKey(r, c)) ?? { row: r, col: c })
+  }
+  return vertices
+}
 
-  return { ...p, cells, edges, vertices }
+export function normalizePuzzle(p: PuzzleJson): PuzzleJson {
+  return { ...p, cells: fullCells(p), edges: fullEdges(p), vertices: fullVertices(p) }
 }
 
 export function edgeBetween(p: PuzzleJson, r1: number, c1: number, r2: number, c2: number): EdgeJson | undefined {

@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from typing import Optional
-
-from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QMouseEvent
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QLabel, QWidget, QListWidget,
-    QListWidgetItem, QGroupBox, QFrame,
+    QDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QListWidget,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-from src.ui import theme as _ui_theme
-
 from src.models.board import Shape
-from src.solver.shapes import normalize, canonical_key
-
+from src.solver.shapes import canonical_key, normalize
+from src.ui import theme as _ui_theme
 
 CELL_SIZE = 36
 
@@ -29,7 +29,8 @@ class ShapeGridEditor(QWidget):
         self._painting = False
 
     def set_cells(self, cells: set[tuple[int, int]]) -> None:
-        self._cells = {(r, c) for r, c in cells if 0 <= r < self.grid_size and 0 <= c < self.grid_size}
+        limit = self.grid_size
+        self._cells = {(r, c) for r, c in cells if 0 <= r < limit and 0 <= c < limit}
         self.update()
 
     def get_shape(self) -> Shape:
@@ -39,7 +40,7 @@ class ShapeGridEditor(QWidget):
         self._cells.clear()
         self.update()
 
-    def _cell_at(self, pos) -> tuple[int, int] | None:
+    def _cell_at(self, pos: QPointF) -> tuple[int, int] | None:
         x, y = pos.x(), pos.y()
         c = int(x // CELL_SIZE)
         r = int(y // CELL_SIZE)
@@ -47,7 +48,7 @@ class ShapeGridEditor(QWidget):
             return (r, c)
         return None
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
         cell = self._cell_at(event.position())
         if cell is not None:
             self._painting = True
@@ -57,17 +58,17 @@ class ShapeGridEditor(QWidget):
                 self._cells.add(cell)
             self.update()
 
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
         if self._painting:
             cell = self._cell_at(event.position())
             if cell is not None:
                 self._cells.add(cell)
                 self.update()
 
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+    def mouseReleaseEvent(self, _event: QMouseEvent) -> None:  # noqa: N802 - Qt override
         self._painting = False
 
-    def paintEvent(self, event) -> None:
+    def paintEvent(self, _event: QPaintEvent) -> None:  # noqa: N802 - Qt override
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -89,14 +90,17 @@ class ShapeGridEditor(QWidget):
         area = len(self._cells)
         painter.setPen(QPen(QColor(_ui_theme.colors.shape_editor_area_text)))
         painter.setFont(self.font())
-        painter.drawText(QRectF(0, self.grid_size * CELL_SIZE + 6,
-                                  self.grid_size * CELL_SIZE, 18),
-                         Qt.AlignmentFlag.AlignCenter, f"格数: {area}")
+        painter.drawText(
+            QRectF(0, self.grid_size * CELL_SIZE + 6, self.grid_size * CELL_SIZE, 18),
+            Qt.AlignmentFlag.AlignCenter,
+            f"格数: {area}",
+        )
 
 
 class ShapeEditorDialog(QDialog):
-    def __init__(self, parent: QWidget | None = None,
-                 existing_shapes: list[Shape] | None = None) -> None:
+    def __init__(
+        self, parent: QWidget | None = None, existing_shapes: list[Shape] | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("形状池编辑器")
         self.resize(520, 520)
@@ -214,16 +218,19 @@ class ShapeEditorDialog(QDialog):
         self._shape_list.clear()
         for i, s in enumerate(self._shapes):
             cells_desc = ", ".join(f"({r},{c})" for r, c in sorted(s.cells))
-            self._shape_list.addItem(f"形状{i+1} (面积={s.area}): [{cells_desc}]")
+            self._shape_list.addItem(f"形状{i + 1} (面积={s.area}): [{cells_desc}]")
 
     def get_shapes(self) -> list[Shape]:
         return list(self._shapes)
 
 
 class PatternEditorDialog(QDialog):
-    def __init__(self, parent: QWidget | None = None,
-                 existing: Shape | None = None,
-                 title: str = "图案编辑器") -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        existing: Shape | None = None,
+        title: str = "图案编辑器",
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setFixedSize(300, 360)

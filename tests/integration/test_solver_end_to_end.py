@@ -8,12 +8,13 @@ from src.validation.validator import IndependentValidator, solution_to_board
 
 
 def make_puzzle_with_boundaries(
-    height: int, width: int,
+    height: int,
+    width: int,
     boundaries: list[tuple[int, int, int, int]],
     blocked_cells: list[tuple[int, int]] | None = None,
 ) -> Puzzle:
     board = Board(height, width)
-    for (r1, c1, r2, c2) in boundaries:
+    for r1, c1, r2, c2 in boundaries:
         e = board.edge_between(r1, c1, r2, c2)
         if e is not None:
             e.is_boundary = True
@@ -295,13 +296,18 @@ class TestEndToEndValidatorWithKnownSolution:
 
 class TestEndToEndPreDrawnBoundaries:
     def test_solve_with_boundaries_no_rules(self) -> None:
-        puzzle = make_puzzle_with_boundaries(3, 3, [
-            (0, 1, 0, 2), (1, 1, 1, 2),
-        ])
+        puzzle = make_puzzle_with_boundaries(
+            3,
+            3,
+            [
+                (0, 1, 0, 2),
+                (1, 1, 1, 2),
+            ],
+        )
         solution = solve(puzzle, timeout=10)
         assert solution.solved is True
         board = solution_to_board(puzzle, solution)
-        for (r1, c1, r2, c2) in [(0, 1, 0, 2), (1, 1, 1, 2)]:
+        for r1, c1, r2, c2 in [(0, 1, 0, 2), (1, 1, 1, 2)]:
             e = board.edge_between(r1, c1, r2, c2)
             assert e is not None
             c1_cell = board.cell(r1, c1)
@@ -310,21 +316,46 @@ class TestEndToEndPreDrawnBoundaries:
 
     def test_solve_6x5_bordered_with_boundaries(self) -> None:
         blocked = [
-            (0, 0), (0, 1), (0, 2), (0, 3), (0, 4),
-            (1, 0), (1, 4),
-            (2, 0), (2, 4),
-            (3, 0), (3, 4),
-            (4, 0), (4, 4),
-            (5, 0), (5, 1), (5, 2), (5, 3), (5, 4),
+            (0, 0),
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (0, 4),
+            (1, 0),
+            (1, 4),
+            (2, 0),
+            (2, 4),
+            (3, 0),
+            (3, 4),
+            (4, 0),
+            (4, 4),
+            (5, 0),
+            (5, 1),
+            (5, 2),
+            (5, 3),
+            (5, 4),
         ]
         boundaries = [
-            (0, 1, 1, 1), (0, 2, 1, 2), (0, 3, 1, 3),
-            (1, 3, 1, 4), (2, 0, 2, 1), (2, 2, 2, 3),
-            (2, 3, 2, 4), (3, 0, 3, 1), (3, 1, 3, 2),
-            (3, 3, 3, 4), (4, 0, 4, 1), (4, 3, 4, 4),
-            (1, 1, 2, 1), (1, 2, 2, 2), (1, 3, 2, 3),
-            (2, 2, 3, 2), (3, 2, 4, 2),
-            (4, 1, 5, 1), (4, 2, 5, 2), (4, 3, 5, 3),
+            (0, 1, 1, 1),
+            (0, 2, 1, 2),
+            (0, 3, 1, 3),
+            (1, 3, 1, 4),
+            (2, 0, 2, 1),
+            (2, 2, 2, 3),
+            (2, 3, 2, 4),
+            (3, 0, 3, 1),
+            (3, 1, 3, 2),
+            (3, 3, 3, 4),
+            (4, 0, 4, 1),
+            (4, 3, 4, 4),
+            (1, 1, 2, 1),
+            (1, 2, 2, 2),
+            (1, 3, 2, 3),
+            (2, 2, 3, 2),
+            (3, 2, 4, 2),
+            (4, 1, 5, 1),
+            (4, 2, 5, 2),
+            (4, 3, 5, 3),
         ]
         puzzle = make_puzzle_with_boundaries(6, 5, boundaries, blocked)
         solution = solve(puzzle, timeout=30)

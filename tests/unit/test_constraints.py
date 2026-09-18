@@ -41,7 +41,8 @@ from src.solver.constraints import (
 
 
 def board_with_regions(
-    height: int, width: int,
+    height: int,
+    width: int,
     region_map: list[list[int]],
 ) -> Board:
     b = Board(height, width)
@@ -69,11 +70,15 @@ def puzzle_with_rules(rules: list[Rule]) -> Puzzle:
 
 class TestHelpers:
     def test_get_region_cells(self) -> None:
-        b = board_with_regions(3, 3, [
-            [1, 1, 2],
-            [1, 2, 2],
-            [3, 3, 3],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 2],
+                [1, 2, 2],
+                [3, 3, 3],
+            ],
+        )
         regions = get_region_cells(b)
         assert len(regions) == 3
         assert len(regions[1]) == 3
@@ -81,10 +86,14 @@ class TestHelpers:
         assert len(regions[3]) == 3
 
     def test_get_region_shape(self) -> None:
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         cells = b.get_region_cells(1)
         shape = get_region_shape(cells)
         assert shape.area == 2
@@ -101,53 +110,77 @@ class TestHelpers:
 
 class TestRegionConnectivity:
     def test_connected_region(self) -> None:
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [1, 0, 1],
-            [1, 1, 1],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [1, 0, 1],
+                [1, 1, 1],
+            ],
+        )
         assert check_region_connectivity(b) is True
 
     def test_disconnected_region(self) -> None:
-        b = board_with_regions(3, 3, [
-            [1, 0, 1],
-            [0, 0, 0],
-            [1, 0, 1],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 0, 1],
+                [0, 0, 0],
+                [1, 0, 1],
+            ],
+        )
         assert check_region_connectivity(b) is False
 
     def test_single_cell_region(self) -> None:
-        b = board_with_regions(3, 3, [
-            [1, 0, 0],
-            [0, 0, 0],
-            [0, 0, 0],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 0, 0],
+                [0, 0, 0],
+                [0, 0, 0],
+            ],
+        )
         assert check_region_connectivity(b) is True
 
     def test_all_same_region(self) -> None:
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [1, 1, 1],
-            [1, 1, 1],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [1, 1, 1],
+                [1, 1, 1],
+            ],
+        )
         assert check_region_connectivity(b) is True
 
     def test_disconnected_diagonal(self) -> None:
-        b = board_with_regions(3, 3, [
-            [1, 0, 2],
-            [0, 0, 0],
-            [2, 0, 1],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 0, 2],
+                [0, 0, 0],
+                [2, 0, 1],
+            ],
+        )
         ret = check_region_connectivity(b)
         # Region 1 has cells at (0,0) and (2,2) - not connected
         assert ret is False
 
     def test_snake_connected(self) -> None:
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [0, 0, 1],
-            [0, 0, 1],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [0, 0, 1],
+                [0, 0, 1],
+            ],
+        )
         assert check_region_connectivity(b) is True
 
     def test_empty_board_no_assigned(self) -> None:
@@ -155,38 +188,54 @@ class TestRegionConnectivity:
         assert check_region_connectivity(b) is True
 
     def test_multiple_regions_all_connected(self) -> None:
-        b = board_with_regions(4, 4, [
-            [1, 1, 2, 2],
-            [1, 1, 2, 2],
-            [3, 3, 4, 4],
-            [3, 3, 4, 4],
-        ])
+        b = board_with_regions(
+            4,
+            4,
+            [
+                [1, 1, 2, 2],
+                [1, 1, 2, 2],
+                [3, 3, 4, 4],
+                [3, 3, 4, 4],
+            ],
+        )
         assert check_region_connectivity(b) is True
 
 
 class TestBoundaryConsistency:
     def test_no_edges_marked(self) -> None:
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         assert check_boundary_consistency(b) is True
 
     def test_correct_boundary(self) -> None:
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         e = b.edge_between(0, 0, 1, 0)
         assert e is not None
         e.is_boundary = True
         assert check_boundary_consistency(b) is True
 
     def test_incorrect_boundary_inside_region(self) -> None:
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [1, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [1, 2],
+            ],
+        )
         # Edge between (0,0)-(0,1) is inside region 1, but marked as boundary
         e = b.edge_between(0, 0, 0, 1)
         assert e is not None
@@ -209,20 +258,28 @@ class TestRuleShapePool:
     def test_all_shapes_in_pool(self) -> None:
         shapes = [Shape(cells=frozenset([(0, 0), (0, 1)]))]
         puzzle = puzzle_with_rules([Rule.shape_pool(shapes)])
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         # Region 1 = domino horizontal, Region 2 = domino horizontal
         assert check_rule_shape_pool(puzzle, b) is True
 
     def test_shape_not_in_pool(self) -> None:
         pool = [Shape(cells=frozenset([(0, 0)]))]
         puzzle = puzzle_with_rules([Rule.shape_pool(pool)])
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         assert check_rule_shape_pool(puzzle, b) is False
 
     def test_no_rule_returns_true(self) -> None:
@@ -239,10 +296,14 @@ class TestRuleShapePool:
 class TestRuleRoseWindow:
     def test_valid_rose_window(self) -> None:
         puzzle = puzzle_with_rules([Rule.rose_window(["A", "B"])])
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         b.cell(0, 0).symbol = "A"
         b.cell(0, 1).symbol = "B"
         b.cell(1, 0).symbol = "A"
@@ -257,10 +318,14 @@ class TestRuleRoseWindow:
 
     def test_wrong_symbol_count(self) -> None:
         puzzle = puzzle_with_rules([Rule.rose_window(["A", "B"])])
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         b.cell(0, 0).symbol = "A"
         b.cell(0, 1).symbol = "A"
         b.cell(1, 0).symbol = "A"
@@ -270,10 +335,14 @@ class TestRuleRoseWindow:
 
     def test_unknown_symbol(self) -> None:
         puzzle = puzzle_with_rules([Rule.rose_window(["A", "B"])])
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         b.cell(0, 0).symbol = "A"
         b.cell(0, 1).symbol = "X"
         b.cell(1, 0).symbol = "A"
@@ -287,10 +356,14 @@ class TestRuleRoseWindow:
 
     def test_region_count_must_equal_symbol_count(self) -> None:
         puzzle = puzzle_with_rules([Rule.rose_window(["A", "B"])])
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         b.cell(0, 0).symbol = "A"
         b.cell(0, 1).symbol = "B"
         b.cell(1, 0).symbol = "A"
@@ -301,11 +374,15 @@ class TestRuleRoseWindow:
 class TestRuleHeterogeneous:
     def test_heterogeneous_satisfied(self) -> None:
         puzzle = puzzle_with_rules([Rule.heterogeneous()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 2],
-            [1, 1, 2],
-            [1, 1, 3],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 2],
+                [1, 1, 2],
+                [1, 1, 3],
+            ],
+        )
         # Region 1 = 2x3 rectangle (area 6), Region 2 = vertical domino (area 2)
         e = b.edge_between(0, 1, 0, 2)
         assert e is not None
@@ -339,11 +416,15 @@ class TestRuleHomogeneous:
 
     def test_homogeneous_fails_when_shapes_differ(self) -> None:
         puzzle = puzzle_with_rules([Rule.homogeneous()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [2, 2, 2],
-            [2, 2, 2],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [2, 2, 2],
+                [2, 2, 2],
+            ],
+        )
         e = b.edge_between(0, 0, 1, 0)
         assert e is not None
         e.constraint = EdgeConstraint(type=EdgeConstraintType.HOMOGENEOUS)
@@ -359,20 +440,28 @@ class TestRuleHomogeneous:
 class TestRulePrecise:
     def test_precise_satisfied(self) -> None:
         puzzle = puzzle_with_rules([Rule.precise(4)])
-        b = board_with_regions(4, 4, [
-            [1, 1, 1, 1],
-            [2, 2, 2, 2],
-            [3, 3, 3, 3],
-            [4, 4, 4, 4],
-        ])
+        b = board_with_regions(
+            4,
+            4,
+            [
+                [1, 1, 1, 1],
+                [2, 2, 2, 2],
+                [3, 3, 3, 3],
+                [4, 4, 4, 4],
+            ],
+        )
         assert check_rule_precise(puzzle, b) is True
 
     def test_precise_fails(self) -> None:
         puzzle = puzzle_with_rules([Rule.precise(4)])
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         assert check_rule_precise(puzzle, b) is False
 
     def test_no_rule_returns_true(self) -> None:
@@ -408,11 +497,15 @@ class TestRulePuzzlePiece:
 class TestRuleMixed:
     def test_mixed_satisfied(self) -> None:
         puzzle = puzzle_with_rules([Rule.mixed()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [2, 2, 2],
-            [2, 2, 2],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [2, 2, 2],
+                [2, 2, 2],
+            ],
+        )
         # Region 1 (area 3) != Region 2 (area 6)
         assert check_rule_mixed(puzzle, b) is True
 
@@ -466,22 +559,30 @@ class TestRuleArea:
 class TestRuleSame:
     def test_same_all_same_shape(self) -> None:
         puzzle = puzzle_with_rules([Rule.same()])
-        b = board_with_regions(4, 4, [
-            [1, 1, 2, 2],
-            [1, 1, 2, 2],
-            [3, 3, 4, 4],
-            [3, 3, 4, 4],
-        ])
+        b = board_with_regions(
+            4,
+            4,
+            [
+                [1, 1, 2, 2],
+                [1, 1, 2, 2],
+                [3, 3, 4, 4],
+                [3, 3, 4, 4],
+            ],
+        )
         # All regions are 2x2 squares
         assert check_rule_same(puzzle, b) is True
 
     def test_same_differs(self) -> None:
         puzzle = puzzle_with_rules([Rule.same()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [2, 2, 2],
-            [3, 3, 3],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [2, 2, 2],
+                [3, 3, 3],
+            ],
+        )
         assert check_rule_same(puzzle, b) is True
 
     def test_no_rule_returns_true(self) -> None:
@@ -521,11 +622,15 @@ class TestRuleRange:
 class TestRuleDifferent:
     def test_different_satisfied(self) -> None:
         puzzle = puzzle_with_rules([Rule.different()])
-        b = board_with_regions(3, 2, [
-            [1, 1],
-            [1, 2],
-            [1, 2],
-        ])
+        b = board_with_regions(
+            3,
+            2,
+            [
+                [1, 1],
+                [1, 2],
+                [1, 2],
+            ],
+        )
         # Region 1 = L (area 3), Region 2 = vertical domino (area 2) -> different
         assert check_rule_different(puzzle, b) is True
 
@@ -576,10 +681,14 @@ class TestRuleBlock:
 
     def test_non_rectangle_fails(self) -> None:
         puzzle = puzzle_with_rules([Rule.block()])
-        b = board_with_regions(2, 3, [
-            [1, 1, 1],
-            [1, 1, 2],
-        ])
+        b = board_with_regions(
+            2,
+            3,
+            [
+                [1, 1, 1],
+                [1, 1, 2],
+            ],
+        )
         # Region 1 has 5 cells in a 2x3 bounding box -> not a rectangle
         assert check_rule_block(puzzle, b) is False
 
@@ -599,11 +708,15 @@ class TestRuleNonBlock:
     def test_non_rectangle_ok(self) -> None:
         puzzle = puzzle_with_rules([Rule.non_block()])
         # Region 1: L-shape (3 cells, 2x2 bbox), Region 2: L-shape (3 cells, 2x2 bbox) over 3x2 grid
-        b = board_with_regions(3, 2, [
-            [1, 1],
-            [1, 2],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            3,
+            2,
+            [
+                [1, 1],
+                [1, 2],
+                [2, 2],
+            ],
+        )
         assert check_rule_non_block(puzzle, b) is True
 
     def test_rectangle_fails(self) -> None:
@@ -631,21 +744,29 @@ class TestRuleDifferentiation:
 
     def test_differentiation_satisfied_different_areas(self) -> None:
         puzzle = puzzle_with_rules([Rule.differentiation()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [2, 2, 2],
-            [3, 3, 3],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [2, 2, 2],
+                [3, 3, 3],
+            ],
+        )
         # Region 1 (3 cells) adjacent to Region 2 (3 cells) -> same area -> failure
         assert check_rule_differentiation(puzzle, b) is False
 
     def test_differentiation_all_different(self) -> None:
         puzzle = puzzle_with_rules([Rule.differentiation()])
-        b = board_with_regions(3, 2, [
-            [1, 1],
-            [2, 2],
-            [3, 3],
-        ])
+        b = board_with_regions(
+            3,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+                [3, 3],
+            ],
+        )
         # Region 1 (2) adjacent to Region 2 (2) -> same area -> fail
         assert check_rule_differentiation(puzzle, b) is False
 
@@ -671,10 +792,14 @@ class TestRuleBrick:
 
     def test_brick_violated(self) -> None:
         puzzle = puzzle_with_rules([Rule.brick()])
-        b = board_with_regions(2, 2, [
-            [1, 2],
-            [3, 4],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 2],
+                [3, 4],
+            ],
+        )
         _sync_boundaries(b)
         # Vertex (0,0): all 4 edges are boundaries, count = 4 -> violate
         assert check_rule_brick(puzzle, b) is False
@@ -686,11 +811,15 @@ class TestRuleBrick:
 
     def test_brick_larger_board(self) -> None:
         puzzle = puzzle_with_rules([Rule.brick()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [1, 1, 1],
-            [1, 1, 1],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [1, 1, 1],
+                [1, 1, 1],
+            ],
+        )
         # All one region, no boundaries
         assert check_rule_brick(puzzle, b) is True
 
@@ -700,22 +829,30 @@ class TestRuleRing:
         # Closed loop around a center cell — no boundary meets the border, so
         # no T-junction at any grid point (incl. the outer border).
         puzzle = puzzle_with_rules([Rule.ring()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [1, 2, 1],
-            [1, 1, 1],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [1, 2, 1],
+                [1, 1, 1],
+            ],
+        )
         assert check_rule_ring(puzzle, b) is True
 
     def test_ring_violated_internal_t(self) -> None:
         # Three regions meet at grid point (1,1): top (0,0)-(0,1), bottom
         # (1,0)-(1,1) and right (0,1)-(1,1) are all boundaries -> count 3.
         puzzle = puzzle_with_rules([Rule.ring()])
-        b = board_with_regions(3, 3, [
-            [1, 2, 2],
-            [1, 3, 3],
-            [1, 3, 3],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 2, 2],
+                [1, 3, 3],
+                [1, 3, 3],
+            ],
+        )
         assert check_rule_ring(puzzle, b) is False
 
     def test_ring_violated_at_outer_border(self) -> None:
@@ -723,10 +860,14 @@ class TestRuleRing:
         # border (2 border segments + 1 internal boundary = 3).  The old
         # implementation only checked interior vertices and missed this.
         puzzle = puzzle_with_rules([Rule.ring()])
-        b = board_with_regions(2, 2, [
-            [1, 1],
-            [2, 2],
-        ])
+        b = board_with_regions(
+            2,
+            2,
+            [
+                [1, 1],
+                [2, 2],
+            ],
+        )
         assert check_rule_ring(puzzle, b) is False
 
     def test_no_rule_returns_true(self) -> None:
@@ -738,11 +879,15 @@ class TestRuleRing:
 class TestRuleInequality:
     def test_inequality_satisfied(self) -> None:
         puzzle = puzzle_with_rules([Rule.inequality()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [2, 2, 2],
-            [3, 3, 3],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [2, 2, 2],
+                [3, 3, 3],
+            ],
+        )
         e = b.edge_between(0, 0, 1, 0)
         assert e is not None
         e.constraint = EdgeConstraint(type=EdgeConstraintType.INEQUALITY)
@@ -752,11 +897,15 @@ class TestRuleInequality:
 
     def test_inequality_satisfied_different_areas(self) -> None:
         puzzle = puzzle_with_rules([Rule.inequality()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [2, 2, 2],
-            [2, 2, 2],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [2, 2, 2],
+                [2, 2, 2],
+            ],
+        )
         e = b.edge_between(0, 0, 1, 0)
         assert e is not None
         e.constraint = EdgeConstraint(type=EdgeConstraintType.INEQUALITY)
@@ -783,11 +932,15 @@ class TestRuleInequality:
 class TestRuleDifference:
     def test_difference_satisfied(self) -> None:
         puzzle = puzzle_with_rules([Rule.difference()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [2, 2, 2],
-            [3, 3, 3],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [2, 2, 2],
+                [3, 3, 3],
+            ],
+        )
         e = b.edge_between(0, 0, 1, 0)
         assert e is not None
         e.constraint = EdgeConstraint(type=EdgeConstraintType.DIFFERENCE, value=0)
@@ -796,11 +949,15 @@ class TestRuleDifference:
 
     def test_difference_wrong_value(self) -> None:
         puzzle = puzzle_with_rules([Rule.difference()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [2, 2, 2],
-            [2, 2, 2],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [2, 2, 2],
+                [2, 2, 2],
+            ],
+        )
         e = b.edge_between(0, 0, 1, 0)
         assert e is not None
         e.constraint = EdgeConstraint(type=EdgeConstraintType.DIFFERENCE, value=2)
@@ -809,11 +966,15 @@ class TestRuleDifference:
 
     def test_difference_exact_match(self) -> None:
         puzzle = puzzle_with_rules([Rule.difference()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 1],
-            [2, 2, 2],
-            [2, 2, 2],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 1],
+                [2, 2, 2],
+                [2, 2, 2],
+            ],
+        )
         e = b.edge_between(0, 0, 1, 0)
         assert e is not None
         e.constraint = EdgeConstraint(type=EdgeConstraintType.DIFFERENCE, value=3)
@@ -887,33 +1048,45 @@ class TestRuleWatchtower:
 class TestRuleCompass:
     def test_compass_satisfied(self) -> None:
         puzzle = puzzle_with_rules([Rule.compass()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 2],
-            [1, 1, 2],
-            [3, 3, 3],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 2],
+                [1, 1, 2],
+                [3, 3, 3],
+            ],
+        )
         b.cell(0, 0).compass = CompassClue(up=-1, down=-1, left=-1, right=2)
         # From (0,0): region-1 cells strictly to the right are (0,1),(1,1) -> count = 2
         assert check_rule_compass(puzzle, b) is True
 
     def test_compass_fails(self) -> None:
         puzzle = puzzle_with_rules([Rule.compass()])
-        b = board_with_regions(3, 3, [
-            [1, 1, 2],
-            [1, 1, 2],
-            [3, 3, 3],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 1, 2],
+                [1, 1, 2],
+                [3, 3, 3],
+            ],
+        )
         b.cell(0, 0).compass = CompassClue(up=-1, down=-1, left=-1, right=3)
         # From (0,0): only (0,1),(1,1) are region-1 cells to the right -> count = 2, not 3
         assert check_rule_compass(puzzle, b) is False
 
     def test_compass_up_direction(self) -> None:
         puzzle = puzzle_with_rules([Rule.compass()])
-        b = board_with_regions(3, 3, [
-            [1, 2, 2],
-            [1, 2, 2],
-            [1, 1, 1],
-        ])
+        b = board_with_regions(
+            3,
+            3,
+            [
+                [1, 2, 2],
+                [1, 2, 2],
+                [1, 1, 1],
+            ],
+        )
         # Cell (2,0) in region 1, looking up: (1,0) region 1, (0,0) region 1 -> count = 2
         b.cell(2, 0).compass = CompassClue(up=2, down=-1, left=-1, right=-1)
         assert check_rule_compass(puzzle, b) is True
@@ -948,9 +1121,16 @@ class TestRuleFence:
         #   (1,0)=left=True, (1,1)=center=True, (1,2)=right=False
         #   (2,0) no, (2,1)=down=True, (2,2) no
         # So fence cells: (0,1), (1,0), (1,1), (2,1)
-        fence = Shape(cells=frozenset([
-            (0, 1), (1, 0), (1, 1), (2, 1),
-        ]))
+        fence = Shape(
+            cells=frozenset(
+                [
+                    (0, 1),
+                    (1, 0),
+                    (1, 1),
+                    (2, 1),
+                ]
+            )
+        )
         b.cell(0, 0).fence_pattern = fence
         assert check_rule_fence(puzzle, b) is True
 
@@ -972,14 +1152,31 @@ class TestRuleFence:
         assert check_rule_fence(puzzle, b) is True
 
 
-class TestRULE_CHECKERS:
+class TestRuleCheckers:
     def test_all_checkers_present(self) -> None:
         expected_checkers = {
-            "shape_pool", "rose_window", "heterogeneous", "homogeneous",
-            "precise", "puzzle_piece", "mixed", "area", "same", "range",
-            "fence", "different", "solitary", "block", "non_block",
-            "differentiation", "brick", "ring", "inequality", "difference",
-            "watchtower", "compass",
+            "shape_pool",
+            "rose_window",
+            "heterogeneous",
+            "homogeneous",
+            "precise",
+            "puzzle_piece",
+            "mixed",
+            "area",
+            "same",
+            "range",
+            "fence",
+            "different",
+            "solitary",
+            "block",
+            "non_block",
+            "differentiation",
+            "brick",
+            "ring",
+            "inequality",
+            "difference",
+            "watchtower",
+            "compass",
         }
         assert set(RULE_CHECKERS.keys()) == expected_checkers
 

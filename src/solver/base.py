@@ -27,7 +27,7 @@ class Solver(ABC):
         """
 
     @classmethod
-    def supports(cls, puzzle: Puzzle) -> bool:
+    def supports(cls, puzzle: Puzzle) -> bool:  # noqa: ARG003 — hook for subclasses
         return True
 
 
@@ -69,15 +69,57 @@ class SolverRouter:
         for solver in self._solvers:
             solver.cancel()
 
+    def _now_ms(self, t0: float) -> int:
+        return int((time.monotonic() - t0) * 1000)
+
+    def _record_validation_failed(self, solver: Solver, sol: Solution, elapsed: int) -> None:
+        self._attempts.append(
+            SolverAttempt(
+                solver=solver.name,
+                status=AttemptStatus.VALIDATION_FAILED,
+                elapsed_ms=elapsed,
+                steps=sol.steps_taken,
+                note=self._last_verify_error,
+            )
+        )
+
+    def _record_outcome(self, solver: Solver, sol: Solution, elapsed: int) -> None:
+        self._attempts.append(
+            SolverAttempt(
+                solver=solver.name,
+                status=AttemptStatus.SUCCESS if sol.solved else AttemptStatus.EXHAUSTED,
+                elapsed_ms=elapsed,
+                steps=sol.steps_taken,
+                note=sol.error_message if not sol.solved else None,
+            )
+        )
+
+    def _record_error(self, solver: Solver, e: Exception, t0: float) -> None:
+        self._attempts.append(
+            SolverAttempt(
+                solver=solver.name,
+                status=AttemptStatus.ERROR,
+                elapsed_ms=self._now_ms(t0),
+                steps=0,
+                note=str(e),
+            )
+        )
+
+    def _build_label(self, puzzle: Puzzle, puzzle_name: str | None) -> str:
+        if puzzle_name:
+            return puzzle_name
+        return f"{puzzle.height}x{puzzle.width} rules={sorted(r.type for r in puzzle.rules)}"
+
+    def _format_error_message(self, attempts: list[SolverAttempt]) -> str:
+        return " / ".join(f"[{a.solver}] {a.error or '无解'}" for a in attempts)
+
     def route(
         self, puzzle: Puzzle, timeout: float = 30.0, puzzle_name: str | None = None
     ) -> Solution:
         self._attempts = []
         start = time.monotonic()
 
-        label = puzzle_name or (
-            f"{puzzle.height}x{puzzle.width} " f"rules={sorted(r.type for r in puzzle.rules)}"
-        )
+        label = self._build_label(puzzle, puzzle_name)
 
         for solver in self._solvers:
             # Cancelling must abort the whole chain, not just the running
@@ -97,47 +139,23 @@ class SolverRouter:
                 sol = solver.solve(puzzle, timeout=budget)
                 if self._cancelled:
                     break
-                elapsed = int((time.monotonic() - t0) * 1000)
+                elapsed = self._now_ms(t0)
                 if sol.solved and not self._verify_answer(solver, puzzle, sol, label):
                     # wrong answer → try the next solver
-                    self._attempts.append(
-                        SolverAttempt(
-                            solver=solver.name,
-                            status=AttemptStatus.VALIDATION_FAILED,
-                            elapsed_ms=elapsed,
-                            steps=sol.steps_taken,
-                            note=self._last_verify_error,
-                        )
-                    )
+                    self._record_validation_failed(solver, sol, elapsed)
                     continue
-                self._attempts.append(
-                    SolverAttempt(
-                        solver=solver.name,
-                        status=AttemptStatus.SUCCESS if sol.solved else AttemptStatus.EXHAUSTED,
-                        elapsed_ms=elapsed,
-                        steps=sol.steps_taken,
-                        note=sol.error_message if not sol.solved else None,
-                    )
-                )
+                self._record_outcome(solver, sol, elapsed)
                 if sol.solved:
                     sol.elapsed_ms = int((time.monotonic() - start) * 1000)
                     return sol
             except Exception as e:
-                self._attempts.append(
-                    SolverAttempt(
-                        solver=solver.name,
-                        status=AttemptStatus.ERROR,
-                        elapsed_ms=int((time.monotonic() - t0) * 1000),
-                        steps=0,
-                        note=str(e),
-                    )
-                )
+                self._record_error(solver, e, t0)
 
         return Solution(
             solved=False,
             steps_taken=sum(a.steps for a in self._attempts),
             elapsed_ms=int((time.monotonic() - start) * 1000),
-            error_message=" / ".join(f"[{a.solver}] {a.error or '无解'}" for a in self._attempts),
+            error_message=self._format_error_message(self._attempts),
         )
 
     def _verify_answer(

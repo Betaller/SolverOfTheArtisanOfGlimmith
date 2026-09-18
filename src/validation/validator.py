@@ -18,9 +18,11 @@ Usage::
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import Any, cast
 
-from src.models.board import Board, Cell, EdgeConstraintType, Shape
+from src.models.board import Board, Cell, Edge, EdgeConstraint, EdgeConstraintType, Shape
 from src.models.puzzle import Puzzle
 
 # ─── Self-contained shape helpers (rotations + reflections) ────────────────
@@ -42,7 +44,7 @@ def _flip_h(cells: frozenset[tuple[int, int]]) -> frozenset[tuple[int, int]]:
     return frozenset((r, -c) for r, c in cells)
 
 
-def _all_transforms(cells: frozenset[tuple[int, int]]):
+def _all_transforms(cells: frozenset[tuple[int, int]]) -> Iterator[frozenset[tuple[int, int]]]:
     current = cells
     for _ in range(4):
         yield _normalize(current)
@@ -72,7 +74,7 @@ class ValidationResult:
     errors: list[str] = field(default_factory=list)
 
 
-def solution_to_board(puzzle: Puzzle, solution) -> Board:
+def solution_to_board(puzzle: Puzzle, solution: Any) -> Board:
     """Rebuild a Board carrying the puzzle's clues and the solution's regions.
 
     Works whether the solution carries an already-populated ``board`` or a
@@ -99,8 +101,8 @@ def solution_to_board(puzzle: Puzzle, solution) -> Board:
                     assigned += 1
     if assigned == 0:
         for region in getattr(solution, "regions", None) or []:
-            for r, c in region.cells:
-                board.cell(r, c).region_id = region.region_id
+            for row, col in region.cells:
+                board.cell(row, col).region_id = region.region_id
     return board
 
 
@@ -152,7 +154,7 @@ def _solution_boundary(board: Board, r1: int, c1: int, r2: int, c2: int) -> bool
 
 
 def _check_shape_pool(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, _board: Board, regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     rule = puzzle.get_rule("shape_pool")
     if rule is None:
@@ -175,7 +177,7 @@ def _check_shape_pool(
 
 
 def _check_precise(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, _board: Board, regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     rule = puzzle.get_rule("precise")
     if rule is None:
@@ -190,7 +192,7 @@ def _check_precise(
 
 
 def _check_range(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, _board: Board, regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     rule = puzzle.get_rule("range")
     if rule is None:
@@ -213,7 +215,7 @@ def _check_area(
     ok = True
     for c in board.cells():
         if c.number is not None and c.assigned:
-            cells = regions.get(c.region_id)
+            cells = regions.get(cast(int, c.region_id))
             if cells is None or len(cells) != c.number:
                 ok = False
                 errors.append(f"({c.row},{c.col}) 数字 {c.number} 与其区域面积不符")
@@ -221,7 +223,7 @@ def _check_area(
 
 
 def _check_same(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, _board: Board, regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("same"):
         return True
@@ -233,7 +235,7 @@ def _check_same(
 
 
 def _check_different(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, _board: Board, regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("different"):
         return True
@@ -244,7 +246,9 @@ def _check_different(
     return True
 
 
-def _adjacent_region_pairs(board: Board, regions: dict[int, list[Cell]]):
+def _adjacent_region_pairs(
+    board: Board, _regions: dict[int, list[Cell]]
+) -> Iterator[tuple[int, int]]:
     seen: set[tuple[int, int]] = set()
     for e in board.edges():
         c1 = board.cell(e.r1, e.c1)
@@ -285,7 +289,7 @@ def _check_differentiation(
 
 
 def _check_solitary(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, _board: Board, regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("solitary"):
         return True
@@ -319,7 +323,7 @@ def _is_rectangle(cells: list[Cell]) -> bool:
 
 
 def _check_block(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, _board: Board, regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("block"):
         return True
@@ -331,7 +335,7 @@ def _check_block(
 
 
 def _check_non_block(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, _board: Board, regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("non_block"):
         return True
@@ -349,7 +353,7 @@ def _check_puzzle_piece(
         return True
     for c in board.cells():
         if c.shape_pattern is not None and c.assigned:
-            region_cells = regions.get(c.region_id)
+            region_cells = regions.get(cast(int, c.region_id))
             if region_cells is None:
                 return False
             if _canonical_key(_cell_positions(region_cells)) != _shape_key(c.shape_pattern):
@@ -358,31 +362,59 @@ def _check_puzzle_piece(
     return True
 
 
+def _fence_pattern(board: Board, c: Cell) -> frozenset[tuple[int, int]]:
+    bits: list[bool] = []
+    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        nr, nc = c.row + dr, c.col + dc
+        if 0 <= nr < board.height and 0 <= nc < board.width:
+            nbr = board.cell(nr, nc)
+            bits.append(nbr.blocked or (nbr.assigned and nbr.region_id != c.region_id))
+        else:
+            bits.append(True)
+    # 3x3 pattern: center + up/down/left/right boundary bits
+    pattern = {(1, 1)}
+    for bit, (r, cc) in zip(bits, [(0, 1), (2, 1), (1, 0), (1, 2)], strict=False):
+        if bit:
+            pattern.add((r, cc))
+    return frozenset(pattern)
+
+
 def _check_fence(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, board: Board, _regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("fence"):
         return True
     for c in board.cells():
         if c.fence_pattern is None or not c.assigned:
             continue
-        bits: list[bool] = []
-        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            nr, nc = c.row + dr, c.col + dc
-            if 0 <= nr < board.height and 0 <= nc < board.width:
-                nbr = board.cell(nr, nc)
-                bits.append(nbr.blocked or (nbr.assigned and nbr.region_id != c.region_id))
-            else:
-                bits.append(True)
-        # 3x3 pattern: center + up/down/left/right boundary bits
-        pattern = {(1, 1)}
-        for bit, (r, cc) in zip(bits, [(0, 1), (2, 1), (1, 0), (1, 2)], strict=False):
-            if bit:
-                pattern.add((r, cc))
-        if _canonical_key(frozenset(pattern)) != _shape_key(c.fence_pattern):
+        if _canonical_key(_fence_pattern(board, c)) != _shape_key(c.fence_pattern):
             errors.append(f"({c.row},{c.col}) 围栏图案不匹配")
             return False
     return True
+
+
+def _compass_direction_matches(dr: int, dc: int, rr: int, cc: int, r: int, col: int) -> bool:
+    if dr == -1:
+        return rr < r
+    if dr == 1:
+        return rr > r
+    if dc == -1:
+        return cc < col
+    if dc == 1:
+        return cc > col
+    return False
+
+
+def _count_compass_in_direction(
+    positions: set[tuple[int, int]], r: int, col: int, dr: int, dc: int
+) -> int:
+    count = 0
+    for rr, cc in positions:
+        if rr == r and cc == col:
+            continue
+        if _compass_direction_matches(dr, dc, rr, cc, r, col):
+            count += 1
+    return count
 
 
 def _check_compass(
@@ -393,7 +425,7 @@ def _check_compass(
     for c in board.cells():
         if c.compass is None or not c.assigned:
             continue
-        region_cells = regions.get(c.region_id)
+        region_cells = regions.get(cast(int, c.region_id))
         if region_cells is None:
             return False
         positions = {(cell.row, cell.col) for cell in region_cells}
@@ -402,22 +434,44 @@ def _check_compass(
             expected = getattr(c.compass, attr)
             if expected == -1:
                 continue
-            count = 0
-            for rr, cc in positions:
-                if rr == r and cc == col:
-                    continue
-                if (
-                    dr == -1
-                    and rr < r
-                    or dr == 1
-                    and rr > r
-                    or (dc == -1 and cc < col or dc == 1 and cc > col)
-                ):
-                    count += 1
+            count = _count_compass_in_direction(positions, r, col, dr, dc)
             if count != expected:
                 errors.append(f"({r},{col}) 罗盘 {attr} 应为 {expected}，实际 {count}")
                 return False
     return True
+
+
+def _edge_inequality_msg(ca: list[Cell], cb: list[Cell], e: Edge) -> str | None:
+    reversed_dir = cast(EdgeConstraint, e.constraint).value == 1
+    if reversed_dir:
+        return None if len(cb) < len(ca) else "不等号边 方向不满足"
+    return None if len(ca) < len(cb) else "不等号边 方向不满足"
+
+
+def _edge_difference_msg(ca: list[Cell], cb: list[Cell], e: Edge) -> str | None:
+    if abs(len(ca) - len(cb)) == (cast(EdgeConstraint, e.constraint).value or 0):
+        return None
+    return "差值边 面积差不符合"
+
+
+def _edge_heterogeneous_msg(ca: list[Cell], cb: list[Cell], _e: Edge) -> str | None:
+    if _canonical_key(_cell_positions(ca)) != _canonical_key(_cell_positions(cb)):
+        return None
+    return "异生边 两侧形状相同"
+
+
+def _edge_homogeneous_msg(ca: list[Cell], cb: list[Cell], _e: Edge) -> str | None:
+    if _canonical_key(_cell_positions(ca)) == _canonical_key(_cell_positions(cb)):
+        return None
+    return "双生边 两侧形状不同"
+
+
+_EDGE_CONSTRAINT_HANDLERS = {
+    EdgeConstraintType.INEQUALITY: _edge_inequality_msg,
+    EdgeConstraintType.DIFFERENCE: _edge_difference_msg,
+    EdgeConstraintType.HETEROGENEOUS: _edge_heterogeneous_msg,
+    EdgeConstraintType.HOMOGENEOUS: _edge_homogeneous_msg,
+}
 
 
 def _check_edge_constraints(
@@ -441,36 +495,19 @@ def _check_edge_constraints(
             ok = False
             errors.append(f"约束边 ({e.r1},{e.c1})-({e.r2},{e.c2}) 两端同一区域")
             continue
-        ca = regions[c1.region_id]
-        cb = regions[c2.region_id]
-        ct = e.constraint.type
-        if ct == EdgeConstraintType.INEQUALITY:
-            reversed_dir = e.constraint.value == 1
-            if reversed_dir:
-                if len(cb) >= len(ca):
-                    ok = False
-                    errors.append(f"不等号边 ({e.r1},{e.c1})-({e.r2},{e.c2}) 方向不满足")
-            else:
-                if len(ca) >= len(cb):
-                    ok = False
-                    errors.append(f"不等号边 ({e.r1},{e.c1})-({e.r2},{e.c2}) 方向不满足")
-        elif ct == EdgeConstraintType.DIFFERENCE:
-            if abs(len(ca) - len(cb)) != (e.constraint.value or 0):
+        ca = regions[cast(int, c1.region_id)]
+        cb = regions[cast(int, c2.region_id)]
+        handler = _EDGE_CONSTRAINT_HANDLERS.get(e.constraint.type)
+        if handler is not None:
+            msg = handler(ca, cb, e)
+            if msg is not None:
                 ok = False
-                errors.append(f"差值边 ({e.r1},{e.c1})-({e.r2},{e.c2}) 面积差不符合")
-        elif ct == EdgeConstraintType.HETEROGENEOUS:
-            if _canonical_key(_cell_positions(ca)) == _canonical_key(_cell_positions(cb)):
-                ok = False
-                errors.append(f"异生边 ({e.r1},{e.c1})-({e.r2},{e.c2}) 两侧形状相同")
-        elif ct == EdgeConstraintType.HOMOGENEOUS:
-            if _canonical_key(_cell_positions(ca)) != _canonical_key(_cell_positions(cb)):
-                ok = False
-                errors.append(f"双生边 ({e.r1},{e.c1})-({e.r2},{e.c2}) 两侧形状不同")
+                errors.append(f"{msg} ({e.r1},{e.c1})-({e.r2},{e.c2})")
     return ok
 
 
 def _check_watchtower(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, board: Board, _regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("watchtower"):
         return True
@@ -487,7 +524,7 @@ def _check_watchtower(
 
 
 def _check_brick(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, board: Board, _regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("brick"):
         return True
@@ -509,7 +546,7 @@ def _check_brick(
 
 
 def _check_ring(
-    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+    puzzle: Puzzle, board: Board, _regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("ring"):
         return True
@@ -518,20 +555,20 @@ def _check_ring(
     # vertices.  Mirrors the C++ check_loopy: at each vertex the 4 incident
     # segments are counted; the outer border and blocked cells count as
     # boundaries (except blocked-blocked, which is one empty space).
-    H, W = board.height, board.width
-    BLOCKED = -1
+    h, w = board.height, board.width
+    blocked_value = -1
 
     def val(r: int, c: int) -> int:
-        if 0 <= r < H and 0 <= c < W:
+        if 0 <= r < h and 0 <= c < w:
             cell = board.cell(r, c)
             if cell.blocked:
-                return BLOCKED
+                return blocked_value
             rid = cell.region_id
-            return rid if rid is not None else BLOCKED
-        return BLOCKED
+            return rid if rid is not None else blocked_value
+        return blocked_value
 
-    for r in range(H):
-        for c in range(W):
+    for r in range(h):
+        for c in range(w):
             if board.cell(r, c).blocked:
                 continue
             index = val(r, c)
@@ -546,28 +583,39 @@ def _check_ring(
     return True
 
 
+def _rose_symbol_types(puzzle: Puzzle, board: Board) -> list[str]:
+    rule = puzzle.get_rule("rose_window")
+    symbol_types: list[str] = rule.params.get("symbol_types", []) if rule else []
+    if not symbol_types:
+        symbol_types = sorted({c.symbol for c in board.cells() if c.symbol is not None})
+    return symbol_types
+
+
+def _rose_symbol_counts(board: Board, types: set[str]) -> tuple[dict[str, int], str | None]:
+    counts: dict[str, int] = {}
+    for c in board.cells():
+        if c.symbol is not None:
+            if c.symbol not in types:
+                return counts, f"存在规则外的符号 {c.symbol}"
+            counts[c.symbol] = counts.get(c.symbol, 0) + 1
+    if len(set(counts.values())) != 1:
+        return counts, "各符号出现次数不一致"
+    return counts, None
+
+
 def _check_rose_window(
     puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
 ) -> bool:
     if not puzzle.has_rule("rose_window"):
         return True
-    rule = puzzle.get_rule("rose_window")
-    symbol_types = rule.params.get("symbol_types", []) if rule else []
-    if not symbol_types:
-        symbol_types = sorted({c.symbol for c in board.cells() if c.symbol is not None})
+    symbol_types = _rose_symbol_types(puzzle, board)
     if not symbol_types:
         errors.append("玫瑰窗规则缺少符号类型")
         return False
     types = set(symbol_types)
-    counts: dict[str, int] = {}
-    for c in board.cells():
-        if c.symbol is not None:
-            if c.symbol not in types:
-                errors.append(f"存在规则外的符号 {c.symbol}")
-                return False
-            counts[c.symbol] = counts.get(c.symbol, 0) + 1
-    if len(set(counts.values())) != 1:
-        errors.append("各符号出现次数不一致")
+    counts, bad = _rose_symbol_counts(board, types)
+    if bad is not None:
+        errors.append(bad)
         return False
     m = next(iter(counts.values()))
     if len(regions) != m:
@@ -615,25 +663,15 @@ class IndependentValidator:
 
         # 1) every fillable cell is assigned to exactly one region
         regions = _regions(board)
-        unassigned = [c for c in board.cells() if not c.blocked and c.region_id is None]
+        unassigned = _collect_unassigned(board)
         if unassigned:
             errors.append(f"{len(unassigned)} 个可填格未分配区域")
 
         # 2) every region is connected
-        for rid, cells in regions.items():
-            if not _is_connected(cells):
-                errors.append(f"区域 {rid} 不连通")
+        _check_region_connectivity(regions, errors)
 
         # 3) pre-drawn boundaries separate regions
-        for e in puzzle.edges:
-            if e.is_boundary:
-                c1 = board.cell(e.r1, e.c1)
-                c2 = board.cell(e.r2, e.c2)
-                if not c1.blocked and not c2.blocked:
-                    if c1.region_id is None or c2.region_id is None:
-                        errors.append(f"预画边界 ({e.r1},{e.c1})-({e.r2},{e.c2}) 邻接未分配格")
-                    elif c1.region_id == c2.region_id:
-                        errors.append(f"预画边界 ({e.r1},{e.c1})-({e.r2},{e.c2}) 两侧同一区域")
+        _validate_predrawn_boundaries(puzzle, board, errors)
 
         # 4) edge constraints (gemini/delta/inequality/difference) live on edges
         #    and must be enforced regardless of which rule types are declared —
@@ -642,12 +680,47 @@ class IndependentValidator:
         _check_edge_constraints(puzzle, board, regions, errors)
 
         # 5) per-rule checks (implemented independently)
-        rule_results: dict[str, bool] = {}
-        active_rules = {r.type for r in puzzle.rules}
-        for rule_type in active_rules:
-            checker = _RULE_CHECKS.get(rule_type)
-            if checker is not None:
-                rule_results[rule_type] = bool(checker(puzzle, board, regions, errors))
+        rule_results = _run_rule_checks(puzzle, board, regions, errors)
 
-        solved = not errors and all(c.region_id is not None for c in board.cells() if not c.blocked)
+        solved = not errors and _all_fillable_assigned(board)
         return ValidationResult(solved=solved, rule_results=rule_results, errors=errors)
+
+
+def _collect_unassigned(board: Board) -> list[Cell]:
+    return [c for c in board.cells() if not c.blocked and c.region_id is None]
+
+
+def _check_region_connectivity(regions: dict[int, list[Cell]], errors: list[str]) -> None:
+    for rid, cells in regions.items():
+        if not _is_connected(cells):
+            errors.append(f"区域 {rid} 不连通")
+
+
+def _all_fillable_assigned(board: Board) -> bool:
+    return all(c.region_id is not None for c in board.cells() if not c.blocked)
+
+
+def _validate_predrawn_boundaries(puzzle: Puzzle, board: Board, errors: list[str]) -> None:
+    for e in puzzle.edges:
+        if not e.is_boundary:
+            continue
+        c1 = board.cell(e.r1, e.c1)
+        c2 = board.cell(e.r2, e.c2)
+        if c1.blocked or c2.blocked:
+            continue
+        if c1.region_id is None or c2.region_id is None:
+            errors.append(f"预画边界 ({e.r1},{e.c1})-({e.r2},{e.c2}) 邻接未分配格")
+        elif c1.region_id == c2.region_id:
+            errors.append(f"预画边界 ({e.r1},{e.c1})-({e.r2},{e.c2}) 两侧同一区域")
+
+
+def _run_rule_checks(
+    puzzle: Puzzle, board: Board, regions: dict[int, list[Cell]], errors: list[str]
+) -> dict[str, bool]:
+    rule_results: dict[str, bool] = {}
+    active_rules = {r.type for r in puzzle.rules}
+    for rule_type in active_rules:
+        checker = _RULE_CHECKS.get(rule_type)
+        if checker is not None:
+            rule_results[rule_type] = bool(checker(puzzle, board, regions, errors))
+    return rule_results

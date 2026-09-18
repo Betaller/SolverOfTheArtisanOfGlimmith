@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import pytest
-
 from src.models.board import Shape
 from src.solver.shapes import (
-    normalize, canonical_key, shapes_equal, match_shape_pool,
-    is_rectangle, enumerate_polyominoes, all_transformations,
-    shape_key, shape_from_cells, shape_bitmap, shape_from_bitmap,
+    all_transformations,
+    canonical_key,
+    enumerate_polyominoes,
+    is_rectangle,
+    match_shape_pool,
+    normalize,
+    shape_bitmap,
+    shape_from_bitmap,
+    shape_from_cells,
+    shape_key,
+    shapes_equal,
 )
 
 
@@ -35,6 +41,7 @@ class TestNormalize:
 class TestTransformations:
     def test_rotate_90(self) -> None:
         from src.solver.shapes import rotate_90
+
         cells = frozenset([(0, 0), (0, 1)])
         rotated = rotate_90(cells)
         assert (0, 0) in rotated
@@ -43,6 +50,7 @@ class TestTransformations:
 
     def test_rotate_180(self) -> None:
         from src.solver.shapes import rotate_180
+
         cells = frozenset([(0, 0), (0, 1)])
         rotated = rotate_180(cells)
         assert (0, 0) in rotated
@@ -51,6 +59,7 @@ class TestTransformations:
 
     def test_flip_horizontal(self) -> None:
         from src.solver.shapes import flip_horizontal
+
         cells = frozenset([(0, 0), (0, 1)])
         flipped = flip_horizontal(cells)
         assert (0, 0) in flipped
@@ -58,6 +67,7 @@ class TestTransformations:
 
     def test_flip_vertical(self) -> None:
         from src.solver.shapes import flip_vertical
+
         cells = frozenset([(0, 0), (1, 0)])
         flipped = flip_vertical(cells)
         assert (0, 0) in flipped

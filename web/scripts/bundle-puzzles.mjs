@@ -43,53 +43,67 @@ async function readJson(p) {
   }
 }
 
-async function main() {
-  await mkdir(OUT, { recursive: true })
-  const manifest = { puzzles: [] }
+/** Relative path → zone/category/id, or null when the file is not a puzzle. */
+function locate(rel) {
+  if (rel.startsWith('Zone') && rel.includes('-answer/')) return null // skip answer trees
+  if (rel === '_index.json') return null
+  const [zone, ...rest] = rel.split('/')
+  return { zone, category: rest.length > 1 ? rest.slice(0, -1).join('/') : 'default', id: rel.replace(/\.json$/, '') }
+}
 
-  for await (const puzzlePath of walk(OFFICIAL)) {
-    const rel = relative(OFFICIAL, puzzlePath) // e.g. Zone2/10-zone2-mixed/0401.json
-    if (rel.startsWith('Zone') && rel.includes('-answer/')) continue // skip answer trees
-    if (rel === '_index.json') continue
+async function loadAnswer(ansRel) {
+  if (!ansRel) return null
+  const ans = await readJson(join(OFFICIAL, ansRel))
+  return ans?.regions ?? null
+}
 
-    const [zone, ...rest] = rel.split('/')
-    const category = rest.length > 1 ? rest.slice(0, -1).join('/') : 'default'
-    const id = rel.replace(/\.json$/, '')
-
-    const puzzle = await readJson(puzzlePath)
-    if (!puzzle) continue
-
-    let answer = null
-    const ansRel = answerPath(rel)
-    if (ansRel) {
-      const ans = await readJson(join(OFFICIAL, ansRel))
-      answer = ans?.regions ?? null
-    }
-
-    const entry = { puzzle, answer }
-    const outPath = join(OUT, id + '.json')
-    await mkdir(dirname(outPath), { recursive: true })
-    await writeFile(outPath, JSON.stringify(entry))
-
-    manifest.puzzles.push({
-      id,
-      zone,
-      category,
-      url: `data/${id}.json`,
-      has_answer: answer != null,
-      height: puzzle.grid?.height ?? 0,
-      width: puzzle.grid?.width ?? 0,
-      rules: (puzzle.rules ?? []).map((r) => r.type),
-      blocked_count: (puzzle.cells ?? []).filter((c) => c.blocked).length,
-      has_boundaries: (puzzle.edges ?? []).some((e) => e.is_boundary),
-      difficulty: puzzle._meta?.archive_difficulty ?? null,
-    })
+function puzzleStats(puzzle) {
+  return {
+    height: puzzle.grid?.height ?? 0,
+    width: puzzle.grid?.width ?? 0,
+    rules: (puzzle.rules ?? []).map((r) => r.type),
+    blocked_count: (puzzle.cells ?? []).filter((c) => c.blocked).length,
+    has_boundaries: (puzzle.edges ?? []).some((e) => e.is_boundary),
+    difficulty: puzzle._meta?.archive_difficulty ?? null,
   }
+}
 
-  await writeFile(join(OUT, 'manifest.json'), JSON.stringify(manifest))
+function manifestEntry(loc, puzzle, answer) {
+  return {
+    id: loc.id,
+    zone: loc.zone,
+    category: loc.category,
+    url: `data/${loc.id}.json`,
+    has_answer: answer != null,
+    ...puzzleStats(puzzle),
+  }
+}
+
+async function bundleOne(puzzlePath, manifest) {
+  const rel = relative(OFFICIAL, puzzlePath) // e.g. Zone2/10-zone2-mixed/0401.json
+  const loc = locate(rel)
+  if (!loc) return
+  const puzzle = await readJson(puzzlePath)
+  if (!puzzle) return
+  const answer = await loadAnswer(answerPath(rel))
+  const outPath = join(OUT, loc.id + '.json')
+  await mkdir(dirname(outPath), { recursive: true })
+  await writeFile(outPath, JSON.stringify({ puzzle, answer }))
+  manifest.puzzles.push(manifestEntry(loc, puzzle, answer))
+}
+
+function report(manifest) {
   console.log(`bundled ${manifest.puzzles.length} puzzles → ${relative(ROOT, OUT)}/`)
   const withAnswer = manifest.puzzles.filter((p) => p.has_answer).length
   console.log(`  with official answer: ${withAnswer}, solver-only: ${manifest.puzzles.length - withAnswer}`)
+}
+
+async function main() {
+  await mkdir(OUT, { recursive: true })
+  const manifest = { puzzles: [] }
+  for await (const puzzlePath of walk(OFFICIAL)) await bundleOne(puzzlePath, manifest)
+  await writeFile(join(OUT, 'manifest.json'), JSON.stringify(manifest))
+  report(manifest)
 }
 
 main().catch((e) => {

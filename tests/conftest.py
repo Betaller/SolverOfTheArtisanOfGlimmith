@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import os
+
+# Headless Qt for every UI test module.  ``setdefault`` keeps an explicit
+# developer choice (e.g. QT_QPA_PLATFORM=xcb) winning over this default.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 import pytest
 
 from src.models.board import Board, Shape

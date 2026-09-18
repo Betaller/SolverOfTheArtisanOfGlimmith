@@ -1,6 +1,9 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.3.0
+    # Kept in step with the local `ruff` used by `ruff check src/ tests/`
+    # (0.16.1).  v0.3.0 disagreed with it on E402 — newer ruff accepts
+    # `os.environ.setdefault(...)` between imports, the old pin did not.
+    rev: v0.16.1
     hooks:
       - id: ruff
         args: [--fix]
@@ -10,6 +13,11 @@ repos:
     rev: v1.8.0
     hooks:
       - id: mypy
+        # Without the runtime deps in mypy's own venv every PySide6 import
+        # resolves to Any, which `disallow_any_unimported` then reports as 130
+        # bogus `no-any-unimported` errors.  PySide6 ships real .pyi stubs, so
+        # installing it here makes the check meaningful (308 → 179 errors).
+        additional_dependencies: ["PySide6>=6.6.0"]
         args: [--strict, src/]
         pass_filenames: false
 
@@ -24,3 +32,16 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: [--maxkb=500]
+
+  # Complexity gate — this project's detekt equivalent.  Same enforcement as
+  # .git/hooks/pre-push: Python (radon CC <= 10), Rust (clippy
+  # cognitive_complexity, threshold in rsolver/clippy.toml) and JS/TS/Vue
+  # (eslint complexity, threshold in web/eslint.config.js).
+  - repo: local
+    hooks:
+      - id: complexity-gate
+        name: complexity-gate (python + rust + js)
+        entry: python3 scripts/complexity_gate.py --all
+        language: system
+        pass_filenames: false
+        always_run: true

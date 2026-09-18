@@ -16,7 +16,40 @@ ruff format src/ tests/                    # format (line-length=100)
 mypy src/                                  # typecheck (strict)
 pre-commit run --all-files                 # CI gate
 cd rsolver && cargo build --release        # build Rust solver
+python3 scripts/complexity_gate.py --all   # 复杂度门禁 (python+rust+js)
 ```
+
+## Complexity gate (detekt equivalent)
+
+`scripts/complexity_gate.py` is the project's static complexity gate — the
+equivalent of Kotlin's detekt `CyclomaticComplexMethod`. It runs **three**
+analysers, one per shipped language, and fails (exit 1) when any block is over
+its threshold:
+
+| Language | Tool / rule | Threshold | Config |
+|---|---|---|---|
+| Python (`src/`, `scripts/`) | radon cyclomatic complexity | **CC ≤ 10** | `--max` (default 10) |
+| Rust (`rsolver/`) | clippy `cognitive_complexity` (nursery) | see `rsolver/clippy.toml` | `cognitive-complexity-threshold` |
+| JS / TS / Vue (`web/`) | eslint `complexity` | **CC ≤ 10** | `web/eslint.config.js` |
+
+```powershell
+python3 scripts/complexity_gate.py            # python only
+python3 scripts/complexity_gate.py --rust     # rust only
+python3 scripts/complexity_gate.py --js       # js only
+python3 scripts/complexity_gate.py --all      # all three (what the hook runs)
+```
+
+- `.git/hooks/pre-push` runs **complexity gate → pytest**; a push that raises
+  complexity or breaks a test is rejected.
+- `.pre-commit-config.yaml` has the same gate as a local hook.
+- 10 is detekt's default `CyclomaticComplexMethod` threshold, so the Python and
+  JS sides match a default detekt setup exactly. Clippy's score is *cognitive*
+  (it also charges for nesting), so the Rust number is not 1:1 with radon's and
+  lives in `clippy.toml`.
+- Reducing complexity must stay behaviour-preserving: run
+  `python -m pytest tests/` and the full benchmark
+  (`python scripts/benchmark_rust_solver.py --timeout 30`) and confirm no
+  regression before merging.
 
 ## Architecture
 

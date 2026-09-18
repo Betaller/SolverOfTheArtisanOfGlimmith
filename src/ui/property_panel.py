@@ -1,20 +1,59 @@
 from __future__ import annotations
 
-from typing import Optional
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QPushButton, QSpinBox, QLineEdit, QCheckBox,
-    QFrame, QScrollArea,
+    QCheckBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
-from src.models.board import Board, EdgeConstraint, EdgeConstraintType
-
+from src.models.board import Board, Cell, Edge, EdgeConstraint, EdgeConstraintType
 
 SPIN_STYLE = """
 QSpinBox { min-width: 80px; }
 """
+
+BTN_STYLE = "QPushButton { font-size: 11px; padding: 5px 8px; border-radius: 4px; }"
+
+SYMBOL_CHOICES = ["★", "●", "◆", "▲", "♥", "■"]
+
+PATTERN_KINDS = (
+    ("shape_pattern", "拼块图案", "拼块图案编辑"),
+    ("fence_pattern", "围栏标记", "围栏标记编辑"),
+)
+
+
+def _compass_part(value: int) -> int:
+    """Spin boxes are ranged -1..99; anything below 0 means "unset" (-1)."""
+    return value if value >= 0 else -1
+
+
+def _edge_constraint_text(e: Edge) -> str:
+    if e.constraint is None:
+        return "无"
+    text = e.constraint.type.value
+    if e.constraint.value is not None:
+        text += f", 值={e.constraint.value}"
+    return text
+
+
+def _make_compass_spin(init_val: int) -> QSpinBox:
+    s = QSpinBox()
+    s.setRange(-1, 99)
+    s.setValue(init_val)
+    s.setFixedWidth(64)
+    s.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    return s
 
 
 def _sep(layout: QVBoxLayout) -> None:
@@ -57,8 +96,7 @@ class PropertyPanel(QWidget):
         self._info = QLabel("未选中任何对象")
         self._info.setWordWrap(True)
         self._info.setStyleSheet(
-            "font-size: 12px; padding: 8px; "
-            "border: 1px solid palette(mid); border-radius: 6px;"
+            "font-size: 12px; padding: 8px; border: 1px solid palette(mid); border-radius: 6px;"
         )
         self._layout.addWidget(self._info)
 
@@ -84,13 +122,22 @@ class PropertyPanel(QWidget):
     def _clear_content(self) -> None:
         while self._content.count():
             item = self._content.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            elif item.layout():
-                while item.layout().count():
-                    child = item.layout().takeAt(0)
-                    if child.widget():
-                        child.widget().deleteLater()
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+                continue
+            sub = item.layout()
+            if sub is None:
+                continue
+            while sub.count():
+                child = sub.takeAt(0)
+                if child is None:
+                    continue
+                child_widget = child.widget()
+                if child_widget is not None:
+                    child_widget.deleteLater()
 
     def select_cell(self, r: int, c: int) -> None:
         self._selected_cell = (r, c)
@@ -120,16 +167,23 @@ class PropertyPanel(QWidget):
         self._info.setText(f'<b style="font-size:13px;">单元格 ({r}, {c})</b>')
         self._clear_content()
 
-        L = self._content
+        layout = self._content
+        self._add_cell_blocked_row(layout, r, c, cell)
+        _sep(layout)
+        self._add_cell_number_row(layout, r, c, cell)
+        self._add_cell_symbol_row(layout, r, c, cell)
+        _sep(layout)
+        self._add_cell_compass_section(layout, r, c, cell)
+        _sep(layout)
+        self._add_cell_pattern_section(layout, r, c, cell)
 
-        # ── Blocked ──
+    def _add_cell_blocked_row(self, layout: QVBoxLayout, r: int, c: int, cell: Cell) -> None:
         cb = QCheckBox("障碍格")
         cb.setChecked(cell.blocked)
         cb.toggled.connect(lambda checked: self._set_cell_blocked(r, c, checked))
-        L.addWidget(cb)
-        _sep(L)
+        layout.addWidget(cb)
 
-        # ── Number ──
+    def _add_cell_number_row(self, layout: QVBoxLayout, r: int, c: int, cell: Cell) -> None:
         nr = QHBoxLayout()
         nr.setSpacing(4)
         nr.addWidget(QLabel("数字"))
@@ -141,12 +195,17 @@ class PropertyPanel(QWidget):
         ncl = QPushButton("清除")
         ncl.setFixedWidth(40)
         ncl.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 4px; }")
-        ncl.clicked.connect(lambda: (ns.setValue(0), self._set_cell_number(r, c, None)))
+
+        def clear_number() -> None:
+            ns.setValue(0)
+            self._set_cell_number(r, c, None)
+
+        ncl.clicked.connect(clear_number)
         nr.addWidget(ncl)
         nr.addStretch()
-        L.addLayout(nr)
+        layout.addLayout(nr)
 
-        # ── Symbol ──
+    def _add_cell_symbol_row(self, layout: QVBoxLayout, r: int, c: int, cell: Cell) -> None:
         sr = QHBoxLayout()
         sr.setSpacing(4)
         sr.addWidget(QLabel("符号"))
@@ -156,41 +215,41 @@ class PropertyPanel(QWidget):
         si.setText(cell.symbol or "")
         si.textChanged.connect(lambda t: self._set_cell_symbol(r, c, t or None))
         sr.addWidget(si)
-        for sym in ["★", "●", "◆", "▲", "♥", "■"]:
+        for sym in SYMBOL_CHOICES:
             b = QPushButton(sym)
             b.setFixedSize(28, 24)
             b.setStyleSheet("QPushButton { font-size: 13px; padding: 1px; border-radius: 3px; }")
-            b.clicked.connect(lambda checked, s=sym: (si.setText(s), self._set_cell_symbol(r, c, s)))
+
+            def pick_symbol(_checked: bool, s: str = sym) -> None:
+                si.setText(s)
+                self._set_cell_symbol(r, c, s)
+
+            b.clicked.connect(pick_symbol)
             sr.addWidget(b)
         scl = QPushButton("×")
         scl.setFixedWidth(22)
-        scl.clicked.connect(lambda: (si.clear(), self._set_cell_symbol(r, c, None)))
-        sr.addWidget(scl)
-        L.addLayout(sr)
 
-        # ── Compass ──
-        _sep(L)
-        compass_label = QLabel("罗盘")
-        compass_label.setStyleSheet("font-weight: bold; font-size: 11px;")
-        L.addWidget(compass_label)
+        def clear_symbol() -> None:
+            si.clear()
+            self._set_cell_symbol(r, c, None)
+
+        scl.clicked.connect(clear_symbol)
+        sr.addWidget(scl)
+        layout.addLayout(sr)
+
+    def _add_cell_compass_section(self, layout: QVBoxLayout, r: int, c: int, cell: Cell) -> None:
+        label = QLabel("罗盘")
+        label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        layout.addWidget(label)
 
         cg = QGridLayout()
         cg.setSpacing(3)
-        val = type("v", (), {"__getitem__": lambda s, k: -1})()
-
-        def mk_spin(init_val: int) -> QSpinBox:
-            s = QSpinBox()
-            s.setRange(-1, 99)
-            s.setValue(init_val)
-            s.setFixedWidth(64)
-            s.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            return s
 
         cp = cell.compass
-        su = mk_spin(cp.up if cp else -1)
-        sd = mk_spin(cp.down if cp else -1)
-        sl = mk_spin(cp.left if cp else -1)
-        sr2 = mk_spin(cp.right if cp else -1)
+        su = _make_compass_spin(cp.up if cp else -1)
+        sd = _make_compass_spin(cp.down if cp else -1)
+        sl = _make_compass_spin(cp.left if cp else -1)
+        sr2 = _make_compass_spin(cp.right if cp else -1)
 
         cg.addWidget(QLabel("  "), 0, 0)
         cg.addWidget(su, 0, 1)
@@ -203,15 +262,18 @@ class PropertyPanel(QWidget):
         cg.addWidget(sr2, 1, 2)
         cg.addWidget(QLabel("  "), 2, 0)
         cg.addWidget(sd, 2, 1)
-        L.addLayout(cg)
+        layout.addLayout(cg)
 
-        def emit_compass():
+        def emit_compass() -> None:
             from src.models.board import CompassClue
+
+            if self._board is None:
+                return
             clue = CompassClue(
-                up=su.value() if su.value() >= 0 else -1,
-                down=sd.value() if sd.value() >= 0 else -1,
-                left=sl.value() if sl.value() >= 0 else -1,
-                right=sr2.value() if sr2.value() >= 0 else -1,
+                up=_compass_part(su.value()),
+                down=_compass_part(sd.value()),
+                left=_compass_part(sl.value()),
+                right=_compass_part(sr2.value()),
             )
             self._board.cell(r, c).compass = clue
             self.board_modified.emit()
@@ -219,47 +281,45 @@ class PropertyPanel(QWidget):
         apply_c = QPushButton("应用罗盘")
         apply_c.setStyleSheet("QPushButton { font-size: 11px; padding: 3px 8px; }")
         apply_c.clicked.connect(emit_compass)
-        L.addWidget(apply_c)
+        layout.addWidget(apply_c)
 
-        # ── Patterns ──
-        _sep(L)
-        patterns_label = QLabel("图案")
-        patterns_label.setStyleSheet("font-weight: bold; font-size: 11px;")
-        L.addWidget(patterns_label)
+    def _add_cell_pattern_section(self, layout: QVBoxLayout, r: int, c: int, cell: Cell) -> None:
+        label = QLabel("图案")
+        label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        layout.addWidget(label)
+        for attr, caption, title in PATTERN_KINDS:
 
+            def handler(a: str = attr, t: str = title) -> None:
+                self._edit_cell_pattern(r, c, a, t)
+
+            self._add_pattern_button(layout, caption, getattr(cell, attr) is not None, handler)
+
+    def _add_pattern_button(
+        self, layout: QVBoxLayout, caption: str, present: bool, on_click: Callable[[], None]
+    ) -> None:
+        btn = QPushButton(f"{caption} {'有' if present else '无'}")
+        btn.setStyleSheet("QPushButton { font-size: 11px; padding: 4px 8px; }")
+        btn.clicked.connect(lambda: on_click())
+        layout.addWidget(btn)
+
+    def _edit_cell_pattern(self, r: int, c: int, attr: str, title: str) -> None:
         from src.ui.shape_editor import PatternEditorDialog
 
-        def _edit_shape_pattern():
-            dialog = PatternEditorDialog(self, existing=cell.shape_pattern, title="拼块图案编辑")
-            if dialog.exec():
-                shape = dialog.get_shape()
-                self._board.cell(r, c).shape_pattern = shape if shape.area > 0 else None
-                self.board_modified.emit()
-                self._rebuild_cell()
-
-        def _edit_fence_pattern():
-            dialog = PatternEditorDialog(self, existing=cell.fence_pattern, title="围栏标记编辑")
-            if dialog.exec():
-                shape = dialog.get_shape()
-                self._board.cell(r, c).fence_pattern = shape if shape.area > 0 else None
-                self.board_modified.emit()
-                self._rebuild_cell()
-
-        has_sp = cell.shape_pattern is not None
-        sp_btn = QPushButton(f"拼块图案 {'有' if has_sp else '无'}")
-        sp_btn.setStyleSheet("QPushButton { font-size: 11px; padding: 4px 8px; }")
-        sp_btn.clicked.connect(lambda: _edit_shape_pattern())
-        L.addWidget(sp_btn)
-
-        has_fp = cell.fence_pattern is not None
-        fp_btn = QPushButton(f"围栏标记 {'有' if has_fp else '无'}")
-        fp_btn.setStyleSheet("QPushButton { font-size: 11px; padding: 4px 8px; }")
-        fp_btn.clicked.connect(lambda: _edit_fence_pattern())
-        L.addWidget(fp_btn)
+        if self._board is None:
+            return
+        cell = self._board.cell(r, c)
+        dialog = PatternEditorDialog(self, existing=getattr(cell, attr), title=title)
+        if dialog.exec():
+            shape = dialog.get_shape()
+            setattr(cell, attr, shape if shape.area > 0 else None)
+            self.board_modified.emit()
+            self._rebuild_cell()
 
     # ── Cell setters ──
 
     def _set_cell_blocked(self, r: int, c: int, blocked: bool) -> None:
+        if self._board is None:
+            return
         cell = self._board.cell(r, c)
         cell.blocked = blocked
         if blocked:
@@ -272,10 +332,14 @@ class PropertyPanel(QWidget):
         self.board_modified.emit()
 
     def _set_cell_number(self, r: int, c: int, value: int | None) -> None:
+        if self._board is None:
+            return
         self._board.cell(r, c).number = value
         self.board_modified.emit()
 
     def _set_cell_symbol(self, r: int, c: int, value: str | None) -> None:
+        if self._board is None:
+            return
         self._board.cell(r, c).symbol = value
         self.board_modified.emit()
 
@@ -289,104 +353,121 @@ class PropertyPanel(QWidget):
         if e is None:
             return
 
-        constraint_str = "无"
-        if e.constraint is not None:
-            ct = e.constraint.type.value
-            val = f", 值={e.constraint.value}" if e.constraint.value is not None else ""
-            constraint_str = f"{ct}{val}"
-
         self._info.setText(
             '<b style="font-size:13px;">边框 ({},{})-({},{})</b><br>'
-            '<span>分割:</span> {}<br>'
-            '<span>约束:</span> {}'.format(
-                r1, c1, r2, c2, "是" if e.is_boundary else "否", constraint_str
+            "<span>分割:</span> {}<br>"
+            "<span>约束:</span> {}".format(
+                r1, c1, r2, c2, "是" if e.is_boundary else "否", _edge_constraint_text(e)
             )
         )
         self._clear_content()
-        L = self._content
+        layout = self._content
 
-        btn_style = "QPushButton { font-size: 11px; padding: 5px 8px; border-radius: 4px; }"
+        layout.addWidget(self._make_boundary_button(e))
+        _sep(layout)
+        self._add_edge_hetero_row(layout, e)
+        self._add_edge_inequality_row(layout, e)
+        self._add_edge_difference_row(layout, e)
+        _sep(layout)
+        self._add_edge_clear_button(layout)
 
-        # ── Boundary toggle ──
+    def _make_boundary_button(self, e: Edge) -> QPushButton:
         if e.is_boundary:
             tb = QPushButton("取消分割线")
             tb.setStyleSheet(
-                "QPushButton { font-size: 12px; padding: 6px; border-radius: 5px; font-weight: bold; "
-                "color: #EF4444; border: 1px solid #EF4444; }"
+                "QPushButton { font-size: 12px; padding: 6px; border-radius: 5px; "
+                "font-weight: bold; color: #EF4444; border: 1px solid #EF4444; }"
                 "QPushButton:hover { background: #3D1F1F; }"
             )
         else:
             tb = QPushButton("设为分割线")
             tb.setStyleSheet(
-                "QPushButton { font-size: 12px; padding: 6px; border-radius: 5px; font-weight: bold; "
-                "color: #3B82F6; border: 1px solid #3B82F6; }"
+                "QPushButton { font-size: 12px; padding: 6px; border-radius: 5px; "
+                "font-weight: bold; color: #3B82F6; border: 1px solid #3B82F6; }"
                 "QPushButton:hover { background: #1E3A5F; }"
             )
         tb.clicked.connect(self._toggle_boundary)
-        L.addWidget(tb)
-        _sep(L)
+        return tb
 
-        # ── Hetero / Homo ──
-        ca = e.constraint is not None
+    def _make_toggle_button(
+        self, label: str, checked: bool, on_click: Callable[[], None]
+    ) -> QPushButton:
+        btn = QPushButton(label)
+        btn.setStyleSheet(BTN_STYLE)
+        btn.setCheckable(True)
+        btn.setChecked(checked)
+        btn.clicked.connect(lambda: on_click())
+        return btn
+
+    def _add_edge_hetero_row(self, layout: QVBoxLayout, e: Edge) -> None:
+        constraint = e.constraint
         hrow = QHBoxLayout()
         hrow.setSpacing(4)
-        bh = QPushButton("≠异生")
-        bh.setStyleSheet(btn_style)
-        bh.setCheckable(True)
-        bh.setChecked(ca and e.constraint.type == EdgeConstraintType.HETEROGENEOUS)
-        bh.clicked.connect(lambda: self._set_edge_constraint(EdgeConstraintType.HETEROGENEOUS))
-        hrow.addWidget(bh)
-        bm = QPushButton("=双生")
-        bm.setStyleSheet(btn_style)
-        bm.setCheckable(True)
-        bm.setChecked(ca and e.constraint.type == EdgeConstraintType.HOMOGENEOUS)
-        bm.clicked.connect(lambda: self._set_edge_constraint(EdgeConstraintType.HOMOGENEOUS))
-        hrow.addWidget(bm)
-        L.addLayout(hrow)
+        for label, ctype in (
+            ("≠异生", EdgeConstraintType.HETEROGENEOUS),
+            ("=双生", EdgeConstraintType.HOMOGENEOUS),
+        ):
+            checked = constraint is not None and constraint.type == ctype
 
-        # ── Inequality direction ──
+            def handler(t: EdgeConstraintType = ctype) -> None:
+                self._set_edge_constraint(t)
+
+            hrow.addWidget(self._make_toggle_button(label, checked, handler))
+        layout.addLayout(hrow)
+
+    def _add_edge_inequality_row(self, layout: QVBoxLayout, e: Edge) -> None:
         # value==1 → 第一端点 (r1,c1) 更大；value!=1 → 第二端点 (r2,c2) 更大。
         # 符号表达“哪侧更大”：'>' 左大 · '<' 右大 · '^' 上大 · 'v' 下大
-        ineq_rev = e.constraint.value == 1 if ca and e.constraint.type == EdgeConstraintType.INEQUALITY else False
+        constraint = e.constraint
+        is_ineq = constraint is not None and constraint.type == EdgeConstraintType.INEQUALITY
+        ineq_rev = constraint.value == 1 if (is_ineq and constraint is not None) else False
         is_vert = e.c1 == e.c2
-        dirs = [("v下大上小", 0), ("^上大下小", 1)] if is_vert else [("<右大左小", 0), (">左大右小", 1)]
+        dirs = (
+            [("v下大上小", 0), ("^上大下小", 1)]
+            if is_vert
+            else [("<右大左小", 0), (">左大右小", 1)]
+        )
         irow = QHBoxLayout()
         irow.setSpacing(4)
         irow.addWidget(QLabel("不等"))
         for label, val in dirs:
-            b = QPushButton(label)
-            b.setStyleSheet(btn_style)
-            b.setCheckable(True)
-            b.setChecked(ca and e.constraint.type == EdgeConstraintType.INEQUALITY and ineq_rev == (val == 1))
-            b.clicked.connect(lambda checked, v=val: self._set_inequality(v))
-            irow.addWidget(b)
-        irow.addStretch()
-        L.addLayout(irow)
+            checked = is_ineq and ineq_rev == (val == 1)
 
-        # ── Difference ──
+            def handler(v: int = val) -> None:
+                self._set_inequality(v)
+
+            irow.addWidget(self._make_toggle_button(label, checked, handler))
+        irow.addStretch()
+        layout.addLayout(irow)
+
+    def _add_edge_difference_row(self, layout: QVBoxLayout, e: Edge) -> None:
+        constraint = e.constraint
+        is_diff = constraint is not None and constraint.type == EdgeConstraintType.DIFFERENCE
+        raw_value = constraint.value if (is_diff and constraint is not None) else None
         drow = QHBoxLayout()
         drow.setSpacing(4)
         drow.addWidget(QLabel("差值"))
         ds = QSpinBox()
         ds.setRange(1, 999)
-        ds.setValue(e.constraint.value if ca and e.constraint.type == EdgeConstraintType.DIFFERENCE else 1)
+        ds.setValue(raw_value if raw_value is not None else 1)
         drow.addWidget(ds)
         da = QPushButton("设差值")
-        da.setStyleSheet(btn_style)
-        da.clicked.connect(lambda: self._set_edge_constraint(EdgeConstraintType.DIFFERENCE, ds.value()))
+        da.setStyleSheet(BTN_STYLE)
+        da.clicked.connect(
+            lambda: self._set_edge_constraint(EdgeConstraintType.DIFFERENCE, ds.value())
+        )
         drow.addWidget(da)
         drow.addStretch()
-        L.addLayout(drow)
+        layout.addLayout(drow)
 
-        # ── Clear ──
-        _sep(L)
+    def _add_edge_clear_button(self, layout: QVBoxLayout) -> None:
         cl = QPushButton("清除约束")
         cl.setStyleSheet(
             "QPushButton { font-size: 11px; padding: 5px; border-radius: 4px; color: #EF4444; }"
             "QPushButton:hover { background: #3D1F1F; }"
         )
         cl.clicked.connect(self._clear_edge_constraint)
-        L.addWidget(cl)
+        layout.addWidget(cl)
 
     def _toggle_boundary(self) -> None:
         if self._board is None or self._selected_edge is None:
@@ -428,13 +509,12 @@ class PropertyPanel(QWidget):
         if v is None:
             return
         self._info.setText(
-            '<b style="font-size:13px;">顶点 ({},{})</b><br>'
-            '<span>望塔:</span> {}'.format(
+            '<b style="font-size:13px;">顶点 ({},{})</b><br><span>望塔:</span> {}'.format(
                 vr, vc, v.watchtower if v.watchtower is not None else "无"
             )
         )
         self._clear_content()
-        L = self._content
+        layout = self._content
 
         wrow = QHBoxLayout()
         wrow.addWidget(QLabel("望塔值"))
@@ -445,16 +525,25 @@ class PropertyPanel(QWidget):
         wrow.addWidget(ws)
         wa = QPushButton("设置")
         wa.setStyleSheet("QPushButton { font-size: 11px; padding: 4px 8px; }")
-        wa.clicked.connect(lambda: self._set_watchtower(vr, vc, ws.value() if ws.value() > 0 else None))
+        wa.clicked.connect(
+            lambda: self._set_watchtower(vr, vc, ws.value() if ws.value() > 0 else None)
+        )
         wrow.addWidget(wa)
         wcl = QPushButton("清除")
         wcl.setStyleSheet("QPushButton { font-size: 11px; padding: 4px 8px; color: #DC2626; }")
-        wcl.clicked.connect(lambda: (ws.setValue(0), self._set_watchtower(vr, vc, None)))
+
+        def clear_watchtower() -> None:
+            ws.setValue(0)
+            self._set_watchtower(vr, vc, None)
+
+        wcl.clicked.connect(clear_watchtower)
         wrow.addWidget(wcl)
         wrow.addStretch()
-        L.addLayout(wrow)
+        layout.addLayout(wrow)
 
     def _set_watchtower(self, r: int, c: int, value: int | None) -> None:
+        if self._board is None:
+            return
         v = self._board.vertex_at(r, c)
         if v is not None:
             if value is not None and 1 <= value <= 4:

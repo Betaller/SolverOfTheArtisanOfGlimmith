@@ -219,6 +219,82 @@ fn rose_structural_pieces(puzzle: &Puzzle) -> Option<usize> {
     }
 }
 
+/// Can two compass clues never sit in the same region?
+///
+/// Ported from `third_party/aog/src/solver/propagation/area.rs::
+/// compass_cells_incompatible`.  Two independent families of conflicts:
+///
+/// * **Zero-value**: `A.n == 0` forbids any region cell north of A, so a clue
+///   B strictly north of A cannot share A's region (and symmetrically for the
+///   other five axis/side combinations).
+/// * **Value ordering**: if B is north of A then, inside a shared region,
+///   everything north of B is also north of A *plus B itself*, so
+///   `A.n ≥ B.n + 1`.  Both values known and `B.n ≥ A.n` → incompatible.
+///   When the two sit on the same row neither is north of the other, so a
+///   shared region forces `A.n == B.n` (and likewise for S / E / W).
+///
+/// All tests only use known direction values, so they are one-sided: a
+/// `false` answer just means "not proven incompatible".
+fn compass_cells_incompatible(
+    grid: &Grid,
+    ca: CellId,
+    pa: &CompassData,
+    cb: CellId,
+    pb: &CompassData,
+) -> bool {
+    let (ra, cola) = grid.cell_pos(ca);
+    let (rb, colb) = grid.cell_pos(cb);
+    let (ra, cola, rb, colb) = (ra as isize, cola as isize, rb as isize, colb as isize);
+
+    // Zero-value direction conflicts.
+    if pa.n == Some(0) && rb < ra {
+        return true;
+    }
+    if pb.n == Some(0) && ra < rb {
+        return true;
+    }
+    if pa.s == Some(0) && rb > ra {
+        return true;
+    }
+    if pb.s == Some(0) && ra > rb {
+        return true;
+    }
+    if pa.e == Some(0) && colb > cola {
+        return true;
+    }
+    if pb.e == Some(0) && cola > colb {
+        return true;
+    }
+    if pa.w == Some(0) && colb < cola {
+        return true;
+    }
+    if pb.w == Some(0) && cola < colb {
+        return true;
+    }
+
+    // Value ordering along each axis: the "further" clue needs a strictly
+    // smaller count; on the same line the counts must match.
+    fn axis_conflict(ahead: isize, va: Option<usize>, vb: Option<usize>) -> bool {
+        match (va, vb) {
+            (Some(a), Some(b)) => {
+                if ahead < 0 {
+                    a <= b
+                } else if ahead > 0 {
+                    b <= a
+                } else {
+                    a != b
+                }
+            }
+            _ => false,
+        }
+    }
+    // North / South compare along the row axis; East / West along the column.
+    axis_conflict(rb - ra, pa.n, pb.n)
+        || axis_conflict(ra - rb, pa.s, pb.s)
+        || axis_conflict(colb - cola, pa.e, pb.e)
+        || axis_conflict(cola - colb, pa.w, pb.w)
+}
+
 impl<'a> Solver<'a> {
     fn new(input: Input, deadline: Instant, puzzle: &'a Puzzle) -> Self {
         let n = input.grid.num_edges();
@@ -517,6 +593,12 @@ impl<'a> Solver<'a> {
         // Solitary feasibility bitset (see `setup_solitary_feasibility`).
         self.setup_solitary_feasibility();
 
+        // Pre-search compass incompatibility (see
+        // `init_compass_incompatibility`): adjacent compass clues that can
+        // never share a region get their edge forced Cut before the search
+        // starts.
+        self.init_compass_incompatibility();
+
         // Watchtower value==1 startup optimization (port of reference
         // `apply_watchtower_value_one_optimization`): an interior vertex (all 4
         // cells exist) with value==1 means all 4 cells are the same region → all
@@ -630,6 +712,50 @@ impl<'a> Solver<'a> {
         }
         self.solitary_feasible = feasible;
         self.solitary_feasible_active = true;
+    }
+
+    /// Pre-search compass incompatibility (port of
+    /// `third_party/aog/src/solver/propagation/area.rs::init_compass_incompatibility`).
+    ///
+    /// Two compass clues that can never sit in the same region, and that are
+    /// adjacent, get their shared edge forced Cut now — before the search
+    /// burns budget rediscovering it.  (Non-adjacent incompatible pairs are
+    /// left alone: the reference records them as rose `diffs`, which we do not
+    /// want to couple to, and the compass direction propagation already
+    /// rejects a merged pair at the leaf.)
+    fn init_compass_incompatibility(&mut self) {
+        if !self.has_compass_clue {
+            return;
+        }
+        let clues: Vec<(CellId, CompassData)> = self
+            .prop
+            .compass_clue_indices
+            .iter()
+            .filter_map(|&cl_idx| match &self.cell_clues[cl_idx] {
+                CellClue::Compass { cell, compass } if self.grid.cell_exists[*cell] => {
+                    Some((*cell, *compass))
+                }
+                _ => None,
+            })
+            .collect();
+        for i in 0..clues.len() {
+            for j in (i + 1)..clues.len() {
+                let (ca, pa) = clues[i];
+                let (cb, pb) = clues[j];
+                if !compass_cells_incompatible(&self.grid, ca, &pa, cb, &pb) {
+                    continue;
+                }
+                if let Some(eid) = self.grid.edge_between(ca, cb) {
+                    if self.edges[eid] == EdgeState::Unknown {
+                        // A failed set_edge here means a pre-drawn Uncut
+                        // contradicts the incompatibility — the puzzle is
+                        // unsolvable, but that is the search's job to prove;
+                        // ignore rather than abort setup.
+                        let _ = self.set_edge(eid, EdgeState::Cut);
+                    }
+                }
+            }
+        }
     }
 
     /// Flood-fill decided-Uncut edges into connected components, then build

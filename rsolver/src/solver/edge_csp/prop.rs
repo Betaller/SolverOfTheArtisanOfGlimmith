@@ -799,6 +799,8 @@ impl<'a> Solver<'a> {
                 progress = true;
             }
         }
+        // S5d — see `propagate_solitary_single_candidate`.
+        progress |= self.propagate_solitary_single_candidate(n)?;
         // S5c.
         let mut clue_bit = vec![u8::MAX; n];
         for (bit, &cl_idx) in self.prop.compass_clue_indices.iter().enumerate() {
@@ -820,6 +822,59 @@ impl<'a> Solver<'a> {
                 if self.solitary_feasible[c] & mask == 0 {
                     return Err(());
                 }
+            }
+        }
+        Ok(progress)
+    }
+
+    /// S5d: a cell whose candidate set is a singleton `{i}` belongs to clue
+    /// `i`'s piece, so it must stay connected to that piece.  Count its
+    /// Unknown edges to neighbours that can also be `i`: none → it can never
+    /// join `i` → contradiction; exactly one → that edge is its only way in →
+    /// Uncut.  Pure inference on the static bitset, so it is safe to interleave
+    /// with S5b (Uncut merges components, but the fixed-point loop rebuilds
+    /// them before the next pass reads `comp_cells`).
+    fn propagate_solitary_single_candidate(&mut self, n: usize) -> Result<bool, ()> {
+        let mut progress = false;
+        for c in 0..n {
+            if !self.grid.cell_exists[c] {
+                continue;
+            }
+            let f = self.solitary_feasible[c];
+            if f == 0 || (f & (f - 1)) != 0 {
+                continue; // not a singleton
+            }
+            let mut only: Option<EdgeId> = None;
+            let mut count = 0usize;
+            for eid in self.grid.cell_edges(c).into_iter().flatten() {
+                if self.edges[eid] != EdgeState::Unknown {
+                    continue;
+                }
+                let (a, b) = self.grid.edge_cells(eid);
+                let other = if a == c { b } else { a };
+                if !self.grid.cell_exists[other] {
+                    continue;
+                }
+                if self.solitary_feasible[other] & f != 0 {
+                    count += 1;
+                    if count > 1 {
+                        break;
+                    }
+                    only = Some(eid);
+                }
+            }
+            match count {
+                0 => return Err(()),
+                1 => {
+                    let e = only.unwrap();
+                    if self.edges[e] == EdgeState::Unknown {
+                        if !self.set_edge(e, EdgeState::Uncut) {
+                            return Err(());
+                        }
+                        progress = true;
+                    }
+                }
+                _ => {}
             }
         }
         Ok(progress)

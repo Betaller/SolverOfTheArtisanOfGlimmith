@@ -179,6 +179,46 @@ fn compute_halfplane_avail(grid: &Grid) -> Vec<[usize; 4]> {
     avail
 }
 
+/// Exact piece count from the `rose_window` rule, when derivable.
+///
+/// Every piece holds exactly one cell of each symbol type, so if each type
+/// occurs `N` times the partition has exactly `N` pieces.  The type set comes
+/// from `rose_symbol_types` (rule params first, matching `validate.rs`'s rose
+/// semantics); counts that differ mean the puzzle is unsolvable, in which case
+/// we return `None` and let the rose propagation reject later.
+///
+/// This is a *different* consumer from the disabled `exact_piece_count`
+/// deduction: that one feeds `rose.rs::propagate_parity`'s two-piece branch,
+/// which seeds Cut edges as parity-1 and forces wrong Cuts at the root
+/// (`docs/优化/27-exact-piece-count与two-piece-parity证伪.md`).
+/// `structural_pieces` only feeds `propagate_dual_connectivity`.
+fn rose_structural_pieces(puzzle: &Puzzle) -> Option<usize> {
+    let types = crate::shapes::rose_symbol_types(puzzle);
+    if types.is_empty() {
+        return None;
+    }
+    let index: std::collections::BTreeMap<&str, usize> = types
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.as_str(), i))
+        .collect();
+    let mut counts = vec![0usize; types.len()];
+    for row in &puzzle.cells {
+        for cell in row {
+            if let Some(sym) = &cell.symbol {
+                if let Some(&i) = index.get(sym.as_str()) {
+                    counts[i] += 1;
+                }
+            }
+        }
+    }
+    if counts.iter().all(|&c| c == counts[0] && c >= 1) {
+        Some(counts[0])
+    } else {
+        None
+    }
+}
+
 impl<'a> Solver<'a> {
     fn new(input: Input, deadline: Instant, puzzle: &'a Puzzle) -> Self {
         let n = input.grid.num_edges();
@@ -421,10 +461,10 @@ impl<'a> Solver<'a> {
     pub fn solve(&mut self) -> Option<Vec<RegionInfo>> {
         self.total_cells = self.grid.total_existing_cells();
 
-        // Structural piece count from the `precise` rule (see the field doc).
-        // Deliberately NOT the rose-window deduction: that one flips on the
-        // two-piece parity seeding, which forces wrong Cuts at the root
-        // (`docs/优化/27-exact-piece-count与two-piece-parity证伪.md`).
+        // Structural piece count (see the field doc).
+        //
+        // Source 1 — `precise`: every region has area `A`, so with `F` fillable
+        // cells the partition has exactly `F / A` pieces.
         if let Some(a) = self
             .puzzle
             .rules
@@ -437,6 +477,12 @@ impl<'a> Solver<'a> {
             if a >= 1 && self.total_cells % a == 0 {
                 self.structural_pieces = Some(self.total_cells / a);
             }
+        }
+        // Source 2 — `rose_window`: every piece holds exactly one cell of each
+        // symbol type, so if each type occurs `N` times the partition has
+        // exactly `N` pieces.  See `rose_structural_pieces`.
+        if self.structural_pieces.is_none() {
+            self.structural_pieces = rose_structural_pieces(self.puzzle);
         }
 
         // Edges adjacent to a blocked/outside cell are outer borders → Cut.

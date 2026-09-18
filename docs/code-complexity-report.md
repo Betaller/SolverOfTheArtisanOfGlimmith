@@ -267,15 +267,29 @@ crate 内**其余全部函数**都在阈值以内，门禁对其余代码仍然�
 
 **合并后复跑（`main` @ `ac31ecb`，2026-09-18，`--timeout 40 -j 8`）：1114 / 1258。**
 逐题对比 1120 基线：8 回退 / 2 新解，净 -6。**0 真回归**——同一份 rsolver 二进制
-（md5 与跑出 1120 的构建一致，cargo 重编译逐字节相同），差异全来自运行条件：
+（md5 与跑出 1120 的构建一致，cargo 重编译逐字节相同），差异全来自运行条件。
+8 道回退逐题串行复测（`scripts/solo_eval.py`，每阶段 60s 预算，原始记录见
+`results/tmp/20260918_ac31ecb_reg8-solo.jsonl` 与 `results/tmp/0826_try*.jsonl`）：
 
-- **7 道是并行争抢**：0651 / 0710 / 0829 / 0875 / 1131 / 1132 / 1320 用
-  `scripts/solo_eval.py` 串行复跑 **7/7 解出**（16–88s）。其中 0710 / 0875 /
-  1320 / 0829 在基线里是 `aog:success`（17–32s），这次 `--timeout` 从 30 放宽到
-  40 **反而 aog 超时**——wall-clock 预算变大但 CPU 被 8 路 worker 分掉，
-  aog 在同样时间内推进的搜索量更少。
-- **1 道是求解器本身的非确定性**：0826 串行 8 次 **5 FAIL / 2 PASS**（PASS 时
-  16.3s，与基线 18.7s 吻合）。根因在 `aog/types.rs` 的
+| 题 | 基线（`-j 6`，timeout 30） | 本次（`-j 8`，timeout 40） | 串行复测 | 判定 |
+|---|---|---|---|---|
+| 0710 | aog:success 31.8s | aog 超时 → edge_csp 超时 → pieces 耗尽 | **PASS** aog 38.9s | 争抢 |
+| 0829 | aog:success 28.3s | aog 超时 → edge_csp 超时 → pieces 超时 | **PASS** aog 32.1s | 争抢 |
+| 1320 | aog:success 24.0s | aog 超时 → edge_csp 超时 → pieces 耗尽 | **PASS** aog 30.2s | 争抢 |
+| 0875 | aog:success 17.0s | aog 超时 → edge_csp 耗尽 → pieces 超时 | **PASS** aog 25.8s | 争抢 |
+| 0651 | aog 超时 → edge_csp:success 48.4s | aog 超时 → edge_csp 超时 | **PASS** edge_csp 88.4s | 争抢 |
+| 1131 | aog 超时 → edge_csp:success 52.7s | aog 超时 → edge_csp 超时 | **PASS** edge_csp 79.1s | 争抢 |
+| 1132 | aog 超时 → edge_csp:success 45.3s | aog 超时 → edge_csp 超时 | **PASS** edge_csp 80.6s | 争抢 |
+| 0826 | aog:success 18.8s | aog 超时 → rose 耗尽 → pieces 超时 | **抖动** 7 FAIL / 2 PASS | 非确定性 |
+
+- **7 道纯争抢**：串行 7/7 解出。前 4 道尤其能说明问题——`--timeout` 从 30
+  **放宽到 40**，aog 反而超时：wall-clock 预算变大，但 CPU 被 8 路 worker 分掉，
+  aog 在同样时间内推进的搜索量更少。后 3 道（0651 / 1131 / 1132）串行需要
+  79–88s，即 aog 吃满 60s 后 edge_csp 还要 20–30s；基线里 edge_csp 阶段的
+  40s 预算在 `-j 8` 下不够用。
+- **1 道（0826）是求解器本身的非确定性**：串行共跑 **9 次，7 FAIL / 2 PASS**
+  （PASS 两次均为 aog，16.3s，与基线 18.8s 吻合；FAIL 六次 aog 都在 28–32s
+  主动判无解而非超时）。根因在 `aog/types.rs` 的
   `block_adj: HashMap<u64, Vec<Node>>`——Rust `HashMap` 每进程随机种子，
   迭代顺序决定放置顺序，同一份二进制结果会漂。这是**既有问题**，与本次重构无关。
 

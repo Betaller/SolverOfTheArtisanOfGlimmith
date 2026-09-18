@@ -136,6 +136,12 @@ pub(crate) struct Solver<'a> {
     /// pieces (set only when `A` divides `F`).  Consumed by
     /// `propagate_dual_connectivity`.
     pub structural_pieces: Option<usize>,
+    /// Upper bound on the piece count when only a lower area bound is known
+    /// (`range`/`precise` min): every region has at least `min_area` cells, so
+    /// there are at most `total_cells / min_area` of them.  Used by the D2
+    /// contradiction check (`cc > pieces_max`); the "equal → force Uncut"
+    /// half needs an exact count and is skipped here.
+    pub structural_pieces_max: Option<usize>,
 }
 
 /// `avail[cell] = [N, S, E, W]` — count of *existing* cells strictly in each
@@ -410,6 +416,7 @@ impl<'a> Solver<'a> {
             solitary_feasible: Vec::new(),
             solitary_feasible_active: false,
             structural_pieces: None,
+            structural_pieces_max: None,
         };
 
         // Rose-window state: map each distinct symbol string to a type index and
@@ -559,6 +566,13 @@ impl<'a> Solver<'a> {
         // exactly `N` pieces.  See `rose_structural_pieces`.
         if self.structural_pieces.is_none() {
             self.structural_pieces = rose_structural_pieces(self.puzzle);
+        }
+        // Piece-count upper bound from the global area lower bound: every
+        // region has at least `min_area` cells, so there are at most
+        // `total_cells / min_area` regions.  Only meaningful when the bound
+        // actually bites (`min_area > 1`).
+        if self.eff_min_area > 1 {
+            self.structural_pieces_max = Some(self.total_cells / self.eff_min_area);
         }
 
         // Edges adjacent to a blocked/outside cell are outer borders → Cut.

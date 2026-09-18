@@ -980,10 +980,12 @@ impl<'a> Solver<'a> {
     /// argument about the two sides of each bridge and is the riskiest of the
     /// three.
     pub(crate) fn propagate_dual_connectivity(&mut self, num_comp: usize) -> Result<bool, ()> {
-        let Some(pieces) = self.structural_pieces else {
+        let exact = self.structural_pieces;
+        let bound = self.structural_pieces_max;
+        if exact.is_none() && bound.is_none() {
             return Ok(false);
-        };
-        if pieces < 2 {
+        }
+        if exact.map_or(false, |p| p < 2) {
             return Ok(false);
         }
         let mut progress = false;
@@ -1068,10 +1070,15 @@ impl<'a> Solver<'a> {
                 cc += 1;
             }
         }
-        if cc > pieces {
+        // `cc > pieces` is a contradiction whether `pieces` is exact or only
+        // an upper bound — every graph component needs at least one piece.
+        let cap = exact.or(bound).unwrap();
+        if cc > cap {
             return Err(());
         }
-        if cc == pieces {
+        // Forcing Uncut needs the count to be exact: with only an upper bound
+        // a component could still split further.
+        if exact == Some(cc) {
             for e in cross_edges {
                 if self.edges[e] == EdgeState::Unknown {
                     if !self.set_edge(e, EdgeState::Uncut) {

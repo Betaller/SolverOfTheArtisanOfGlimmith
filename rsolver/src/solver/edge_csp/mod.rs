@@ -107,6 +107,66 @@ pub(crate) struct Solver<'a> {
     /// number / shape_pattern / fence_pattern), so `propagate_solitary` prunes
     /// on the same notion of "clue" the leaf check enforces.
     pub clue_cell: Vec<bool>,
+    /// Per-cell count of existing cells in each compass half-plane
+    /// (N, S, E, W), excluding the cell itself.  Static board geometry, so it
+    /// is computed once in `solve()`; `get_compass_area_bounds` uses it to turn
+    /// an unspecified direction into a board-sized upper bound.
+    pub compass_halfplane_avail: Vec<[usize; 4]>,
+    /// `solitary_feasible[cell]` — bitmask of compass-clue indices whose
+    /// bounding box contains `cell`.  Under `solitary` every piece holds
+    /// exactly one clue, so a cell can only join the piece of a clue whose
+    /// bbox covers it; bit `i` clear means "cannot belong to clue i's piece".
+    /// Only populated when the propagation is active (see
+    /// `solitary_feasible_active`); otherwise empty.
+    pub solitary_feasible: Vec<u64>,
+    /// Whether `solitary_feasible` carries real information.  Requires the
+    /// `solitary` rule, at least one compass clue, ≤64 of them (u64 bitmask),
+    /// and — crucially — that *every* clue cell is a compass clue.  If some
+    /// clue carries no bbox (a bare symbol / area number / shape pattern), a
+    /// cell outside every compass bbox could still join that clue's piece, so
+    /// an empty bitmask would be a false contradiction.
+    pub solitary_feasible_active: bool,
+}
+
+/// `avail[cell] = [N, S, E, W]` — count of *existing* cells strictly in each
+/// half-plane relative to `cell`.  Static board geometry, computed once in
+/// `Solver::new`; `get_compass_area_bounds` uses it to turn an unspecified
+/// compass direction into a board-sized upper bound.  Doing that inline would
+/// be O(H·W) per component per propagate call, i.e. on every search node.
+fn compute_halfplane_avail(grid: &Grid) -> Vec<[usize; 4]> {
+    let nc = grid.num_cells();
+    let mut avail = vec![[0usize; 4]; nc];
+    for r in 0..grid.rows {
+        for c in 0..grid.cols {
+            let id = grid.cell_id(r, c);
+            if !grid.cell_exists[id] {
+                continue;
+            }
+            let mut a = [0usize; 4];
+            for rr in 0..grid.rows {
+                for cc in 0..grid.cols {
+                    let nid = grid.cell_id(rr, cc);
+                    if !grid.cell_exists[nid] || (rr == r && cc == c) {
+                        continue;
+                    }
+                    if rr < r {
+                        a[0] += 1;
+                    }
+                    if rr > r {
+                        a[1] += 1;
+                    }
+                    if cc > c {
+                        a[2] += 1;
+                    }
+                    if cc < c {
+                        a[3] += 1;
+                    }
+                }
+            }
+            avail[id] = a;
+        }
+    }
+    avail
 }
 
 impl<'a> Solver<'a> {
@@ -175,6 +235,9 @@ impl<'a> Solver<'a> {
             }
         }
 
+        // Static half-plane cell counts per cell (compass upper bounds).
+        let compass_halfplane_avail = compute_halfplane_avail(&input.grid);
+
         let mut solver = Self {
             puzzle,
             grid: input.grid,
@@ -217,6 +280,9 @@ impl<'a> Solver<'a> {
             pair_branch: rose::PairBranchState::default(),
             exact_piece_count: None,
             clue_cell,
+            compass_halfplane_avail,
+            solitary_feasible: Vec::new(),
+            solitary_feasible_active: false,
         };
 
         // Rose-window state: map each distinct symbol string to a type index and
@@ -373,6 +439,9 @@ impl<'a> Solver<'a> {
                 .collect();
         }
 
+        // Solitary feasibility bitset (see `setup_solitary_feasibility`).
+        self.setup_solitary_feasibility();
+
         // Watchtower value==1 startup optimization (port of reference
         // `apply_watchtower_value_one_optimization`): an interior vertex (all 4
         // cells exist) with value==1 means all 4 cells are the same region → all
@@ -422,6 +491,70 @@ impl<'a> Solver<'a> {
         }
 
         self.solution_regions.take()
+    }
+
+    /// Build the `solitary` feasibility bitset (consumed by
+    /// `propagate_solitary_feasibility`).
+    ///
+    /// Under `solitary` every finished piece holds exactly one clue cell, so a
+    /// cell may only join the piece of a clue whose compass bounding box
+    /// covers it.  The bbox is sound thanks to region connectivity: to reach a
+    /// cell `n` rows north of the clue the region must cross `n` north
+    /// half-plane cells, so with `up == n` no region cell can sit further
+    /// north than `n` rows (same for the other axes).  An unspecified
+    /// direction (-1) leaves that axis unbounded.
+    ///
+    /// Activated only when every clue cell is a compass clue — otherwise a
+    /// cell outside every compass bbox could still belong to a symbol /
+    /// area-number piece, and an empty bitmask would be a false contradiction.
+    /// K ≤ 64 because the mask is a u64.
+    fn setup_solitary_feasibility(&mut self) {
+        if !self.rules.solitary || !self.has_compass_clue {
+            return;
+        }
+        let k = self.prop.compass_clue_indices.len();
+        if k == 0 || k > 64 {
+            return;
+        }
+        let mut compass_cells = std::collections::BTreeSet::new();
+        for &cl_idx in &self.prop.compass_clue_indices {
+            if let CellClue::Compass { cell, .. } = &self.cell_clues[cl_idx] {
+                compass_cells.insert(*cell);
+            }
+        }
+        let all_clues_are_compass = (0..self.grid.num_cells())
+            .all(|c| !self.clue_cell[c] || compass_cells.contains(&c));
+        if !all_clues_are_compass {
+            return;
+        }
+        let mut feasible = vec![0u64; self.grid.num_cells()];
+        for (bit, &cl_idx) in self.prop.compass_clue_indices.iter().enumerate() {
+            let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] else {
+                continue;
+            };
+            let (r, c) = self.grid.cell_pos(*cell);
+            let (ri, ci) = (r as isize, c as isize);
+            let min_r = compass.n.map_or(0, |v| ri - v as isize).max(0);
+            let max_r = compass
+                .s
+                .map_or(self.grid.rows as isize - 1, |v| ri + v as isize)
+                .min(self.grid.rows as isize - 1);
+            let min_c = compass.w.map_or(0, |v| ci - v as isize).max(0);
+            let max_c = compass
+                .e
+                .map_or(self.grid.cols as isize - 1, |v| ci + v as isize)
+                .min(self.grid.cols as isize - 1);
+            for rr in min_r..=max_r {
+                for cc in min_c..=max_c {
+                    let id = self.grid.cell_id(rr as usize, cc as usize);
+                    if self.grid.cell_exists[id] {
+                        feasible[id] |= 1u64 << bit;
+                    }
+                }
+            }
+        }
+        self.solitary_feasible = feasible;
+        self.solitary_feasible_active = true;
     }
 
     /// Flood-fill decided-Uncut edges into connected components, then build

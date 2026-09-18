@@ -311,46 +311,36 @@ impl<'a> Solver<'a> {
     }
 
     /// Compass area bounds for a component: `(min, max, exact)`.
-    /// Inferred 0 for directions where no cells exist in the grid.
+    ///
+    /// Compass axes are **half-planes** (`_compass_halfplane_count` in
+    /// `src/solver/constraints.py`): a NE cell counts in both N and E, so the
+    /// four direction counts overlap and `size ≠ 1 + Σ`.  With `Q` = cells in
+    /// the four quadrants (counted twice by the sum):
+    ///   `size = 1 + (n+s) + (e+w) - Q`, hence
+    ///   `size ≥ 1 + max(n+s, e+w)`   (Q = min(n+s, e+w)) — the tightest lower
+    ///   bound expressible without knowing Q, and
+    ///   `size ≤ 1 + Σ dir_max`       (Q = 0) — a valid upper bound once every
+    ///   direction is capped.
+    ///
+    /// An unspecified direction (`-1`) is capped by the board: at most
+    /// `compass_halfplane_avail[cell][d]` existing cells lie in that
+    /// half-plane.  Previously an unspecified direction left `max_area = None`
+    /// (unbounded), which disabled the `size == max → seal` inference,
+    /// `growth_potential` capping and the compass placement-enumeration
+    /// threshold for every clue carrying a `-1` — the common case on the
+    /// compass+solitary FAIL cluster (only 58/971 corpus clues qualified).
+    /// A direction with no existing cell at all is inferred 0, as before.
     fn get_compass_area_bounds(
         &self,
         cell: CellId,
         compass: &CompassData,
     ) -> (usize, Option<usize>, Option<usize>) {
-        let (r, c) = self.grid.cell_pos(cell);
+        let avail = self.compass_halfplane_avail[cell];
 
-        let has_dir = |dr: isize, dc: isize| -> bool {
-            let mut d = 1isize;
-            loop {
-                let nr = r as isize + dr * d;
-                let nc = c as isize + dc * d;
-                if nr < 0
-                    || nc < 0
-                    || nr >= self.grid.rows as isize
-                    || nc >= self.grid.cols as isize
-                {
-                    return false;
-                }
-                let nid = self.grid.cell_id(nr as usize, nc as usize);
-                if self.grid.cell_exists[nid] {
-                    return true;
-                }
-                d += 1;
-            }
-        };
-        let has_north = has_dir(-1, 0);
-        let has_south = has_dir(1, 0);
-        let has_east = has_dir(0, 1);
-        let has_west = has_dir(0, -1);
-
-        let n = compass
-            .n
-            .or_else(|| if !has_north { Some(0) } else { None });
-        let s = compass
-            .s
-            .or_else(|| if !has_south { Some(0) } else { None });
-        let e = compass.e.or_else(|| if !has_east { Some(0) } else { None });
-        let w = compass.w.or_else(|| if !has_west { Some(0) } else { None });
+        let n = compass.n.or_else(|| if avail[0] == 0 { Some(0) } else { None });
+        let s = compass.s.or_else(|| if avail[1] == 0 { Some(0) } else { None });
+        let e = compass.e.or_else(|| if avail[2] == 0 { Some(0) } else { None });
+        let w = compass.w.or_else(|| if avail[3] == 0 { Some(0) } else { None });
 
         let nv = n.unwrap_or(0);
         let sv = s.unwrap_or(0);
@@ -366,10 +356,10 @@ impl<'a> Solver<'a> {
             exact_area = Some(1 + ev + wv);
         }
 
-        let mut max_area = None;
-        if n.is_some() && s.is_some() && e.is_some() && w.is_some() {
-            max_area = Some(1 + nv + sv + ev + wv);
-        }
+        // Upper bound: known directions contribute their exact value; unknown
+        // ones contribute the number of cells that half-plane can hold.
+        let cap = |known: Option<usize>, idx: usize| known.unwrap_or(avail[idx]);
+        let max_area = Some(1 + cap(n, 0) + cap(s, 1) + cap(e, 2) + cap(w, 3));
 
         (min_area, max_area, exact_area)
     }
@@ -768,8 +758,76 @@ impl<'a> Solver<'a> {
     /// `curr_comp_id` valid.  S4 writes Uncut, which *merges* components and
     /// invalidates them, so all S4 edges are decided against one consistent
     /// snapshot and applied last; the fixed-point loop then rebuilds components.
+    ///
+    /// S5 (compass-bbox feasibility) is factored out into
+    /// `propagate_solitary_feasibility`.
+    ///
+    /// S5 — compass-bbox feasibility, gated on `solitary_feasible_active`
+    /// (see `solve()`): every piece holds exactly one clue, so a cell may only
+    /// join the piece of a clue whose bbox covers it.
+    /// * **S5a** a cell outside every clue's bbox can belong to no piece.
+    /// * **S5b** adjacent cells with no shared candidate clue can never be the
+    ///   same piece → the edge between them must be Cut.
+    /// * **S5c** a component already holding compass clue `i` is that clue's
+    ///   piece, so every cell in it must lie in clue `i`'s bbox.
+    fn propagate_solitary_feasibility(&mut self, num_comp: usize) -> Result<bool, ()> {
+        let mut progress = false;
+        let n = self.grid.num_cells();
+        // S5a.
+        for c in 0..n {
+            if self.grid.cell_exists[c] && self.solitary_feasible[c] == 0 {
+                return Err(());
+            }
+        }
+        // S5b.
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Unknown {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            if self.solitary_feasible[c1] & self.solitary_feasible[c2] == 0 {
+                if !self.set_edge(e, EdgeState::Cut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+        // S5c.
+        let mut clue_bit = vec![u8::MAX; n];
+        for (bit, &cl_idx) in self.prop.compass_clue_indices.iter().enumerate() {
+            if let CellClue::Compass { cell, .. } = &self.cell_clues[cl_idx] {
+                clue_bit[*cell] = bit as u8;
+            }
+        }
+        for ci in 0..num_comp {
+            let mut bit: Option<u8> = None;
+            for &c in &self.comp_cells[ci] {
+                if clue_bit[c] != u8::MAX {
+                    bit = Some(clue_bit[c]);
+                    break;
+                }
+            }
+            let Some(b) = bit else { continue };
+            let mask = 1u64 << b;
+            for &c in &self.comp_cells[ci] {
+                if self.solitary_feasible[c] & mask == 0 {
+                    return Err(());
+                }
+            }
+        }
+        Ok(progress)
+    }
+
     fn propagate_solitary(&mut self, num_comp: usize) -> Result<bool, ()> {
         let mut progress = false;
+
+        // S5 — compass-bbox feasibility (only when `solitary_feasible_active`).
+        if self.solitary_feasible_active {
+            progress |= self.propagate_solitary_feasibility(num_comp)?;
+        }
 
         // Per-component clue counts + S2.
         let mut clues_in = vec![0usize; num_comp];

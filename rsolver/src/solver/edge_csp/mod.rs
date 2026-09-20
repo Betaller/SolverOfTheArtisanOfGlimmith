@@ -1245,7 +1245,11 @@ mod tests {
 
     #[test]
     fn unsupported_rule_stays_out() {
-        let p = puzzle_with_rules(r#"[{"type":"rose_window"},{"type":"area"}]"#);
+        // `shape_pool` is not in SUPPORTED — the puzzle stays out even though
+        // `area` would otherwise qualify.  (`rose_window` used to serve as the
+        // unsupported example; it now qualifies on its own, see
+        // `rose_window_alone_is_capable`.)
+        let p = puzzle_with_rules(r#"[{"type":"shape_pool"},{"type":"area"}]"#);
         assert!(!is_edge_csp_capable(&p));
     }
 
@@ -1264,6 +1268,15 @@ mod tests {
         let p = puzzle_with_rules(r#"[{"type":"rose_window"},{"type":"same"}]"#);
         assert!(is_edge_csp_capable(&p));
         let p = puzzle_with_rules(r#"[{"type":"different"}]"#);
+        assert!(is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn rose_window_alone_is_capable() {
+        // edge_csp propagates rose separation / parity, so a pure rose_window
+        // puzzle is not a leaf-check-only search here (gives a second chance
+        // when aog and the dedicated rose solver both miss).
+        let p = puzzle_with_rules(r#"[{"type":"rose_window"}]"#);
         assert!(is_edge_csp_capable(&p));
     }
 }

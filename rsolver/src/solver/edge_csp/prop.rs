@@ -714,7 +714,6 @@ impl<'a> Solver<'a> {
                 }
             }
         }
-
         progress |= self.propagate_inequality_clues(num_comp)?;
         progress |= self.propagate_diff_clues(num_comp)?;
         if self.has_compass_clue {
@@ -3561,7 +3560,42 @@ impl<'a> Solver<'a> {
                 continue;
             }
             let merged_sz = self.curr_comp_sz[ci1] + self.curr_comp_sz[ci2];
-            if sizes[ci1].contains(&merged_sz) || sizes[ci2].contains(&merged_sz) {
+            // Sound only when the merged component cannot grow any further
+            // (`merged_sz == cap`): the forbidden-size set only constrains the
+            // FINAL size, and a merged component below its cap can keep
+            // growing past `merged_sz` to a legal size.
+            //
+            // The reference aog (area.rs:429) Cuts on `contains(&merged_sz)`
+            // unconditionally — unsound.  On 0926 (9×9 differentiation+area+
+            // difference) at the root, component (3,2) (sz=1, target 4) and
+            // (4,2) (sz=1) share e=19; merged_sz=2 equals a sealed neighbour's
+            // size 2, so the reference logic Cuts e=19 — but the official
+            // region 14 = {(3,2),(4,2),(4,3),(5,2)} merges them and grows to
+            // its target 4.  Requiring `merged_sz == min(max1, max2)` keeps
+            // the sound case (merge lands exactly on the cap → final size is
+            // `merged_sz` → genuinely forbidden) and drops the unsound one.
+            if ci1 >= self.prop.curr_max_area.len() || ci2 >= self.prop.curr_max_area.len() {
+                continue;
+            }
+            let cap = self.prop.curr_max_area[ci1].min(self.prop.curr_max_area[ci2]);
+            let hits_cap = merged_sz == cap
+                && (sizes[ci1].contains(&merged_sz) || sizes[ci2].contains(&merged_sz));
+            // A target on either side pins the merged region's final size, so
+            // a forbidden target is a genuine merge conflict even below the
+            // cap (this is the case the reference's `merged_sz` check was
+            // approximating).
+            let target_conflict = match (
+                self.curr_target_area.get(ci1).copied().flatten(),
+                self.curr_target_area.get(ci2).copied().flatten(),
+            ) {
+                (Some(t), Some(u)) if t == u => {
+                    sizes[ci1].contains(&t) || sizes[ci2].contains(&t)
+                }
+                (Some(t), None) => sizes[ci1].contains(&t) || sizes[ci2].contains(&t),
+                (None, Some(u)) => sizes[ci1].contains(&u) || sizes[ci2].contains(&u),
+                _ => false,
+            };
+            if hits_cap || target_conflict {
                 cuts.push(e);
             }
         }
@@ -4147,7 +4181,23 @@ impl<'a> Solver<'a> {
                 }
                 if self.rules.non_boxy && cell_count < bbox_size {
                     let holes = bbox_size - cell_count;
-                    if holes == 1 && max_possible >= bbox_size {
+                    // Sound only when the component is capped AT the bbox
+                    // (`max_possible == bbox_size`): taking the hole would
+                    // reach the cap, seal, and be a rectangle → contradiction,
+                    // so the hole edges must be Cut.
+                    //
+                    // The reference aog (area.rs:958) uses `>=` — unsound:
+                    // with `max_possible > bbox_size` the component can take
+                    // the hole AND keep growing past the bbox, ending
+                    // non-rectangular.  On 0497 (7×7 non_block+fence) the
+                    // root component {(0,0),(1,0),(1,1)} has a 2×2 bbox with
+                    // one hole (0,1) and unbounded max; the official region 0
+                    // takes that hole and extends right to (0,3) — a legal
+                    // 6-cell non-rectangle.  The `>=` version Cut e=6
+                    // ((0,1)-(1,1)) at the root and exhausted the search
+                    // instantly (0497/0171/0688/0824/0921/0926/0932/0993/
+                    // 1003/1091 all FAILed this way).
+                    if holes == 1 && max_possible == bbox_size {
                         for &c in &self.comp_cells[ci] {
                             let (r, col) = self.grid.cell_pos(c);
                             for (dr, dc) in [(-1isize, 0), (1, 0), (0, -1), (0, 1)] {

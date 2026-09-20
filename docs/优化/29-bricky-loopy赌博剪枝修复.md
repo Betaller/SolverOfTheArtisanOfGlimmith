@@ -1,9 +1,11 @@
-# 29 · bricky_loopy 赌博式剪枝修复（ring+brick 簇根因）
+# 29 · edge_csp 过度剪枝三连修（bricky_loopy 赌博 / boxy 单洞 / size_sep 合并）
 
 > 状态：**已修复**，2026-09-20。
 > 定位：1131/1258 基准里 ring+brick 组合 14 道 FAIL 中多数 attempt 链为
 > `edge_csp:exhausted`（甚至 0ms 根层耗尽）——官方解存在但被 edge_csp 剪掉。
-> 根因是 `propagate_bricky_loopy` 的“强制前 n 条 Uncut”赌博式推理。
+> 根因是 `propagate_bricky_loopy` 的“强制前 n 条 Uncut”赌博式推理（§1-4）；
+> 同日又修两处同类缺陷：`propagate_boxy_nonboxy` 单洞强制与
+> `size_separation_merge_cuts` 合并尺寸检查（§5，boxy / differentiation 簇）。
 
 ---
 
@@ -68,24 +70,50 @@ loopy-only 分支（3+1→Cut、2+1→Uncut、3+0→矛盾）本就是全选/矛
 验证手段：官方解是唯一解，取官方解在根层传播后比对每条边状态——任何与官方解
 冲突的根层强制都是声音性 bug。本次即靠这个方法 10 分钟锁定 palisade 误判上游。
 
-## 5. 后续线索：0497 簇（edge_csp 快速 exhausted）
+## 5. 同日第二波：boxy / size_separation 的「当前值当最终值」缺陷（已修复）
 
-同口径基准里有 10 道 FAIL 的 attempt 链是 `edge_csp:exhausted`（多数 <100ms，
-0171/0497/0688/0921/1003 为 0ms）——搜索空间瞬间"耗尽"但官方解存在，疑似与
-bricky_loopy 同类的声音性过度剪枝。对 0497（7×7 non_block+fence）的定位进展：
+1148 基准里有 10 道 FAIL 的 attempt 链是 `edge_csp:exhausted`（多数 <100ms）——
+搜索空间瞬间"耗尽"但官方解存在。诊断方法与 §1 相同：官方解的全部 Cut 边播种为
+`is_boundary` 后 edge_csp 0ms 解出 → 传播器没问题，是根层/probing 的强制有错；
+再用 debug 构建的 `Backtrace::force_capture()`（release 下帧被内联吃掉）定位到
+具体传播器。根因两处，均为**把「当前尺寸」当「最终尺寸」**推理，且参考 aog
+同款（忠实移植带来的）：
 
-- 官方解的全部 Cut 边播种为 `is_boundary` 后，edge_csp **0ms 解出** →
-  传播器本身在正确输入上没问题。
-- 根层 probing 轨迹（`EDGE_CSP_DEBUG` + set_edge 打点）显示：`probe(e=0 Uncut)`
-  分支内 `area_bounds` 报 straddle（e=1 Cut 但 (1,0)~(2,0) 经 Uncut 路径连通），
-  于是提交 `e=0 Cut`（官方为 Uncut）→ 官方解被剪。
-- 追踪到 straddle 的上游：cell (1,1)（fence=Adjacent）在 N 边被误判 Cut 时会
-  强制 S=e7 Uncut（官方 Cut），与 e48/e54 的 Uncut 连通成 (1,0)~(2,0) 路径。
-  e6=(0,1)-(1,1) 的状态是关键分叉——需要确认 probe 分支内是谁先把 e6 判错。
-- 排查工具已沉淀：propagate() 的 step! 宏标注 Err 来源、palisade 强制来源格、
-  set_edge 的 dbg_src 标签、ROOTDEC 根层决策转储、官方解逐边比对脚本。
+### 5.1 `propagate_boxy_nonboxy` 的 non_boxy 单洞强制（area.rs:958）
 
-预计修通后 +3~8 道（0171/0497/0688/0824/0921/0926/0932/0993/1003/1091）。
+bbox 只剩 1 洞且 `max_possible >= bbox_size` 时强制 Cut 洞边——但组件可以
+**穿过洞继续向外生长、扩大 bbox**，最终仍是非矩形。0497 官方 region 0 =
+{(0,0),(0,1),(0,2),(0,3),(1,0),(1,1)} 正是如此：先取 2×2 bbox 的洞 (0,1)，
+再右扩到 (0,3)。修复：条件收紧为 `max_possible == bbox_size`（取洞即触顶
+封口成矩形 → 真矛盾）。
+
+### 5.2 `size_separation_merge_cuts` 的 merged_sz 检查（area.rs:429）
+
+两组件间 Unknown 边若 `merged_sz == sz1+sz2` 命中任一侧的禁用尺寸集就 Cut——
+但 merged_sz 只是合并后的**最小**尺寸，组件还能继续长到合法尺寸。0926 官方
+region 14 = {(3,2),(4,2),(4,3),(5,2)}：根层 (3,2)(sz=1,target=4) 与 (4,2)
+(sz=1) 的 merged_sz=2 命中密封邻居的尺寸 2 → e=19 被 Cut → 官方解被剪。
+修复：仅当 `merged_sz == min(max1, max2)`（合并即触顶，最终尺寸确定为
+merged_sz）或**任一侧带 target**（target 钉死最终尺寸，禁用 target 是真冲突）
+才 Cut。
+
+### 5.3 收益
+
+新解 8 道 via edge_csp：**0497 / 0688 / 0824 / 0921 / 0926 / 0993 / 1003 /
+1091**；0171 / 0932 由 0ms exhausted 转为正常 timeout（空间恢复合法但仍大）。
+1200/1032/0699/0850/0848/1378/0341/1370/1340 等 non_block/differentiation
+PASS 题抽样 0 回归。
+
+### 5.4 方法论沉淀
+
+1. **播种验证**：把官方解所有 Cut 边写成 `is_boundary` 重跑——0ms 解出说明
+   传播器无辜，问题在强制；仍 exhausted 说明传播器直接否定了官方解。
+2. **debug 构建 + `Backtrace::force_capture()`**：release 下函数被内联，栈只剩
+   `propagate→set_edge`；debug 构建能直接点名传播器（本次靠它 10 分钟锁定
+   `propagate_boxy_nonboxy`）。
+3. 参考 aog **从不做叶验证**（它假设自己的传播可靠），其 `>=` / 无条件
+   `contains(merged_sz)` 这类"当前值当最终值"的推理不能盲信——移植时凡把
+   当前尺寸/最小合并尺寸与"最终尺寸约束"比较的，都要问一句"组件还能长吗"。
 
 ## 6. 关联
 

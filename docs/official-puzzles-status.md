@@ -41,6 +41,7 @@
 | 2026-09-18 | **全量收口基准（`65d2336`）** | `results/bench/20260918_65d2336_shape-identity-compass-dual.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1127 / 1258** | **+7**（vs 1120） | 9 新解 / 2 损失。新解：0341/1370（different+fence）、1340（different+rose_window）via 形状同一性传播；1386/0418（本轮 0418 因争抢未进榜，串行复测 SOLVED）via compass bbox；0209/0703 via dual_connectivity；0956（aog 35s）/1131（edge_csp 65s）为临界题受益。损失 0685（串行复测 SOLVED，争抢噪声）、0491（watchtower 8×10，**1120 时代二进制同样 OOM**，非本轮回归）。二进制 `results/bin/rsolver-65d2336-linux-x86_64`。 |
 | 2026-09-18 | **最终基准（`c58054d`，回退 S5d 后）** | `results/bench/20260918_c58054d_shape-identity-compass-dual.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1131 / 1258** | **+11**（vs 1120） | 12 新解 / 1 损失。新解：0341/1370/1340（形状同一性）、0209/0703（dual_connectivity）、1386/0418（compass bbox）、0956/1131/1140fix/0990/1146（临界题受益于剪枝收紧）。损失仅 0491（watchtower 8×10，1120 时代二进制同样 OOM）。二进制 `results/bin/rsolver-c58054d-linux-x86_64`。 |
 | 2026-09-18 | rose_growth 连通性守卫（doc 28） | 直跑 rsolver + 153 题 rose PASS 回归 | 直跑 rsolver + 全量基准 `7b1e8c5` | **1128 / 1258**（全量，噪声带内） | **0**（正确性修复，非 PASS 增益） | `try_swap_fix` / `try_chain_move` / `repair_symbol_distribution` 三处搬格点加 `is_connected_set` 守卫。**更正**：此前误判的「25 道 FAIL / 13 道新解」不成立——那 25 道题多为 PASS（rose 非法候选只是中间被拒尝试，最终由 edge_csp/aog 解出）。修复后 PASS 数不变；价值在正确性。153 道 rose PASS 0 回归。 |
+| 2026-09-18 | **本轮收口基准（`8221be7`）** | `results/bench/20260918_8221be7_final.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1131 / 1258** | **+11**（vs 1120） | 12 新解 / 1 损失。新解：0341/1370/1340（形状同一性传播）、0209/0703（dual_connectivity D1/D2）、1386/0418（compass bbox 面积界）、1433（rose_window 单独可进门控）、0745（pieces）、0956/1131/1140fix（临界题受益）。损失仅 0491（watchtower 8×10，1120 时代二进制同样 OOM）。二进制 `results/bin/rsolver-8221be7-linux-x86_64`。 |
 
 ---
 
@@ -551,6 +552,32 @@ seeding，根层强制错误 Cut）。本次改用**结构规则**来源：
   （1120 提交的二进制）上同样 rc=137 OOM，属固有内存不稳题。
 - **产物**：`results/bench/20260918_c58054d_shape-identity-compass-dual.{txt,jsonl}`、
   `results/bin/rsolver-c58054d-linux-x86_64`。
+
+### 2026-09-18 · 本轮收口 1131/1258（`8221be7`）
+
+`--timeout 40 -j 6`，较 1120 基线净 **+11**（12 新解 / 1 损失）。这是本轮
+`feat/shape-identity-propagation` 分支的最终数字。
+
+- **12 新解**：0341 / 1370 / 1340（edge_csp 形状同一性传播）、0209 / 0703
+  （dual_connectivity D1/D2，structural_pieces via precise）、1386 / 0418
+  （compass bbox 面积界回填）、1433（rose_window 单独可进 edge_csp 门控）、
+  0745（pieces）、0956 / 1131 / 1140fix（多处剪枝收紧后的临界题）。
+- **1 损失**：0491（watchtower 8×10），在 1120 提交的二进制
+  `results/bin/rsolver-7c05d41-…` 上同样 rc=137 OOM，属固有内存不稳题。
+- **本轮证伪/0 增益项**（均已回退或降级为基础设施，详见 doc 27/28 与记忆）：
+  select_edge 启发式扩展（真回归）、exact_piece_count 玫瑰窗推导（阻塞
+  loop_closure）、solitary S5d/S5e 连通推理（1017 证伪）、AOG_SHAPE_CAP
+  各档（净负）、check_complement_feasibility（0 新解，已回退）、
+  rose_growth 连通/边界守卫（正确性修复，0 PASS 增益）。
+- **产物**：`results/bench/20260918_8221be7_final.{txt,jsonl}`、
+  `results/bin/rsolver-8221be7-linux-x86_64`。
+
+**距 1140 目标还差 9 道。** 剩余 127 道 FAIL 的主要簇：compass+solitary 11
+（三种传播方案均被证伪，实测 90s 预算也仅 1~2 道可解且引发 OOM）、rose 约 20
+（greedy 范式解不出，非法候选已修）、brick+ring OOM 约 8（aog 形状库爆炸，
+cap 各档净负）、edge_csp 模型缺口约 22（exhausted，多为 fence/non_block/
+watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20 的 rose→edge_csp
+边传播迁移，或 aog 形状枚举根治）。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

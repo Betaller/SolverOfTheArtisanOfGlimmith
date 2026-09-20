@@ -68,7 +68,26 @@ loopy-only 分支（3+1→Cut、2+1→Uncut、3+0→矛盾）本就是全选/矛
 验证手段：官方解是唯一解，取官方解在根层传播后比对每条边状态——任何与官方解
 冲突的根层强制都是声音性 bug。本次即靠这个方法 10 分钟锁定 palisade 误判上游。
 
-## 5. 关联
+## 5. 后续线索：0497 簇（edge_csp 快速 exhausted）
+
+同口径基准里有 10 道 FAIL 的 attempt 链是 `edge_csp:exhausted`（多数 <100ms，
+0171/0497/0688/0921/1003 为 0ms）——搜索空间瞬间"耗尽"但官方解存在，疑似与
+bricky_loopy 同类的声音性过度剪枝。对 0497（7×7 non_block+fence）的定位进展：
+
+- 官方解的全部 Cut 边播种为 `is_boundary` 后，edge_csp **0ms 解出** →
+  传播器本身在正确输入上没问题。
+- 根层 probing 轨迹（`EDGE_CSP_DEBUG` + set_edge 打点）显示：`probe(e=0 Uncut)`
+  分支内 `area_bounds` 报 straddle（e=1 Cut 但 (1,0)~(2,0) 经 Uncut 路径连通），
+  于是提交 `e=0 Cut`（官方为 Uncut）→ 官方解被剪。
+- 追踪到 straddle 的上游：cell (1,1)（fence=Adjacent）在 N 边被误判 Cut 时会
+  强制 S=e7 Uncut（官方 Cut），与 e48/e54 的 Uncut 连通成 (1,0)~(2,0) 路径。
+  e6=(0,1)-(1,1) 的状态是关键分叉——需要确认 probe 分支内是谁先把 e6 判错。
+- 排查工具已沉淀：propagate() 的 step! 宏标注 Err 来源、palisade 强制来源格、
+  set_edge 的 dbg_src 标签、ROOTDEC 根层决策转储、官方解逐边比对脚本。
+
+预计修通后 +3~8 道（0171/0497/0688/0824/0921/0926/0932/0993/1003/1091）。
+
+## 6. 关联
 
 - `rsolver/src/solver/edge_csp/prop.rs::propagate_bricky_loopy`
 - `docs/official-puzzles-status.md`（本轮进度行）

@@ -43,6 +43,7 @@
 | 2026-09-18 | rose_growth 连通性守卫（doc 28） | 直跑 rsolver + 153 题 rose PASS 回归 | 直跑 rsolver + 全量基准 `7b1e8c5` | **1128 / 1258**（全量，噪声带内） | **0**（正确性修复，非 PASS 增益） | `try_swap_fix` / `try_chain_move` / `repair_symbol_distribution` 三处搬格点加 `is_connected_set` 守卫。**更正**：此前误判的「25 道 FAIL / 13 道新解」不成立——那 25 道题多为 PASS（rose 非法候选只是中间被拒尝试，最终由 edge_csp/aog 解出）。修复后 PASS 数不变；价值在正确性。153 道 rose PASS 0 回归。 |
 | 2026-09-18 | **本轮收口基准（`8221be7`）** | `results/bench/20260918_8221be7_final.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1131 / 1258** | **+11**（vs 1120） | 12 新解 / 1 损失。新解：0341/1370/1340（形状同一性传播）、0209/0703（dual_connectivity D1/D2）、1386/0418（compass bbox 面积界）、1433（rose_window 单独可进门控）、0745（pieces）、0956/1131/1140fix（临界题受益）。损失仅 0491（watchtower 8×10，1120 时代二进制同样 OOM）。二进制 `results/bin/rsolver-8221be7-linux-x86_64`。 |
 | 2026-09-18 | watchtower Pass B 对角格误判修复（`3262e5d`） | `results/bench/20260918_3262e5d_watchtower-fix.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1130 / 1258**（噪声带内） | **+1 真增益**（0496） | Pass B 原先对「顶点四格间无共享边且 value>1」一律判矛盾；blocked 格可让顶点只剩对角相邻两格（0496 的 vertex(5,2)），它们仍可经外部路径合并，value=2 可满足。改为仅角点单格且 value>1 才矛盾。**0496（7×7 watchtower）via edge_csp 7ms 解出**；0491 在不 OOM 时亦 SOLVED（本轮并行下仍被 OOM 击杀）。0209/0418 本轮为争抢/OOM 翻转（串行复测均 SOLVED）。二进制 `results/bin/rsolver-3262e5d-linux-x86_64`。 |
+| 2026-09-20 | **bricky_loopy 赌博剪枝修复 + OOM 兜底重试（doc 29）** | `results/tmp/20260920_bricksound_oomretry.jsonl`（全量）+ `results/tmp/20260920_bricksound.jsonl`（无兜底对照） | `benchmark_rust_solver.py --timeout 40 -j 6` | **1146 / 1258** | **+16**（vs 1130） | 17 新解 / 1 损失（0745 为并行争抢噪声，串行复测 SOLVED）。**主修复**：`propagate_bricky_loopy` 的 ring+brick 与 bricky-only 分支把「至少 n 条 Uncut」实现成「强制前 n 条 Uncut」（赌博），1378 根层误强 (2,2) 的 W/E → palisade 误判矛盾 → 官方解被剪；改为仅 `cut_count == 2`（或 bricky `== 3`）全选 Uncut。**新解 9 道 ring+brick 簇 via edge_csp**：1373/1374b/1375/1378/0834/0631/1110/0977/0978；另 0209/0418/0491/0630/0952/0969/1294/1301 噪声带翻正。**OOM 兜底**：`RustSolver` 在 exit -9 时带 `AOG_SHAPE_CAP=200000` 重试一次（默认路径 cap 仍为 0——0710 等题合法库超 10M 条目，全局 cap 必回归），1373/1375/0834/0977/0978/0969 等 6 道 aog OOM 题由此得救。`pytest` 301、`cargo test` 34、complexity gate 全过。详见 `docs/优化/29-bricky-loopy赌博剪枝修复.md`。 |
 
 ---
 
@@ -579,6 +580,38 @@ seeding，根层强制错误 Cut）。本次改用**结构规则**来源：
 cap 各档净负）、edge_csp 模型缺口约 22（exhausted，多为 fence/non_block/
 watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20 的 rose→edge_csp
 边传播迁移，或 aog 形状枚举根治）。
+
+### 2026-09-20 · bricky_loopy 赌博剪枝修复 + OOM 兜底重试 → **1146/1258（doc 29）**
+
+`--timeout 40 -j 6`，较 1130 基线净 **+16**（17 新解 / 1 损失）。**1140 目标达成。**
+
+- **主修复（声音性）**：`propagate_bricky_loopy` 的 ring+brick 与 bricky-only
+  分支把「至少 n 条 Unknown 须 Uncut」实现成「强制**前 n 条** Uncut」——挑边是
+  赌博。1378 上根层（nodes=0）误强 cell (2,2) 的 W/E 为 Uncut，palisade 按
+  fence_pattern=Three 判矛盾，官方解被剪。诊断：`EDGE_CSP_DEBUG` + propagate()
+  临时 step! 宏标注 Err 来源 + 官方解逐边比对。改为仅当**全部** Unknown 都必须
+  Uncut（`cut_count == 2` / bricky `== 3`）才强制，中间情形只做矛盾检查。
+- **新解 9 道 ring+brick 簇 via edge_csp**：1373 / 1374b / 1375 / 1378 / 0834 /
+  0631 / 1110 / 0977 / 0978（该簇此前 14 道 FAIL 的共同根因）。
+- **OOM 兜底重试**：`RustSolver.solve` 在子进程 exit -9 时以
+  `AOG_SHAPE_CAP=200000` 原预算重试一次。默认路径 cap 保持 0——实测 0710
+  （area 8×8）合法形状库超 10M 条目，任何全局 cap 都会回归它；0384/0870/1131
+  在 200k 下亦回归、2M 下恢复。兜底让 1373/1375/0834/0977/0978/0969 等
+  aog OOM 题在重试中由 edge_csp 接住。
+- **1 损失**：0745，串行复测 SOLVED（pieces 40s 临界，-j 6 争抢噪声）。
+- **同日二次证伪**（doc 27 §5.1）：exact_piece_count two-piece parity seeding
+  在 0974（ring+rose、无 vertex 线索）上 nodes 1173→34 错剪——seeding 不可靠
+  不依赖 watchtower 上游错误边状态。loop_closure 挂 structural_pieces 的移植
+  实验（0974 nodes 减半仍超时）收益不足，未合入。
+- **产物**：`results/tmp/20260920_bricksound_oomretry.jsonl`（全量）、
+  `results/tmp/20260920_bricksound.jsonl`（无兜底对照，1137/1258）。
+- **测试**：`pytest` 301、`cargo test` 34、`complexity_gate.py` 全过。
+
+**剩余 112 道 FAIL 的主要簇**：compass+solitary 约 11、rose 约 20（greedy
+范式缺口）、watchtower/difference/inequality 约 25、无规则纯分区约 50+。
+下一步（新目标 1166）：doc 20 rose→edge_csp 边传播迁移、doc 26 未吸收技术
+（probing 增强 / mingle_shape / complement_feasibility 重估）、watchtower
+大题的 config 枚举扩展。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

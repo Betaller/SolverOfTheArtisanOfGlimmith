@@ -97,6 +97,15 @@ flood-fill **已决 Uncut** 边 → 连通组件；为每组件算目标面积�
 
 ring（禁 3 段）/ brick（禁 4 段）/ ring+brick（度≤2）三态分别处理。
 
+**⚠ 赌博剪枝修复（2026-09-20，doc 29）**：超度时的 Uncut 强制原先实现为
+「强制**前 n 条** Unknown Uncut」——只知道「至少 n 条须 Uncut」，挑哪几条是
+赌博。1378 根层误强 (2,2) 的 W/E 后 palisade 判矛盾，官方解被剪掉（ring+brick
+14 道 FAIL 的共同根因）。现仅在**全部** Unknown 都必须 Uncut 时才强制
+（ring+brick `cut_count == 2`、bricky `cut_count == 3`）；`cut_count` 更低而
+总数超限的情形只做矛盾检查，不挑边。新解 9 道（1373/1374b/1375/1378/0834/
+0631/1110/0977/0978）。经验法则：传播器里「至少 n 选 k」只有 k==n（全选）或
+k==0 才能落地为逐边强制，中间情形必须留给搜索。
+
 ### 3.4 搜索（`mod.rs::backtrack_edges`）
 
 `select_edge`（目标面积 + 密封 + watchtower 顶点多因子评分）→ `prefer_cut_first` →
@@ -255,4 +264,3 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   `pieces-compass-fix` 已修但 0 新解，未合）。
 - 纯 compass 0469/1395b 仍 FAIL（大单方向值 W=7/N=8/S=57 超 `MAX_AREA_THRESHOLD=12` 跳过，
   需桥/网关或调阈值；1395b 的 S=57 大列靠 bridge/gateway）。
-

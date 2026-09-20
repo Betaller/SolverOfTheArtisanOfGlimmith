@@ -244,10 +244,15 @@ impl<'a> Solver<'a> {
                     if cut_count >= 3 {
                         return Err(());
                     }
-                    let to_uncut = cut_count + unk_edges.len();
-                    if to_uncut > 2 {
-                        let n = to_uncut - 2;
-                        for &eid in &unk_edges[..n] {
+                    // Force Uncut only when EVERY unknown must go Uncut
+                    // (`cut_count == 2`): with `cut_count < 2` and too many
+                    // unknowns we only know that *some* of them end Uncut, and
+                    // picking the first `n` was an unsound gamble — on 1378 it
+                    // forced the W/E edges of cell (2,2) Uncut at the root and
+                    // the palisade propagator then rejected the official
+                    // solution (all 14 ring+brick FAILs share this path).
+                    if cut_count == 2 {
+                        for &eid in &unk_edges {
                             if !self.set_edge(eid, EdgeState::Uncut) {
                                 return Err(());
                             }
@@ -278,9 +283,10 @@ impl<'a> Solver<'a> {
                     if cut_count > 3 {
                         return Err(());
                     }
-                    if cut_count + unk_edges.len() > 3 {
-                        let n = cut_count + unk_edges.len() - 3;
-                        for &eid in &unk_edges[..n] {
+                    // Same soundness rule as the ring+brick branch: force
+                    // Uncut only when every unknown must go Uncut.
+                    if cut_count == 3 {
+                        for &eid in &unk_edges {
                             if !self.set_edge(eid, EdgeState::Uncut) {
                                 return Err(());
                             }

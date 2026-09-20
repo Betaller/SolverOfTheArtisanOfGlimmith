@@ -456,13 +456,17 @@ impl<'a> Solver<'a> {
                 // `third_party/aog/src/solver/mod.rs:139`).  We deliberately
                 // leave it `None`: writing `Some(n)` flips on the two-piece
                 // branch of `rose.rs::propagate_parity`, which seeds every Cut
-                // edge as parity=1 and — on 1135 / 1392 — forces edges Cut at
-                // the ROOT (nodes=0) that the official solution has Uncut.
-                // Count-only (no extra seeding) was re-tried 2026-09-18 with
-                // the same result: the seeding lives behind
-                // `two_piece == exact_piece_count == Some(2)`, so the count
-                // cannot be enabled without it.  Blocks the loop_closure /
-                // dual_connectivity ports (doc 26 §2.1-2.2).
+                // edge as parity=1 and forces edges Cut at the ROOT that the
+                // official solution has Uncut.  Confirmed on 1135 / 1392
+                // (watchtower, doc 27) and again 2026-09-20 on 0974
+                // (ring+rose, NO vertex clues): nodes dropped 1173 → 34 and
+                // the search exhausted — the seeding is unsound by itself,
+                // not only when watchtower leaves a wrong edge state.
+                // Count-only is not separable: the seeding lives behind
+                // `two_piece == exact_piece_count == Some(2)`.
+                // `structural_pieces` (a parallel field) carries the same
+                // count to `propagate_dual_connectivity` without touching
+                // parity.
                 // Full analysis: `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
                 solver.exact_piece_count = None;
             }

@@ -1044,13 +1044,10 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
     ];
     const AREA_RULES: [&str; 3] = ["area", "precise", "range"];
     // `rose_window` / `same` / `different` / `homogeneous` / `mixed` /
-    // `heterogeneous` are NOT propagated by edge_csp (it can only leaf-check
-    // them via `validate::validate`), but they frequently co-occur with a
-    // propagatable edge rule (ring/fence/compass/…). Tolerating them lets
-    // edge_csp engage on those edge rules instead of the puzzle being entirely
-    // excluded (which starves the search of edge_csp's strong propagation).
-    // Pure non-edge combos are still rejected by the EDGE_RULES/AREA_RULES
-    // checks below, so the blast radius is limited to edge+window/shape puzzles.
+    // `heterogeneous` carry propagation of their own (rose separation /
+    // parity, `check_mingle` / `check_mismatch` / `check_mixed`, gemini
+    // equal-area sealing + delta-gemini interaction), so they both tolerate
+    // co-occurring edge rules AND qualify on their own (see the gates below).
     //
     // `puzzle_piece` is deliberately NOT tolerated: a `puzzle_piece` puzzle is
     // solved by the `pieces` (DLX) solver, and gating it into edge_csp makes
@@ -1103,7 +1100,12 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
     if puzzle
         .rules
         .iter()
-        .any(|r| matches!(r.ctype.as_str(), "same" | "different" | "mixed"))
+        .any(|r| {
+            matches!(
+                r.ctype.as_str(),
+                "same" | "different" | "mixed" | "homogeneous" | "heterogeneous"
+            )
+        })
     {
         return true;
     }
@@ -1281,6 +1283,19 @@ mod tests {
         // puzzle is not a leaf-check-only search here (gives a second chance
         // when aog and the dedicated rose solver both miss).
         let p = puzzle_with_rules(r#"[{"type":"rose_window"}]"#);
+        assert!(is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn gemini_alone_is_capable() {
+        // `homogeneous`/`heterogeneous` carry real gemini/delta edge-clue
+        // propagation (equal-area sealing + delta-gemini interaction), so a
+        // non_block+homogeneous puzzle (0848 / 0850) is no longer leaf-check
+        // only.  Previously the gate rejected them and they stayed FAIL
+        // (aog timeout); with the gate open edge_csp solves both.
+        let p = puzzle_with_rules(r#"[{"type":"non_block"},{"type":"homogeneous"}]"#);
+        assert!(is_edge_csp_capable(&p));
+        let p = puzzle_with_rules(r#"[{"type":"heterogeneous"}]"#);
         assert!(is_edge_csp_capable(&p));
     }
 }

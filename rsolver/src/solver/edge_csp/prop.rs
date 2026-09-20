@@ -2378,7 +2378,7 @@ impl<'a> Solver<'a> {
         let mut progress = false;
         let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
         // === Pass B: edge-count-based ===
-        let constraints: Vec<(usize, usize, usize, Vec<EdgeId>, bool)> = self
+        let constraints: Vec<(usize, usize, usize, Vec<EdgeId>, bool, usize)> = self
             .vertex_clues
             .iter()
             .filter_map(|clue| {
@@ -2396,10 +2396,10 @@ impl<'a> Solver<'a> {
                     return None; // nothing to propagate
                 }
                 if value > n {
-                    return Some((vi, vj, value, vec![], false));
+                    return Some((vi, vj, value, vec![], false, n));
                 }
                 if n == 1 {
-                    return Some((vi, vj, value, vec![], false));
+                    return Some((vi, vj, value, vec![], false, n));
                 }
 
                 let mut edge_ids = Vec::new();
@@ -2413,15 +2413,22 @@ impl<'a> Solver<'a> {
                     }
                 }
                 let is_cycle = n == 4 && edge_ids.len() == 4;
-                Some((vi, vj, value, edge_ids, is_cycle))
+                Some((vi, vj, value, edge_ids, is_cycle, n))
             })
             .collect();
 
-        for (_vi, _vj, value, edge_ids, is_cycle) in constraints {
-            if edge_ids.is_empty() && value > 1 {
-                return Err(());
-            }
+        for (vi, vj, value, edge_ids, is_cycle, n) in constraints {
             if edge_ids.is_empty() {
+                // The cells around this vertex share no edge *here*.  They can
+                // still end up in the same region via a path outside the
+                // vertex, so nothing follows from the edge count — unless only
+                // one cell touches the vertex (a corner), where `value > 1` is
+                // impossible no matter what.  (The old code returned `Err` for
+                // any `value > 1`, which wrongly killed 0496: blocked cells
+                // left only diagonally-adjacent pairs around vertex (5,2).)
+                if n == 1 && value > 1 {
+                    return Err(());
+                }
                 continue;
             }
             let mut n_cut = 0usize;

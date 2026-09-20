@@ -1103,6 +1103,15 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
     {
         return true;
     }
+    // `rose_window` alone also qualifies: edge_csp propagates rose separation
+    // (`propagate_rose_separation` / `propagate_rose_phase3` /
+    // `propagate_parity`), so a pure rose puzzle is not a leaf-check-only
+    // search here.  This gives a second chance to the handful of rose puzzles
+    // aog and the dedicated rose solver both miss (the rose solver's greedy
+    // `rose_growth` fallback exhausts on them — doc 28).
+    if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
+        return true;
+    }
     if !puzzle
         .rules
         .iter()

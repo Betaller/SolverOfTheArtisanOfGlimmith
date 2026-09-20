@@ -171,15 +171,21 @@ class RustSolver(Solver):
     # that without materially slowing the fast tail.
     SLACK = 1.2
 
-    def _subprocess_env(self, timeout: float) -> dict[str, str]:
+    def _subprocess_env(self, timeout: float, aog_shape_cap: int | None = None) -> dict[str, str]:
         """Env for the rsolver subprocess: inherit plus the per-puzzle timeout.
 
         `RSOLVER_TIMEOUT_MS` is the unit budget (ms) each of aog/pieces/
         backtrack/rose receives — threading `--timeout` into the Rust search
         (was hardcoded 30s in main.rs/io.rs, so `--timeout` never reached the
         solver).  Rust clamps values < 1000 to 1000.
+
+        `aog_shape_cap` sets `AOG_SHAPE_CAP` for the OOM-fallback re-run only;
+        the default path leaves it unset so aog's library stays uncapped.
         """
-        return {**os.environ, "RSOLVER_TIMEOUT_MS": str(int(timeout * 1000))}
+        env = {**os.environ, "RSOLVER_TIMEOUT_MS": str(int(timeout * 1000))}
+        if aog_shape_cap is not None:
+            env["AOG_SHAPE_CAP"] = str(aog_shape_cap)
+        return env
 
     def _wall_budget(self, timeout: float) -> float:
         """Subprocess wall-clock budget for one puzzle: `RUST_PARTS` × unit × slack."""
@@ -277,6 +283,33 @@ class RustSolver(Solver):
         self._cancelled = False
         input_json = self._prepare_input(puzzle)
 
+        result = self._run_once(puzzle, input_json, timeout)
+        # OOM fallback: aog's free-polyomino shape library is uncapped by
+        # default (DEFAULT_SHAPE_CAP=0; a fixed cap regresses puzzles like
+        # 0710 whose legitimate library exceeds 10M entries).  On memory-heavy
+        # puzzles the OOM killer takes the whole process (exit -9) before the
+        # deadline — and before edge_csp/pieces get to run at all.  Re-run the
+        # same budget with a shape cap: aog degrades to a graceful timeout and
+        # the later solvers can still solve (docs/优化/29 §3: +9 ring+brick).
+        if (
+            result.error_message
+            and "exited with code -9" in result.error_message
+            and not self._cancelled
+        ):
+            retry = self._run_once(puzzle, input_json, timeout, aog_shape_cap=200_000)
+            if retry.solved or not retry.error_message:
+                return retry
+            # Keep the original failure; note the fallback also failed.
+            retry_note = retry.error_message.split(":", 1)[0]
+            result = Solution(
+                solved=False,
+                error_message=f"{result.error_message} (capped retry: {retry_note})",
+            )
+        return result
+
+    def _run_once(
+        self, puzzle: Puzzle, input_json: str, timeout: float, aog_shape_cap: int | None = None
+    ) -> Solution:
         try:
             proc = subprocess.Popen(
                 [self._binary],
@@ -285,7 +318,7 @@ class RustSolver(Solver):
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
-                env=self._subprocess_env(timeout),
+                env=self._subprocess_env(timeout, aog_shape_cap=aog_shape_cap),
             )
         except FileNotFoundError:
             return Solution(

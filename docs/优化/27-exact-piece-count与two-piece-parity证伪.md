@@ -74,12 +74,36 @@ rose_by_type 各类型格数全相等且非零 ⇒ exact_piece_count = Some(N)
 - **`exact_piece_count` 保持 `None`**（main 现状，注释已更新为本文结论）。
 - **loop_closure / dual_connectivity 移植被阻塞**：两者都要 `exact_piece_count`；
   在修好 two-piece parity 的声音性之前，移植它们等于把同一个 bug 接进新传播器。
+  （dual_connectivity 后来改挂 `structural_pieces` 落地，见 doc 12/15。）
 - 修复方向（按优先级）：
   1. 查清根层哪条边状态与官方解不符（watchtower 传播 or rose 分离）——那是
      真正的声音性 bug，独立于 two-piece 也值得修；
   2. two-piece seeding 改为「只种同型对 + Uncut，不种 Cut 边」（牺牲强度换声音）；
   3. 或让 `exact_piece_count` 与 two-piece seeding 解耦（新字段
      `piece_count_for_loop_closure`），供 loop_closure 单独使用。
+
+### 5.1 补充实测（2026-09-20）：无 vertex 线索也翻车
+
+在 **0974**（Zone3/2-loopy，`ring+rose_window`，12×12，官方 2 块，**无任何
+vertex/watchtower 线索**）上启用计数（`exact_piece_count = rose_structural_pieces`，
+条件为“无 watchtower 线索”）：
+
+| 配置 | edge_csp 结果 |
+|---|---|
+| 计数关（main） | nodes=1173，40s 超时 |
+| 计数开 | **nodes=34，1.8s exhausted（错剪）** |
+
+**结论修正**：two-piece parity seeding 的不可靠**不依赖** watchtower 在根层留下的
+错误边状态——0974 上根本没有 vertex 线索，seeding 单独把官方解剪掉了。
+§3 的“上游错误边状态放大”解释不完整；seeding 本身（同型对 parity 1 + Cut 边
+parity 1 的 XOR 传递）在这套传播调用序下就是不可靠的。方向 1（查上游）优先级
+下调，方向 2/3（削弱或解耦 seeding）成为主线。
+
+同日尝试了方向 3 的变体：移植 `propagate_loop_closure` 挂到 `structural_pieces`
+（与 parity 完全解耦，绕开 seeding）。0974 上 nodes 1173→692，仍超时；单独收益
+不足，随工作树回退。移植要点存档：`max_loops = pieces_cap - 1`，DSU 数 Cut 边
+连通分量的奇度顶点分类 loop/open，`num_loops > max_loops` 即矛盾；边界 Uncut 与
+单环饱和两条强制规则需 `max_loops == 1` 且仅对 loopy 可靠。重启时可按此重建。
 
 ## 6. 关联
 

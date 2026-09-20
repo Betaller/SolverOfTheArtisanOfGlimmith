@@ -34,6 +34,15 @@
 | 2026-08-17 | 求解器返回信息完善：attempts 求解链 + ModuleOutcome（`9d8461f`，可观测性，非算法） | `results/bench/20260817_9d8461f_attempts-full.jsonl`（全量）+ `results/bin/rsolver-9d8461f-linux-x86_64` | `benchmark_rust_solver.py --timeout 30 -j 6` | **1084 / 1258** | 较 iter7 估算 1085，**−1（aog 抖动，非算法回归）** | **可观测性改动，求解能力不变**。`Solution` 加 `attempts: Vec<SolverAttempt>`（per-module 求解链，doc 23）：每个分派考虑过的模块一条 `{solver, status, elapsed_ms, note}`，`status` 六态 `success`/`timeout`/`exhausted`/`validation_failed`/`not_attempted`/`error`。五个 `solve_*` 返回类型 `Option<Vec<RegionInfo>>` → `ModuleOutcome`（`Solved`/`ValidationFailed`/`None`），把 aog/edge_csp/rose 内部「找到候选但 validate 拒绝」从 `None` 里分出来（原先被吞掉，对 FAIL 根因分析最关键）。`mod.rs` 分派处包裹计时+记录；`build_solution` 校验失败时把刚 push 的 success 改写成 validation_failed。JSON `attempts` 为新增可选字段（`skip_serializing_if=Vec::is_empty`，旧消费者不解析即忽略）。Python 侧 `SolverAttempt` 统一到 `models/solution.py`（L1 router 链 + L2 Rust 模块链共用，带 `AttemptStatus` 枚举 + `solved`/`error` 兼容 property）；UI 结果面板加求解链表格；benchmark `via=` 显示完整链（如 `aog:timeout→rose:success`）+ JSONL 落 `attempts`。**端到端实测**：C4-1 `aog:timeout(3011ms)→rose:success(54ms)`（旧 JSON 只说 solver=rose）；1169 `aog:validation_failed→rose/edge_csp:not_attempted→pieces:success`（validation_failed 成功浮出）；0839/1406 `aog:timeout→rose:validation_failed→backtrack:exhausted`（rose 产假解被 validate 拒，可见）。**0 真回归**：1 道差异 1270（homogeneous+rose_window，solo timeout=40 1.9s 解出 aog:success）为已知 aog 非确定性抖动题（iter4 已记录 1270/0749/0875 均为 aog 抖动假回归），与 attempts 改动无关。**已知边界**：OOM/外部 kill 时进程没机会写 JSON，`attempts=[]`（如 0882/0826/0838 rose OOM 题）；timeout/exhausted 用 `now>=deadline` 近似判定，精确 deadline-hit 信号留待 deadline 盲区整改（doc 17）。`cargo test` 20、`pytest` 全绿、ruff 改动文件错误数 19→16（未引入新错误）。详见 `docs/优化/23-求解器返回信息完善方案.md`。 |
 | 2026-09-02 | 1102 收口基准（`c10e181`） | `results/bench/20260902_c10e181_verify.jsonl` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1102 / 1258** | +18（vs 1084） | 1120 里程碑前的全量收口基准（rose-cap 预算 + rose deadline 锚定之前）；逐题解 + 独立验证均过，新解构成见下方 1120 条目。 |
 | 2026-09-09 | 1120 里程碑（PR#64 `a04a4ad` = 7c05d41 + de1f3f4） | `results/bench/20260909_areafeas_full.jsonl` | `benchmark_rust_solver.py --timeout 40 -j 8` | **1120 / 1258** | +18（vs 1102） | ① `AOG_ROSE_BUDGET_MS` 3s→20s：31 道 rose-capable 题原被 aog 3s 截断全超时，放宽后 aog 解 0213/0213nopad/0856/0957/0620/1386；② `solve_rose` 把 deadline 锚定自身起点（修复 router 全局 start 致 rose 剩余预算为负、0ms 返回，曾让 30s aog 预算回退 6 道）；③ 边 CSP `propagate` 加声音的面积可行性裁剪（两组件合并区最小尺寸已超任一方 max_area 则强 Cut，剪 0289 等爆炸，0 真回归）。新解 0439/0491/0445/0651 via edge_csp。1120/1258，0 真回归。 |
+| 2026-09-18 | edge_csp 形状同一性传播（same/different/mixed，`feat/shape-identity-propagation`） | `results/tmp/20260918_shape-identity-verify.txt`（定向验证；全量基准待合入前跑） | 直跑 rsolver + 219 题形状规则回归 | **1123 预估 / 1258**（+3，全量待确认） | +3（vs 1120） | `GlobalRules` 加 mingle/mismatch/mixed 三标志；`propagate_shape_constraints` 扩展 `check_mingle`（全局同形：首个密封组件定尺寸 a 后，超尺寸/目标≠a/潜力<a 判矛盾，达 a 强制封口）、`check_mismatch`（密封形状两两互异，BTreeSet）、`check_mixed`（Cut 边两侧密封同形判矛盾）。`is_edge_csp_capable` 放开纯形状同一性题（rose_window+same 等——`is_rose_capable` 拒绝它们，此前仅 aog 尝试）。**新解 0341/1370（different+fence）、1340（different+rose_window）via edge_csp**；219 道形状规则 PASS 题 0 回归；select_edge 启发式扩展（clue 约束/Slitherlink 端点/rose 邻近）实测致 0924fix/0972 真回归已回退。`pytest` 301、`cargo test` 34 通过。 |
+| 2026-09-18 | compass bbox 面积界回填 + solitary 可行集 + pieces compass deadline | `results/tmp/20260918_compass-bbox-verify.txt`（定向验证） | 直跑 rsolver + 154 题 compass/solitary 回归 | **1126 预估 / 1258**（+3，全量待确认） | +3（vs 1123） | `get_compass_area_bounds` 对含 `-1` 方向的罗盘线索给出 `max = 1+Σ(v_d or 半平面可存格数)`（原先四方向全已知才有 max），激活 `size==max→封口`/`growth_potential`/放置枚举门槛（够格线索 58→155）；`propagate_solitary` 加 S5 bbox 可行集（S5a/b/c，仅全罗盘线索且 K≤64 激活）；`pieces::compass_rec` 加 deadline（0312/0680 不再被 harness 击杀）。**新解 1386（compass+rose）、0418/1140fix（compass+watchtower）via edge_csp**；154 道 compass/solitary PASS 题 0 回归；compass+solitary FAIL 簇 11 题仍未解（S5b 根层不触发）。 |
+| 2026-09-18 | edge_csp dual_connectivity D1/D2（structural_pieces via precise） | 直跑 rsolver | 直跑 rsolver + 169 题 precise PASS 回归 | **1128 预估 / 1258**（+2，全量待确认） | +2（vs 1126） | 新字段 `structural_pieces`：仅从 `precise` 规则推导（fillable/A 整除时），刻意不用玫瑰窗计数（后者会打开 two-piece parity seeding 的错误强制，见 doc 27）。`propagate_dual_connectivity`：D1 须生长而仅 1 条 Unknown 生长边→强制 Uncut；D2 组件图连通分量数 >片数→矛盾、==片数→分量内 Unknown 边全 Uncut。**新解 0209（precise+ring，15.7s）、0703（fence+precise，1.8s）via edge_csp**；169 道 precise PASS 题 0 回归；1248（fence+homogeneous+precise）仍超时。 |
+| 2026-09-18 | edge_csp 卫生项打包（structural_pieces_max / compass 不兼容 / S5d / rose 源） | 直跑 rsolver | 定向回归 | **1128 预估 / 1258** | 0（均为 0 增益 0 回归的声音基础设施） | ① `structural_pieces_max`（range/precise 的 min_area 派生片数上界）供 D2 的 `cc > cap` 矛盾用；② `init_compass_incompatibility`（相邻不相容罗盘对预强制 Cut）；③ solitary S5d（单候选格的唯一邻接强制 Uncut）；④ `structural_pieces` 玫瑰窗源。四项各自实测 0 新解，但回归全绿（分别 273 / 96 / 154 / 56 题），保留为后续优化的地基。 |
+| 2026-09-18 | **全量收口基准（`65d2336`）** | `results/bench/20260918_65d2336_shape-identity-compass-dual.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1127 / 1258** | **+7**（vs 1120） | 9 新解 / 2 损失。新解：0341/1370（different+fence）、1340（different+rose_window）via 形状同一性传播；1386/0418（本轮 0418 因争抢未进榜，串行复测 SOLVED）via compass bbox；0209/0703 via dual_connectivity；0956（aog 35s）/1131（edge_csp 65s）为临界题受益。损失 0685（串行复测 SOLVED，争抢噪声）、0491（watchtower 8×10，**1120 时代二进制同样 OOM**，非本轮回归）。二进制 `results/bin/rsolver-65d2336-linux-x86_64`。 |
+| 2026-09-18 | **最终基准（`c58054d`，回退 S5d 后）** | `results/bench/20260918_c58054d_shape-identity-compass-dual.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1131 / 1258** | **+11**（vs 1120） | 12 新解 / 1 损失。新解：0341/1370/1340（形状同一性）、0209/0703（dual_connectivity）、1386/0418（compass bbox）、0956/1131/1140fix/0990/1146（临界题受益于剪枝收紧）。损失仅 0491（watchtower 8×10，1120 时代二进制同样 OOM）。二进制 `results/bin/rsolver-c58054d-linux-x86_64`。 |
+| 2026-09-18 | rose_growth 连通性守卫（doc 28） | 直跑 rsolver + 153 题 rose PASS 回归 | 直跑 rsolver + 全量基准 `7b1e8c5` | **1128 / 1258**（全量，噪声带内） | **0**（正确性修复，非 PASS 增益） | `try_swap_fix` / `try_chain_move` / `repair_symbol_distribution` 三处搬格点加 `is_connected_set` 守卫。**更正**：此前误判的「25 道 FAIL / 13 道新解」不成立——那 25 道题多为 PASS（rose 非法候选只是中间被拒尝试，最终由 edge_csp/aog 解出）。修复后 PASS 数不变；价值在正确性。153 道 rose PASS 0 回归。 |
+| 2026-09-18 | **本轮收口基准（`8221be7`）** | `results/bench/20260918_8221be7_final.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1131 / 1258** | **+11**（vs 1120） | 12 新解 / 1 损失。新解：0341/1370/1340（形状同一性传播）、0209/0703（dual_connectivity D1/D2）、1386/0418（compass bbox 面积界）、1433（rose_window 单独可进门控）、0745（pieces）、0956/1131/1140fix（临界题受益）。损失仅 0491（watchtower 8×10，1120 时代二进制同样 OOM）。二进制 `results/bin/rsolver-8221be7-linux-x86_64`。 |
+| 2026-09-18 | watchtower Pass B 对角格误判修复（`3262e5d`） | `results/bench/20260918_3262e5d_watchtower-fix.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1130 / 1258**（噪声带内） | **+1 真增益**（0496） | Pass B 原先对「顶点四格间无共享边且 value>1」一律判矛盾；blocked 格可让顶点只剩对角相邻两格（0496 的 vertex(5,2)），它们仍可经外部路径合并，value=2 可满足。改为仅角点单格且 value>1 才矛盾。**0496（7×7 watchtower）via edge_csp 7ms 解出**；0491 在不 OOM 时亦 SOLVED（本轮并行下仍被 OOM 击杀）。0209/0418 本轮为争抢/OOM 翻转（串行复测均 SOLVED）。二进制 `results/bin/rsolver-3262e5d-linux-x86_64`。 |
 
 ---
 
@@ -437,6 +446,139 @@ vs `6169df3` 基线：**0 回归，+1 PASS（0829）**；**8 道校验失败 →
 - **边 CSP 声音的面积可行性裁剪（`de1f3f4`）**：两组件间一条 Uncut 边合并出的区域尺寸至少 `sz1+sz2` 且须满足各方 max_area；若该最小尺寸已超任一 max_area，则无合法解可 uncut，强 Cut。缩减 area/precise/range 题分支（如 0289 爆炸），**剪掉 0 个合法解**。全量基准 1120 保持、0 回归（3 个临界翻转为 `-j 8` 负载噪声，solo 确认）；新 edge_csp 解出 0651，0980/0685 等 brick/ring OOM 在 aog 未被内存 kill 时也解出。
 - **新解**：0213 / 0213nopad / 0856 / 0957 / 0620 / 1386（aog）+ 0439 / 0491 / 0445 / 0651（edge_csp）。
 - **结果**：1120 / 1258（89.03%），较 1102 基准 +18、较 1084 基准 +36；0 真回归。二进制 `results/bin/rsolver-7c05d41-linux-x86_64`，基准 `results/bench/20260909_areafeas_full.jsonl`。
+
+### 2026-09-18 · edge_csp 形状同一性传播（same / different / mixed）
+
+1120 基线的 138 道 FAIL **全部带规则**（doc 26 基于 1111 基线的「134 道无规则」结论已过时）。
+按规则组合统计，涉及 `same`/`different`/`mixed` 的 FAIL 共 19 道，是仅次于
+compass+solitary（11 道）的第二大簇；其中 9 道本就在 `is_edge_csp_capable` 门内
+（有 fence/ring/brick 等边规则），另 10 道（rose_window+same、different+rose_window 等）
+因 `is_rose_capable` 拒绝 same/different 而只由 aog 尝试。
+
+- **传播实现**（`edge_csp/prop.rs`、`types.rs`、`adapter.rs`）：
+  - `check_mingle`（`same`）：按 `check_rule_same` 的**全局**语义（`len(shape_keys) <= 1`），
+    不是参考 aog 的仅相邻 mingle。首个密封组件定出共享尺寸 `a` 后：任何生长组件
+    超尺寸 / 目标面积≠a / 生长潜力<a 判矛盾；已达 `a` 的生长组件强制封口（生长边 Cut）。
+  - `check_mismatch`（`different`）：密封组件 canonical 形状两两互异（BTreeSet）。
+  - `check_mixed`（`mixed`）：每条 Cut 边两侧若均密封且 canonical 形状相同即判矛盾。
+  - 三者均为 false-negative-only（只拒绝、不产解），声音性由 219 题回归背书。
+- **门控放开**（`is_edge_csp_capable`）：所有规则 ⊆ SUPPORTED 且含 same/different/mixed
+  至少一条 → capable。这给 rose_window+same / different+rose_window 类题第二次机会
+  （aog 满预算失败后 edge_csp 接力），墙钟仍在 `RUST_PARTS=4` 预算内。
+- **新解**：0341（different+fence，44ms）、1370（different+fence，722ms）、
+  1340（different+rose_window，926ms），均 via edge_csp。
+- **证伪项**：select_edge 启发式补全（doc 26 §5.3 的 clue 约束组件 +30 / Slitherlink
+  路径端点 +45 / rose 邻近 +80）已实现并实测——0924fix（fence+difference，基线 12s）
+  与 0972（ring+rose_window，基线 9.2s）串行复测双双超时，属**真回归**（搜索序改变
+  砍掉原本可达的分支），已回退。教训：edge_csp 的搜索序对慢题敏感，启发式调整
+  必须逐题验证不能只看 FAIL 集合的净变化。
+- **验证**：219 道含 same/different/mixed 的 PASS 题全部复测 0 回归；`pytest` 301、
+  `cargo test` 34 通过。全量基准待合入前跑（见软门禁）。
+
+### 2026-09-18 · compass bbox 面积界回填 + solitary 可行集 + pieces compass deadline
+
+背景：compass+solitary 是 1120 基线最大的 FAIL 簇（11 道，全部纯 compass+solitary）。
+定向调研（未入库）指出三处缺口：罗盘 `-1` 方向使 `max_area` 无界 → 既有放置枚举/
+封口/生长势剪枝全部失效；solitary 只在组件粒度传播；`pieces::compass_rec` 无 deadline。
+
+- **`get_compass_area_bounds` 回填 max**（`edge_csp/prop.rs`）：半平面语义下
+  `size = 1 + (n+s) + (e+w) - Q`（Q=象限格，被和重复计数）。下界保持
+  `1 + max(n+s, e+w)`（对 Q 最紧）；上界改 `1 + Σ_d (v_d or avail_d)`，
+  `avail` 来自静态表 `compass_halfplane_avail`（`Solver::new` 一次算好，
+  避免每搜索节点 O(HW)）。原先仅四方向全已知才有 max → 含 `-1` 的线索
+  （全语料 971 个罗盘线索中的大多数）拿不到任何面积上界。
+  **够格进入放置枚举的线索 58 → 155**。
+- **solitary S5 可行集**（`propagate_solitary`）：`solitary` 下每区恰一线索，
+  故格只能属于「bbox 覆盖该格」的线索所对应的区。bbox 紧性依赖**区域连通性**：
+  要到达线索以北第 k 行必须穿越 k 个北半平面格，故 `up==v` 时区域格不会比
+  v 行更北（其余方向同理）。S5a 无候选格→矛盾；S5b 相邻格候选不交→强制 Cut；
+  S5c 含线索 i 的组件内出现不在 i bbox 的格→矛盾。仅当**全部线索均为罗盘**且
+  K≤64（u64 位掩码）时激活——否则 bbox 之外的格仍可属于无线索界的符号/面积区。
+- **`pieces::compass_rec` 加 deadline**：某方向为 `-1` 时 `max_sz=None`，递归
+  无尺寸上限；原先 0312/0680 会跑到 harness 墙钟被 SIGKILL（attempt trace 为空）。
+- **新解**：1386（compass+rose_window）、0418 / 1140fix（compass+watchtower），
+  均 via edge_csp、默认单元预算内解出（非加时收益）。
+- **未解出**：compass+solitary 簇 11 题全部仍超时。以 1017 为例，bbox 交集在根层
+  唯一锁定 7 格（与官方解一致），但这些唯一归属格之间**没有候选不交的邻接对**，
+  S5b 无边可强制；需要更强的「唯一归属 ⇒ 到线索的路径必 Uncut」连通性推理
+  （类似 dual_connectivity 的桥分析）才能坍缩搜索空间。
+- **回归**：154 道 compass / solitary PASS 题全部复测 0 回归。
+
+### 2026-09-18 · edge_csp dual_connectivity D1/D2（structural_pieces via precise）
+
+doc 26 列 loop_closure / dual_connectivity 为 P1，两者都以精确片数为入口门。
+doc 27 已证伪玫瑰窗推导（写入 `exact_piece_count` 即打开 two-piece parity
+seeding，根层强制错误 Cut）。本次改用**结构规则**来源：
+
+- **`structural_pieces`**：`precise` 规则给出每区面积 `A`，可填格数 `F`，
+  则片数恰为 `F/A`（仅整除时设置）。与玫瑰窗路径完全解耦。
+- **D1 单生长边强制**：组件必须生长（尺寸 < 目标或 < `curr_min_area`）而
+  Unknown 生长边恰 1 条 → 该边必 Uncut（组件别无通路长大）。
+- **D2 组件图连通分量**：组件为点、跨组件 Unknown 边为边。每个连通分量
+  至少成 1 片，故 `cc > pieces` 矛盾；`cc == pieces` 时每分量恰成 1 片，
+  其内部 Unknown 边全 Uncut。
+- **D3 桥分析未移植**（风险最高，需论证桥两侧面积，暂缓）。
+- **新解**：0209（precise+ring，edge_csp 15.7s）、0703（fence+precise，1.8s）。
+- **回归**：169 道 precise PASS 题全部复测 0 回归。1248 仍超时。
+
+### 2026-09-18 · 全量收口基准 1127/1258（`65d2336`）
+
+`--timeout 40 -j 6`，较 1120 基线净 **+7**（9 新解 / 2 损失）。
+
+- **新解 9 道**：0341 / 1370 / 1340（形状同一性传播，见上）；0209 / 0703
+  （dual_connectivity，见上）；1386（compass bbox 紧界）；0956（aog 35s）、
+  1131（edge_csp 65s）为跨运行临界题，本轮剪枝收紧后在预算内解出；
+  0418 本轮 -j 6 争抢未进榜，**串行复测 SOLVED**（edge_csp 27.5s）。
+- **损失 2 道**：0685 串行复测 SOLVED（aog 20s，争抢噪声）；0491（watchtower
+  8×10）在本轮与 `results/bin/rsolver-7c05d41-linux-x86_64`（1120 提交的二进制）
+  上**均 rc=137 OOM**，属固有内存不稳题，非本轮回归。
+- **判噪声口径**：与 `docs/code-complexity-report.md` §7.5 一致——并行下 40s 边界
+  题随机翻转，逐题串行复测才能定性。按此口径真实能力约 **1129**（+0685 +0418）。
+- **产物**：`results/bench/20260918_65d2336_shape-identity-compass-dual.{txt,jsonl}`、
+  `results/bin/rsolver-65d2336-linux-x86_64`。
+
+### 2026-09-18 · 最终基准 1131/1258（`c58054d`，回退 S5d 后）
+
+`--timeout 40 -j 6`，较 1120 基线净 **+11**（12 新解 / 1 损失）。
+
+- **S5d 回退**（`c58054d`）：solitary 的「单候选邻接强制」两种形式均被 1017
+  证伪——格级版忽略组件可经其它边生长（1017 格 (5,0) 自身边全已 Uncut 仍
+  被判矛盾）；组件级版修正后仍在 4s 内耗尽。S5d 只在 compass+solitary 题上
+  触发，该簇 11 道有无 S5d 均未解出，回退不影响任何增益。保留 S5a/b/c。
+- **12 新解**：0341 / 1370 / 1340（形状同一性传播）、0209 / 0703
+  （dual_connectivity D1/D2）、1386 / 0418（compass bbox 面积界）、
+  0956 / 1131 / 1140fix / 0990 / 1146（临界题受益于剪枝收紧，aog 或
+  edge_csp 在预算内解出）。
+- **1 损失**：0491（watchtower 8×10）在 `results/bin/rsolver-7c05d41-…`
+  （1120 提交的二进制）上同样 rc=137 OOM，属固有内存不稳题。
+- **产物**：`results/bench/20260918_c58054d_shape-identity-compass-dual.{txt,jsonl}`、
+  `results/bin/rsolver-c58054d-linux-x86_64`。
+
+### 2026-09-18 · 本轮收口 1131/1258（`8221be7`）
+
+`--timeout 40 -j 6`，较 1120 基线净 **+11**（12 新解 / 1 损失）。这是本轮
+`feat/shape-identity-propagation` 分支的最终数字。
+
+- **12 新解**：0341 / 1370 / 1340（edge_csp 形状同一性传播）、0209 / 0703
+  （dual_connectivity D1/D2，structural_pieces via precise）、1386 / 0418
+  （compass bbox 面积界回填）、1433（rose_window 单独可进 edge_csp 门控）、
+  0745（pieces）、0956 / 1131 / 1140fix（多处剪枝收紧后的临界题）。
+- **1 损失**：0491（watchtower 8×10），在 1120 提交的二进制
+  `results/bin/rsolver-7c05d41-…` 上同样 rc=137 OOM，属固有内存不稳题。
+- **本轮证伪/0 增益项**（均已回退或降级为基础设施，详见 doc 27/28 与记忆）：
+  select_edge 启发式扩展（真回归）、exact_piece_count 玫瑰窗推导（阻塞
+  loop_closure）、solitary S5d/S5e 连通推理（1017 证伪）、AOG_SHAPE_CAP
+  各档（净负）、check_complement_feasibility（0 新解，已回退）、
+  rose_growth 连通/边界守卫（正确性修复，0 PASS 增益）。
+- **产物**：`results/bench/20260918_8221be7_final.{txt,jsonl}`、
+  `results/bin/rsolver-8221be7-linux-x86_64`。
+
+**距 1140 目标还差 9 道。** 剩余 127 道 FAIL 的主要簇：compass+solitary 11
+（三种传播方案均被证伪，实测 90s 预算也仅 1~2 道可解且引发 OOM）、rose 约 20
+（greedy 范式解不出，非法候选已修）、brick+ring OOM 约 8（aog 形状库爆炸，
+cap 各档净负）、edge_csp 模型缺口约 22（exhausted，多为 fence/non_block/
+watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20 的 rose→edge_csp
+边传播迁移，或 aog 形状枚举根治）。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

@@ -107,6 +107,198 @@ pub(crate) struct Solver<'a> {
     /// number / shape_pattern / fence_pattern), so `propagate_solitary` prunes
     /// on the same notion of "clue" the leaf check enforces.
     pub clue_cell: Vec<bool>,
+    /// Per-cell count of existing cells in each compass half-plane
+    /// (N, S, E, W), excluding the cell itself.  Static board geometry, so it
+    /// is computed once in `solve()`; `get_compass_area_bounds` uses it to turn
+    /// an unspecified direction into a board-sized upper bound.
+    pub compass_halfplane_avail: Vec<[usize; 4]>,
+    /// `solitary_feasible[cell]` — bitmask of compass-clue indices whose
+    /// bounding box contains `cell`.  Under `solitary` every piece holds
+    /// exactly one clue, so a cell can only join the piece of a clue whose
+    /// bbox covers it; bit `i` clear means "cannot belong to clue i's piece".
+    /// Only populated when the propagation is active (see
+    /// `solitary_feasible_active`); otherwise empty.
+    pub solitary_feasible: Vec<u64>,
+    /// Whether `solitary_feasible` carries real information.  Requires the
+    /// `solitary` rule, at least one compass clue, ≤64 of them (u64 bitmask),
+    /// and — crucially — that *every* clue cell is a compass clue.  If some
+    /// clue carries no bbox (a bare symbol / area number / shape pattern), a
+    /// cell outside every compass bbox could still join that clue's piece, so
+    /// an empty bitmask would be a false contradiction.
+    pub solitary_feasible_active: bool,
+    /// Exact number of pieces when it follows from a *structural* rule, as
+    /// opposed to the (unsound to enable) rose-window deduction that flips on
+    /// the two-piece parity seeding — see
+    /// `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
+    ///
+    /// Currently only the `precise` rule supplies it: every region has area
+    /// `A`, so with `F` fillable cells the partition has exactly `F / A`
+    /// pieces (set only when `A` divides `F`).  Consumed by
+    /// `propagate_dual_connectivity`.
+    pub structural_pieces: Option<usize>,
+    /// Upper bound on the piece count when only a lower area bound is known
+    /// (`range`/`precise` min): every region has at least `min_area` cells, so
+    /// there are at most `total_cells / min_area` of them.  Used by the D2
+    /// contradiction check (`cc > pieces_max`); the "equal → force Uncut"
+    /// half needs an exact count and is skipped here.
+    pub structural_pieces_max: Option<usize>,
+}
+
+/// `avail[cell] = [N, S, E, W]` — count of *existing* cells strictly in each
+/// half-plane relative to `cell`.  Static board geometry, computed once in
+/// `Solver::new`; `get_compass_area_bounds` uses it to turn an unspecified
+/// compass direction into a board-sized upper bound.  Doing that inline would
+/// be O(H·W) per component per propagate call, i.e. on every search node.
+fn compute_halfplane_avail(grid: &Grid) -> Vec<[usize; 4]> {
+    let nc = grid.num_cells();
+    let mut avail = vec![[0usize; 4]; nc];
+    for r in 0..grid.rows {
+        for c in 0..grid.cols {
+            let id = grid.cell_id(r, c);
+            if !grid.cell_exists[id] {
+                continue;
+            }
+            let mut a = [0usize; 4];
+            for rr in 0..grid.rows {
+                for cc in 0..grid.cols {
+                    let nid = grid.cell_id(rr, cc);
+                    if !grid.cell_exists[nid] || (rr == r && cc == c) {
+                        continue;
+                    }
+                    if rr < r {
+                        a[0] += 1;
+                    }
+                    if rr > r {
+                        a[1] += 1;
+                    }
+                    if cc > c {
+                        a[2] += 1;
+                    }
+                    if cc < c {
+                        a[3] += 1;
+                    }
+                }
+            }
+            avail[id] = a;
+        }
+    }
+    avail
+}
+
+/// Exact piece count from the `rose_window` rule, when derivable.
+///
+/// Every piece holds exactly one cell of each symbol type, so if each type
+/// occurs `N` times the partition has exactly `N` pieces.  The type set comes
+/// from `rose_symbol_types` (rule params first, matching `validate.rs`'s rose
+/// semantics); counts that differ mean the puzzle is unsolvable, in which case
+/// we return `None` and let the rose propagation reject later.
+///
+/// This is a *different* consumer from the disabled `exact_piece_count`
+/// deduction: that one feeds `rose.rs::propagate_parity`'s two-piece branch,
+/// which seeds Cut edges as parity-1 and forces wrong Cuts at the root
+/// (`docs/优化/27-exact-piece-count与two-piece-parity证伪.md`).
+/// `structural_pieces` only feeds `propagate_dual_connectivity`.
+fn rose_structural_pieces(puzzle: &Puzzle) -> Option<usize> {
+    let types = crate::shapes::rose_symbol_types(puzzle);
+    if types.is_empty() {
+        return None;
+    }
+    let index: std::collections::BTreeMap<&str, usize> = types
+        .iter()
+        .enumerate()
+        .map(|(i, t)| (t.as_str(), i))
+        .collect();
+    let mut counts = vec![0usize; types.len()];
+    for row in &puzzle.cells {
+        for cell in row {
+            if let Some(sym) = &cell.symbol {
+                if let Some(&i) = index.get(sym.as_str()) {
+                    counts[i] += 1;
+                }
+            }
+        }
+    }
+    if counts.iter().all(|&c| c == counts[0] && c >= 1) {
+        Some(counts[0])
+    } else {
+        None
+    }
+}
+
+/// Can two compass clues never sit in the same region?
+///
+/// Ported from `third_party/aog/src/solver/propagation/area.rs::
+/// compass_cells_incompatible`.  Two independent families of conflicts:
+///
+/// * **Zero-value**: `A.n == 0` forbids any region cell north of A, so a clue
+///   B strictly north of A cannot share A's region (and symmetrically for the
+///   other five axis/side combinations).
+/// * **Value ordering**: if B is north of A then, inside a shared region,
+///   everything north of B is also north of A *plus B itself*, so
+///   `A.n ≥ B.n + 1`.  Both values known and `B.n ≥ A.n` → incompatible.
+///   When the two sit on the same row neither is north of the other, so a
+///   shared region forces `A.n == B.n` (and likewise for S / E / W).
+///
+/// All tests only use known direction values, so they are one-sided: a
+/// `false` answer just means "not proven incompatible".
+fn compass_cells_incompatible(
+    grid: &Grid,
+    ca: CellId,
+    pa: &CompassData,
+    cb: CellId,
+    pb: &CompassData,
+) -> bool {
+    let (ra, cola) = grid.cell_pos(ca);
+    let (rb, colb) = grid.cell_pos(cb);
+    let (ra, cola, rb, colb) = (ra as isize, cola as isize, rb as isize, colb as isize);
+
+    // Zero-value direction conflicts.
+    if pa.n == Some(0) && rb < ra {
+        return true;
+    }
+    if pb.n == Some(0) && ra < rb {
+        return true;
+    }
+    if pa.s == Some(0) && rb > ra {
+        return true;
+    }
+    if pb.s == Some(0) && ra > rb {
+        return true;
+    }
+    if pa.e == Some(0) && colb > cola {
+        return true;
+    }
+    if pb.e == Some(0) && cola > colb {
+        return true;
+    }
+    if pa.w == Some(0) && colb < cola {
+        return true;
+    }
+    if pb.w == Some(0) && cola < colb {
+        return true;
+    }
+
+    // Value ordering along each axis: the "further" clue needs a strictly
+    // smaller count; on the same line the counts must match.
+    fn axis_conflict(ahead: isize, va: Option<usize>, vb: Option<usize>) -> bool {
+        match (va, vb) {
+            (Some(a), Some(b)) => {
+                if ahead < 0 {
+                    a <= b
+                } else if ahead > 0 {
+                    b <= a
+                } else {
+                    a != b
+                }
+            }
+            _ => false,
+        }
+    }
+    // North / South compare along the row axis; East / West along the column.
+    axis_conflict(rb - ra, pa.n, pb.n)
+        || axis_conflict(ra - rb, pa.s, pb.s)
+        || axis_conflict(colb - cola, pa.e, pb.e)
+        || axis_conflict(cola - colb, pa.w, pb.w)
 }
 
 impl<'a> Solver<'a> {
@@ -175,6 +367,9 @@ impl<'a> Solver<'a> {
             }
         }
 
+        // Static half-plane cell counts per cell (compass upper bounds).
+        let compass_halfplane_avail = compute_halfplane_avail(&input.grid);
+
         let mut solver = Self {
             puzzle,
             grid: input.grid,
@@ -217,6 +412,11 @@ impl<'a> Solver<'a> {
             pair_branch: rose::PairBranchState::default(),
             exact_piece_count: None,
             clue_cell,
+            compass_halfplane_avail,
+            solitary_feasible: Vec::new(),
+            solitary_feasible_active: false,
+            structural_pieces: None,
+            structural_pieces_max: None,
         };
 
         // Rose-window state: map each distinct symbol string to a type index and
@@ -253,15 +453,17 @@ impl<'a> Solver<'a> {
 
                 // NOTE: AOG deduces `exact_piece_count` from the rose window
                 // here ("all types occur N times => exactly N pieces",
-                // `third_party/aog/src/solver/mod.rs:139`) and uses it to seed
-                // Cut edges as parity-1 facts.  We deliberately do NOT: our type
-                // set is built from *any* cell symbol, not just rose clues, so a
-                // puzzle carrying non-rose symbols gets a wrong count and the
-                // resulting pruning drops real solutions.
-                //
-                // Measured 2026-09-03 on the 187 rose_window puzzles: enabling
-                // the deduction and the extra parity seeding gained 0987 but
-                // lost 0213nopad, 1135 and 1392 (-2 net).  Reverted.
+                // `third_party/aog/src/solver/mod.rs:139`).  We deliberately
+                // leave it `None`: writing `Some(n)` flips on the two-piece
+                // branch of `rose.rs::propagate_parity`, which seeds every Cut
+                // edge as parity=1 and — on 1135 / 1392 — forces edges Cut at
+                // the ROOT (nodes=0) that the official solution has Uncut.
+                // Count-only (no extra seeding) was re-tried 2026-09-18 with
+                // the same result: the seeding lives behind
+                // `two_piece == exact_piece_count == Some(2)`, so the count
+                // cannot be enabled without it.  Blocks the loop_closure /
+                // dual_connectivity ports (doc 26 §2.1-2.2).
+                // Full analysis: `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
                 solver.exact_piece_count = None;
             }
         }
@@ -342,6 +544,37 @@ impl<'a> Solver<'a> {
     pub fn solve(&mut self) -> Option<Vec<RegionInfo>> {
         self.total_cells = self.grid.total_existing_cells();
 
+        // Structural piece count (see the field doc).
+        //
+        // Source 1 — `precise`: every region has area `A`, so with `F` fillable
+        // cells the partition has exactly `F / A` pieces.
+        if let Some(a) = self
+            .puzzle
+            .rules
+            .iter()
+            .find(|r| r.ctype == "precise")
+            .and_then(|r| r.params.get("area"))
+            .and_then(|v| v.as_u64())
+        {
+            let a = a as usize;
+            if a >= 1 && self.total_cells % a == 0 {
+                self.structural_pieces = Some(self.total_cells / a);
+            }
+        }
+        // Source 2 — `rose_window`: every piece holds exactly one cell of each
+        // symbol type, so if each type occurs `N` times the partition has
+        // exactly `N` pieces.  See `rose_structural_pieces`.
+        if self.structural_pieces.is_none() {
+            self.structural_pieces = rose_structural_pieces(self.puzzle);
+        }
+        // Piece-count upper bound from the global area lower bound: every
+        // region has at least `min_area` cells, so there are at most
+        // `total_cells / min_area` regions.  Only meaningful when the bound
+        // actually bites (`min_area > 1`).
+        if self.eff_min_area > 1 {
+            self.structural_pieces_max = Some(self.total_cells / self.eff_min_area);
+        }
+
         // Edges adjacent to a blocked/outside cell are outer borders → Cut.
         for e in 0..self.grid.num_edges() {
             let (c1, c2) = self.grid.edge_cells(e);
@@ -370,6 +603,15 @@ impl<'a> Solver<'a> {
                 })
                 .collect();
         }
+
+        // Solitary feasibility bitset (see `setup_solitary_feasibility`).
+        self.setup_solitary_feasibility();
+
+        // Pre-search compass incompatibility (see
+        // `init_compass_incompatibility`): adjacent compass clues that can
+        // never share a region get their edge forced Cut before the search
+        // starts.
+        self.init_compass_incompatibility();
 
         // Watchtower value==1 startup optimization (port of reference
         // `apply_watchtower_value_one_optimization`): an interior vertex (all 4
@@ -420,6 +662,114 @@ impl<'a> Solver<'a> {
         }
 
         self.solution_regions.take()
+    }
+
+    /// Build the `solitary` feasibility bitset (consumed by
+    /// `propagate_solitary_feasibility`).
+    ///
+    /// Under `solitary` every finished piece holds exactly one clue cell, so a
+    /// cell may only join the piece of a clue whose compass bounding box
+    /// covers it.  The bbox is sound thanks to region connectivity: to reach a
+    /// cell `n` rows north of the clue the region must cross `n` north
+    /// half-plane cells, so with `up == n` no region cell can sit further
+    /// north than `n` rows (same for the other axes).  An unspecified
+    /// direction (-1) leaves that axis unbounded.
+    ///
+    /// Activated only when every clue cell is a compass clue — otherwise a
+    /// cell outside every compass bbox could still belong to a symbol /
+    /// area-number piece, and an empty bitmask would be a false contradiction.
+    /// K ≤ 64 because the mask is a u64.
+    fn setup_solitary_feasibility(&mut self) {
+        if !self.rules.solitary || !self.has_compass_clue {
+            return;
+        }
+        let k = self.prop.compass_clue_indices.len();
+        if k == 0 || k > 64 {
+            return;
+        }
+        let mut compass_cells = std::collections::BTreeSet::new();
+        for &cl_idx in &self.prop.compass_clue_indices {
+            if let CellClue::Compass { cell, .. } = &self.cell_clues[cl_idx] {
+                compass_cells.insert(*cell);
+            }
+        }
+        let all_clues_are_compass = (0..self.grid.num_cells())
+            .all(|c| !self.clue_cell[c] || compass_cells.contains(&c));
+        if !all_clues_are_compass {
+            return;
+        }
+        let mut feasible = vec![0u64; self.grid.num_cells()];
+        for (bit, &cl_idx) in self.prop.compass_clue_indices.iter().enumerate() {
+            let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] else {
+                continue;
+            };
+            let (r, c) = self.grid.cell_pos(*cell);
+            let (ri, ci) = (r as isize, c as isize);
+            let min_r = compass.n.map_or(0, |v| ri - v as isize).max(0);
+            let max_r = compass
+                .s
+                .map_or(self.grid.rows as isize - 1, |v| ri + v as isize)
+                .min(self.grid.rows as isize - 1);
+            let min_c = compass.w.map_or(0, |v| ci - v as isize).max(0);
+            let max_c = compass
+                .e
+                .map_or(self.grid.cols as isize - 1, |v| ci + v as isize)
+                .min(self.grid.cols as isize - 1);
+            for rr in min_r..=max_r {
+                for cc in min_c..=max_c {
+                    let id = self.grid.cell_id(rr as usize, cc as usize);
+                    if self.grid.cell_exists[id] {
+                        feasible[id] |= 1u64 << bit;
+                    }
+                }
+            }
+        }
+        self.solitary_feasible = feasible;
+        self.solitary_feasible_active = true;
+    }
+
+    /// Pre-search compass incompatibility (port of
+    /// `third_party/aog/src/solver/propagation/area.rs::init_compass_incompatibility`).
+    ///
+    /// Two compass clues that can never sit in the same region, and that are
+    /// adjacent, get their shared edge forced Cut now — before the search
+    /// burns budget rediscovering it.  (Non-adjacent incompatible pairs are
+    /// left alone: the reference records them as rose `diffs`, which we do not
+    /// want to couple to, and the compass direction propagation already
+    /// rejects a merged pair at the leaf.)
+    fn init_compass_incompatibility(&mut self) {
+        if !self.has_compass_clue {
+            return;
+        }
+        let clues: Vec<(CellId, CompassData)> = self
+            .prop
+            .compass_clue_indices
+            .iter()
+            .filter_map(|&cl_idx| match &self.cell_clues[cl_idx] {
+                CellClue::Compass { cell, compass } if self.grid.cell_exists[*cell] => {
+                    Some((*cell, *compass))
+                }
+                _ => None,
+            })
+            .collect();
+        for i in 0..clues.len() {
+            for j in (i + 1)..clues.len() {
+                let (ca, pa) = clues[i];
+                let (cb, pb) = clues[j];
+                if !compass_cells_incompatible(&self.grid, ca, &pa, cb, &pb) {
+                    continue;
+                }
+                if let Some(eid) = self.grid.edge_between(ca, cb) {
+                    if self.edges[eid] == EdgeState::Unknown {
+                        // A failed set_edge here means a pre-drawn Uncut
+                        // contradicts the incompatibility — the puzzle is
+                        // unsolvable, but that is the search's job to prove;
+                        // ignore rather than abort setup.
+                        let _ = self.set_edge(eid, EdgeState::Cut);
+                    }
+                }
+            }
+        }
     }
 
     /// Flood-fill decided-Uncut edges into connected components, then build
@@ -739,6 +1089,29 @@ pub fn is_edge_csp_capable(puzzle: &Puzzle) -> bool {
     {
         return true;
     }
+    // Shape-identity rules now carry real propagation (`check_mingle` /
+    // `check_mismatch` / `check_mixed` in `propagate_shape_constraints`), so a
+    // puzzle whose only usable signal is `same` / `different` / `mixed` is no
+    // longer a leaf-check-only search.  This matters most for
+    // rose_window+same / rose_window+different combos: `is_rose_capable`
+    // rejects them (the rose solver's symbol bookkeeping assumes no global
+    // shape identity), so without this gate they were attempted by aog alone.
+    if puzzle
+        .rules
+        .iter()
+        .any(|r| matches!(r.ctype.as_str(), "same" | "different" | "mixed"))
+    {
+        return true;
+    }
+    // `rose_window` alone also qualifies: edge_csp propagates rose separation
+    // (`propagate_rose_separation` / `propagate_rose_phase3` /
+    // `propagate_parity`), so a pure rose puzzle is not a leaf-check-only
+    // search here.  This gives a second chance to the handful of rose puzzles
+    // aog and the dedicated rose solver both miss (the rose solver's greedy
+    // `rose_growth` fallback exhausts on them — doc 28).
+    if puzzle.rules.iter().any(|r| r.ctype == "rose_window") {
+        return true;
+    }
     if !puzzle
         .rules
         .iter()
@@ -872,7 +1245,11 @@ mod tests {
 
     #[test]
     fn unsupported_rule_stays_out() {
-        let p = puzzle_with_rules(r#"[{"type":"rose_window"},{"type":"area"}]"#);
+        // `shape_pool` is not in SUPPORTED — the puzzle stays out even though
+        // `area` would otherwise qualify.  (`rose_window` used to serve as the
+        // unsupported example; it now qualifies on its own, see
+        // `rose_window_alone_is_capable`.)
+        let p = puzzle_with_rules(r#"[{"type":"shape_pool"},{"type":"area"}]"#);
         assert!(!is_edge_csp_capable(&p));
     }
 
@@ -881,5 +1258,25 @@ mod tests {
         // `differentiation` alone is supported but carries no area signal.
         let p = puzzle_with_rules(r#"[{"type":"differentiation"}]"#);
         assert!(!is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn shape_identity_rule_alone_is_capable() {
+        // `same`/`different`/`mixed` now propagate, so they qualify even with
+        // no edge or area rule (e.g. rose_window+same, which the rose solver
+        // refuses and aog alone used to attempt).
+        let p = puzzle_with_rules(r#"[{"type":"rose_window"},{"type":"same"}]"#);
+        assert!(is_edge_csp_capable(&p));
+        let p = puzzle_with_rules(r#"[{"type":"different"}]"#);
+        assert!(is_edge_csp_capable(&p));
+    }
+
+    #[test]
+    fn rose_window_alone_is_capable() {
+        // edge_csp propagates rose separation / parity, so a pure rose_window
+        // puzzle is not a leaf-check-only search here (gives a second chance
+        // when aog and the dedicated rose solver both miss).
+        let p = puzzle_with_rules(r#"[{"type":"rose_window"}]"#);
+        assert!(is_edge_csp_capable(&p));
     }
 }

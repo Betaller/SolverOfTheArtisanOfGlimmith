@@ -1,0 +1,71 @@
+# 28 · rose_growth 产出不连通区域（正确性修复，0 新解）
+
+> 状态：**已修复（0 PASS 增益）**，2026-09-18。
+> 定位：1131/1258 基准（`c58054d`）里 **25 道题**的 attempt 链含
+> `rose:validation_failed`——rose 求解器产出了通不过 `validate::validate` 的
+> 候选。**更正**：这 25 道并非都是 FAIL，其中大多数（含 0879/0390/0972 等
+> 13 道）本就由 edge_csp / aog 解出并 PASS，rose 的非法候选只是中间一次
+> 被拒绝的尝试。修复后 rose 不再产出不连通候选，但 **PASS 数不变（+0）**；
+> 153 道 rose PASS 题 0 回归。价值在于正确性与省掉一次无效候选的构造开销。
+
+---
+
+## 0. 一句话结论
+
+rose 的两条路径里，`region_match`（精确覆盖，BFS 生成连通候选）产出的候选
+是连通的；**不连通区域来自 `rose_growth` 兜底路径**——其 `swap_repair_iteration`
+与 `repair_symbol_distribution` 在区域之间搬移格子时**不检查源区域是否仍连通**。
+
+## 1. 定位过程
+
+1. 在 1131 基准的 127 道 FAIL 里筛 `rose:validation_failed`：**25 道**
+   （1098/1099/1433/0879/0390/0838/0660/0972/1156/1222/0987/0998/0839/0634/
+   1403/0417/1402/0697/0776/1137/1392/1406/1150fix/1149a/1249）。
+2. 给 `solver/validate.rs::validate` 的早返回点加临时打印，在 1433 上得到：
+   **`validate FAIL: region 2 not connected (5 cells)`**。
+3. 给 `rose/mod.rs` 两条 `accept_if_valid` 调用点加来源标记：1433 上
+   **没有打印 region_match 的 REJECTED**，说明候选来自
+   `rose_growth::solve_rose_growth` 兜底。
+4. 读 `rose_growth.rs`：`wavefront_growth` 按邻接生长（连通性由构造保证），
+   但后续两步会破坏它：
+   - `swap_repair_iteration`（:285）→ `try_swap_fix` / `try_chain_move`：
+     为修复**预划边界违规**而在区域间搬格，只查边界不查连通；
+   - `repair_symbol_distribution`（:547）：为让每区恰含一个符号而搬格，
+     同样不查连通。
+
+## 2. 为什么值得修
+
+25 道是当前最大的单一失败簇。它们的共同形态是：aog 拿满 20s 超时 →
+rose 在 1~8s 内产出一个**结构非法**的候选被 `validate` 拒绝 → 路由器落到
+edge_csp/pieces（多数 `not_attempted`，因为纯 rose 题不在 edge_csp 门内）。
+若 rose 产出的候选保持连通，其中一部分会直接变成 PASS。
+
+注意：`accept_if_valid` 的拒绝是**正确行为**（路由器的独立复验网关，
+CLAUDE.md 关键不变量），本缺陷是"解不出"而非"错解被接受"。
+
+## 3. 修复（已落地）
+
+采用**方案 1（搬移后连通性检查）**：新增 `is_connected_set`（对区域格集做
+BFS，区域规模小、代价可接受），在三处搬移点加守卫——
+
+- `try_swap_fix`：格从 `cur` 搬到 `nrid` 后，若 `cur` 不再连通则回滚并试
+  下一个候选区域；
+- `try_chain_move`：两格互换后，`cur` 与 `n_rid` 任一不连通即回滚；
+- `repair_symbol_distribution`：非符号格从超员区 `ei` 搬出后，若 `ei` 被
+  切开则回滚。
+
+守卫只拒绝"切开采源区域"的搬移，不引入新的强制，声音性由 153 道 rose
+PASS 题 0 回归背书。
+
+**第二处缺陷（同批修复）：`assign_one_leftover` 漏检预划边界。** 该函数
+只检查格子"入口边"是否跨越预划边界，未检查其余三侧——格经非边界边并入
+区域后，另一侧可能正压在预划边界上。补上 `would_violate` 全侧检查后，
+1433 从 `validation_failed`（产出非法候选）变为 `exhausted`（诚实无解），
+即非法候选消失但该题本身 rose_growth 仍解不出。同样 0 PASS 增益。
+
+## 4. 关联
+
+- `rsolver/src/solver/rose/rose_growth.rs`（swap_repair / symbol repair）
+- `rsolver/src/solver/rose/mod.rs::accept_if_valid`
+- `rsolver/src/solver/validate.rs::validate`（连通性早返回）
+- 基准：`results/bench/20260918_c58054d_shape-identity-compass-dual.jsonl`

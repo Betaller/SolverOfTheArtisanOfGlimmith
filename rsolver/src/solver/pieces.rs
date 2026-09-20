@@ -42,7 +42,7 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
     }
 
     let ctx = build_context(puzzle);
-    let placements = generate_all_placements(puzzle, &ctx);
+    let placements = generate_all_placements(puzzle, &ctx, deadline);
 
     if placements.is_empty() {
         if ctx.num_cells == 0 {
@@ -204,7 +204,11 @@ fn collect_edge_constraints_data(
     result
 }
 
-fn generate_all_placements(puzzle: &Puzzle, ctx: &SolveContext) -> Vec<Placement> {
+fn generate_all_placements(
+    puzzle: &Puzzle,
+    ctx: &SolveContext,
+    deadline: Instant,
+) -> Vec<Placement> {
     let h = puzzle.height;
     let w = puzzle.width;
     let mut placements = Vec::new();
@@ -272,7 +276,7 @@ fn generate_all_placements(puzzle: &Puzzle, ctx: &SolveContext) -> Vec<Placement
                     continue; // too loosely constrained
                 }
 
-                let mut results = generate_compass_polyominoes(puzzle, r, c, comp);
+                let mut results = generate_compass_polyominoes(puzzle, r, c, comp, deadline);
                 // D8: truncate instead of discarding when too many compass placements
                 // are generated.  The first N placements are still useful; discarding
                 // all of them (old `continue`) skipped DLX entirely for these clues.
@@ -459,11 +463,18 @@ fn poly_rec(
 }
 
 /// Generate all connected polyominoes containing `(sr, sc)` that satisfy compass constraints.
+///
+/// `deadline` bounds the placement DFS: a compass clue with an unspecified
+/// direction has no size cap (`max_sz == None`), so without a wall-clock check
+/// the recursion can run far past the module budget — observed on 0312 / 0680
+/// where `pieces` was still enumerating 90s+ after aog / edge_csp had finished
+/// and the harness killed the whole subprocess (empty attempt trace).
 fn generate_compass_polyominoes(
     puzzle: &Puzzle,
     sr: usize,
     sc: usize,
     compass: &CompassClue,
+    deadline: Instant,
 ) -> Vec<Vec<[usize; 2]>> {
     let h = puzzle.height;
     let w = puzzle.width;
@@ -483,7 +494,7 @@ fn generate_compass_polyominoes(
 
     compass_rec(
         puzzle, &mut current, &mut counts, &mut candidates,
-        sri, sci, compass, &mut results,
+        sri, sci, compass, &mut results, deadline,
     );
     results
 }
@@ -497,7 +508,16 @@ fn compass_rec(
     cc_i: isize,
     compass: &CompassClue,
     results: &mut Vec<Vec<[usize; 2]>>,
+    deadline: Instant,
 ) {
+    // Wall-clock bail-out: the placement DFS below has no size cap when a
+    // direction is unspecified, so it must be deadline-bounded (see
+    // `generate_compass_polyominoes`).  Checking every call is fine —
+    // `Instant::now()` is ~25ns and each recursion step already does far more
+    // work (BTreeSet clones + neighbor scans).
+    if Instant::now() >= deadline {
+        return;
+    }
     // Check if any *specified* direction exceeds its compass value.  An
     // unspecified direction (`None`) is unbounded — it may hold any number of
     // cells.  (Previously `unwrap_or(0)` treated `None` as "exactly 0", which
@@ -622,7 +642,7 @@ fn compass_rec(
 
         counts[dir_idx] += 1;
         current.push(next);
-        compass_rec(puzzle, current, counts, candidates, cr_i, cc_i, compass, results);
+        compass_rec(puzzle, current, counts, candidates, cr_i, cc_i, compass, results, deadline);
         current.pop();
         counts[dir_idx] -= 1;
 

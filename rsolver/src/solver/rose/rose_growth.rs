@@ -192,8 +192,52 @@ fn wavefront_growth(
     true
 }
 
+/// Is the cell set 4-connected?  Guards `rose_growth`'s repair moves so they
+/// never slice a region in two (doc 28).  Regions are small, so a plain BFS
+/// over the set is cheap.
+fn is_connected_set(cells: &CellSet, w: usize) -> bool {
+    let n = cells.len();
+    if n <= 1 {
+        return true;
+    }
+    let mut max_idx = 0usize;
+    for i in cells.iter() {
+        if i > max_idx {
+            max_idx = i;
+        }
+    }
+    let mut seen = vec![false; max_idx + 1];
+    let start = cells.iter().next().unwrap();
+    let mut q = std::collections::VecDeque::new();
+    q.push_back(start);
+    seen[start] = true;
+    let mut reached = 0usize;
+    while let Some(cur) = q.pop_front() {
+        reached += 1;
+        let (r, c) = (cur / w, cur % w);
+        for (dr, dc) in DIRS {
+            let nr = r as i32 + dr;
+            let nc = c as i32 + dc;
+            if nr < 0 || nc < 0 {
+                continue;
+            }
+            let ni = nr as usize * w + nc as usize;
+            if ni <= max_idx && !seen[ni] && cells.contains(ni) {
+                seen[ni] = true;
+                q.push_back(ni);
+            }
+        }
+    }
+    reached == n
+}
+
 /// First repair strategy: move one endpoint of a violating pre-boundary edge
 /// into an adjacent region that has no pre-boundary conflict with it.
+///
+/// Every move is guarded by `is_connected_set` on the region the cell leaves:
+/// without that guard the repair can slice a region in two, and the resulting
+/// candidate is rejected by `validate` (doc 28 — 25 FAILs showed
+/// `rose:validation_failed`, traced to this path).
 fn try_swap_fix(
     region_of: &mut [Option<usize>],
     region_cells: &mut [CellSet],
@@ -225,9 +269,17 @@ fn try_swap_fix(
                 if has_pre_neighbor_in(region_of, pre, nrid, cell_r, cell_c, h, w) {
                     continue;
                 }
-                region_of[cell_r * w + cell_c] = Some(nrid);
-                region_cells[cur].remove(cell_r * w + cell_c);
-                region_cells[nrid].insert(cell_r * w + cell_c);
+                let idx = cell_r * w + cell_c;
+                region_of[idx] = Some(nrid);
+                region_cells[cur].remove(idx);
+                region_cells[nrid].insert(idx);
+                // The cell left `cur`; if that split it, undo and try the next.
+                if !is_connected_set(&region_cells[cur], w) {
+                    region_of[idx] = Some(cur);
+                    region_cells[cur].insert(idx);
+                    region_cells[nrid].remove(idx);
+                    continue;
+                }
                 return true;
             }
         }
@@ -266,12 +318,27 @@ fn try_chain_move(
                     continue;
                 }
                 if can_move_self(region_of, pre, n_rid, nidx, cell_r, cell_c, h, w) {
-                    region_of[nidx] = Some(cur);
-                    region_cells[n_rid].remove(nidx);
-                    region_cells[cur].insert(nidx);
-                    region_of[cell_r * w + cell_c] = Some(n_rid);
-                    region_cells[cur].remove(cell_r * w + cell_c);
-                    region_cells[n_rid].insert(cell_r * w + cell_c);
+                    let a = nidx;
+                    let b = cell_r * w + cell_c;
+                    region_of[a] = Some(cur);
+                    region_cells[n_rid].remove(a);
+                    region_cells[cur].insert(a);
+                    region_of[b] = Some(n_rid);
+                    region_cells[cur].remove(b);
+                    region_cells[n_rid].insert(b);
+                    // Both regions changed hands; a swap that disconnects either
+                    // one is not a repair (doc 28).
+                    if !is_connected_set(&region_cells[cur], w)
+                        || !is_connected_set(&region_cells[n_rid], w)
+                    {
+                        region_of[a] = Some(n_rid);
+                        region_cells[cur].remove(a);
+                        region_cells[n_rid].insert(a);
+                        region_of[b] = Some(cur);
+                        region_cells[n_rid].remove(b);
+                        region_cells[cur].insert(b);
+                        continue;
+                    }
                     return true;
                 }
             }
@@ -586,6 +653,14 @@ fn repair_symbol_distribution(
                         region_of[idx] = Some(di);
                         region_cells[ei].remove(idx);
                         region_cells[di].insert(idx);
+                        // Moving a non-symbol cell out of an over-full region
+                        // must not split it (doc 28).
+                        if !is_connected_set(&region_cells[ei], w) {
+                            region_of[idx] = Some(ei);
+                            region_cells[ei].insert(idx);
+                            region_cells[di].remove(idx);
+                            continue;
+                        }
                         moved = true;
                         break;
                     }
@@ -764,7 +839,14 @@ fn assign_one_leftover(
         return false;
     }
     valid.sort_by_key(|&i| region_sizes[i]);
-    let best = valid[0];
+    // The candidate filter above only checked the edge this cell would enter
+    // through; joining `best` must not cross a pre-drawn boundary on any of the
+    // cell's other three sides either (doc 28 — that gap let rose_growth emit
+    // candidates whose region straddles a boundary, rejected by `validate`).
+    let Some(&best) = valid.iter().find(|&&i| !would_violate(region_of, r, c, i, pre, w))
+    else {
+        return false;
+    };
     region_of[idx] = Some(best);
     if let Some(si) = sym {
         region_symbols[best] |= 1u64 << si;
@@ -862,6 +944,49 @@ fn repair_move_conflicts(
 
 /// One repair pass for the multi-symbol solver: try to move each violating cell
 /// into a compatible adjacent region.  Returns `true` if any cell was moved.
+/// Is region `rid` 4-connected, judging membership from `region_of`?  Same
+/// guard as `is_connected_set`, for the callers that track membership in a
+/// `region_of` map rather than a `CellSet` (doc 28).
+fn is_region_connected(region_of: &[Option<usize>], rid: usize, w: usize) -> bool {
+    let mut start: Option<usize> = None;
+    let mut count = 0usize;
+    for (i, &r) in region_of.iter().enumerate() {
+        if r == Some(rid) {
+            count += 1;
+            if start.is_none() {
+                start = Some(i);
+            }
+        }
+    }
+    if count <= 1 {
+        return true;
+    }
+    let start = start.unwrap();
+    let n = region_of.len();
+    let mut seen = vec![false; n];
+    let mut q = std::collections::VecDeque::new();
+    q.push_back(start);
+    seen[start] = true;
+    let mut reached = 0usize;
+    while let Some(cur) = q.pop_front() {
+        reached += 1;
+        let (r, c) = (cur / w, cur % w);
+        for (dr, dc) in DIRS {
+            let nr = r as i32 + dr;
+            let nc = c as i32 + dc;
+            if nr < 0 || nc < 0 || (nr as usize) * w + (nc as usize) >= n {
+                continue;
+            }
+            let ni = nr as usize * w + nc as usize;
+            if !seen[ni] && region_of[ni] == Some(rid) {
+                seen[ni] = true;
+                q.push_back(ni);
+            }
+        }
+    }
+    reached == count
+}
+
 fn repair_multisymbol(
     region_of: &mut [Option<usize>],
     region_symbols: &mut [u64],
@@ -895,9 +1020,22 @@ fn repair_multisymbol(
                     region_symbols[cur_rid] &= !(1u64 << si);
                     region_symbols[nrid] |= 1u64 << si;
                 }
-                region_of[cell_r * w + cell_c] = Some(nrid);
+                let idx = cell_r * w + cell_c;
+                region_of[idx] = Some(nrid);
                 region_sizes[cur_rid] -= 1;
                 region_sizes[nrid] += 1;
+                // Guard: the move must not slice the region the cell left
+                // (doc 28).  Undo everything on failure.
+                if !is_region_connected(region_of, cur_rid, w) {
+                    region_of[idx] = Some(cur_rid);
+                    region_sizes[cur_rid] += 1;
+                    region_sizes[nrid] -= 1;
+                    if let Some(si) = sym {
+                        region_symbols[cur_rid] |= 1u64 << si;
+                        region_symbols[nrid] &= !(1u64 << si);
+                    }
+                    continue;
+                }
                 repaired = true;
                 break;
             }

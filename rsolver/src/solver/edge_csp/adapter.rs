@@ -207,6 +207,9 @@ pub fn build_input(puzzle: &Puzzle) -> Input {
         boxy: has("block"),
         non_boxy: has("non_block"),
         solitary: has("solitary"),
+        mingle: has("same"),
+        mismatch: has("different"),
+        mixed: has("mixed"),
     };
 
     // `area_bounds` returns (min incl. compass, max incl. B2 cap).  We want the

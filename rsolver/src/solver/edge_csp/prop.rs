@@ -154,6 +154,10 @@ impl<'a> Solver<'a> {
                 progress |= self.propagate_delta_gemini_interaction()?;
             }
             progress |= self.propagate_area_bounds()?;
+        if self.structural_pieces.is_some() {
+            let num_comp = self.curr_comp_sz.len();
+            progress |= self.propagate_dual_connectivity(num_comp)?;
+        }
             if !self.vertex_clues.is_empty() {
                 progress |= self.propagate_watchtower()?;
             }
@@ -311,46 +315,36 @@ impl<'a> Solver<'a> {
     }
 
     /// Compass area bounds for a component: `(min, max, exact)`.
-    /// Inferred 0 for directions where no cells exist in the grid.
+    ///
+    /// Compass axes are **half-planes** (`_compass_halfplane_count` in
+    /// `src/solver/constraints.py`): a NE cell counts in both N and E, so the
+    /// four direction counts overlap and `size ≠ 1 + Σ`.  With `Q` = cells in
+    /// the four quadrants (counted twice by the sum):
+    ///   `size = 1 + (n+s) + (e+w) - Q`, hence
+    ///   `size ≥ 1 + max(n+s, e+w)`   (Q = min(n+s, e+w)) — the tightest lower
+    ///   bound expressible without knowing Q, and
+    ///   `size ≤ 1 + Σ dir_max`       (Q = 0) — a valid upper bound once every
+    ///   direction is capped.
+    ///
+    /// An unspecified direction (`-1`) is capped by the board: at most
+    /// `compass_halfplane_avail[cell][d]` existing cells lie in that
+    /// half-plane.  Previously an unspecified direction left `max_area = None`
+    /// (unbounded), which disabled the `size == max → seal` inference,
+    /// `growth_potential` capping and the compass placement-enumeration
+    /// threshold for every clue carrying a `-1` — the common case on the
+    /// compass+solitary FAIL cluster (only 58/971 corpus clues qualified).
+    /// A direction with no existing cell at all is inferred 0, as before.
     fn get_compass_area_bounds(
         &self,
         cell: CellId,
         compass: &CompassData,
     ) -> (usize, Option<usize>, Option<usize>) {
-        let (r, c) = self.grid.cell_pos(cell);
+        let avail = self.compass_halfplane_avail[cell];
 
-        let has_dir = |dr: isize, dc: isize| -> bool {
-            let mut d = 1isize;
-            loop {
-                let nr = r as isize + dr * d;
-                let nc = c as isize + dc * d;
-                if nr < 0
-                    || nc < 0
-                    || nr >= self.grid.rows as isize
-                    || nc >= self.grid.cols as isize
-                {
-                    return false;
-                }
-                let nid = self.grid.cell_id(nr as usize, nc as usize);
-                if self.grid.cell_exists[nid] {
-                    return true;
-                }
-                d += 1;
-            }
-        };
-        let has_north = has_dir(-1, 0);
-        let has_south = has_dir(1, 0);
-        let has_east = has_dir(0, 1);
-        let has_west = has_dir(0, -1);
-
-        let n = compass
-            .n
-            .or_else(|| if !has_north { Some(0) } else { None });
-        let s = compass
-            .s
-            .or_else(|| if !has_south { Some(0) } else { None });
-        let e = compass.e.or_else(|| if !has_east { Some(0) } else { None });
-        let w = compass.w.or_else(|| if !has_west { Some(0) } else { None });
+        let n = compass.n.or_else(|| if avail[0] == 0 { Some(0) } else { None });
+        let s = compass.s.or_else(|| if avail[1] == 0 { Some(0) } else { None });
+        let e = compass.e.or_else(|| if avail[2] == 0 { Some(0) } else { None });
+        let w = compass.w.or_else(|| if avail[3] == 0 { Some(0) } else { None });
 
         let nv = n.unwrap_or(0);
         let sv = s.unwrap_or(0);
@@ -366,10 +360,10 @@ impl<'a> Solver<'a> {
             exact_area = Some(1 + ev + wv);
         }
 
-        let mut max_area = None;
-        if n.is_some() && s.is_some() && e.is_some() && w.is_some() {
-            max_area = Some(1 + nv + sv + ev + wv);
-        }
+        // Upper bound: known directions contribute their exact value; unknown
+        // ones contribute the number of cells that half-plane can hold.
+        let cap = |known: Option<usize>, idx: usize| known.unwrap_or(avail[idx]);
+        let max_area = Some(1 + cap(n, 0) + cap(s, 1) + cap(e, 2) + cap(w, 3));
 
         (min_area, max_area, exact_area)
     }
@@ -736,7 +730,8 @@ impl<'a> Solver<'a> {
         self.check_gemini_pairs(num_comp)?;
         // Gemini/Delta shape-identity: sealed regions across a gemini edge must
         // share a canonical shape; across a delta edge they must differ.
-        self.propagate_shape_constraints(num_comp)?;
+        // Also `same`/`different`/`mixed` global shape-identity rules.
+        progress |= self.propagate_shape_constraints(num_comp)?;
 
         Ok(progress)
     }
@@ -767,8 +762,76 @@ impl<'a> Solver<'a> {
     /// `curr_comp_id` valid.  S4 writes Uncut, which *merges* components and
     /// invalidates them, so all S4 edges are decided against one consistent
     /// snapshot and applied last; the fixed-point loop then rebuilds components.
+    ///
+    /// S5 (compass-bbox feasibility) is factored out into
+    /// `propagate_solitary_feasibility`.
+    ///
+    /// S5 — compass-bbox feasibility, gated on `solitary_feasible_active`
+    /// (see `solve()`): every piece holds exactly one clue, so a cell may only
+    /// join the piece of a clue whose bbox covers it.
+    /// * **S5a** a cell outside every clue's bbox can belong to no piece.
+    /// * **S5b** adjacent cells with no shared candidate clue can never be the
+    ///   same piece → the edge between them must be Cut.
+    /// * **S5c** a component already holding compass clue `i` is that clue's
+    ///   piece, so every cell in it must lie in clue `i`'s bbox.
+    fn propagate_solitary_feasibility(&mut self, num_comp: usize) -> Result<bool, ()> {
+        let mut progress = false;
+        let n = self.grid.num_cells();
+        // S5a.
+        for c in 0..n {
+            if self.grid.cell_exists[c] && self.solitary_feasible[c] == 0 {
+                return Err(());
+            }
+        }
+        // S5b.
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Unknown {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            if self.solitary_feasible[c1] & self.solitary_feasible[c2] == 0 {
+                if !self.set_edge(e, EdgeState::Cut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+        // S5c.
+        let mut clue_bit = vec![u8::MAX; n];
+        for (bit, &cl_idx) in self.prop.compass_clue_indices.iter().enumerate() {
+            if let CellClue::Compass { cell, .. } = &self.cell_clues[cl_idx] {
+                clue_bit[*cell] = bit as u8;
+            }
+        }
+        for ci in 0..num_comp {
+            let mut bit: Option<u8> = None;
+            for &c in &self.comp_cells[ci] {
+                if clue_bit[c] != u8::MAX {
+                    bit = Some(clue_bit[c]);
+                    break;
+                }
+            }
+            let Some(b) = bit else { continue };
+            let mask = 1u64 << b;
+            for &c in &self.comp_cells[ci] {
+                if self.solitary_feasible[c] & mask == 0 {
+                    return Err(());
+                }
+            }
+        }
+        Ok(progress)
+    }
+
     fn propagate_solitary(&mut self, num_comp: usize) -> Result<bool, ()> {
         let mut progress = false;
+
+        // S5 — compass-bbox feasibility (only when `solitary_feasible_active`).
+        if self.solitary_feasible_active {
+            progress |= self.propagate_solitary_feasibility(num_comp)?;
+        }
 
         // Per-component clue counts + S2.
         let mut clues_in = vec![0usize; num_comp];
@@ -841,6 +904,135 @@ impl<'a> Solver<'a> {
             }
         }
 
+        Ok(progress)
+    }
+
+    /// Dual connectivity (port of `third_party/aog/src/solver/propagation/
+    /// dual.rs`, checks D1/D2).  Gated on `structural_pieces` — an exact piece
+    /// count derived from a *structural* rule (`precise`), never from the
+    /// rose-window deduction (doc 27).
+    ///
+    /// * **D1** a component that must still grow (size below its target or
+    ///   `curr_min_area`) and has exactly one Unknown growth edge has no other
+    ///   way to reach its size → that edge must be Uncut.
+    /// * **D2** view components as nodes and Unknown edges between distinct
+    ///   components as edges.  Every connected component of this graph must
+    ///   become at least one piece, so `cc > pieces` is a contradiction; when
+    ///   `cc == pieces` each graph component is exactly one piece and all its
+    ///   internal Unknown edges must be Uncut.
+    ///
+    /// D3 (bridge analysis) is deliberately not ported: it needs a finer
+    /// argument about the two sides of each bridge and is the riskiest of the
+    /// three.
+    pub(crate) fn propagate_dual_connectivity(&mut self, num_comp: usize) -> Result<bool, ()> {
+        let exact = self.structural_pieces;
+        let bound = self.structural_pieces_max;
+        if exact.is_none() && bound.is_none() {
+            return Ok(false);
+        }
+        if exact.map_or(false, |p| p < 2) {
+            return Ok(false);
+        }
+        let mut progress = false;
+
+        // D1: single growth edge on a component that still needs to grow.
+        let mut to_uncut: Vec<EdgeId> = Vec::new();
+        for ci in 0..num_comp {
+            let sz = self.curr_comp_sz[ci];
+            let must_grow = match self.curr_target_area[ci] {
+                Some(t) => sz < t,
+                None => sz < self.prop.curr_min_area[ci],
+            };
+            if !must_grow {
+                continue;
+            }
+            let mut unknown: Option<EdgeId> = None;
+            let mut count = 0usize;
+            for &e in &self.prop.growth_edges[ci] {
+                if self.edges[e] == EdgeState::Unknown {
+                    count += 1;
+                    if count > 1 {
+                        break;
+                    }
+                    unknown = Some(e);
+                }
+            }
+            if count == 1 {
+                to_uncut.push(unknown.unwrap());
+            }
+        }
+        for e in to_uncut {
+            if self.edges[e] == EdgeState::Unknown {
+                if !self.set_edge(e, EdgeState::Uncut) {
+                    return Err(());
+                }
+                progress = true;
+            }
+        }
+        if progress {
+            // Uncut merges components; the fixed-point loop rebuilds them.
+            return Ok(true);
+        }
+
+        // D2: connected-component count of the component graph.
+        // Union-Find over components, joined by Unknown edges.
+        let mut parent: Vec<usize> = (0..num_comp).collect();
+        fn find(parent: &mut Vec<usize>, x: usize) -> usize {
+            let mut r = x;
+            while parent[r] != r {
+                r = parent[r];
+            }
+            let mut cur = x;
+            while parent[cur] != r {
+                let next = parent[cur];
+                parent[cur] = r;
+                cur = next;
+            }
+            r
+        }
+        let mut cross_edges: Vec<EdgeId> = Vec::new();
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Unknown {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let (ci1, ci2) = (self.curr_comp_id[c1], self.curr_comp_id[c2]);
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            cross_edges.push(e);
+            let (r1, r2) = (find(&mut parent, ci1), find(&mut parent, ci2));
+            if r1 != r2 {
+                parent[r1] = r2;
+            }
+        }
+        let mut cc = 0usize;
+        for ci in 0..num_comp {
+            if find(&mut parent, ci) == ci {
+                cc += 1;
+            }
+        }
+        // `cc > pieces` is a contradiction whether `pieces` is exact or only
+        // an upper bound — every graph component needs at least one piece.
+        let cap = exact.or(bound).unwrap();
+        if cc > cap {
+            return Err(());
+        }
+        // Forcing Uncut needs the count to be exact: with only an upper bound
+        // a component could still split further.
+        if exact == Some(cc) {
+            for e in cross_edges {
+                if self.edges[e] == EdgeState::Unknown {
+                    if !self.set_edge(e, EdgeState::Uncut) {
+                        return Err(());
+                    }
+                    progress = true;
+                }
+            }
+        }
         Ok(progress)
     }
 
@@ -2186,7 +2378,7 @@ impl<'a> Solver<'a> {
         let mut progress = false;
         let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
         // === Pass B: edge-count-based ===
-        let constraints: Vec<(usize, usize, usize, Vec<EdgeId>, bool)> = self
+        let constraints: Vec<(usize, usize, usize, Vec<EdgeId>, bool, usize)> = self
             .vertex_clues
             .iter()
             .filter_map(|clue| {
@@ -2204,10 +2396,10 @@ impl<'a> Solver<'a> {
                     return None; // nothing to propagate
                 }
                 if value > n {
-                    return Some((vi, vj, value, vec![], false));
+                    return Some((vi, vj, value, vec![], false, n));
                 }
                 if n == 1 {
-                    return Some((vi, vj, value, vec![], false));
+                    return Some((vi, vj, value, vec![], false, n));
                 }
 
                 let mut edge_ids = Vec::new();
@@ -2221,15 +2413,22 @@ impl<'a> Solver<'a> {
                     }
                 }
                 let is_cycle = n == 4 && edge_ids.len() == 4;
-                Some((vi, vj, value, edge_ids, is_cycle))
+                Some((vi, vj, value, edge_ids, is_cycle, n))
             })
             .collect();
 
-        for (_vi, _vj, value, edge_ids, is_cycle) in constraints {
-            if edge_ids.is_empty() && value > 1 {
-                return Err(());
-            }
+        for (vi, vj, value, edge_ids, is_cycle, n) in constraints {
             if edge_ids.is_empty() {
+                // The cells around this vertex share no edge *here*.  They can
+                // still end up in the same region via a path outside the
+                // vertex, so nothing follows from the edge count — unless only
+                // one cell touches the vertex (a corner), where `value > 1` is
+                // impossible no matter what.  (The old code returned `Err` for
+                // any `value > 1`, which wrongly killed 0496: blocked cells
+                // left only diagonally-adjacent pairs around vertex (5,2).)
+                if n == 1 && value > 1 {
+                    return Err(());
+                }
                 continue;
             }
             let mut n_cut = 0usize;
@@ -3631,7 +3830,7 @@ impl<'a> Solver<'a> {
         Ok(())
     }
 
-    fn propagate_shape_constraints(&mut self, num_comp: usize) -> Result<(), ()> {
+    fn propagate_shape_constraints(&mut self, num_comp: usize) -> Result<bool, ()> {
         let has_gemini = self
             .edge_clues
             .iter()
@@ -3640,19 +3839,156 @@ impl<'a> Solver<'a> {
             .edge_clues
             .iter()
             .any(|cl| matches!(cl.kind, EdgeClueKind::Delta));
-        if !has_gemini && !has_delta {
-            return Ok(());
+        let has_mingle = self.rules.mingle;
+        let has_mismatch = self.rules.mismatch;
+        let has_mixed = self.rules.mixed;
+        if !has_gemini && !has_delta && !has_mingle && !has_mismatch && !has_mixed {
+            return Ok(false);
         }
 
         // Canonical shape per sealed component.
         let comp_shape = self.sealed_comp_shapes(num_comp);
+        let mut progress = false;
         if has_gemini {
             self.check_gemini_shape_pairs(num_comp, &comp_shape)?;
         }
         if has_delta {
             self.check_delta_shape_pairs(num_comp, &comp_shape)?;
         }
+        if has_mingle {
+            progress |= self.check_mingle(num_comp, &comp_shape)?;
+        }
+        if has_mismatch {
+            self.check_mismatch(num_comp, &comp_shape)?;
+        }
+        if has_mixed {
+            self.check_mixed(num_comp, &comp_shape)?;
+        }
 
+        Ok(progress)
+    }
+
+    /// `same` (mingle): EVERY piece shares one canonical shape — global, not
+    /// merely adjacent (`check_rule_same` requires `len(shape_keys) <= 1`).
+    ///
+    /// Once a piece is sealed at size `a`, every other piece must also finish
+    /// at `a`:
+    /// - any two sealed shapes that differ → contradiction;
+    /// - a growing component whose size already exceeds `a`, whose target area
+    ///   (from clues) is not `a`, or whose growth potential falls short of `a`
+    ///   → contradiction;
+    /// - a growing component that has already reached size `a` is sealed: force
+    ///   its remaining growth edges Cut (the same inference
+    ///   `propagate_area_constraints` performs at `size == max_a`).
+    ///
+    /// Returns whether any edge was forced.
+    fn check_mingle(
+        &mut self,
+        num_comp: usize,
+        comp_shape: &[Option<Shape>],
+    ) -> Result<bool, ()> {
+        // Reference size: the first sealed shape's component size.
+        let mut ref_sz: Option<usize> = None;
+        let mut ref_shape: Option<&Shape> = None;
+        for ci in 0..num_comp {
+            let Some(shape) = &comp_shape[ci] else {
+                continue;
+            };
+            match ref_shape {
+                None => {
+                    ref_shape = Some(shape);
+                    ref_sz = Some(self.curr_comp_sz[ci]);
+                }
+                Some(rs) => {
+                    if rs != shape {
+                        return Err(());
+                    }
+                }
+            }
+        }
+        let Some(a) = ref_sz else {
+            return Ok(false); // nothing sealed yet — size unknown, no inference
+        };
+        let mut progress = false;
+        for ci in 0..num_comp {
+            if comp_shape[ci].is_some() {
+                continue; // sealed at `a` already (shapes verified equal above)
+            }
+            if let Some(target) = self.curr_target_area[ci] {
+                if target != a {
+                    return Err(());
+                }
+            }
+            let sz = self.curr_comp_sz[ci];
+            if sz > a {
+                return Err(());
+            }
+            if !self.is_growing(ci) {
+                continue;
+            }
+            if sz == a {
+                // Reached the shared shape size → seal, mirroring the
+                // `size == max_a` branch of `propagate_area_constraints`.
+                for i in 0..self.prop.growth_edges[ci].len() {
+                    let e = self.prop.growth_edges[ci][i];
+                    if self.edges[e] == EdgeState::Unknown {
+                        if !self.set_edge(e, EdgeState::Cut) {
+                            return Err(());
+                        }
+                        progress = true;
+                    }
+                }
+            } else if self.growth_potential(ci) < a {
+                return Err(());
+            }
+        }
+        Ok(progress)
+    }
+
+    /// `different` (mismatch): every piece has a distinct canonical shape
+    /// (`check_rule_different` requires all shape keys pairwise unique), so two
+    /// sealed components carrying the same canonical shape is a contradiction.
+    fn check_mismatch(
+        &self,
+        num_comp: usize,
+        comp_shape: &[Option<Shape>],
+    ) -> Result<(), ()> {
+        // BTreeSet (not HashSet): membership-only here, but the project keeps
+        // search-path containers ordered so results stay reproducible.
+        let mut taken: std::collections::BTreeSet<&Shape> = std::collections::BTreeSet::new();
+        for ci in 0..num_comp {
+            if let Some(shape) = &comp_shape[ci] {
+                if !taken.insert(shape) {
+                    return Err(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `mixed`: pieces sharing an edge have different canonical shapes.  Every
+    /// Cut edge between two distinct sealed components is such an adjacency, so
+    /// equal shapes on the two sides → contradiction.
+    fn check_mixed(&self, num_comp: usize, comp_shape: &[Option<Shape>]) -> Result<(), ()> {
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            if let (Some(s1), Some(s2)) = (&comp_shape[ci1], &comp_shape[ci2]) {
+                if s1 == s2 {
+                    return Err(());
+                }
+            }
+        }
         Ok(())
     }
 

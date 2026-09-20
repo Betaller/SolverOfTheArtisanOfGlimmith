@@ -1041,8 +1041,70 @@ impl<'a> Solver<'a> {
         Ok(progress)
     }
 
-    /// Inequality edge clues: verify / prune area ordering.
-    fn propagate_inequality_clues(&mut self, _num_comp: usize) -> Result<bool, ()> {
+    /// Arc-consistency narrowing of the components' `[min, max]` area bounds
+    /// through the inequality chain (helper of `propagate_inequality_clues`).
+    ///
+    /// Skipped during failed-literal probing: the fixpoint loop is O(pairs)
+    /// per iteration and probing calls propagate once per Unknown edge — on
+    /// 1131 (9×9 area+inequality+difference) that overhead alone pushed
+    /// edge_csp from a 2.5s solve past the 40s deadline.  Probe results are
+    /// only used for contradiction detection, which the caller's check loop
+    /// already covers.
+    fn narrow_inequality_bounds(&mut self, pairs: &[(usize, usize)]) -> Result<bool, ()> {
+        if self.prop.curr_min_area.is_empty() || self.in_probing || pairs.is_empty() {
+            return Ok(false);
+        }
+        let mut progress = false;
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for &(smaller_ci, larger_ci) in pairs {
+                let new_max_s = self.prop.curr_max_area[larger_ci].saturating_sub(1);
+                if self.prop.curr_max_area[smaller_ci] > new_max_s {
+                    self.prop.curr_max_area[smaller_ci] = new_max_s;
+                    changed = true;
+                }
+                let new_min_l = self.prop.curr_min_area[smaller_ci].saturating_add(1);
+                if self.prop.curr_min_area[larger_ci] < new_min_l {
+                    self.prop.curr_min_area[larger_ci] = new_min_l;
+                    changed = true;
+                }
+            }
+            for &(smaller_ci, larger_ci) in pairs {
+                for ci in [smaller_ci, larger_ci] {
+                    if self.prop.curr_min_area[ci] > self.prop.curr_max_area[ci]
+                        || self.curr_comp_sz[ci] > self.prop.curr_max_area[ci]
+                    {
+                        return Err(());
+                    }
+                    // Narrowed to a point → pin as target (enables sealing).
+                    if self.prop.curr_min_area[ci] == self.prop.curr_max_area[ci]
+                        && self.curr_target_area[ci].is_none()
+                    {
+                        self.curr_target_area[ci] = Some(self.prop.curr_min_area[ci]);
+                        progress = true;
+                    }
+                }
+            }
+        }
+        Ok(progress)
+    }
+
+    /// Inequality edge clues: verify / prune area ordering, plus arc-consistency
+    /// narrowing of the components' `[min, max]` area bounds through the
+    /// inequality chain (port of `third_party/aog/src/solver/pieces.rs:337-377`,
+    /// which the pieces/DXL path uses but edge_csp previously lacked).
+    ///
+    /// For an adjacent pair with `area(small) < area(large)`: the final regions
+    /// are distinct (the clue edge is always Cut), so
+    /// `max[small] <= max[large] - 1` and `min[large] >= min[small] + 1`.
+    /// Iterating to a fixpoint propagates along whole chains (e.g. the size
+    /// ordering on 0152's 8 regions).  When narrowing makes `min == max` the
+    /// bound becomes a target, unlocking the sealing paths downstream.
+    /// The narrowing is skipped during failed-literal probing (one fixpoint
+    /// per probe × up to 256 probes is pure overhead — it pushed 1131 from a
+    /// 2.5s solve past its deadline); the contradiction checks below still run.
+    fn propagate_inequality_clues(&mut self, num_comp: usize) -> Result<bool, ()> {
         let ineq_clues: Vec<(EdgeId, bool)> = self
             .edge_clues
             .iter()
@@ -1051,6 +1113,26 @@ impl<'a> Solver<'a> {
                 _ => None,
             })
             .collect();
+
+        // Component-level ordered pairs across Cut clue edges.
+        let mut pairs: Vec<(usize, usize)> = Vec::new();
+        for &(e, smaller_first) in &ineq_clues {
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            pairs.push(if smaller_first { (ci1, ci2) } else { (ci2, ci1) });
+        }
+
+        let mut progress = self.narrow_inequality_bounds(&pairs)?;
 
         for (e, smaller_first) in ineq_clues {
             if self.edges[e] != EdgeState::Cut {
@@ -1106,7 +1188,7 @@ impl<'a> Solver<'a> {
                 }
             }
         }
-        Ok(false)
+        Ok(progress)
     }
 
     /// Difference edge clues: propagate target area when one side is sealed.

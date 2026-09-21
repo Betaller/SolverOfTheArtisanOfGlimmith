@@ -341,3 +341,14 @@ D0 对 `precise` / `rose_window` 来源的件数同样生效。
 - 1017 官方解 Cut 播种：修复前根层矛盾，修复后 0 节点解出（D2 的
   `exact == cc` 直接把剩余 12 条全 Uncut）。未播种的 1017 仍超时（60 条内部
   边、要切约 26 条，D0/D2 的收益要等搜索把组件数压到 4）。
+
+### 14.7 追加：S5d 潜在连通性 + 可行集搜索序
+
+- `solitary_potential_connectivity`（S5d）：对非 Cut 边 flood-fill 得「仍可能连
+  通」组件；可行集单点 `{i}` 的格子必须与线索 `i` 同属一个潜在组件，否则矛盾。
+  整盘一次 flood-fill，O(格+边)。
+- `select_edge` 在 `solitary_feasible_active` 时按端点可行集交集大小加分：交集
+  越小越优先切，让 `cc` 尽快爬到 K，D2/D0 收尾。
+
+`--rules solitary` 72 → 74/87；全量 1157 → **1159/1258**。**1017 与 1060 via
+edge_csp 解出**；0685 并行翻负但串行 20s SOLVED（噪声）。

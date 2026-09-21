@@ -915,6 +915,17 @@ impl<'a> Solver<'a> {
                 }
             }
 
+            // `solitary` + compass: the two endpoints share few candidate
+            // clues, so this edge is more likely a boundary.  Branching on it
+            // first grows the component-graph `cc` toward the exact piece
+            // count, which is what lets D2 (`cc == K` → force the rest Uncut)
+            // and D0 (`num_comp == K` → freeze) finish the partition instead of
+            // the search having to decide every remaining edge.
+            if self.solitary_feasible_active {
+                let shared = (self.solitary_feasible[c1] & self.solitary_feasible[c2]).count_ones();
+                score += (8i32 - shared.min(8) as i32) * 6;
+            }
+
             if score > best_score {
                 best_score = score;
                 best_e = Some((e, score));

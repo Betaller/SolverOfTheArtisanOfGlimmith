@@ -865,6 +865,70 @@ impl<'a> Solver<'a> {
     ///   same piece → the edge between them must be Cut.
     /// * **S5c** a component already holding compass clue `i` is that clue's
     ///   piece, so every cell in it must lie in clue `i`'s bbox.
+    /// S5d — potential connectivity for `solitary` + compass.
+    ///
+    /// Flood-fills over *non-Cut* edges (Uncut or still Unknown) to get the
+    /// "may still end up connected" components.  A cell whose only candidate
+    /// clue is `i` must land in region `i`, and a region is Uncut-connected,
+    /// so it has to share a potential component with clue `i`.  A Cut that
+    /// severs every such path is a contradiction that S5a/S5b/S5c cannot see
+    /// (they never look at reachability).  One flood-fill for the whole board,
+    /// so this is O(cells + edges).
+    fn solitary_potential_connectivity(&mut self) -> Result<(), ()> {
+        let n = self.grid.num_cells();
+        let mut pot = vec![usize::MAX; n];
+        let mut pot_id = 0usize;
+        for c in 0..n {
+            if !self.grid.cell_exists[c] || pot[c] != usize::MAX {
+                continue;
+            }
+            pot[c] = pot_id;
+            self.q_buf.clear();
+            self.q_buf.push(c);
+            while let Some(cur) = self.q_buf.pop() {
+                for eid in self.grid.cell_edges(cur).into_iter().flatten() {
+                    if self.edges[eid] == EdgeState::Cut {
+                        continue;
+                    }
+                    let (c1, c2) = self.grid.edge_cells(eid);
+                    let other = if c1 == cur { c2 } else { c1 };
+                    if !self.grid.cell_exists[other] || pot[other] != usize::MAX {
+                        continue;
+                    }
+                    pot[other] = pot_id;
+                    self.q_buf.push(other);
+                }
+            }
+            pot_id += 1;
+        }
+        let mut clue_pot = vec![usize::MAX; 64];
+        for (bit, &cl_idx) in self.prop.compass_clue_indices.iter().enumerate() {
+            if bit >= clue_pot.len() {
+                break;
+            }
+            if let CellClue::Compass { cell, .. } = &self.cell_clues[cl_idx] {
+                if self.grid.cell_exists[*cell] {
+                    clue_pot[bit] = pot[*cell];
+                }
+            }
+        }
+        for c in 0..n {
+            if !self.grid.cell_exists[c] {
+                continue;
+            }
+            let m = self.solitary_feasible[c];
+            // Singleton mask: exactly one candidate clue.
+            if m == 0 || (m & (m - 1)) != 0 {
+                continue;
+            }
+            let bit = m.trailing_zeros() as usize;
+            if bit < clue_pot.len() && clue_pot[bit] != usize::MAX && pot[c] != clue_pot[bit] {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+
     fn propagate_solitary_feasibility(&mut self, num_comp: usize) -> Result<bool, ()> {
         let mut progress = false;
         let n = self.grid.num_cells();
@@ -913,6 +977,7 @@ impl<'a> Solver<'a> {
                 }
             }
         }
+        self.solitary_potential_connectivity()?;
         Ok(progress)
     }
 

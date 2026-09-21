@@ -210,3 +210,44 @@ D0/D2 的收益要等搜索把边切到 `num_comp` 或 `cc` 逼近 K 才兑现�
   - 1140fix 在 `-j 6` 下 aog 与 edge_csp 双双 40s 超时翻负，**串行复测两次均
     61s SOLVED**——争抢噪声，非回归（与 memory 里 aog `block_adj` HashMap
     非确定性 + 并行争抢 flaky 的既有结论一致）。
+
+## 6. 追加：S5d 潜在连通性 + 搜索序（同分支第二轮）
+
+D0/D2 的收益要等搜索把组件数（或组件图的 `cc`）压到 K。1017 是 6×6、60 条内部
+边、要切约 26 条，edge DFS 在 40s 内走不到那个点。两件事补上这段路：
+
+### 6.1 S5d — 潜在连通性（`solitary_potential_connectivity`）
+
+S5a/S5b/S5c 都不看可达性。新增：
+
+> 对**非 Cut** 边（Uncut 或仍 Unknown）做一次 flood-fill，得到「仍可能连通」的
+> 组件。可行集是单点 `{i}` 的格子必须落进区域 `i`，而区域是 Uncut 连通的，所以
+> 它必须和线索 `i` 同属一个潜在组件。任何切断所有这种路径的 Cut 都是矛盾。
+
+整盘一次 flood-fill，O(格+边)。只在 `solitary_feasible_active` 时跑。
+
+### 6.2 搜索序（`select_edge`）
+
+端点可行集交集越小，这条边越可能是边界。优先切它，`cc` 就越快爬到 K，D2 的
+`exact == cc → 全 Uncut` 和 D0 的冻结规则就能替搜索收尾，而不是把每条剩下的边
+都交给 DFS 决定：
+
+```rust
+if self.solitary_feasible_active {
+    let shared = (self.solitary_feasible[c1] & self.solitary_feasible[c2]).count_ones();
+    score += (8 - shared.min(8)) * 6;
+}
+```
+
+### 6.3 实测
+
+`--rules solitary` 72 → **74**/87；全量基准 **1157 → 1159 / 1258**。
+
+- **1017**（罗盘簇里最小的那道，本次整条诊断线的起点）via edge_csp 解出。
+- **1060** via edge_csp 解出。
+- 1140fix 在上一轮 `-j 6` 下争抢翻负，本轮并行下也 PASS（噪声消除）。
+- 0685 本轮并行翻负，**串行复测两次均 20s SOLVED via aog**（噪声）。
+
+剩余 13 道 solitary FAIL：0308 / 0312 / 0680-0683 / 1080 / 1093 / 1109 /
+1246 / 1258 / 1259 / 1260。其中 0680-0683/1258 是 12×13~15×15 的大罗盘题，
+1246/1259/1260 是 7×7 五线索——都是搜索深度问题，不是传播缺口。

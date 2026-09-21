@@ -103,6 +103,15 @@ fn compass_zero_conflict(
     false
 }
 
+/// Diagnostic: `EDGE_CSP_SKIP=compass,solitary,probe` disables the named
+/// propagators so a soundness bug can be bisected without a rebuild.
+fn csp_skip(name: &str) -> bool {
+    match std::env::var("EDGE_CSP_SKIP") {
+        Ok(v) => v.split(',').any(|s| s == name),
+        Err(_) => false,
+    }
+}
+
 /// Pairwise value-ordering conflict along one compass axis (North/South/East/
 /// West).  `before` is true when `a` is strictly before `b` along this axis,
 /// `after` when strictly after.
@@ -132,19 +141,21 @@ impl<'a> Solver<'a> {
     /// Fixed-point propagation.  Returns `Ok(true)` when stable (no further
     /// progress), `Err(())` on contradiction or timeout.
     pub(crate) fn propagate(&mut self) -> Result<bool, ()> {
+        // Diagnostic: `EDGE_CSP_SKIP=compass,solitary,probe` disables named
+        // propagators so a soundness bug can be bisected without a rebuild.
         loop {
             if self.check_deadline() {
                 return Err(());
             }
             let mut progress = false;
 
-            if self.rules.bricky || self.rules.loopy {
+            if (self.rules.bricky || self.rules.loopy) && !csp_skip("bricky") {
                 progress |= self.propagate_bricky_loopy()?;
             }
             if !self.vertex_clues.is_empty() {
                 progress |= self.propagate_vertex_edge_parity()?;
             }
-            if self.has_compass_clue {
+            if self.has_compass_clue && !csp_skip("compass") {
                 progress |= self.propagate_compass()?;
             }
             if self.has_palisade_clue {
@@ -153,11 +164,21 @@ impl<'a> Solver<'a> {
             if self.has_gemini_and_delta {
                 progress |= self.propagate_delta_gemini_interaction()?;
             }
-            progress |= self.propagate_area_bounds()?;
-        if self.structural_pieces.is_some() {
-            let num_comp = self.curr_comp_sz.len();
-            progress |= self.propagate_dual_connectivity(num_comp)?;
-        }
+            let mut area_progress = false;
+            if !csp_skip("area") {
+                area_progress = self.propagate_area_bounds()?;
+                progress |= area_progress;
+            }
+            // `propagate_area_bounds` may have set edges after `build_components`
+            // ran (growth-edge cuts, solitary S4 Uncut, …), which leaves
+            // `curr_comp_id` / `curr_comp_sz` stale.  D0/D2 read those, so a
+            // stale `cc` used to be turned into a false `cc > pieces`
+            // contradiction — defer dual connectivity to the next iteration,
+            // where components are rebuilt.
+            if self.structural_pieces.is_some() && !csp_skip("dual") && !area_progress {
+                let num_comp = self.curr_comp_sz.len();
+                progress |= self.propagate_dual_connectivity(num_comp)?;
+            }
             if !self.vertex_clues.is_empty() {
                 progress |= self.propagate_watchtower()?;
             }
@@ -169,7 +190,7 @@ impl<'a> Solver<'a> {
 
             if !progress {
                 // Failed-literal detection: probe unknown edges / edge pairs.
-                if !self.in_probing && self.curr_unknown > 0 && self.curr_unknown <= 256 {
+                if !self.in_probing && self.curr_unknown > 0 && self.curr_unknown <= 256 && !csp_skip("probe") {
                     let saved = self.in_probing;
                     self.in_probing = true;
                     progress |= self.probe_one_round()?;
@@ -359,10 +380,16 @@ impl<'a> Solver<'a> {
 
         let min_area = 1 + (nv + sv).max(ev + wv);
 
+        // `exact_area` is only exact when *all four* counts are known: with E
+        // and W pinned to 0 every region cell sits in the clue's column, but
+        // the column's extent is `n + s`, which is unknown as soon as one of
+        // them is unspecified (-1).  Treating the unspecified side as 0 (the
+        // old `n.unwrap_or(0)`) under-counted the region and turned a valid
+        // board into a false `size > target` contradiction.
         let mut exact_area = None;
-        if e == Some(0) && w == Some(0) {
+        if e == Some(0) && w == Some(0) && n.is_some() && s.is_some() {
             exact_area = Some(1 + nv + sv);
-        } else if n == Some(0) && s == Some(0) {
+        } else if n == Some(0) && s == Some(0) && e.is_some() && w.is_some() {
             exact_area = Some(1 + ev + wv);
         }
 
@@ -493,6 +520,7 @@ impl<'a> Solver<'a> {
         }
 
         // Growth-edge pass: classify Unknown edges between different components.
+        self.build_progress = false;
         self.build_components_growth_edges(num_comp)?;
 
         self.prop.growing_list.clear();
@@ -587,6 +615,7 @@ impl<'a> Solver<'a> {
                     if !self.set_edge(e, EdgeState::Cut) {
                         return Err(());
                     }
+                    self.build_progress = true;
                     continue;
                 }
 
@@ -604,6 +633,7 @@ impl<'a> Solver<'a> {
                     if !self.set_edge(e, EdgeState::Cut) {
                         return Err(());
                     }
+                    self.build_progress = true;
                     continue;
                 }
 
@@ -614,10 +644,11 @@ impl<'a> Solver<'a> {
 
                 let limit1 = self.prop.curr_max_area[ci1];
                 let limit2 = self.prop.curr_max_area[ci2];
-                if (self.curr_comp_sz[ci1] >= limit1 || self.curr_comp_sz[ci2] >= limit2)
-                    && !self.set_edge(e, EdgeState::Cut)
-                {
-                    return Err(());
+                if self.curr_comp_sz[ci1] >= limit1 || self.curr_comp_sz[ci2] >= limit2 {
+                    if !self.set_edge(e, EdgeState::Cut) {
+                        return Err(());
+                    }
+                    self.build_progress = true;
                 }
             }
         }
@@ -644,11 +675,21 @@ impl<'a> Solver<'a> {
             }
         }
 
-        self.propagate_area_constraints(num_comp)
+        let mut progress = self.build_progress;
+        progress |= self.propagate_area_constraints(num_comp)?;
+        Ok(progress)
     }
 
     /// Area-target sealing, inequality and difference clue propagation.
-    fn propagate_area_constraints(&mut self, num_comp: usize) -> Result<bool, ()> {
+    ///
+    /// Each sub-propagator below reads `curr_comp_id` / `curr_comp_sz` /
+    /// `growth_edges` and may write edges, which invalidates those arrays.  A
+    /// later sub-propagator that trusts the stale snapshot can therefore see a
+    /// "sealed clue-less component" that has in fact already merged
+    /// (`propagate_solitary` S3 on 1017), or a `cc` computed over a
+    /// half-updated graph.  So whenever a step reports progress the components
+    /// are rebuilt before the next step runs.
+    fn propagate_area_constraints(&mut self, mut num_comp: usize) -> Result<bool, ()> {
         let mut progress = false;
 
         // Refresh per-component growth-edge counts (heuristic cache).
@@ -664,7 +705,11 @@ impl<'a> Solver<'a> {
             self.growth_edge_count[ci] = cnt;
         }
 
+        let sealing = !csp_skip("areatgt");
         for ci in 0..num_comp {
+            if !sealing {
+                break;
+            }
             let target = self.curr_target_area[ci];
             let min_a = self.prop.curr_min_area[ci];
             let max_a = self.prop.curr_max_area[ci];
@@ -714,30 +759,71 @@ impl<'a> Solver<'a> {
                 }
             }
         }
-        progress |= self.propagate_inequality_clues(num_comp)?;
-        progress |= self.propagate_diff_clues(num_comp)?;
-        if self.has_compass_clue {
-            progress |= self.propagate_compass_in_components(num_comp)?;
-            progress |= self.propagate_compass_placement_enumeration()?;
+        if progress {
+            num_comp = self.build_components()?;
+        }
+        progress |= self.propagate_component_clues(num_comp)?;
+        Ok(progress)
+    }
+
+    /// Per-rule propagation over the current component snapshot.  Any step that
+    /// reports progress rebuilds the components first, so the next step never
+    /// reads a stale `curr_comp_id` / `growth_edges` (see the method doc on
+    /// `propagate_area_constraints`).
+    fn propagate_component_clues(&mut self, mut num_comp: usize) -> Result<bool, ()> {
+        let mut progress = false;
+        // `step!` runs one propagator and, when it changed any edge, rebuilds
+        // the component snapshot for whatever comes next.  `$num` is refreshed
+        // in place; `$prog` accumulates across steps.
+        macro_rules! step {
+            ($prog:ident, $num:ident, $call:expr) => {{
+                if $call? {
+                    $prog = true;
+                    $num = self.build_components()?;
+                }
+            }};
+        }
+        step!(progress, num_comp, self.propagate_inequality_clues(num_comp));
+        step!(progress, num_comp, self.propagate_diff_clues(num_comp));
+        if self.has_compass_clue && !csp_skip("compass_in_comp") {
+            step!(
+                progress,
+                num_comp,
+                self.propagate_compass_in_components(num_comp)
+            );
+        }
+        if self.has_compass_clue && !csp_skip("compass_enum") {
+            step!(
+                progress,
+                num_comp,
+                self.propagate_compass_placement_enumeration()
+            );
         }
         if self.rules.size_separation {
-            progress |= self.propagate_size_separation(num_comp)?;
+            step!(
+                progress,
+                num_comp,
+                self.propagate_size_separation(num_comp)
+            );
         }
         if self.rules.boxy || self.rules.non_boxy {
-            progress |= self.propagate_boxy_nonboxy(num_comp)?;
+            step!(progress, num_comp, self.propagate_boxy_nonboxy(num_comp));
         }
-        if self.rules.solitary {
-            progress |= self.propagate_solitary(num_comp)?;
+        // solitary S4 writes Uncut, which merges components; the rebuild inside
+        // `step!` makes the sealed-pair / shape checks below see the
+        // post-merge partition.
+        if self.rules.solitary && !csp_skip("solitary") {
+            step!(progress, num_comp, self.propagate_solitary(num_comp));
         }
-        // Final sealed-pair size-separation contradiction check.
-        self.check_size_separation_sealed_pairs(num_comp)?;
-        // Gemini: the two regions across a gemini edge must match in area.
-        self.check_gemini_pairs(num_comp)?;
+        if !csp_skip("areachk") {
+            self.check_size_separation_sealed_pairs(num_comp)?;
+            // Gemini: the two regions across a gemini edge must match in area.
+            self.check_gemini_pairs(num_comp)?;
+        }
         // Gemini/Delta shape-identity: sealed regions across a gemini edge must
         // share a canonical shape; across a delta edge they must differ.
         // Also `same`/`different`/`mixed` global shape-identity rules.
         progress |= self.propagate_shape_constraints(num_comp)?;
-
         Ok(progress)
     }
 
@@ -912,11 +998,74 @@ impl<'a> Solver<'a> {
         Ok(progress)
     }
 
-    /// Dual connectivity (port of `third_party/aog/src/solver/propagation/
-    /// dual.rs`, checks D1/D2).  Gated on `structural_pieces` — an exact piece
-    /// count derived from a *structural* rule (`precise`), never from the
-    /// rose-window deduction (doc 27).
+    /// D0 — exact piece count bounds the component count.
     ///
+    /// Components only ever *merge* (setting an Unknown edge to Cut never
+    /// splits an Uncut-connected set), so the final region count is at most
+    /// `num_comp`.  With an exact piece count `K`:
+    ///
+    /// * `num_comp < K` → contradiction (cannot create more regions);
+    /// * `num_comp == K` → the partition is frozen: no component may still
+    ///   need to grow, and every Unknown edge between two distinct components
+    ///   must be Cut.
+    ///
+    /// Returns `Ok(None)` when neither rule fires, `Ok(Some(progress))` when
+    /// the partition was frozen (the caller must return immediately — D1
+    /// would merge, which is now illegal, and D2's graph has no edges left).
+    fn propagate_piece_count_bound(
+        &mut self,
+        num_comp: usize,
+        exact: Option<usize>,
+    ) -> Result<Option<bool>, ()> {
+        let Some(k) = exact else { return Ok(None) };
+        if num_comp < k {
+            return Err(());
+        }
+        if num_comp != k {
+            return Ok(None);
+        }
+        // Partition is frozen: every component *is* a final region.
+        for ci in 0..num_comp {
+            let sz = self.curr_comp_sz[ci];
+            let must_grow = match self.curr_target_area[ci] {
+                Some(t) => sz < t,
+                None => sz < self.prop.curr_min_area[ci],
+            };
+            if must_grow {
+                return Err(());
+            }
+        }
+        let mut progress = false;
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Unknown {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            if self.curr_comp_id[c1] == self.curr_comp_id[c2] {
+                continue;
+            }
+            if !self.set_edge(e, EdgeState::Cut) {
+                return Err(());
+            }
+            progress = true;
+        }
+        Ok(Some(progress))
+    }
+
+    /// Dual connectivity (port of `third_party/aog/src/solver/propagation/
+    /// dual.rs`, checks D1/D2, plus the D0 piece-count bound we add here).
+    /// Gated on `structural_pieces` — an exact piece count derived from a
+    /// *structural* rule (`precise` / `rose_window` / `solitary`).
+    ///
+    /// * **D0** components only ever *merge* (setting an Unknown edge to Cut
+    ///   never splits an Uncut-connected set), so the final region count is at
+    ///   most `num_comp`.  With an exact piece count `K` that means
+    ///   `num_comp < K` is a contradiction, and `num_comp == K` freezes the
+    ///   partition: no component may still need to grow, and every Unknown
+    ///   edge between two distinct components must be Cut.
     /// * **D1** a component that must still grow (size below its target or
     ///   `curr_min_area`) and has exactly one Unknown growth edge has no other
     ///   way to reach its size → that edge must be Uncut.
@@ -939,6 +1088,11 @@ impl<'a> Solver<'a> {
             return Ok(false);
         }
         let mut progress = false;
+
+        // D0: `num_comp` is an upper bound on the final region count.
+        if let Some(frozen) = self.propagate_piece_count_bound(num_comp, exact)? {
+            return Ok(frozen);
+        }
 
         // D1: single growth edge on a component that still needs to grow.
         let mut to_uncut: Vec<EdgeId> = Vec::new();
@@ -3180,6 +3334,20 @@ impl<'a> Solver<'a> {
         (bbox_min_r, bbox_max_r, bbox_min_c, bbox_max_c)
     }
 
+    /// Number of fillable cells inside `bbox`.
+    fn count_bbox_cells(&self, bbox: (isize, isize, isize, isize)) -> usize {
+        let (r0, r1, c0, c1) = bbox;
+        let mut n = 0usize;
+        for r in r0.max(0)..=r1.min(self.grid.rows as isize - 1) {
+            for c in c0.max(0)..=c1.min(self.grid.cols as isize - 1) {
+                if self.grid.cell_exists[self.grid.cell_id(r as usize, c as usize)] {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
     /// Step 1 of compass placement enumeration: BFS from the compass cell over
     /// non-Cut edges, restricted to `bbox`.
     fn compass_reachable_bfs(
@@ -3445,9 +3613,6 @@ impl<'a> Solver<'a> {
             let Some((min_a, max_a)) = self.compass_area_bounds(cell) else {
                 continue;
             };
-            if max_a > MAX_AREA_THRESHOLD {
-                continue;
-            }
 
             let (cr, cc) = self.grid.cell_pos(cell);
             let (cri, cci) = (cr as isize, cc as isize);
@@ -3456,6 +3621,19 @@ impl<'a> Solver<'a> {
 
             // Bounding box from compass constraints (tightest possible).
             let bbox = self.compass_bbox(cell, compass);
+
+            // Region connectivity confines the piece to the clue's bounding
+            // box, so the box's fillable-cell count is a sound upper bound —
+            // usually far tighter than `curr_max_area`, which sums the four
+            // half-planes and therefore double-counts the quadrants.  Gate the
+            // enumeration on the tighter of the two so a `-1`-heavy clue still
+            // qualifies (1017's 6x6 board: `curr_max_area` is 36, the box is
+            // 8-16 cells).
+            let bbox_area = self.count_bbox_cells(bbox);
+            let max_a = max_a.min(bbox_area);
+            if max_a > MAX_AREA_THRESHOLD {
+                continue;
+            }
 
             // Step 1: BFS reachable cells from compass cell via non-Cut edges, in bbox.
             let (cell_in_reachable, reachable_cells) = self.compass_reachable_bfs(cell, bbox);

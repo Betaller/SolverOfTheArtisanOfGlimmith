@@ -72,18 +72,39 @@ rsolver/src/solver/edge_csp/
 loop:
   if deadline 到 → Err（超时）
   bricky_loopy（ring/brick 顶点度）
-  area_bounds（build_components + 面积目标封边 + inequality/diff）
+  vertex_edge_parity（watchtower 顶点奇偶）
+  compass（值为 0 的方向强制 Cut）
+  area_bounds（build_components + 面积目标封边 + inequality/diff/compass/solitary）
+  if structural_pieces 有值 且 area_bounds 这轮没进展:
+      dual_connectivity（D0/D1/D2，见 §14）
+  watchtower / rose
   if 无进展:
     probe_one_round（单边 failed-literal，unknown≤256 时）
     probe_pair_round（顶点共边对探测，unknown≤10/20 时）
     if 仍无进展 → Ok(true)（稳定）
 ```
 
+**为什么 `dual_connectivity` 要等 `area_bounds` 无进展**：`area_bounds` 内部
+的传播器会写边，写完 `curr_comp_id` / `curr_comp_sz` 就是陈旧快照；D0/D2 读
+这两个数组，拿陈旧 `num_comp` 算出的 `cc` 是假的（曾把 4 算成 10 并触发假
+矛盾）。推迟到下一轮不动点，那时组件已重建。详见 §14 与
+`docs/优化/30`。
+
 ### 3.2 build_components（面积枢纽）
 
 flood-fill **已决 Uncut** 边 → 连通组件；为每组件算目标面积（Area 线索 + compass
 面积界）、min/max 面积、生长边（Unknown 跨界边）；组件达 max_area 时强制生长边 Cut；
 组件目标面积互斥时强制 Cut（`cannot_merge`）。
+
+`build_components_growth_edges` 写边时会置 `Solver::build_progress = true`；
+`propagate_area_bounds` 把它并进自己的返回值，否则不动点循环可能在边已变的
+情况下提前收敛。
+
+`propagate_area_constraints` 内部串行跑多个子传播器（areatgt → inequality →
+diff → compass_in_comp → compass_enum → size_sep → boxy → solitary →
+shape）。**任何一个报告 progress 就立刻 `build_components()` 重建组件**，再跑
+下一个——否则后一个会拿陈旧连通性做推理（`solitary` S3 曾因此把已合并的组件
+误判成"封闭无线索"）。
 
 ### 3.3 顶点度传播（`prop.rs::propagate_bricky_loopy`）
 
@@ -264,3 +285,59 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   `pieces-compass-fix` 已修但 0 新解，未合）。
 - 纯 compass 0469/1395b 仍 FAIL（大单方向值 W=7/N=8/S=57 超 `MAX_AREA_THRESHOLD=12` 跳过，
   需桥/网关或调阈值；1395b 的 S=57 大列靠 bridge/gateway）。
+
+## 14. 第九迭代（已实现：陈旧组件修复 + solitary 区域数锁定 + D0）
+
+`docs/优化/30`。三处正确性修复、一处能力扩展、两个诊断开关。
+
+### 14.1 陈旧组件快照（正确性）
+
+`propagate_area_constraints` 的子传播器串行写边后不重建组件，下一个子传播器
+读到过期的 `curr_comp_id` / `comp_cells` / `growth_edges`。典型后果：1017
+官方解 Cut 播种后，`propagate_solitary` 的 S3 把 `(0,2..0,5)` 当成"封闭且
+无线索"——实际上 `compass_enum` 刚把 `(0,1)-(0,2)` 强制 Uncut，它已经并进
+有罗盘线索的区域 1 了。
+
+修复：任何子传播器报 progress 就 `build_components()`；顶层
+`propagate_dual_connectivity` 在 `area_bounds` 有进展时推迟到下一轮。
+
+### 14.2 `exact_area` 不再把 `-1` 当 0（正确性）
+
+`get_compass_area_bounds` 里 `exact_area = Some(1 + nv + sv)` 的 `nv` 来自
+`n.unwrap_or(0)`。E/W 都是 0 时区域确实全在该列，但列长是 `n + s`；任一为
+`-1` 就未知。现在四个方向都已知才算 exact。
+
+### 14.3 `compass_enum` 门槛改用 bbox 面积（能力）
+
+`curr_max_area` 是四个半平面之和，半平面互相重叠（东北格同时算 N 和 E），
+系统性高估。1017 上它是 36，罗盘 bbox 只有 8–16 格，于是
+`MAX_AREA_THRESHOLD = 12` 把全部线索跳过，`compass_enum` 在未播种棋盘上
+根本不跑。改成 `max_a = min(curr_max_area, bbox 内可填充格数)`。
+
+### 14.4 `solitary` → `structural_pieces` + D0（能力）
+
+`structural_pieces` 第三个来源：`solitary` 下区域数 == 线索格数（
+`validate::check_solitary` 同一谓词；87/87 官方解验证）。
+
+新规则 **D0**（`propagate_dual_connectivity`）：组件只增不减，所以最终区域数
+≤ 当前组件数。`num_comp < K` 矛盾；`num_comp == K` 时分区冻结——还需长大的
+组件矛盾，所有跨组件 Unknown 边强制 Cut，然后直接返回（D1 会合并、D2 无边）。
+D0 对 `precise` / `rose_window` 来源的件数同样生效。
+
+### 14.5 诊断开关（新增，永久保留）
+
+- `SKIP_AOG=1`：跳过 aog/rose，单独跑下游求解器（对偶 `AOG_ONLY`）。
+- `EDGE_CSP_SKIP=bricky,compass,compass_in_comp,compass_enum,solitary,dual,probe,area,areatgt,areachk`：
+  按名关传播器，不用重编即可二分 soundness bug。
+
+### 14.6 实测
+
+全量基准 1156 → **1157 / 1258**。`--rules solitary` 71 → 72/87。
+
+- **0629**（compass+differentiation+ring）：aog 40s 超时后 edge_csp **2.3s**
+  解出——bbox 面积门槛让 `compass_enum` 在这块棋盘上真正跑起来了。
+- **0685** via aog。
+- 1140fix 在 `-j 6` 下双 40s 超时翻负，串行复测两次均 61s SOLVED（争抢噪声）。
+- 1017 官方解 Cut 播种：修复前根层矛盾，修复后 0 节点解出（D2 的
+  `exact == cc` 直接把剩余 12 条全 Uncut）。未播种的 1017 仍超时（60 条内部
+  边、要切约 26 条，D0/D2 的收益要等搜索把组件数压到 4）。

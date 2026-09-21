@@ -288,3 +288,23 @@ match_regions_mrv(sized, all_positions, ..., covered, assignment, ...)
 ---
 
 下一节：[08-验证与约束检查](08-验证与约束检查.md)
+
+## M1 早停的健全性边界 + `m == 2` 补集封面（2026-09-21）
+
+`region_match::generate_all_candidates` 的 M1 早停（集齐符号类型就停止扩张）只
+在「最小完整集已落在精确覆盖的可用尺寸窗口内」时健全。窗口按
+`total/m/[min_sz,max_sz]` 推出（见 `docs/优化/31`）：
+
+```
+useful_min = max(min_sz, total - (m-1) * max_sz)
+useful_max = min(max_sz, total - (m-1) * min_sz)
+```
+
+窗口宽 ≤ `WINDOW_GROW_LIMIT`（8）时候选 BFS 一路长到 `useful_max`，否则保留原
+早停（0833 那类无尺寸约束的题不能长满）。1333（窗口 `[9,10]`）据此解出。
+
+另加 `m == 2` 的 `try_complement_cover`：两区域平分棋盘，seed 0 的完整候选的
+补集即第二区域的唯一形状，逐个做连通性 BFS 即可，最坏毫秒级。
+
+未救回的 m==2 大盘（0974 等）是候选 BFS 在集齐异类符号前就撞 `VISITED_CAP`，
+属于范式问题（`docs/优化/20` P2）。

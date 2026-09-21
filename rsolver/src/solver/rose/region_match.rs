@@ -48,6 +48,12 @@ pub const MAX_COMBOS: usize = 50_000;
 /// into the multi-million range; 2M stops them well before OOM.
 pub const VISITED_CAP: usize = 2_000_000;
 
+/// Width of the useful size window (`useful_max - useful_min`) below which
+/// candidate BFS grows through the whole window instead of stopping at the
+/// first complete symbol set.  See the M1 early-stop note in
+/// `generate_all_candidates`.
+pub const WINDOW_GROW_LIMIT: usize = 8;
+
 /// BFS over boundary-compliant connected subsets containing `seed` (cell idx).
 /// Port of `bfs_candidates.generate_all_candidates`.
 ///
@@ -60,6 +66,14 @@ pub const VISITED_CAP: usize = 2_000_000;
 /// return and `solve_rose` fall through to `rose_growth`, which now gets the
 /// remaining budget.  False-negative only (partial candidates can only *miss* the
 /// exact cover, never produce an invalid one).
+/// `size_window = (useful_min, useful_max)`: the range of region sizes that can
+/// still take part in an exact cover of `total` cells into `m` regions of size
+/// within `[min_sz, max_sz]`.  A region of size `s` is usable only when
+/// `total - s` can be split into `m - 1` such regions, i.e.
+/// `total - (m-1)*max_sz <= s <= total - (m-1)*min_sz`.  Computed once by the
+/// caller and threaded down so the M1 early-stop (below) can tell a
+/// "complete but too small to be usable" candidate from a genuinely finished
+/// one.
 pub fn generate_all_candidates(
     puzzle: &Puzzle,
     seed: usize,
@@ -69,6 +83,7 @@ pub fn generate_all_candidates(
     symbol_types: &[String],
     start: &Instant,
     timeout_ms: u64,
+    size_window: (usize, usize),
 ) -> Vec<CellSet> {
     let h = puzzle.height;
     let w = puzzle.width;
@@ -116,14 +131,35 @@ pub fn generate_all_candidates(
         // symbols, strictly worse for the exact-cover match). The M1 revert
         // showed removing this early-stop regressed slash-pack 0833 from solved
         // to unsolvable, so it stays. See region_match history / docs/bugs.
+        //
+        // **Soundness bound (2026-09-21)**: the "strictly worse" argument only
+        // holds once the set is big enough to appear in *some* exact cover of
+        // `total` cells.  When the size window forces regions to be larger than
+        // the minimal symbol span, stopping at `complete` drops every usable
+        // candidate and `region_match` returns a false "no solution":
+        // 1333 is 7×7 with 5 regions and `range max 10`, so the only size
+        // multiset summing to 49 is {9,10,10,10,10}, while every minimal
+        // P1+P2 span is 5–8 cells — all 5 area combos came out, but
+        // `candidates_by_size` had nothing at size 9 or 10 and the puzzle was
+        // reported UNSOLVED in 319ms.  Keep growing while the set is below
+        // `useful_min`; stop as soon as it is usable, or when it has passed
+        // `useful_max` (further growth can only be worse).
+        let (useful_min, useful_max) = size_window;
         let complete_multi = is_multi && syms == all_required;
         if complete_multi || !is_multi {
             results.push(current.clone());
         }
-        if complete_multi {
+        if current.len() >= useful_max || current.len() >= MAX_CANDIDATE_CELLS {
             continue;
         }
-        if current.len() >= MAX_CANDIDATE_CELLS {
+        // Grow through the *whole* useful window when it is narrow: a size-9
+        // complete set sitting inside the size-10 region 1333 needs must not
+        // stop the BFS one cell short.  When the window is wide the size
+        // constraint is loose, minimal sets are already usable, and expanding
+        // everything is what made 0833 (10×11, window [1,105]) blow up — keep
+        // the original M1 stop there.
+        let grow_through = useful_max.saturating_sub(useful_min) <= WINDOW_GROW_LIMIT;
+        if complete_multi && !grow_through && current.len() >= useful_min {
             continue;
         }
         for cell in frontier.iter().collect::<Vec<_>>() {
@@ -427,6 +463,50 @@ fn enum_area_combos_bounded(
 /// every `shape_pattern` cell is excluded from `all_positions` before calling,
 /// otherwise the produced regions may violate the shape rule (caught by
 /// `accept_if_valid` / `validate::validate`).
+/// `m == 2` exact cover via complement.
+///
+/// With exactly two regions they partition `all_positions`, so for any complete
+/// candidate `A` of seed 0 the second region is forced to be
+/// `all_positions \ A`.  The candidate BFS never generates those complements —
+/// they are far larger than the minimal symbol span, and the M1 early-stop
+/// stops expansion as soon as the symbol set is complete — so a 2-region rose
+/// puzzle exhausts with no candidate pair at all: 0974 (12×12, two regions of
+/// 72 cells) was reported UNSOLVED in 3.9s.  Testing complement connectivity is
+/// exact and costs one BFS per candidate.
+///
+/// Symbol coverage needs no check here: `A` already holds one of each type and
+/// the board holds exactly `m == 2` of each, so the complement gets the other.
+fn try_complement_cover(
+    cands0: &[CellSet],
+    all_positions: &CellSet,
+    pre: &PreBoundaries,
+    h: usize,
+    w: usize,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    for a in cands0 {
+        if a.len() >= all_positions.len() {
+            continue;
+        }
+        let mut b = all_positions.clone();
+        for idx in a.iter() {
+            b.remove(idx);
+        }
+        // Reachability of every complement cell from every other, with
+        // `min_component_cells = 1` — i.e. plain connectivity.
+        if can_partition(&b, &b, pre, h, w, 1) {
+            let mut region_of: Vec<Option<usize>> = vec![None; h * w];
+            for idx in a.iter() {
+                region_of[idx] = Some(0);
+            }
+            for idx in b.iter() {
+                region_of[idx] = Some(1);
+            }
+            return Some(super::build_regions(&region_of, h, w));
+        }
+    }
+    None
+}
+
 pub fn solve_by_region_match(
     puzzle: &Puzzle,
     pre: &PreBoundaries,
@@ -454,11 +534,27 @@ pub fn solve_by_region_match(
     // cells are excluded so reachability is computed over the remainder only.
     let (all_seed_cells, symbol_of) = build_symbol_maps(puzzle, symbol_types, all_positions, h, w);
 
+    // Size window for an exact cover of `total` cells into `m` regions — see
+    // `generate_all_candidates`.  Computed before the area filter because the
+    // filter's `min_sz`/`max_sz` are what define it.
+    let (min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
+    let useful_min = total
+        .saturating_sub(m.saturating_sub(1).saturating_mul(max_sz))
+        .max(min_sz);
+    let useful_max = max_sz.min(
+        total
+            .saturating_sub(m.saturating_sub(1).saturating_mul(min_sz))
+            .max(min_sz),
+    );
+    if crate::aog_debug_enabled() {
+        eprintln!("rose: size window [{}, {}] (min={} max={} total={} m={})", useful_min, useful_max, min_sz, max_sz, total, m);
+    }
+
     // Generate candidates per seed (single-symbol path).
     let mut all_candidates: Vec<Vec<CellSet>> = Vec::new();
     for &seed in &seeds {
         let t0 = Instant::now();
-        let cands = generate_all_candidates(puzzle, seed, all_positions, pre, &symbol_of, symbol_types, start, timeout_ms);
+        let cands = generate_all_candidates(puzzle, seed, all_positions, pre, &symbol_of, symbol_types, start, timeout_ms, (useful_min, useful_max));
         if crate::aog_debug_enabled() {
             eprintln!(
                 "rose: seed {} -> {} candidates in {:?}",
@@ -479,6 +575,22 @@ pub fn solve_by_region_match(
         );
     }
 
+    // m == 2: the complement of a complete seed-0 candidate is the only shape
+    // the second region can take, and the BFS never produces it (see
+    // `try_complement_cover`).  Cheapest possible exact cover — one BFS per
+    // candidate — so try it before any of the expensive pre-filters.
+    if m == 2 {
+        if let Some(regions) = try_complement_cover(&all_candidates[0], all_positions, pre, h, w) {
+            if crate::aog_debug_enabled() {
+                eprintln!("rose: m==2 complement cover found");
+            }
+            return Some(regions);
+        }
+        if crate::aog_debug_enabled() {
+            eprintln!("rose: m==2 complement cover missed");
+        }
+    }
+
     // Deadline for the whole region_match attempt.  Computed here (not further
     // down) so the pre-filter loops below can bail on it: `can_partition` runs a
     // BFS per candidate per seed, which with CANDIDATE_CAP candidates and m seeds
@@ -490,7 +602,6 @@ pub fn solve_by_region_match(
     // [range.min, range.max] (or precise) and leave >= 1 cell per other seed.
     // These filters are pure pruning — bailing early just leaves extra candidates
     // in place (sound, only slower for `match_regions_mrv`, which re-checks).
-    let (min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
     if !filter_by_area(&mut all_candidates, deadline, min_sz, max_sz, total, m) {
         return None;
     }
@@ -510,6 +621,17 @@ pub fn solve_by_region_match(
 
     // Sizes and by-size lookup.
     let (seed_size_sets, candidates_by_size) = build_size_index(&all_candidates);
+    if crate::aog_debug_enabled() {
+        for (i, map) in candidates_by_size.iter().enumerate() {
+            let mut keys: Vec<usize> = map.keys().copied().collect();
+            keys.sort_unstable();
+            eprintln!(
+                "rose: seed {} sizes {:?}",
+                i,
+                keys.iter().map(|&k| (k, map[&k].len())).collect::<Vec<_>>()
+            );
+        }
+    }
 
     let min_area_per_region = min_sz.max(n);
     let mut combos: Vec<Vec<usize>> = Vec::new();
@@ -901,7 +1023,7 @@ mod tests {
         let symbol_types = vec!["A".to_string()];
         let mut symbol_of = HashMap::new();
         symbol_of.insert(0usize, 0usize);
-        let cands = generate_all_candidates(&puzzle, 0, &all_positions, &pre, &symbol_of, &symbol_types, &crate::clock::Instant::now(), 1_000);
+        let cands = generate_all_candidates(&puzzle, 0, &all_positions, &pre, &symbol_of, &symbol_types, &crate::clock::Instant::now(), 1_000, (1, 100));
         assert!(!cands.is_empty(), "must return at least the singleton region");
         assert!(cands.iter().all(|c| c.contains(0)), "every candidate contains the seed");
         assert!(cands.len() <= CANDIDATE_CAP);

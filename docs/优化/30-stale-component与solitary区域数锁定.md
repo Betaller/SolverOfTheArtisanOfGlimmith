@@ -251,3 +251,14 @@ if self.solitary_feasible_active {
 剩余 13 道 solitary FAIL：0308 / 0312 / 0680-0683 / 1080 / 1093 / 1109 /
 1246 / 1258 / 1259 / 1260。其中 0680-0683/1258 是 12×13~15×15 的大罗盘题，
 1246/1259/1260 是 7×7 五线索——都是搜索深度问题，不是传播缺口。
+
+## 7. 追加：热路径 scratch 提升（卫生）
+
+`build_components` 的 `id_map` 与 `solitary_potential_connectivity` 的 `pot`
+原本每次调用都 `vec![usize::MAX; n]`。前者现在每个不动点轮次要跑多次，后者在
+罗盘+solitary 题上每节点都跑，于是提成 `PropagationState::{id_map_buf, pot_buf}`。
+
+**教训**：复用 scratch 时清理必须放在函数**开头**。这两个函数都有早退
+`return Err(())`，放结尾会在早退时被跳过，留下脏 buffer 给下一次调用——
+`id_map` 脏了 `num_comp` 直接算错，1017 从 5s 解出变成 7ms 假穷尽。已写进代码
+注释。

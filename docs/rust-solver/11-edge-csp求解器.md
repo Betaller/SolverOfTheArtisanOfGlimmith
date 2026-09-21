@@ -352,3 +352,13 @@ D0 对 `precise` / `rose_window` 来源的件数同样生效。
 
 `--rules solitary` 72 → 74/87；全量 1157 → **1159/1258**。**1017 与 1060 via
 edge_csp 解出**；0685 并行翻负但串行 20s SOLVED（噪声）。
+
+### 14.8 卫生：热路径 scratch 提升为字段
+
+`build_components` 每次调用都 `vec![usize::MAX; n]` 分配 `id_map`，而它现在每个
+不动点轮次要跑多次（每个有进展的子传播器一次）；`solitary_potential_connectivity`
+的 `pot` 同理。两者都提成 `PropagationState::{id_map_buf, pot_buf}` 复用。
+
+**踩坑（已记进代码注释）**：scratch 的清理必须放在函数**开头**而不是结尾。这两个
+函数都有早退 `return Err(())` 路径，放结尾会在早退时被跳过，留下脏 scratch 给下
+一次调用——`id_map` 脏了会让 `num_comp` 算错，1017 从 5s 解出变成 7ms 假穷尽。

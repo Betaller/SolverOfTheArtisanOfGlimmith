@@ -26,6 +26,14 @@ pub(crate) struct PropagationState {
     pub compass_clue_indices: Vec<usize>,
     /// Reusable BFS buffer (`usize::MAX` = unvisited).
     pub comp_buf: Vec<usize>,
+    /// Scratch for `build_components`' representative → contiguous-id map.
+    /// Hoisted out of the function because it used to `vec![usize::MAX; n]` on
+    /// every call, and `build_components` now runs once per progress-making
+    /// sub-propagator per fixed-point round — at ~1M search nodes that
+    /// allocation churn showed up on the compass cluster.
+    pub id_map_buf: Vec<usize>,
+    /// Scratch for `solitary_potential_connectivity`'s non-Cut flood-fill.
+    pub pot_buf: Vec<usize>,
     /// Precomputed growing / sealed component index lists.
     pub growing_list: Vec<usize>,
     pub sealed_list: Vec<usize>,
@@ -40,6 +48,8 @@ impl PropagationState {
             growth_edges: Vec::new(),
             compass_clue_indices: Vec::new(),
             comp_buf: vec![usize::MAX; nc],
+            id_map_buf: vec![usize::MAX; nc],
+            pot_buf: vec![usize::MAX; nc],
             growing_list: Vec::new(),
             sealed_list: Vec::new(),
         }
@@ -445,16 +455,21 @@ impl<'a> Solver<'a> {
             self.flood_fill_decided(c);
         }
 
-        // Map component representatives to contiguous ids.
+        // Map component representatives to contiguous ids (reusable scratch —
+        // see `PropagationState::id_map_buf`).  Reset *before* use: this
+        // function has early `return Err(())` paths, and a post-loop reset
+        // would be skipped there, leaving the scratch dirty for the next call
+        // (which then produced a wrong `num_comp` — 1017 went from a 5s solve
+        // to a 7ms false exhaust).
         let mut num_comp = 0usize;
-        let mut id_map = vec![usize::MAX; n];
+        self.prop.id_map_buf[..n].fill(usize::MAX);
         for c in 0..n {
             if !self.grid.cell_exists[c] {
                 continue;
             }
             let rep = self.prop.comp_buf[c];
-            if id_map[rep] == usize::MAX {
-                id_map[rep] = num_comp;
+            if self.prop.id_map_buf[rep] == usize::MAX {
+                self.prop.id_map_buf[rep] = num_comp;
                 num_comp += 1;
             }
         }
@@ -462,7 +477,7 @@ impl<'a> Solver<'a> {
         self.curr_comp_id.resize(n, usize::MAX);
         for c in 0..n {
             if self.grid.cell_exists[c] {
-                self.curr_comp_id[c] = id_map[self.prop.comp_buf[c]];
+                self.curr_comp_id[c] = self.prop.id_map_buf[self.prop.comp_buf[c]];
             }
         }
 
@@ -876,13 +891,16 @@ impl<'a> Solver<'a> {
     /// so this is O(cells + edges).
     fn solitary_potential_connectivity(&mut self) -> Result<(), ()> {
         let n = self.grid.num_cells();
-        let mut pot = vec![usize::MAX; n];
+        // Reset *before* use — see the `id_map_buf` note above (the singleton
+        // check below can `return Err(())`, and a post-loop reset would be
+        // skipped).
+        self.prop.pot_buf[..n].fill(usize::MAX);
         let mut pot_id = 0usize;
         for c in 0..n {
-            if !self.grid.cell_exists[c] || pot[c] != usize::MAX {
+            if !self.grid.cell_exists[c] || self.prop.pot_buf[c] != usize::MAX {
                 continue;
             }
-            pot[c] = pot_id;
+            self.prop.pot_buf[c] = pot_id;
             self.q_buf.clear();
             self.q_buf.push(c);
             while let Some(cur) = self.q_buf.pop() {
@@ -892,10 +910,10 @@ impl<'a> Solver<'a> {
                     }
                     let (c1, c2) = self.grid.edge_cells(eid);
                     let other = if c1 == cur { c2 } else { c1 };
-                    if !self.grid.cell_exists[other] || pot[other] != usize::MAX {
+                    if !self.grid.cell_exists[other] || self.prop.pot_buf[other] != usize::MAX {
                         continue;
                     }
-                    pot[other] = pot_id;
+                    self.prop.pot_buf[other] = pot_id;
                     self.q_buf.push(other);
                 }
             }
@@ -908,7 +926,7 @@ impl<'a> Solver<'a> {
             }
             if let CellClue::Compass { cell, .. } = &self.cell_clues[cl_idx] {
                 if self.grid.cell_exists[*cell] {
-                    clue_pot[bit] = pot[*cell];
+                    clue_pot[bit] = self.prop.pot_buf[*cell];
                 }
             }
         }
@@ -922,7 +940,7 @@ impl<'a> Solver<'a> {
                 continue;
             }
             let bit = m.trailing_zeros() as usize;
-            if bit < clue_pot.len() && clue_pot[bit] != usize::MAX && pot[c] != clue_pot[bit] {
+            if bit < clue_pot.len() && clue_pot[bit] != usize::MAX && self.prop.pot_buf[c] != clue_pot[bit] {
                 return Err(());
             }
         }

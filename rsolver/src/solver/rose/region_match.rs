@@ -476,15 +476,34 @@ fn enum_area_combos_bounded(
 ///
 /// Symbol coverage needs no check here: `A` already holds one of each type and
 /// the board holds exactly `m == 2` of each, so the complement gets the other.
+///
+/// Connectivity alone is *not* enough — the puzzle's other rules (ring vertex
+/// degrees, inequality, watchtower, …) still have to hold, and there can be
+/// many connected complements with only one valid.  Returning the first one
+/// made 1137 (`ring + inequality + watchtower + rose`) report
+/// `validation_failed` in 54ms and give up on the whole `region_match` path.
+/// So every complement is run through the full validator and the first one
+/// that passes is returned; if none do, the caller falls through to the
+/// normal search.
 fn try_complement_cover(
     cands0: &[CellSet],
     all_positions: &CellSet,
     pre: &PreBoundaries,
     h: usize,
     w: usize,
+    puzzle: &Puzzle,
 ) -> Option<Vec<crate::types::RegionInfo>> {
+    // Cheap size pre-filter: a full `validate` per candidate is the expensive
+    // part (600ms over 20000 complements on 1137), and most complements can be
+    // rejected by the puzzle's own area bounds first.
+    let (min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
+    let total = all_positions.len();
     for a in cands0 {
         if a.len() >= all_positions.len() {
+            continue;
+        }
+        let comp_sz = total - a.len();
+        if a.len() < min_sz || a.len() > max_sz || comp_sz < min_sz || comp_sz > max_sz {
             continue;
         }
         let mut b = all_positions.clone();
@@ -493,15 +512,19 @@ fn try_complement_cover(
         }
         // Reachability of every complement cell from every other, with
         // `min_component_cells = 1` — i.e. plain connectivity.
-        if can_partition(&b, &b, pre, h, w, 1) {
-            let mut region_of: Vec<Option<usize>> = vec![None; h * w];
-            for idx in a.iter() {
-                region_of[idx] = Some(0);
-            }
-            for idx in b.iter() {
-                region_of[idx] = Some(1);
-            }
-            return Some(super::build_regions(&region_of, h, w));
+        if !can_partition(&b, &b, pre, h, w, 1) {
+            continue;
+        }
+        let mut region_of: Vec<Option<usize>> = vec![None; h * w];
+        for idx in a.iter() {
+            region_of[idx] = Some(0);
+        }
+        for idx in b.iter() {
+            region_of[idx] = Some(1);
+        }
+        let regions = super::build_regions(&region_of, h, w);
+        if let Some(ok) = super::accept_if_valid(regions, puzzle) {
+            return Some(ok);
         }
     }
     None
@@ -580,7 +603,7 @@ pub fn solve_by_region_match(
     // `try_complement_cover`).  Cheapest possible exact cover — one BFS per
     // candidate — so try it before any of the expensive pre-filters.
     if m == 2 {
-        if let Some(regions) = try_complement_cover(&all_candidates[0], all_positions, pre, h, w) {
+        if let Some(regions) = try_complement_cover(&all_candidates[0], all_positions, pre, h, w, puzzle) {
             if crate::aog_debug_enabled() {
                 eprintln!("rose: m==2 complement cover found");
             }

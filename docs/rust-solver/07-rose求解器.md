@@ -308,3 +308,8 @@ useful_max = min(max_sz, total - (m-1) * min_sz)
 
 未救回的 m==2 大盘（0974 等）是候选 BFS 在集齐异类符号前就撞 `VISITED_CAP`，
 属于范式问题（`docs/优化/20` P2）。
+
+`try_complement_cover` **必须过完整验证器**：只看补集连通性会把环顶点度 /
+inequality / watchtower 全漏掉，1137 上 54ms 就 `validation_failed` 并让整条
+`region_match` 路径被放弃。现在每个补集先过 `[min_sz,max_sz]` 尺寸预筛、再过
+`accept_if_valid`，只返回第一个通过的；都不通过则 `None`，调用方继续正常搜索。

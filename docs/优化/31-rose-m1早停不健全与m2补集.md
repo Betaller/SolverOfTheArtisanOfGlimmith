@@ -100,3 +100,19 @@ rose: m==2 complement cover found
 ```
 
 全量基准见 `results/bench/20260921_<sha>_rose-m1.{txt,jsonl}`。
+
+## 6. 追加：`m == 2` 补集必须过验证器
+
+PR #78 的 `try_complement_cover` 只检查补集**连通性**就连着返回了第一个，但环顶
+点度 / inequality / watchtower 这些规则它一概没看。1137
+（`ring + inequality + watchtower + rose_window`，9×11）上就是
+`rose: m==2 complement cover found` → 54ms `validation_failed` → 整条
+`region_match` 路径被放弃。
+
+改成：每个补集都跑一遍完整验证器，**只返回第一个通过的**；一个都不通过就返回
+`None`，让调用方继续走正常搜索。代价是最坏 20000 次 `validate`（1137 上约
+600ms），所以先用题目自身的 `[min_sz, max_sz]` 把尺寸不合法的补集挡掉再验证。
+
+`--rules rose_window` 子集（187 道）与 PR #78 的结果**完全持平**（155 PASS /
+32 FAIL，零增零损）——这条是纯粹的正确性修复：在「第一个连通补集不合法、但后面
+某个合法」的题上它才兑现，目前语料里没有这样的题，但不修就是一颗埋着的假接受。

@@ -313,3 +313,16 @@ useful_max = min(max_sz, total - (m-1) * min_sz)
 inequality / watchtower 全漏掉，1137 上 54ms 就 `validation_failed` 并让整条
 `region_match` 路径被放弃。现在每个补集先过 `[min_sz,max_sz]` 尺寸预筛、再过
 `accept_if_valid`，只返回第一个通过的；都不通过则 `None`，调用方继续正常搜索。
+
+## `shape_pattern` 独立预钉（非 rose 前置，2026-09-21）
+
+`puzzle_piece_pin::solve_puzzle_piece_standalone`：对「有 `puzzle_piece` 且**无**
+`rose_window`」的题，在 edge_csp 之前跑一遍 shape_pattern 预钉——枚举每个锚点的
+二面体放置、求两两不相交的完整指派、把剩余所有格子当成一个区域、过完整验证器。
+解出 0976 / 0606 / 1215（原路由下**没有任何求解器能尝试**：aog 形状库 OOM、
+rose 不适用、edge_csp 排除 `puzzle_piece`、pieces 的 DLX 没有"大无约束区域"概念
+2ms exhausted、backtrack 禁用）。
+
+两个陷阱：**deadline 必须锚到模块自己的 `Instant::now()`**（用全局 start 等于
+已过期）；**给完整 unit 预算**（1215 的放置搜索要 ~36s）。范围限制与
+`docs/优化/32` 见该文档。

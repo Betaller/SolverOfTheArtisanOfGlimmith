@@ -396,3 +396,118 @@ mod tests {
         assert_eq!(vs.len(), 1);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Standalone (non-rose) pre-pin
+// ---------------------------------------------------------------------------
+
+/// Standalone `shape_pattern` pre-pin for puzzles that carry `puzzle_piece` but
+/// **no** `rose_window`, so `solve_rose_with_pin` never runs for them.
+///
+/// `pieces`' DLX cannot model these: it tiles the board with the shape pool and
+/// has no notion of "one big unconstrained region", so 0976
+/// (`brick+ring+puzzle_piece`, 5 pattern regions of 6 cells plus one 80-cell
+/// region) exhausts in 2ms — and with edge_csp deliberately not tolerating
+/// `puzzle_piece`, nothing else in the chain can even attempt it.
+///
+/// Exact for the shape the corpus actually has here: pin every `shape_pattern`
+/// region, then treat the *entire* remainder as a single region and run it
+/// through the full validator.  A wrong remainder is rejected by `validate`;
+/// if no assignment yields a valid single-remainder partition this returns
+/// `None` and the rest of the chain runs unchanged.  Regions that hold more
+/// than one `shape_pattern` cell (0493) or leave several unconstrained
+/// remainder regions (0994/1435) are out of scope and fall through.
+pub fn solve_puzzle_piece_standalone(
+    puzzle: &Puzzle,
+    timeout_ms: u64,
+) -> crate::types::ModuleOutcome {
+    use crate::types::ModuleOutcome;
+
+    // Anchor to *this module's* start, not the caller's global one — aog has
+    // usually burned the whole unit budget by the time we get here, so a
+    // global-start deadline would already be expired (the same trap
+    // `solve_rose` documents above its own `rose_start`).
+    let deadline = crate::clock::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let n = h * w;
+
+    // No symbol types → `enumerate_pin_candidates` skips the rose balance
+    // filter and just returns the dihedral placements per anchor.
+    let Some(anchors) = enumerate_pin_candidates(puzzle, &[]) else {
+        return ModuleOutcome::None;
+    };
+
+    let mut current: Vec<PinnedPlacement> = Vec::with_capacity(anchors.len());
+    let mut found: Option<Vec<crate::types::RegionInfo>> = None;
+    combine_plain(&anchors, 0, &mut current, puzzle, n, deadline, &mut found);
+    match found {
+        Some(regions) => {
+            if crate::solver::validate::validate(puzzle, &regions) {
+                ModuleOutcome::Solved(regions)
+            } else {
+                ModuleOutcome::ValidationFailed
+            }
+        }
+        None => ModuleOutcome::None,
+    }
+}
+
+/// Recursive disjoint-placement search; on a complete assignment the leftover
+/// cells form one region and are handed straight to the validator.
+#[allow(clippy::too_many_arguments)]
+fn combine_plain(
+    anchors: &[AnchorCandidates],
+    i: usize,
+    current: &mut Vec<PinnedPlacement>,
+    puzzle: &Puzzle,
+    n: usize,
+    deadline: crate::clock::Instant,
+    found: &mut Option<Vec<crate::types::RegionInfo>>,
+) {
+    if found.is_some() || crate::clock::Instant::now() >= deadline {
+        return;
+    }
+    let h = puzzle.height;
+    let w = puzzle.width;
+    if i == anchors.len() {
+        let mut region_of: Vec<Option<usize>> = vec![None; n];
+        for (ri, p) in current.iter().enumerate() {
+            for idx in p.cells.iter() {
+                region_of[idx] = Some(ri);
+            }
+        }
+        // The whole remainder is one region — the case the corpus's
+        // `puzzle_piece` FAILs actually have (pattern regions + 1 big region).
+        let rem_id = current.len();
+        let mut has_remainder = false;
+        for idx in 0..n {
+            let r = idx / w;
+            let c = idx % w;
+            if !puzzle.cells[r][c].blocked && region_of[idx].is_none() {
+                region_of[idx] = Some(rem_id);
+                has_remainder = true;
+            }
+        }
+        // Patterns already tile the board exactly — nothing to solve.
+        if !has_remainder && current.is_empty() {
+            return;
+        }
+        let regions = super::build_regions(&region_of, h, w);
+        if crate::solver::validate::validate(puzzle, &regions) {
+            *found = Some(regions);
+        }
+        return;
+    }
+    for p in &anchors[i].placements {
+        if current.iter().any(|c| !c.cells.is_disjoint(&p.cells)) {
+            continue;
+        }
+        current.push(p.clone());
+        combine_plain(anchors, i + 1, current, puzzle, n, deadline, found);
+        current.pop();
+        if found.is_some() {
+            return;
+        }
+    }
+}

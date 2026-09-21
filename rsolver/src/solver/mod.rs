@@ -157,6 +157,35 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         attempts.push(not_attempted("rose", note));
     }
 
+    // Standalone `shape_pattern` pre-pin for `puzzle_piece` puzzles that have no
+    // `rose_window` (so `solve_rose_with_pin` never ran above).  `pieces`' DLX
+    // cannot model "N pattern regions + one big unconstrained region" — 0976
+    // exhausts in 2ms and nothing else in the chain can attempt it.  Cheap when
+    // it does not apply (a few dihedral placements per anchor) and validated
+    // end-to-end, so a wrong pin can never leak out.
+    let has_pp = puzzle.rules.iter().any(|r| r.ctype == "puzzle_piece");
+    if has_pp && !rose_capable {
+        let pp_start = Instant::now();
+        // Full unit budget, like every other module: the placement search on
+        // 1215 needs ~36s of a 40s budget, and the wall clock
+        // (`timeout × RUST_PARTS × SLACK` = 40 × 4 × 1.2 = 192s) still covers
+        // aog(40) + pp-pin(40) + pieces(40) with room for the OOM retry.
+        let outcome = rose::puzzle_piece_pin::solve_puzzle_piece_standalone(puzzle, timeout_ms);
+        let elapsed = pp_start.elapsed().as_millis() as u64;
+        match outcome {
+            ModuleOutcome::Solved(regions) => {
+                attempts.push(SolverAttempt {
+                    solver: "pp-pin".into(),
+                    status: SolverStatus::Success,
+                    elapsed_ms: elapsed,
+                    note: None,
+                });
+                return build_solution(regions, &start, puzzle, "pp-pin", attempts);
+            }
+            _ => attempts.push(not_attempted("pp-pin", "no valid single-remainder pin")),
+        }
+    }
+
     // Solver dispatch:
     // 1. edge_csp post-fallback for edge-constraint-dense puzzles (ring / brick /
     //    watchtower / compass / inequality / difference) that aog couldn't solve.

@@ -81,7 +81,10 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         // own full unit budget afterwards.
         timeout_ms
     };
-    if !puzzle.rules.is_empty() {
+    // Diagnostic: `SKIP_AOG=1` bypasses the aog/rose phases so a single
+    // downstream solver can be exercised in isolation (mirrors `AOG_ONLY`).
+    let skip_aog = std::env::var("SKIP_AOG").is_ok();
+    if !skip_aog && !puzzle.rules.is_empty() {
         let deadline = start + std::time::Duration::from_millis(aog_budget);
         let aog_start = Instant::now();
         let outcome = aog::solve_aog(puzzle, deadline);
@@ -147,9 +150,11 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             };
         }
     } else {
-        // No rules: aog / rose never run (they need rule-driven search).
-        attempts.push(not_attempted("aog", "no rules"));
-        attempts.push(not_attempted("rose", "no rules"));
+        // No rules, or `SKIP_AOG=1`: aog / rose never run (they need
+        // rule-driven search).
+        let note = if skip_aog { "SKIP_AOG" } else { "no rules" };
+        attempts.push(not_attempted("aog", note));
+        attempts.push(not_attempted("rose", note));
     }
 
     // Solver dispatch:

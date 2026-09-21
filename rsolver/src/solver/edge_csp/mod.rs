@@ -131,10 +131,16 @@ pub(crate) struct Solver<'a> {
     /// the two-piece parity seeding — see
     /// `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
     ///
-    /// Currently only the `precise` rule supplies it: every region has area
-    /// `A`, so with `F` fillable cells the partition has exactly `F / A`
-    /// pieces (set only when `A` divides `F`).  Consumed by
-    /// `propagate_dual_connectivity`.
+    /// Three sources, all verified against the official answers:
+    ///
+    /// * `precise` — every region has area `A`, so with `F` fillable cells the
+    ///   partition has exactly `F / A` pieces (set only when `A` divides `F`).
+    /// * `rose_window` — see `rose_structural_pieces`.
+    /// * `solitary` — every region holds exactly one clue cell and every clue
+    ///   cell sits in some region, so pieces == clue cells
+    ///   (`docs/rules-guide.md` §3.14 "区域数锁定"; 87/87 official answers
+    ///   agree).  Consumed by `propagate_dual_connectivity` and by the
+    ///   "component count == piece count → no more merges" rule.
     pub structural_pieces: Option<usize>,
     /// Upper bound on the piece count when only a lower area bound is known
     /// (`range`/`precise` min): every region has at least `min_area` cells, so
@@ -142,6 +148,12 @@ pub(crate) struct Solver<'a> {
     /// contradiction check (`cc > pieces_max`); the "equal → force Uncut"
     /// half needs an exact count and is skipped here.
     pub structural_pieces_max: Option<usize>,
+    /// Whether `build_components_growth_edges` set any edge during the last
+    /// `build_components` pass.  Those writes happen *after* `curr_comp_id` is
+    /// computed, so they leave the component arrays stale; `propagate()` uses
+    /// this flag to defer `propagate_dual_connectivity` (which reads them) to
+    /// the next fixed-point iteration.
+    pub build_progress: bool,
 }
 
 /// `avail[cell] = [N, S, E, W]` — count of *existing* cells strictly in each
@@ -351,16 +363,20 @@ impl<'a> Solver<'a> {
         // Solitary clue-cell index.  Built straight from `puzzle` (not from
         // `cell_clues`, which only carries the area / compass / palisade clues
         // the propagators consume) so that `symbol` / `shape_pattern` cells also
-        // count — `validate`'s solitary check counts them too.
+        // count — `validate`'s solitary check counts them too.  Blocked cells
+        // are skipped: they belong to no region, and `validate` iterates region
+        // cells, so a clue on a blocked cell would be counted here but not
+        // there (and would break the piece-count deduction in `solve()`).
         let mut clue_cell = vec![false; nc];
         for r in 0..puzzle.height {
             for c in 0..puzzle.width {
                 let cell = &puzzle.cells[r][c];
-                if cell.symbol.is_some()
-                    || cell.compass.is_some()
-                    || cell.number.is_some()
-                    || cell.shape_pattern.is_some()
-                    || cell.fence_pattern.is_some()
+                if !cell.blocked
+                    && (cell.symbol.is_some()
+                        || cell.compass.is_some()
+                        || cell.number.is_some()
+                        || cell.shape_pattern.is_some()
+                        || cell.fence_pattern.is_some())
                 {
                     clue_cell[r * puzzle.width + c] = true;
                 }
@@ -417,6 +433,7 @@ impl<'a> Solver<'a> {
             solitary_feasible_active: false,
             structural_pieces: None,
             structural_pieces_max: None,
+            build_progress: false,
         };
 
         // Rose-window state: map each distinct symbol string to a type index and
@@ -570,6 +587,19 @@ impl<'a> Solver<'a> {
         // exactly `N` pieces.  See `rose_structural_pieces`.
         if self.structural_pieces.is_none() {
             self.structural_pieces = rose_structural_pieces(self.puzzle);
+        }
+        // Source 3 — `solitary`: every region holds exactly one clue cell and
+        // every clue cell belongs to some region, so the two stand in
+        // bijection and the partition has exactly `|clue cells|` pieces.
+        // `clue_cell` already mirrors `validate::check_solitary`'s predicate
+        // (symbol / compass / number / shape_pattern / fence_pattern), so the
+        // count here is the same one the validator uses.  Verified on all 87
+        // official `solitary` puzzles: clue count == region count, 87/87.
+        if self.structural_pieces.is_none() && self.rules.solitary {
+            let k = self.clue_cell.iter().filter(|&&b| b).count();
+            if k >= 2 {
+                self.structural_pieces = Some(k);
+            }
         }
         // Piece-count upper bound from the global area lower bound: every
         // region has at least `min_area` cells, so there are at most

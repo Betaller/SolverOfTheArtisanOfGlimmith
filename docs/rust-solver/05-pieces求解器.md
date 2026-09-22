@@ -277,3 +277,32 @@ reconstruct_and_validate(puzzle, placements, row_ids, ctx)
 ---
 
 下一节：[06-backtrack求解器](06-backtrack求解器.md)
+
+
+## 2026-09-22 修订（符号签名 + 行级剪枝 + 新落点源）
+
+**compass 计数语义修复（正确性）**：`compass_rec` 原用优先级独占计数（N>S>E>W，
+每格只进一个桶），与 `validate::check_compass` 的**半平面计数**（象限格同时计入两个
+方向）不一致——0312 型 `left=4` 由西象限承担时永远凑不满，pieces 解出过 **0/103**
+官方罗盘题。改为独立半平面计数后与验证器逐字对齐，并补两个语义测试锁死。
+
+**落点枚举完备性**：原共享 `candidates` 的 DFS 在任一分支尝试过某格后把它永久移除，
+兄弟分支连带丢失整个集合族。重写为 frontier 生长 + 以格集为键的 visited 去重
+（每个连通子集恰好展开一次），另有 `MAX_COMPASS_ENUM_STATES` 状态上限防爆。
+
+**新落点源**：
+- `block` 矩形落点（`check_block`：任意长宽实心矩形）——1004 型（28 个 3-6 格矩形区）
+  由此可解；
+- `shape_pattern` 落点（复用 `puzzle_piece_pin::enumerate_pin_candidates`）——0745 型
+  「无数字的图案区」原无任何行可盖。
+
+**玫瑰符号签名过滤**：`rose_window` 题每个区域恰含每种符号一个——落点层直接过滤，
+0223 的 shape_pool DLX 从 40s 超时缩到 3ms。
+
+**DLX 行级剪枝（`row_check`，原先是恒真空转）**：
+1. 望塔界：已选行的顶点格 `d` 个不同区域 + `u` 个未盖格 → 值须在 `[d+(u>0), d+u]`；
+2. 边约束 / 预绘边界必分家：同行即剪；
+3. `different`：已选行两两形状相异（dihedral key）；
+4. 格线索一致性：行含数字格 ⇒ 面积恰等；行含 shape_pattern 格 ⇒ 形状相等；
+   行含罗盘格 ⇒ 半平面计数恰等（行即完整区域，计数已是终态）；
+5. `solitary` 线索数给出的区域数上限：超出即剪。

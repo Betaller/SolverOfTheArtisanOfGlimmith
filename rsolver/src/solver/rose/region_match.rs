@@ -423,11 +423,14 @@ fn enum_area_combos_bounded(
     depth: usize,
     cur: &mut Vec<usize>,
     out: &mut Vec<Vec<usize>>,
+    deadline: Instant,
 ) {
     // B-LZ: stop once the combo list reaches MAX_COMBOS — prevents the
     // astronomical combo counts (0882 m=22 → 2.2e20) from OOMing before any
     // combo is tried. The partial set (sorted below) is still searched.
-    if out.len() >= MAX_COMBOS {
+    // Deadline guard as well: with m=30+ seeds the recursion to reach the cap
+    // can itself run unbounded (0223 hung here past the harness wall).
+    if out.len() >= MAX_COMBOS || Instant::now() >= deadline {
         return;
     }
     if depth == parts - 1 {
@@ -439,7 +442,7 @@ fn enum_area_combos_bounded(
         return;
     }
     for &sz in &allowed[depth] {
-        if out.len() >= MAX_COMBOS {
+        if out.len() >= MAX_COMBOS || Instant::now() >= deadline {
             return;
         }
         if sz < min_val {
@@ -449,7 +452,7 @@ fn enum_area_combos_bounded(
             continue;
         }
         cur.push(sz);
-        enum_area_combos_bounded(total - sz, parts, min_val, allowed, depth + 1, cur, out);
+        enum_area_combos_bounded(total - sz, parts, min_val, allowed, depth + 1, cur, out, deadline);
         cur.pop();
     }
 }
@@ -666,6 +669,7 @@ pub fn solve_by_region_match(
         0,
         &mut Vec::new(),
         &mut combos,
+        deadline,
     );
     combos.sort_by_key(|c| c.iter().max().unwrap_or(&0) - c.iter().min().unwrap_or(&0));
 

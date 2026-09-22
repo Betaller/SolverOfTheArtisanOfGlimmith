@@ -7,6 +7,7 @@ pub mod fence;
 pub mod pieces;
 pub mod prototypes;
 pub mod rose;
+pub mod same_tiling;
 pub mod validate;
 
 use crate::types::*;
@@ -58,6 +59,48 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // success it is attached to the returned `Solution`.
     let mut attempts: Vec<SolverAttempt> = Vec::new();
 
+    // Congruent-tiling pre-pass (`same_tiling`): the global `same` rule, the
+    // pattern-pinned congruent-remainder clusters, and homogeneous (Gemini)
+    // two-region splits.  Cheap and exact when it applies (cyclic isometry
+    // search / small-shape DLX, both bounded).  Runs first because aog burns
+    // its full unit budget shape-library-exploding on these puzzles (0382:
+    // 45s) where this module finishes in milliseconds.  Gated so the other
+    // 1200+ puzzles pay nothing and record nothing.
+    let st_local_density = puzzle
+        .cells
+        .iter()
+        .flatten()
+        .filter(|c| c.shape_pattern.is_some() || c.fence_pattern.is_some())
+        .count()
+        + puzzle
+            .vertices
+            .iter()
+            .flatten()
+            .filter(|v| v.watchtower.is_some())
+            .count();
+    if puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "homogeneous")
+        || st_local_density > 0
+    {
+        let st_start = Instant::now();
+        let st_deadline = st_start + std::time::Duration::from_millis(timeout_ms);
+        let outcome = same_tiling::solve_same_tiling(puzzle, timeout_ms);
+        let elapsed = st_start.elapsed().as_millis() as u64;
+        match outcome {
+            ModuleOutcome::Solved(regions) => {
+                attempts.push(SolverAttempt {
+                    solver: "same-tiling".into(),
+                    status: SolverStatus::Success,
+                    elapsed_ms: elapsed,
+                    note: None,
+                });
+                return build_solution(regions, &start, puzzle, "same-tiling", attempts);
+            }
+            other => {
+                record_module_with_elapsed("same-tiling", other, st_deadline, elapsed, &mut attempts)
+            }
+        }
+    }
+
     // NOTE (2026-09-03): running edge_csp BEFORE aog here (wiring up the
     // previously dead `is_edge_csp_preempt`) was tried and REJECTED - it cost
     // 61 puzzles (1112 -> 1051, 65 regressions, 4 gains) and *increased* the
@@ -105,17 +148,19 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
 
         // NEW: pure rose_window puzzles aog couldn't solve quickly → rose solver.
         if rose_capable {
-            let elapsed = start.elapsed().as_millis() as u64;
-            // `timeout_ms` is the sole ceiling — the old `.min(ROSE_TIMEOUT_MS)`
-            // clamp (30s) silently capped rose even when the caller asked for
-            // more, so `--timeout 40` never reached a rose-capable puzzle's
-            // rose phase.  Dropping it makes the unit-budget philosophy apply
-            // uniformly to aog/pieces/backtrack/rose.
-            let rose_ms = timeout_ms.saturating_sub(elapsed);
-            if rose_ms > 0 {
-                let rose_deadline = start + std::time::Duration::from_millis(timeout_ms);
+            // Unit-budget philosophy — every module gets its own full
+            // `timeout_ms` from its own start (see `solve_rose`, which anchors
+            // internally).  Computing `timeout_ms - aog_elapsed` instead
+            // starved rose to 0ms whenever aog overran its own deadline: aog's
+            // hot-loop deadline checks overshoot badly (0382: 45s of work
+            // against a 20s `AOG_ROSE_BUDGET_MS`), and the rose+same cluster
+            // then got `not_attempted` — the one solver that can crack those
+            // puzzles never ran.  (The old `.min(ROSE_TIMEOUT_MS)` clamp was
+            // removed earlier for the same reason.)
+            let rose_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
+            {
                 let rose_start = Instant::now();
-                let outcome = rose::solve_rose(puzzle, &start, rose_ms);
+                let outcome = rose::solve_rose(puzzle, &start, timeout_ms);
                 let r_elapsed = rose_start.elapsed().as_millis() as u64;
                 match outcome {
                     ModuleOutcome::Solved(regions) => {
@@ -129,8 +174,6 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
                     }
                     _ => record_module_with_elapsed("rose", outcome, rose_deadline, r_elapsed, &mut attempts),
                 }
-            } else {
-                attempts.push(not_attempted("rose", "aog consumed the full budget"));
             }
         } else {
             attempts.push(not_attempted("rose", "puzzle is not rose-capable"));
@@ -220,7 +263,8 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     let has_area_clues = has_area_number_clues(puzzle);
     let has_compass_clues = has_constrained_compass(puzzle);
 
-    if has_shape_pool || has_area_clues || has_compass_clues {
+    let has_block = puzzle.rules.iter().any(|r| r.ctype == "block");
+    if has_shape_pool || has_area_clues || has_compass_clues || has_block {
         // Try piece-based solver first
         let p_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
         let p_start = Instant::now();
@@ -242,7 +286,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             _ => record_module_with_elapsed("pieces", outcome, p_deadline, elapsed, &mut attempts),
         }
     } else {
-        attempts.push(not_attempted("pieces", "no shape_pool / area / compass clues"));
+        attempts.push(not_attempted("pieces", "no shape_pool / area / constrained compass / block clues"));
     }
 
     // Fallback: backtracking solver.
@@ -470,14 +514,17 @@ fn has_area_number_clues(puzzle: &Puzzle) -> bool {
 }
 
 fn has_constrained_compass(puzzle: &Puzzle) -> bool {
+    // Any compass with at least one constrained direction (count >= 0) carries
+    // real half-plane information.  The old `spec >= 3 || strip` gate dropped
+    // single-/double-direction clues (e.g. 0418's three `left`-only compasses)
+    // and kept the whole pieces compass path dark for them.
     for r in 0..puzzle.height {
         for c in 0..puzzle.width {
             if let Some(ref comp) = puzzle.cells[r][c].compass {
-                let spec = [comp.up, comp.down, comp.left, comp.right]
-                    .iter().filter(|v| v.is_some()).count();
-                let is_strip = (comp.right == Some(0) && comp.left == Some(0))
-                    || (comp.up == Some(0) && comp.down == Some(0));
-                if spec >= 3 || is_strip {
+                if [comp.up, comp.down, comp.left, comp.right]
+                    .iter()
+                    .any(|v| v.is_some_and(|x| x >= 0))
+                {
                     return true;
                 }
             }

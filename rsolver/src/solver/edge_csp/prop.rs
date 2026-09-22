@@ -2482,11 +2482,39 @@ impl<'a> Solver<'a> {
     /// contradicts, force the other.  Returns early on first force.
     fn probe_one_round(&mut self) -> Result<bool, ()> {
         let num_edges = self.grid.num_edges();
-        for e in 0..num_edges {
+        // Diagnostic: `EDGE_CSP_PROBE_ORDER=rev|inter` reshuffles the scan so
+        // the early-return lands on informative edges sooner (each round
+        // restarts from scratch, so index order is the de-facto priority).
+        let order: Vec<usize> = match std::env::var("EDGE_CSP_PROBE_ORDER")
+            .unwrap_or_default()
+            .as_str()
+        {
+            "rev" => (0..num_edges).rev().collect(),
+            "inter" => {
+                let mut v = Vec::with_capacity(num_edges);
+                let (mut lo, mut hi) = (0usize, num_edges);
+                while lo < hi {
+                    v.push(lo);
+                    lo += 1;
+                    if lo < hi {
+                        hi -= 1;
+                        v.push(hi);
+                    }
+                }
+                v
+            }
+            _ => (0..num_edges).collect(),
+        };
+        for e in order {
             if self.edges[e] != EdgeState::Unknown {
                 continue;
             }
             let cut_ok = self.probe(|s| s.set_edge(e, EdgeState::Cut));
+            // A probe that died on the deadline is not a failed literal —
+            // forcing the opposite value from it would prune the real branch.
+            if self.timed_out {
+                return Ok(false);
+            }
             if !cut_ok {
                 if self.edges[e] == EdgeState::Unknown && self.set_edge(e, EdgeState::Uncut) {
                     return Ok(true);
@@ -2497,6 +2525,9 @@ impl<'a> Solver<'a> {
                 continue;
             }
             let uncut_ok = self.probe(|s| s.set_edge(e, EdgeState::Uncut));
+            if self.timed_out {
+                return Ok(false);
+            }
             if !uncut_ok {
                 if self.edges[e] == EdgeState::Unknown && self.set_edge(e, EdgeState::Cut) {
                     return Ok(true);
@@ -2546,6 +2577,11 @@ impl<'a> Solver<'a> {
                     for &v1 in &vals {
                         for &v2 in &vals {
                             let ok = self.probe(|s| s.set_edge(e1, v1) && s.set_edge(e2, v2));
+                            if self.timed_out {
+                                // Deadline kills must not be read as "combination
+                                // invalid" — that would force a wrong pair.
+                                return Ok(false);
+                            }
                             if ok {
                                 ok_count += 1;
                                 last_ok = (v1, v2);

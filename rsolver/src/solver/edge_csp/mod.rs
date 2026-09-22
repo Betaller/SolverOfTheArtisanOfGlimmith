@@ -560,15 +560,21 @@ impl<'a> Solver<'a> {
         }
     }
 
-    /// Entry: returns the first valid region assignment, or `None` (no solution
-    /// or timed out).  The router re-validates via `validate::validate`.
-    pub fn solve(&mut self) -> Option<Vec<RegionInfo>> {
-        self.total_cells = self.grid.total_existing_cells();
 
-        // Structural piece count (see the field doc).
-        //
-        // Source 1 — `precise`: every region has area `A`, so with `F` fillable
-        // cells the partition has exactly `F / A` pieces.
+    /// Structural piece count (see the field doc).
+    ///
+    /// Source 1 — `precise`: every region has area `A`, so with `F` fillable
+    /// cells the partition has exactly `F / A` pieces.
+    /// Source 2 — `rose_window`: every piece holds exactly one cell of each
+    /// symbol type, so if each type occurs `N` times the partition has
+    /// exactly `N` pieces.  See `rose_structural_pieces`.
+    /// Source 3 — `solitary`: every region holds exactly one clue cell and
+    /// every clue cell belongs to some region, so the two stand in
+    /// bijection and the partition has exactly `|clue cells|` pieces.
+    /// (Verified on all 87 official `solitary` puzzles, 87/87.)
+    /// Source 4 — `area_sum_piece_count`.
+    /// Plus a piece-count upper bound from the global area lower bound.
+    fn derive_structural_pieces(&mut self) {
         if let Some(a) = self
             .puzzle
             .rules
@@ -582,32 +588,29 @@ impl<'a> Solver<'a> {
                 self.structural_pieces = Some(self.total_cells / a);
             }
         }
-        // Source 2 — `rose_window`: every piece holds exactly one cell of each
-        // symbol type, so if each type occurs `N` times the partition has
-        // exactly `N` pieces.  See `rose_structural_pieces`.
         if self.structural_pieces.is_none() {
             self.structural_pieces = rose_structural_pieces(self.puzzle);
         }
-        // Source 3 — `solitary`: every region holds exactly one clue cell and
-        // every clue cell belongs to some region, so the two stand in
-        // bijection and the partition has exactly `|clue cells|` pieces.
-        // `clue_cell` already mirrors `validate::check_solitary`'s predicate
-        // (symbol / compass / number / shape_pattern / fence_pattern), so the
-        // count here is the same one the validator uses.  Verified on all 87
-        // official `solitary` puzzles: clue count == region count, 87/87.
         if self.structural_pieces.is_none() && self.rules.solitary {
             let k = self.clue_cell.iter().filter(|&&b| b).count();
             if k >= 2 {
                 self.structural_pieces = Some(k);
             }
         }
-        // Piece-count upper bound from the global area lower bound: every
-        // region has at least `min_area` cells, so there are at most
-        // `total_cells / min_area` regions.  Only meaningful when the bound
-        // actually bites (`min_area > 1`).
+        if self.structural_pieces.is_none() {
+            self.structural_pieces = self.area_sum_piece_count();
+        }
         if self.eff_min_area > 1 {
             self.structural_pieces_max = Some(self.total_cells / self.eff_min_area);
         }
+    }
+
+    /// Entry: returns the first valid region assignment, or `None` (no solution
+    /// or timed out).  The router re-validates via `validate::validate`.
+    pub fn solve(&mut self) -> Option<Vec<RegionInfo>> {
+        self.total_cells = self.grid.total_existing_cells();
+
+        self.derive_structural_pieces();
 
         // Edges adjacent to a blocked/outside cell are outer borders → Cut.
         for e in 0..self.grid.num_edges() {
@@ -696,6 +699,44 @@ impl<'a> Solver<'a> {
         }
 
         self.solution_regions.take()
+    }
+
+    /// Source 4 for `structural_pieces` — distinct area-clue values that sum
+    /// to the fillable cell count.  A cell carrying clue `v` sits in a region
+    /// of area `v` (`check_area`); cells with different values can never share
+    /// a region.  Write `k_v ≥ 1` for the number of value-`v` regions (all of
+    /// area `v`) and `t_j ≥ 1` for any clue-less ones:
+    ///
+    /// ```text
+    /// Σ_v k_v·v + Σ_j t_j = total   and   Σ_{v distinct} v = total
+    /// ```
+    ///
+    /// The left sum is at least the right, so equality forces every `k_v == 1`
+    /// and no clue-less region: the partition has exactly `#distinct` pieces,
+    /// one of each size.  (Two same-valued clue cells therefore *share* one
+    /// region — not by proximity, but because the board has no room for a
+    /// second copy.)
+    ///
+    /// Three official FAILs match (0262 {14,15,17,18}/64, 1138 {60,61}/121,
+    /// 1183 {13,14,15}/42); their answers confirm region count == #distinct
+    /// and the sizes are exactly those values.
+    fn area_sum_piece_count(&self) -> Option<usize> {
+        let mut distinct: BTreeSet<usize> = BTreeSet::new();
+        for r in 0..self.puzzle.height {
+            for c in 0..self.puzzle.width {
+                let cell = &self.puzzle.cells[r][c];
+                if !cell.blocked {
+                    if let Some(v) = cell.number {
+                        distinct.insert(v as usize);
+                    }
+                }
+            }
+        }
+        if distinct.len() >= 2 && distinct.iter().sum::<usize>() == self.total_cells {
+            Some(distinct.len())
+        } else {
+            None
+        }
     }
 
     /// Build the `solitary` feasibility bitset (consumed by

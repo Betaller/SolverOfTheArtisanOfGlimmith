@@ -21,3 +21,4 @@ results/bin/rsolver-2785b59-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bin/rsolver-416c963-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bin/rsolver-56b5d56-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bin/rsolver-e5d68a8-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-47d2e6f-linux-x86_64 filter=lfs diff=lfs merge=lfs -text

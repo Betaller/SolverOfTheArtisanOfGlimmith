@@ -77,6 +77,20 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             .iter()
             .flatten()
             .filter(|v| v.watchtower.is_some())
+            .count()
+        // Pre-drawn boundaries / constraint edges feed the m=2 parity
+        // propagator (0974: 46 precuts and no fence/watchtower at all).
+        + puzzle
+            .h_edges
+            .iter()
+            .flatten()
+            .filter(|e| e.is_boundary || e.constraint.is_some())
+            .count()
+        + puzzle
+            .v_edges
+            .iter()
+            .flatten()
+            .filter(|e| e.is_boundary || e.constraint.is_some())
             .count();
     if puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "homogeneous")
         || st_local_density > 0

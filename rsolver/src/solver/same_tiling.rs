@@ -63,7 +63,19 @@ pub fn solve_same_tiling(puzzle: &Puzzle, timeout_ms: u64) -> ModuleOutcome {
             .iter()
             .flatten()
             .any(|v| v.watchtower.is_some());
-    if !has_same && !has_patterns && !has_gemini && !has_local {
+    // Pre-drawn boundaries / constraint edges feed the m=2 parity propagator
+    // (0974: 46 precuts, no fence/watchtower at all).
+    let has_precuts = puzzle
+        .h_edges
+        .iter()
+        .flatten()
+        .any(|e| e.is_boundary || e.constraint.is_some())
+        || puzzle
+            .v_edges
+            .iter()
+            .flatten()
+            .any(|e| e.is_boundary || e.constraint.is_some());
+    if !has_same && !has_patterns && !has_gemini && !has_local && !has_precuts {
         return ModuleOutcome::None;
     }
     let deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
@@ -123,6 +135,18 @@ pub fn solve_same_tiling(puzzle: &Puzzle, timeout_ms: u64) -> ModuleOutcome {
             .iter()
             .flatten()
             .filter(|v| v.watchtower.is_some())
+            .count()
+        + puzzle
+            .h_edges
+            .iter()
+            .flatten()
+            .filter(|e| e.is_boundary || e.constraint.is_some())
+            .count()
+        + puzzle
+            .v_edges
+            .iter()
+            .flatten()
+            .filter(|e| e.is_boundary || e.constraint.is_some())
             .count();
     if m == 2 && local_density >= 10 {
         if let Some(regions) = m2_region_growth(puzzle, &free, &idx_of, deadline) {
@@ -131,6 +155,13 @@ pub fn solve_same_tiling(puzzle: &Puzzle, timeout_ms: u64) -> ModuleOutcome {
         if crate::aog_debug_enabled() {
             eprintln!("same-tiling: m2 region growth found nothing");
         }
+    }
+
+    // Precut-only entries used this module solely as the m=2 growth host —
+    // the whole-board congruent methods below target same/gemini/pattern
+    // puzzles and would only burn the unit budget here.
+    if !has_same && !has_patterns && !has_gemini && !has_local {
+        return ModuleOutcome::None;
     }
 
     // The whole-board congruent methods need equal piece sizes.
@@ -688,8 +719,11 @@ fn star_configs(pattern: &[[usize; 2]]) -> Vec<[bool; 4]> {
     }
     if base.is_empty() {
         // Not a star (should not happen for well-formed patterns) — accept
-        // everything rather than wrongly prune.
-        return vec![[false; 4], [true; 4]];
+        // every arm config rather than wrongly prune.  (A `[FF, TT]` shortcut
+        // here would kill mixed partial bits.)
+        return (0..16u8)
+            .map(|b| [b & 1 != 0, b & 2 != 0, b & 4 != 0, b & 8 != 0])
+            .collect();
     }
     let mut out: Vec<[bool; 4]> = Vec::new();
     for cfg in base {
@@ -1102,48 +1136,38 @@ fn m2_region_growth(
 ) -> Option<Vec<RegionInfo>> {
     let (h, w) = (puzzle.height, puzzle.width);
     let total = free.len();
-    let facts = growth_facts(puzzle, free, idx_of, h, w);
+    let mut facts = growth_facts(puzzle, free, idx_of, h, w);
 
-    // Symbol bookkeeping: S gets exactly one cell of each rose type; the other
-    // same-type cells are pinned into T.
-    let types = crate::shapes::rose_symbol_types(puzzle);
+    // Rose symbol pairs are XOR constraints in the two-piece world (each
+    // region holds exactly one cell of each type) — hand them to the parity
+    // propagator.  Pin a single root into S: the partition is unordered, so
+    // WLOG one representative starts in S.  (The old per-type pinning of
+    // first→S/second→T is only sound up to ONE global swap — with ≥2 types
+    // the mixed pairings like S={a0,b1} were unreachable.)
     let mut seeds_of_type: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (k, &(r, c)) in free.iter().enumerate() {
         if let Some(sym) = &puzzle.cells[r][c].symbol {
             seeds_of_type.entry(sym.clone()).or_default().push(k);
         }
     }
-    // WLOG the first cell of each type goes to S (the partition is unordered —
-    // swapping S ↔ T swaps every choice; fix one representative per type) and
-    // the second is pinned into T.
-    let mut pinned_t: Vec<usize> = Vec::new();
-    let mut pinned_s: Vec<usize> = Vec::new();
-    for (_t, ks) in &seeds_of_type {
+    for ks in seeds_of_type.values() {
         if ks.len() == 2 {
-            pinned_s.push(ks[0]);
-            pinned_t.push(ks[1]);
-        } else if ks.len() == 1 {
-            pinned_s.push(ks[0]);
+            facts.must_split.push((ks[0], ks[1]));
         }
     }
+    let root = seeds_of_type
+        .values()
+        .next()
+        .and_then(|ks| ks.first().copied())
+        .unwrap_or(0);
 
     let mut state = GrowthState {
         label: vec![2u8; total], // 0 = S, 1 = T, 2 = undecided
-        s_cells: Vec::new(),
+        s_cells: vec![root],
         partner: &[],
     };
-    for &t in &pinned_t {
-        state.label[t] = 1;
-    }
-    for &s in &pinned_s {
-        state.label[s] = 0;
-        state.s_cells.push(s);
-    }
-    if state.s_cells.is_empty() {
-        return None;
-    }
+    state.label[root] = 0;
     let mut visited: std::collections::HashSet<[u64; 4]> = std::collections::HashSet::new();
-    visited.insert(bitkey(&state.s_cells));
     grow_free(
         puzzle,
         free,
@@ -1152,48 +1176,282 @@ fn m2_region_growth(
         &mut state,
         &mut visited,
         &facts,
-        &pinned_t,
         deadline,
     )
 }
 
-/// Recursion of the free-size growth.  `pinned_t` are the T-side symbol seeds.
-fn grow_free(
+/// Unit-propagation outcome: `None` = contradiction, `Some(changed)` = fixpoint
+/// pass result.
+type Prop = Option<bool>;
+
+impl<'p> GrowthState<'p> {
+    /// Assign a previously-undecided cell (0 = S, 1 = T).  S assignments join
+    /// `s_cells` (the visited-set key).
+    fn set(&mut self, k: usize, v: u8) {
+        self.label[k] = v;
+        if v == 0 {
+            self.s_cells.push(k);
+        }
+    }
+}
+
+/// Force the pairwise label relation (`want_differ` = the two cells must land
+/// in different pieces).  In the two-piece world must-split edges, rose symbol
+/// pairs and pinned fence arms all reduce to such relations.
+fn force_relation(state: &mut GrowthState<'_>, a: usize, b: usize, want_differ: bool) -> Prop {
+    let map = |l: u8| if want_differ { 1 - l } else { l };
+    let (la, lb) = (state.label[a], state.label[b]);
+    if la != 2 && lb != 2 {
+        return if lb == map(la) { Some(false) } else { None };
+    }
+    if la != 2 {
+        let t = map(la);
+        state.set(b, t);
+    } else if lb != 2 {
+        let t = map(lb);
+        state.set(a, t);
+    } else {
+        return Some(false);
+    }
+    Some(true)
+}
+
+/// One pass over the XOR pairs (must-split edges + rose symbol pairs).
+fn xor_round(state: &mut GrowthState<'_>, facts: &GrowthPruneFacts) -> Prop {
+    let mut changed = false;
+    for &(a, b) in &facts.must_split {
+        changed |= force_relation(state, a, b, true)?;
+    }
+    Some(changed)
+}
+
+/// Known boundary bits of a fence cell under the current labels (border and
+/// blocked neighbours count as boundary; a bit is known once both sides are
+/// decided).
+fn fence_known_bits(
     puzzle: &Puzzle,
     free: &[(usize, usize)],
     idx_of: &[Vec<usize>],
-    total: usize,
-    state: &mut GrowthState<'_>,
-    visited: &mut std::collections::HashSet<[u64; 4]>,
-    facts: &GrowthPruneFacts,
-    pinned_t: &[usize],
-    deadline: Instant,
-) -> Option<Vec<RegionInfo>> {
-    if Instant::now() >= deadline || visited.len() >= 800_000 {
-        return None;
-    }
-    let (h, w) = (puzzle.height, puzzle.width);
-    if crate::aog_debug_enabled() && visited.len() % 20000 == 0 && visited.len() > 0 {
-        eprintln!(
-            "same-tiling: free-growth states={} |S|={}",
-            visited.len(),
-            state.s_cells.len()
-        );
-    }
-    if !growth_prunes_ok(puzzle, free, idx_of, state, facts, h, w) {
-        return None;
-    }
-    // T closure: T must stay reachable from the pinned T seeds over the
-    // undecided cells (S cells are walls), covering every non-S cell — else
-    // the complement can never become one region.
-    let mut t_reach: Vec<bool> = vec![false; total];
-    let mut q: Vec<usize> = Vec::new();
-    for &t in pinned_t {
-        if state.label[t] == 1 {
-            t_reach[t] = true;
-            q.push(t);
+    state: &GrowthState<'_>,
+    k: usize,
+    h: usize,
+    w: usize,
+) -> ([bool; 4], [bool; 4]) {
+    let (r, c) = free[k];
+    let mut bits = [false; 4];
+    let mut known = [false; 4];
+    let lab_v = state.label[k];
+    for (i, (nr, nc)) in [
+        (r.wrapping_sub(1), c),
+        (r + 1, c),
+        (r, c.wrapping_sub(1)),
+        (r, c + 1),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if nr >= h || nc >= w || puzzle.cells[nr][nc].blocked {
+            bits[i] = true;
+            known[i] = true;
+            continue;
+        }
+        let j = idx_of[nr][nc];
+        if j == usize::MAX {
+            continue;
+        }
+        let lab_u = state.label[j];
+        if lab_v != 2 && lab_u != 2 {
+            bits[i] = lab_u != lab_v;
+            known[i] = true;
         }
     }
+    (bits, known)
+}
+
+/// Which arm values survive in `configs` under the known bits: `None` =
+/// contradiction, otherwise per-direction `Some(v)` when every survivor
+/// agrees on `v` (unique-config is the all-agree special case).
+fn fence_forced_arms(
+    configs: &[[bool; 4]],
+    bits: &[bool; 4],
+    known: &[bool; 4],
+) -> Option<[Option<bool>; 4]> {
+    let survivors: Vec<&[bool; 4]> = configs
+        .iter()
+        .filter(|cfg| (0..4).all(|i| !known[i] || bits[i] == cfg[i]))
+        .collect();
+    let Some(first) = survivors.first() else {
+        return None;
+    };
+    let mut agree = [None; 4];
+    for i in 0..4 {
+        let v = first[i];
+        if survivors.iter().all(|c| c[i] == v) {
+            agree[i] = Some(v);
+        }
+    }
+    Some(agree)
+}
+
+/// Fence-star unit propagation with arm sharing between adjacent fence cells
+/// (the shared edge is one bit: one cell's south arm is its neighbour's north
+/// arm).  Each round narrows every star config's domain from decided labels
+/// and the neighbours' forced arms; agreed arms then force label relations.
+fn fence_round(
+    puzzle: &Puzzle,
+    free: &[(usize, usize)],
+    idx_of: &[Vec<usize>],
+    state: &mut GrowthState<'_>,
+    facts: &GrowthPruneFacts,
+    h: usize,
+    w: usize,
+) -> Prop {
+    let n_f = facts.fence.len();
+    let mut f_idx = vec![usize::MAX; free.len()];
+    for (fi, &(k, _)) in facts.fence.iter().enumerate() {
+        f_idx[k] = fi;
+    }
+    let mut forced: Vec<[Option<bool>; 4]> = vec![[None; 4]; n_f];
+    let mut changed = false;
+    loop {
+        let mut moved = false;
+        for (fi, &(k, ref configs)) in facts.fence.iter().enumerate() {
+            let (mut bits, mut known) = fence_known_bits(puzzle, free, idx_of, state, k, h, w);
+            // Own previously-agreed arms keep their bit; neighbour fence cells
+            // pin the shared edge through their opposite arm.
+            let (r, c) = free[k];
+            for (i, (nr, nc)) in [
+                (r.wrapping_sub(1), c),
+                (r + 1, c),
+                (r, c.wrapping_sub(1)),
+                (r, c + 1),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if known[i] {
+                    continue;
+                }
+                if let Some(v) = forced[fi][i] {
+                    bits[i] = v;
+                    known[i] = true;
+                    continue;
+                }
+                if nr >= h || nc >= w || puzzle.cells[nr][nc].blocked {
+                    continue;
+                }
+                let j = idx_of[nr][nc];
+                if j == usize::MAX {
+                    continue;
+                }
+                let fj = f_idx[j];
+                if fj == usize::MAX {
+                    continue;
+                }
+                if let Some(v) = forced[fj][i ^ 1] {
+                    bits[i] = v;
+                    known[i] = true;
+                }
+            }
+            let agree = fence_forced_arms(configs, &bits, &known)?;
+            for (i, (nr, nc)) in [
+                (r.wrapping_sub(1), c),
+                (r + 1, c),
+                (r, c.wrapping_sub(1)),
+                (r, c + 1),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let Some(v) = agree[i] else { continue };
+                if forced[fi][i] != Some(v) {
+                    forced[fi][i] = Some(v);
+                    moved = true;
+                }
+                if nr >= h || nc >= w || puzzle.cells[nr][nc].blocked {
+                    continue;
+                }
+                let j = idx_of[nr][nc];
+                if j == usize::MAX {
+                    continue;
+                }
+                changed |= force_relation(state, k, j, v)?;
+            }
+        }
+        if !moved {
+            return Some(changed);
+        }
+    }
+}
+
+/// Watchtower unit propagation in the two-piece world (`val` = distinct piece
+/// count around the vertex).  `val == 1` forces the quadrant cells equal;
+/// `val == 2` turns a two-cell vertex into an XOR pair and flips a lone
+/// undecided once the rest already carry one label.  The count bound itself
+/// stays in `growth_prunes_ok`.
+fn watchtower_round(state: &mut GrowthState<'_>, facts: &GrowthPruneFacts) -> Prop {
+    let mut changed = false;
+    for (cells, val) in &facts.watchtowers {
+        let mut und: Vec<usize> = Vec::new();
+        let mut labs: Vec<u8> = Vec::new();
+        for &i in cells {
+            if state.label[i] == 2 {
+                und.push(i);
+            } else if !labs.contains(&state.label[i]) {
+                labs.push(state.label[i]);
+            }
+        }
+        match *val {
+            1 => {
+                if labs.len() > 1 {
+                    return None;
+                }
+                if let Some(&l) = labs.first() {
+                    for &u in &und {
+                        state.set(u, l);
+                        changed = true;
+                    }
+                } else {
+                    for &u in &und[1.min(und.len())..] {
+                        changed |= force_relation(state, und[0], u, false)?;
+                    }
+                }
+            }
+            2 => {
+                if und.len() == 1 && labs.len() == 1 {
+                    let t = 1 - labs[0];
+                    state.set(und[0], t);
+                    changed = true;
+                } else if und.len() == 2 && labs.is_empty() {
+                    changed |= force_relation(state, und[0], und[1], true)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(changed)
+}
+
+/// T-reachability round.  Every forced-T cell must sit in one non-S component
+/// (the complement has to end connected) — undecided cells that cannot reach
+/// that component can never join T and are forced into S.  The old closure
+/// prune demanded *every* non-S cell be T-reachable, but undecided cells may
+/// still join S: an S' that grew into a wall wrongly killed the official
+/// branch (the m=2 cluster's root cause).
+fn t_round(
+    free: &[(usize, usize)],
+    idx_of: &[Vec<usize>],
+    state: &mut GrowthState<'_>,
+    total: usize,
+    h: usize,
+    w: usize,
+) -> Prop {
+    let Some(root) = (0..total).find(|&k| state.label[k] == 1) else {
+        return Some(false); // no T seed yet — nothing to enforce
+    };
+    let mut reach = vec![false; total];
+    reach[root] = true;
+    let mut q = vec![root];
     while let Some(u) = q.pop() {
         let (r, c) = free[u];
         for (nr, nc) in [
@@ -1206,23 +1464,113 @@ fn grow_free(
                 continue;
             }
             let j = idx_of[nr][nc];
-            if j == usize::MAX || t_reach[j] || state.label[j] == 0 {
+            if j == usize::MAX || reach[j] || state.label[j] == 0 {
                 continue;
             }
-            t_reach[j] = true;
+            reach[j] = true;
             q.push(j);
         }
     }
+    let mut changed = false;
     for k in 0..total {
-        if state.label[k] != 0 && !t_reach[k] {
-            return None;
+        if reach[k] {
+            continue;
+        }
+        match state.label[k] {
+            1 => return None, // T would stay split
+            2 => {
+                state.set(k, 0);
+                changed = true;
+            }
+            _ => {}
         }
     }
+    Some(changed)
+}
 
-    // Leaf: everything decided (S plus pinned-T; free non-seed cells decided
-    // implicitly by growth order is NOT enough — undecided cells may still
-    // join either side).  Instead the leaf condition is "no undecided cell is
-    // adjacent to S": S is sealed; the rest is T.
+/// Fixpoint of the label propagators.  Every force is implied by the S-set, so
+/// the full label state is a function of it — visited-dedup on `s_cells` stays
+/// sound.
+fn propagate_labels(
+    puzzle: &Puzzle,
+    free: &[(usize, usize)],
+    idx_of: &[Vec<usize>],
+    state: &mut GrowthState<'_>,
+    facts: &GrowthPruneFacts,
+    total: usize,
+    h: usize,
+    w: usize,
+) -> bool {
+    loop {
+        let mut progress = false;
+        match xor_round(state, facts) {
+            None => return false,
+            Some(c) => progress |= c,
+        }
+        match fence_round(puzzle, free, idx_of, state, facts, h, w) {
+            None => return false,
+            Some(c) => progress |= c,
+        }
+        match watchtower_round(state, facts) {
+            None => return false,
+            Some(c) => progress |= c,
+        }
+        match t_round(free, idx_of, state, total, h, w) {
+            None => return false,
+            Some(c) => progress |= c,
+        }
+        if !progress {
+            return true;
+        }
+    }
+}
+
+/// State cap for the free growth; an abort at the cap is a *budget* outcome,
+/// not a proof of unsolvability.
+const FREE_GROWTH_STATE_CAP: usize = 2_000_000;
+
+/// Recursion of the free-size growth.  Each node first runs the label
+/// propagators to a fixpoint, then tries sealing (rest → T) and expanding S
+/// over the frontier.  Propagation writes are rolled back per branch.
+#[allow(clippy::too_many_arguments)]
+fn grow_free(
+    puzzle: &Puzzle,
+    free: &[(usize, usize)],
+    idx_of: &[Vec<usize>],
+    total: usize,
+    state: &mut GrowthState<'_>,
+    visited: &mut std::collections::HashSet<[u64; 4]>,
+    facts: &GrowthPruneFacts,
+    deadline: Instant,
+) -> Option<Vec<RegionInfo>> {
+    if Instant::now() >= deadline || visited.len() >= FREE_GROWTH_STATE_CAP {
+        return None;
+    }
+    let (h, w) = (puzzle.height, puzzle.width);
+    if crate::aog_debug_enabled() && visited.len() % 20000 == 0 && !visited.is_empty() {
+        eprintln!(
+            "same-tiling: free-growth states={} |S|={}",
+            visited.len(),
+            state.s_cells.len()
+        );
+    }
+    if !propagate_labels(puzzle, free, idx_of, state, facts, total, h, w) {
+        return None;
+    }
+    // Dedup on the *post-propagation* S-set (forced-S cells are part of the
+    // key).  The key was previously inserted by the parent before propagation
+    // could extend it.
+    if !visited.insert(bitkey(&state.s_cells)) {
+        return None;
+    }
+    if !growth_prunes_ok(puzzle, free, idx_of, state, facts, h, w) {
+        return None;
+    }
+    // Try sealing S here (the remaining undecided cells go to T).
+    if let Some(regions) = growth_leaf_free(puzzle, free, idx_of, state, h, w) {
+        return Some(regions);
+    }
+    // Frontier of S; fence-adjacent cells first so the star prunes bite early.
     let mut frontier: Vec<usize> = Vec::new();
     for &sk in &state.s_cells {
         let (r, c) = free[sk];
@@ -1244,52 +1592,41 @@ fn grow_free(
             }
         }
     }
-    // Fence-adjacent cells first so the star prunes bite early.
     let fence_set: std::collections::BTreeSet<usize> =
         facts.fence.iter().map(|&(k, _)| k).collect();
     frontier.sort_by_key(|&j| (if fence_set.contains(&j) { 0u8 } else { 1 }, j));
-
-    // Also try sealing S here (the remaining undecided cells go to T).
-    if let Some(regions) = growth_leaf_free(puzzle, free, idx_of, state, pinned_t, h, w) {
-        return Some(regions);
-    }
 
     for j in frontier {
         if Instant::now() >= deadline {
             return None;
         }
-        // Symbol rule: the other same-type seed is pinned T; S must not swallow it.
-        // (Already labelled 1; the check is implicit.)
-        state.s_cells.push(j);
-        if !visited.insert(bitkey(&state.s_cells)) {
-            state.s_cells.pop();
-            continue;
-        }
-        state.label[j] = 0;
+        // Snapshot: child propagation may force many labels (and S cells).
+        let snap = state.label.clone();
+        let snap_len = state.s_cells.len();
+        state.set(j, 0);
         if let Some(regions) =
-            grow_free(puzzle, free, idx_of, total, state, visited, facts, pinned_t, deadline)
+            grow_free(puzzle, free, idx_of, total, state, visited, facts, deadline)
         {
             return Some(regions);
         }
-        state.s_cells.pop();
-        state.label[j] = 2;
+        state.label.copy_from_slice(&snap);
+        state.s_cells.truncate(snap_len);
     }
     None
 }
 
-/// Leaf of the free growth: everything outside S becomes T; verify T is
-/// connected (S is by construction), then the full validator.
+/// Leaf of the free growth: everything outside S becomes T; verify both sides
+/// are connected pieces (forced-S cells may sit off the frontier), then run
+/// the full validator.
 fn growth_leaf_free(
     puzzle: &Puzzle,
     free: &[(usize, usize)],
     idx_of: &[Vec<usize>],
     state: &GrowthState<'_>,
-    pinned_t: &[usize],
     h: usize,
     w: usize,
 ) -> Option<Vec<RegionInfo>> {
     let total = free.len();
-    // Seal all undecided into T and check T connectivity + piece rules.
     let mut region_of: Vec<Option<usize>> = vec![None; h * w];
     let mut s_cells: Vec<[usize; 2]> = Vec::new();
     let mut t_cells: Vec<[usize; 2]> = Vec::new();
@@ -1305,11 +1642,6 @@ fn growth_leaf_free(
     }
     if s_cells.is_empty() || t_cells.is_empty() {
         return None;
-    }
-    for &t in pinned_t {
-        if state.label[t] != 1 {
-            return None; // symbol seed must sit in T
-        }
     }
     if !piece_ok(puzzle, &s_cells, h, w) || !piece_ok(puzzle, &t_cells, h, w) {
         return None;

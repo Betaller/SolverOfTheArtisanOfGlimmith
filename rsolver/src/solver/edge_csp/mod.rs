@@ -36,6 +36,8 @@ use types::*;
 #[derive(Clone, Copy, Debug)]
 struct Snapshot {
     edges: usize,
+    diffs: usize,
+    sames: usize,
 }
 
 /// The edge-variable search state.  All fields are `pub(crate)` so the
@@ -468,24 +470,28 @@ impl<'a> Solver<'a> {
                     }
                 }
 
-                // NOTE: AOG deduces `exact_piece_count` from the rose window
-                // here ("all types occur N times => exactly N pieces",
-                // `third_party/aog/src/solver/mod.rs:139`).  We deliberately
-                // leave it `None`: writing `Some(n)` flips on the two-piece
-                // branch of `rose.rs::propagate_parity`, which seeds every Cut
-                // edge as parity=1 and forces edges Cut at the ROOT that the
-                // official solution has Uncut.  Confirmed on 1135 / 1392
-                // (watchtower, doc 27) and again 2026-09-20 on 0974
-                // (ring+rose, NO vertex clues): nodes dropped 1173 → 34 and
-                // the search exhausted — the seeding is unsound by itself,
-                // not only when watchtower leaves a wrong edge state.
-                // Count-only is not separable: the seeding lives behind
-                // `two_piece == exact_piece_count == Some(2)`.
-                // `structural_pieces` (a parallel field) carries the same
-                // count to `propagate_dual_connectivity` without touching
-                // parity.
-                // Full analysis: `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
-                solver.exact_piece_count = None;
+                // AOG deduces `exact_piece_count` from the rose window
+                // ("all types occur N times => exactly N pieces",
+                // `third_party/aog/src/solver/mod.rs:139`).  This flips on the
+                // two-piece branch of `rose.rs::propagate_parity` (Cut edges
+                // seed parity=1), which doc 27 falsified after 1135/1392/0974
+                // root-level wrong forces — but the suspected root cause
+                // (watchtower Pass B diagonal misjudge) has since been fixed
+                // (3262e5d) and the seeding proved a big search win (0987:
+                // timeout → 6.9s in doc 27 §2), so it is re-derived here and
+                // re-verified against the cluster + 1135/1392.  Count-only is
+                // not separable from the seeding (`two_piece ==
+                // exact_piece_count == Some(2)`); `structural_pieces` remains
+                // the parallel field for `propagate_dual_connectivity`.
+                // Full history: `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
+                let n0 = solver.rose_by_type.first().map(|t| t.len()).unwrap_or(0);
+                solver.exact_piece_count = if n0 > 0
+                    && solver.rose_by_type.iter().all(|t| t.len() == n0)
+                {
+                    Some(n0)
+                } else {
+                    None
+                };
             }
         }
 
@@ -519,6 +525,8 @@ impl<'a> Solver<'a> {
     fn snapshot(&self) -> Snapshot {
         Snapshot {
             edges: self.changed.len(),
+            diffs: self.pair_branch.diffs.len(),
+            sames: self.pair_branch.sames.len(),
         }
     }
 
@@ -529,6 +537,18 @@ impl<'a> Solver<'a> {
                 self.curr_unknown += 1;
             }
             self.edges[e] = old_state;
+        }
+        // Pair-branch SAME/DIFF decisions are search-branch state too.  They
+        // used to live outside the snapshot and leaked into every sibling
+        // branch after `restore` — over-constraining the rest of the tree into
+        // false exhausts (0974-class).
+        while self.pair_branch.diffs.len() > snap.diffs {
+            let pair = self.pair_branch.diffs.pop().unwrap();
+            self.pair_branch.diff_set.remove(&pair);
+        }
+        while self.pair_branch.sames.len() > snap.sames {
+            let pair = self.pair_branch.sames.pop().unwrap();
+            self.pair_branch.same_set.remove(&pair);
         }
     }
 
@@ -1038,8 +1058,15 @@ impl<'a> Solver<'a> {
         // regresses borderline puzzles — the bulk of the work is done by edge
         // propagation; pairing only disambiguates the tail.  Safe: a wrong branch
         // is caught by `validate` at the leaf and the router falls through.
+        //
+        // Only pay for the branch when `propagate_parity` can consume the SAME/
+        // DIFF relations (a two-piece puzzle or a 2-of-a-type pair — the
+        // parity-1 sources).  On m≥3 puzzles the constraints go nowhere and the
+        // branch merely doubles the tree (1433: 64s timeout).
         let rose_branch_thr = (self.grid.num_edges() / 4).min(80);
-        if self.rose_bits_all != 0 && self.curr_unknown <= rose_branch_thr {
+        let pair_pays = self.exact_piece_count == Some(2)
+            || self.rose_by_type.iter().any(|t| t.len() == 2);
+        if self.rose_bits_all != 0 && pair_pays && self.curr_unknown <= rose_branch_thr {
             if let Some((c1, c2)) = self.select_rose_pair(score) {
                 self.branch_on_pair(c1, c2);
                 return;

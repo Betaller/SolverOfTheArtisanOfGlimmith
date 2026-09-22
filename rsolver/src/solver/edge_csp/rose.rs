@@ -455,32 +455,6 @@ impl<'a> Solver<'a> {
         false
     }
 
-    /// Force `c1` and `c2` into the same piece: BFS through Uncut+Unknown, set
-    /// every Unknown edge on the path to Uncut. Returns `Err` if no path exists
-    /// or forcing fails.
-    pub(crate) fn branch_pair_same(&mut self, c1: CellId, c2: CellId) -> Result<(), ()> {
-        if self.curr_comp_id[c1] == self.curr_comp_id[c2] {
-            return Ok(());
-        }
-        if !self.bfs_path(c1, c2) {
-            return Err(());
-        }
-        let mut cur = c2;
-        while cur != c1 {
-            if let Some((prev, eid)) = self.pair_branch.bfs_prev[cur] {
-                if self.edges[eid] == EdgeState::Unknown {
-                    if !self.set_edge(eid, EdgeState::Uncut) {
-                        return Err(());
-                    }
-                }
-                cur = prev;
-            } else {
-                return Err(());
-            }
-        }
-        Ok(())
-    }
-
     /// Number of distinct rose symbol types present in each growing component
     /// (index by component id).  Entries beyond `comp_cells` stay 0 — mirrors
     /// the original `for ci in 0..num_comp { if ci >= comp_cells.len() { break } }`
@@ -535,7 +509,11 @@ impl<'a> Solver<'a> {
 
                 if is_branch_candidate(cur_sym, cur, c1) {
                     let ci2 = self.curr_comp_id[cur];
-                    if ci1 != ci2 && !self.is_diff_inline(c1, cur) {
+                    if ci1 != ci2
+                        && !self.is_diff_inline(c1, cur)
+                        && !self.pair_branch.same_set.contains(&(c1, cur))
+                        && !self.pair_branch.same_set.contains(&(cur, c1))
+                    {
                         let dist = path_distance(&self.pair_branch.bfs_prev, c1, cur);
                         let score = pair_score(
                             dist,
@@ -573,14 +551,23 @@ impl<'a> Solver<'a> {
         best_pair
     }
 
-    /// Branch on a rose cell pair: try SAME (force same piece), then DIFF (force
-    /// different pieces).  Each branch recurses into `backtrack_edges`.
+    /// Branch on a rose cell pair: try SAME (record the same-piece relation),
+    /// then DIFF.  Each branch recurses into `backtrack_edges`.
+    ///
+    /// The SAME branch must only *record* the relation (like DIFF does):
+    /// "same piece" means *some* Uncut path exists, so the old implementation
+    /// (force one arbitrary BFS path all-Uncut) dropped every solution that
+    /// reaches the pair by a different route — an incomplete branch that
+    /// reported false exhausts.  `propagate_parity` turns the recorded
+    /// relation into UF parity-0 consequences instead.
     pub(crate) fn branch_on_pair(&mut self, c1: CellId, c2: CellId) {
         let in_same_comp = self.curr_comp_id[c1] == self.curr_comp_id[c2];
 
         if !in_same_comp {
             let snap = self.snapshot();
-            if self.branch_pair_same(c1, c2).is_ok() && self.propagate().is_ok() {
+            self.pair_branch.sames.push((c1, c2));
+            self.pair_branch.same_set.insert((c1, c2));
+            if self.propagate().is_ok() {
                 self.backtrack_edges();
             }
             self.restore(snap);

@@ -142,7 +142,11 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // downstream solver can be exercised in isolation (mirrors `AOG_ONLY`).
     let skip_aog = std::env::var("SKIP_AOG").is_ok();
     if !skip_aog && !puzzle.rules.is_empty() {
-        let deadline = start + std::time::Duration::from_millis(aog_budget);
+        // Own-unit budget: anchor to *this* phase's start.  The global `start`
+        // starved aog to 0ms whenever same-tiling burned its unit first
+        // (0974/1137-class chains show `aog timeout 0ms`), which breaks the
+        // RUST_PARTS unit-budget contract the Python wall assumes.
+        let deadline = Instant::now() + std::time::Duration::from_millis(aog_budget);
         let aog_start = Instant::now();
         let outcome = aog::solve_aog(puzzle, deadline);
         let elapsed = aog_start.elapsed().as_millis() as u64;

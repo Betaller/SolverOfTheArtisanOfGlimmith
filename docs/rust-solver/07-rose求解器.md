@@ -326,3 +326,24 @@ rose 不适用、edge_csp 排除 `puzzle_piece`、pieces 的 DLX 没有"大无�
 两个陷阱：**deadline 必须锚到模块自己的 `Instant::now()`**（用全局 start 等于
 已过期）；**给完整 unit 预算**（1215 的放置搜索要 ~36s）。范围限制与
 `docs/优化/32` 见该文档。
+
+
+## 2026-09-22 修订（预算饿死修复 + 锚点覆盖式 pp-pin + 枚举 deadline）
+
+**rose 预算饿死（关键修复）**：路由原把 `timeout_ms - aog_elapsed` 传给 rose。
+aog 的热循环 deadline 检查会超支（0382：20s 预算实际跑 45s），于是
+`rose_ms = 0`、`not_attempted`——**rose+same 簇整簇因此从未被正确求解过**。改为
+rose 拿完整 `timeout_ms`（与 `solve_rose` 自家锚定的语义一致，unit budget 哲学）。
+
+**`enum_area_combos_bounded` 补 deadline**：m=30+ 种子的组合递归可达 MAX_COMBOS
+上限的过程本身无界（0223 在此挂死 80s+ 直到墙杀；0826/0838/0882 同类）。加上
+`Instant::now() >= deadline` 护栏后整链按时收束，0826 回流 aog 解出、0223 落到
+pieces 解出。
+
+**pp-pin 锚点覆盖式搜索（`combine_plain` 重写）**：
+- 原「每锚一落点、互不相交」模型禁掉了**同形多锚共享一个区域**（0493 有 11 个锚
+  挤 7 个区域，单区最多 4 锚）。改为「最低未覆盖锚 → 尝试其落点（可一次覆盖多锚）」；
+- **望塔增量剪枝**（`watchtower_facts`/`watchtower_ok`）：0493 的 45 座望塔把
+  25s 150 万叶子压到 33ms；
+- 同类锚检查（不同形状类不可共享区域）实测会丢 0976 的干净解路径，正确性本就由
+  `validate::check_puzzle_piece` 兜底，故不设（见源码注释）。

@@ -162,6 +162,9 @@ impl<'a> Solver<'a> {
             if (self.rules.bricky || self.rules.loopy) && !csp_skip("bricky") {
                 progress |= self.propagate_bricky_loopy()?;
             }
+            if self.exact_piece_count.is_some() || self.structural_pieces.is_some() {
+                progress |= self.propagate_loop_closure()?;
+            }
             if !self.vertex_clues.is_empty() {
                 progress |= self.propagate_vertex_edge_parity()?;
             }
@@ -191,6 +194,7 @@ impl<'a> Solver<'a> {
             }
             if !self.vertex_clues.is_empty() {
                 progress |= self.propagate_watchtower()?;
+                progress |= self.propagate_watchtower_degree()?;
             }
             if self.rose_bits_all != 0 {
                 progress |= self.propagate_rose_separation()?;
@@ -221,6 +225,137 @@ impl<'a> Solver<'a> {
                 }
             }
         }
+    }
+
+    /// Number of closed loops in the Cut-edge vertex graph (all-even-degree
+    /// components).  Odd-degree components are open paths and not counted.
+    fn cut_loop_count(&self) -> usize {
+        let ne = self.grid.num_edges();
+        let nv = (self.grid.rows + 1) * (self.grid.cols + 1);
+        let mut parent: Vec<usize> = (0..nv).collect();
+        let mut rank: Vec<u8> = vec![0; nv];
+        let mut cut_deg: Vec<u8> = vec![0; nv];
+        let mut any_cut = false;
+        for e in 0..ne {
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            any_cut = true;
+            let (v1, v2) = self.grid.edge_vertices(e);
+            cut_deg[v1] += 1;
+            cut_deg[v2] += 1;
+            let (mut r1, mut r2) = (v1, v2);
+            while parent[r1] != r1 {
+                r1 = parent[r1];
+            }
+            while parent[r2] != r2 {
+                r2 = parent[r2];
+            }
+            if r1 != r2 {
+                if rank[r1] < rank[r2] {
+                    parent[r1] = r2;
+                } else if rank[r1] > rank[r2] {
+                    parent[r2] = r1;
+                } else {
+                    parent[r2] = r1;
+                    rank[r1] += 1;
+                }
+            }
+        }
+        if !any_cut {
+            return 0;
+        }
+        let mut odd: Vec<u8> = vec![0; nv];
+        for v in 0..nv {
+            if cut_deg[v] % 2 == 1 {
+                let mut r = v;
+                while parent[r] != r {
+                    r = parent[r];
+                }
+                odd[r] += 1;
+            }
+        }
+        let mut seen = vec![false; nv];
+        let mut num_loops = 0usize;
+        for v in 0..nv {
+            if cut_deg[v] == 0 {
+                continue;
+            }
+            let mut r = v;
+            while parent[r] != r {
+                r = parent[r];
+            }
+            if !seen[r] {
+                seen[r] = true;
+                if odd[r] == 0 {
+                    num_loops += 1;
+                }
+            }
+        }
+        num_loops
+    }
+
+    fn is_border_vertex(&self, v: usize) -> bool {
+        let (i, j) = self.grid.vertex_pos(v);
+        i == 0 || i == self.grid.rows || j == 0 || j == self.grid.cols
+    }
+
+    /// Loop-closure detection on the Cut-edge vertex graph (rules 1 + 4 of
+    /// `third_party/aog/src/solver/propagation/loop_closure.rs`).  The
+    /// reference's `@`-vertex degree rules are deliberately NOT ported: they
+    /// assume `watchtower` value == required cut-degree, while our (and the
+    /// game's) semantics is the distinct-region count — 241 of 471 official
+    /// answers have cut-degree ≠ 2 at value-2 vertices.  Rules 1 and 4 are
+    /// pure cut-graph theory, verified against 544 / 19 official answers with
+    /// 0 violations:
+    ///   1. the number of closed cut-loops cannot exceed `pieces - 1`;
+    ///   4. with `max_loops == 1` under ring (no T-junctions) the single
+    ///      interface cannot end at the grid border (that would be a degree-3
+    ///      junction with the outer border), so every edge touching a border
+    ///      vertex is internal to the outer piece and must be Uncut.
+    pub(crate) fn propagate_loop_closure(&mut self) -> Result<bool, ()> {
+        let Some(pieces) = self.exact_piece_count.or(self.structural_pieces) else {
+            return Ok(false);
+        };
+        if pieces < 2 {
+            return Ok(false);
+        }
+        let max_loops = pieces - 1;
+        // Rule 1 only holds under ring (no T-junctions): a closed loop's
+        // vertices are degree-saturated, so loop components only accrete.  On
+        // brick-only puzzles degree-3 T-links are legal and separate loops can
+        // later *merge* — an intermediate `loops > max_loops` state stays
+        // completable (1294: root-level brick cuts looked like 5 loops against
+        // max=2, the official 3-piece answer merges them via T-junctions).
+        if self.rules.loopy {
+            let loops = self.cut_loop_count();
+            if loops > max_loops {
+                return Err(());
+            }
+        }
+        if max_loops == 1 && self.rules.loopy {
+            let mut progress = false;
+            for e in 0..self.grid.num_edges() {
+                let (v1, v2) = self.grid.edge_vertices(e);
+                if !self.is_border_vertex(v1) && !self.is_border_vertex(v2) {
+                    continue;
+                }
+                match self.edges[e] {
+                    EdgeState::Cut => return Err(()),
+                    EdgeState::Unknown => {
+                        if !self.set_edge(e, EdgeState::Uncut) {
+                            return Err(());
+                        }
+                        progress = true;
+                    }
+                    EdgeState::Uncut => {}
+                }
+            }
+            if progress {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Ring (`loopy`) / brick (`bricky`) vertex-degree propagation.
@@ -2482,11 +2617,39 @@ impl<'a> Solver<'a> {
     /// contradicts, force the other.  Returns early on first force.
     fn probe_one_round(&mut self) -> Result<bool, ()> {
         let num_edges = self.grid.num_edges();
-        for e in 0..num_edges {
+        // Diagnostic: `EDGE_CSP_PROBE_ORDER=rev|inter` reshuffles the scan so
+        // the early-return lands on informative edges sooner (each round
+        // restarts from scratch, so index order is the de-facto priority).
+        let order: Vec<usize> = match std::env::var("EDGE_CSP_PROBE_ORDER")
+            .unwrap_or_default()
+            .as_str()
+        {
+            "rev" => (0..num_edges).rev().collect(),
+            "inter" => {
+                let mut v = Vec::with_capacity(num_edges);
+                let (mut lo, mut hi) = (0usize, num_edges);
+                while lo < hi {
+                    v.push(lo);
+                    lo += 1;
+                    if lo < hi {
+                        hi -= 1;
+                        v.push(hi);
+                    }
+                }
+                v
+            }
+            _ => (0..num_edges).collect(),
+        };
+        for e in order {
             if self.edges[e] != EdgeState::Unknown {
                 continue;
             }
             let cut_ok = self.probe(|s| s.set_edge(e, EdgeState::Cut));
+            // A probe that died on the deadline is not a failed literal —
+            // forcing the opposite value from it would prune the real branch.
+            if self.timed_out {
+                return Ok(false);
+            }
             if !cut_ok {
                 if self.edges[e] == EdgeState::Unknown && self.set_edge(e, EdgeState::Uncut) {
                     return Ok(true);
@@ -2497,6 +2660,9 @@ impl<'a> Solver<'a> {
                 continue;
             }
             let uncut_ok = self.probe(|s| s.set_edge(e, EdgeState::Uncut));
+            if self.timed_out {
+                return Ok(false);
+            }
             if !uncut_ok {
                 if self.edges[e] == EdgeState::Unknown && self.set_edge(e, EdgeState::Cut) {
                     return Ok(true);
@@ -2546,6 +2712,11 @@ impl<'a> Solver<'a> {
                     for &v1 in &vals {
                         for &v2 in &vals {
                             let ok = self.probe(|s| s.set_edge(e1, v1) && s.set_edge(e2, v2));
+                            if self.timed_out {
+                                // Deadline kills must not be read as "combination
+                                // invalid" — that would force a wrong pair.
+                                return Ok(false);
+                            }
                             if ok {
                                 ok_count += 1;
                                 last_ok = (v1, v2);
@@ -2595,6 +2766,115 @@ impl<'a> Solver<'a> {
     ///   different components when `max_distinct == value`.
     ///   **Pass B (edge-count)** — counts Cut/Unknown among the 4 internal edges
     ///   and forces the remaining Unknowns to reach the required cut count.
+    /// Exact cut-degree propagation at interior watchtower vertices with all
+    /// four quadrants fillable.  The four cyclic quadrant pairs make the
+    /// cut-degree the number of label transitions in a 4-cycle, so the
+    /// distinct-region count `val` bounds it tightly:
+    ///   val=1 → degree 0;  val=2 → degree ∈ {2, 4};  val=3 → {3, 4};  val=4 → 4.
+    /// Under a single-interface world (`max_loops == 1`, 2 pieces) a degree-4
+    /// crossing is a self-touching figure-8 (two cycles) — across every m=2
+    /// official answer all such vertices have degree exactly 2 (634/634), so
+    /// val=2 collapses to a Slitherlink exact-2 clue.  Blocked quadrants break
+    /// the cycle argument (odd degrees appear) and are skipped.
+    pub(crate) fn propagate_watchtower_degree(&mut self) -> Result<bool, ()> {
+        let pieces = self.exact_piece_count.or(self.structural_pieces);
+        let max_loops = pieces.map(|p| p.saturating_sub(1));
+        let clues: Vec<(VertexId, usize)> = self
+            .vertex_clues
+            .iter()
+            .map(|cl| (cl.vertex, cl.value as usize))
+            .collect();
+        if let Some(p) = pieces {
+            for &(_, v) in &clues {
+                if v > p {
+                    return Err(());
+                }
+            }
+        }
+        let (h, w) = (self.grid.rows, self.grid.cols);
+        let mut progress = false;
+        for &(vtx, val) in &clues {
+            if !(1..=4).contains(&val) {
+                continue;
+            }
+            let (i, j) = self.grid.vertex_pos(vtx);
+            if i == 0 || i == h || j == 0 || j == w {
+                continue;
+            }
+            let quads = [
+                (i - 1, j - 1),
+                (i - 1, j),
+                (i, j),
+                (i, j - 1),
+            ];
+            if quads.iter().any(|&(r, c)| !self.grid.cell_exists[r * w + c]) {
+                continue;
+            }
+            let pairs = [
+                (quads[0], quads[1]),
+                (quads[1], quads[2]),
+                (quads[2], quads[3]),
+                (quads[3], quads[0]),
+            ];
+            let mut sides = [usize::MAX; 4];
+            for (k, (a, b)) in pairs.iter().enumerate() {
+                let ea = self.grid.cell_id(a.0, a.1);
+                let eb = self.grid.cell_id(b.0, b.1);
+                let Some(e) = self.grid.edge_between(ea, eb) else {
+                    continue;
+                };
+                sides[k] = e;
+            }
+            let mut known_cut = 0usize;
+            let mut unknown: Vec<EdgeId> = Vec::new();
+            for &e in &sides {
+                match self.edges[e] {
+                    EdgeState::Cut => known_cut += 1,
+                    EdgeState::Unknown => unknown.push(e),
+                    EdgeState::Uncut => {}
+                }
+            }
+            let candidates: Vec<usize> = match val {
+                1 => vec![0],
+                2 => {
+                    if max_loops == Some(1) {
+                        vec![2]
+                    } else {
+                        vec![2, 4]
+                    }
+                }
+                3 => {
+                    if self.rules.loopy {
+                        vec![4]
+                    } else {
+                        vec![3, 4]
+                    }
+                }
+                _ => vec![4],
+            };
+            let x = unknown.len();
+            let fits: Vec<usize> = candidates
+                .iter()
+                .copied()
+                .filter(|&d| d >= known_cut && d <= known_cut + x)
+                .collect();
+            if fits.is_empty() {
+                return Err(());
+            }
+            let lo = *fits.iter().min().unwrap();
+            let hi = *fits.iter().max().unwrap();
+            // Known bug (2026-09-22): pinning the remaining unknowns from a
+            // singleton fit (`hi == known_cut` → Uncut / `lo == known_cut + x`
+            // → Cut) killed real solutions on 1135/1392/1137 even though each
+            // individual rule looks sound on paper and against the official
+            // answers — the interaction is unresolved.  The contradiction
+            // check (`fits.is_empty()`) alone is sound and already solves
+            // 1137, so the forces stay off until the interaction is found.
+            let _ = (lo, hi);
+        }
+        Ok(progress)
+    }
+
     pub(crate) fn propagate_watchtower(&mut self) -> Result<bool, ()> {
         if self.vertex_clues.is_empty() {
             return Ok(false);

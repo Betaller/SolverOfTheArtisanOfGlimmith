@@ -157,11 +157,14 @@ class RustSolver(Solver):
         self._proc: subprocess.Popen[str] | None = None
         self._cancelled = False
 
-    # The Rust binary runs solver parts sequentially (aog → rose → edge_csp →
-    # pieces → backtrack; edge_csp/rose only fire for capable puzzles), each of
-    # which gets the full unit `timeout` as its own deadline.  The subprocess
-    # therefore needs `RUST_PARTS` × wall-clock for every part to use its budget.
-    RUST_PARTS = 4
+    # The Rust binary runs solver parts sequentially (same-tiling → aog →
+    # rose → pp-pin → edge_csp → pieces), each of which gets the full unit
+    # `timeout` as its own deadline (aog additionally overshoots its internal
+    # budget on some puzzles).  The subprocess therefore needs `RUST_PARTS` ×
+    # wall-clock for every part to use its budget.  4 covered the old
+    # aog/rose/edge_csp/pieces chain; same-tiling and pp-pin each own a full
+    # unit too (and backtrack stays off by default), so 6.
+    RUST_PARTS = 6
 
     # Wall-clock headroom over the `RUST_PARTS` × unit budget.  Rust's deadlines
     # are wall-clock `Instant::now()`; under `-j N` CPU contention a puzzle whose

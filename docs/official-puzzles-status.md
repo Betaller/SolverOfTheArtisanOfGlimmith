@@ -53,6 +53,10 @@
 | 2026-09-21 | rose `region_match` M1 早停健全性 + `m==2` 补集封面（doc 31） | `results/bench/20260921_2785b59_rose-m1.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1162 / 1258** | **+2**（vs 1160） | rose 对 14 道**有官方解**的题报告 exhausted（与 doc 29/30 同签名）。根因是 `generate_all_candidates` 的 **M1 早停**：集齐符号类型就停止扩张，但该论证只在「最小完整集已落在精确覆盖的可用尺寸窗口内」时成立。1333（7×7、5 区域、`range max 10`）唯一能凑出 49 的尺寸多重集是 `{9,10,10,10,10}`，而最小 P1+P2 张成集只有 5–8 格，5 个 area combo 全枚举出来却没有 size 9/10 的候选，319ms 报假无解。修法：按 `(total, m, min_sz, max_sz)` 推出可用尺寸窗口 `[useful_min, useful_max]`，窗口宽 ≤ `WINDOW_GROW_LIMIT`(8) 时候选 BFS 一路长到 `useful_max`，否则保留原早停（0833 那类无尺寸约束的题窗口 `[1,49]`，长满会爆）。另加 **`m==2` 补集封面** `try_complement_cover`：两区域平分棋盘，seed 0 的完整候选的补集即第二区域唯一形状，逐个连通性 BFS，最坏毫秒级。**新解 1333（via rose）/ 0990（via edge_csp）/ 0745（via pieces）**；1140fix 并行争抢翻负、**串行复测 62.7s SOLVED**（噪声）。0833 仍 via rose 解出且 rose 自身 7.96s→3.8s。未救回 0974 等 m==2 大盘（候选 BFS 在集齐异类符号前就撞 `VISITED_CAP`，属范式问题，见 doc 20 P2）。`pytest`、`cargo test`、complexity gate 全过。 |
 | 2026-09-21 | rose `m==2` 补集封面必须过验证器 + 尺寸预筛 | `results/bench/20260921_416c963_m2v.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1165 / 1258** | **+3**（vs 1162，见备注） | PR#78 的 `try_complement_cover` 只检查补集**连通性**就连着返回第一个，环顶点度 / inequality / watchtower 一概没看——1137（`ring+inequality+watchtower+rose`）上 `m==2 complement cover found` → 54ms `validation_failed` → 整条 `region_match` 路径被放弃。改成每个补集先过题目自身的 `[min_sz,max_sz]` 尺寸预筛、再过完整验证器，**只返回第一个通过的**；都不通过则 `None` 让调用方继续正常搜索。`--rules rose_window` 子集（187 道）与 PR#78 完全持平（155/32，零增零损）——这条是纯粹的正确性修复，在「第一个连通补集不合法、后面某个合法」的题上才兑现，当前语料没有这样的题。**基准 +3（0418/0826/1140fix）均为历史争抢噪声翻正**：三道题串行复测分别 67.4s / 14.2s / 61.1s SOLVED，非本次代码带来的能力提升；`-j 6` 口径的噪声带约 ±3。**0 回归**。 |
 | 2026-09-21 | `shape_pattern` 独立预钉（非 rose 的 puzzle_piece 前置，doc 32） | `results/bench/20260921_56b5d56_pp-pin.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1162 / 1258**（并行）/ **1165**（串行复核） | **+3**（串行口径） | 0976/0606/1215 的结构是「N 个 shape_pattern 区域 + 1 个无约束大区域」，原路由下**没有任何求解器能尝试**：aog 形状库 OOM、rose 不适用（无 `rose_window`）、edge_csp 故意排除 `puzzle_piece`（试过放开，**0 新解**——边变量范式没有形状变量只能叶验证，40s 全烧盲搜）、pieces 的 DLX 没有「大无约束区域」概念（0976 2ms exhausted）、backtrack 默认禁用。新增 `puzzle_piece_pin::solve_puzzle_piece_standalone`：枚举每个锚点的二面体放置 → 不相交完整指派 → 剩余当一个区域 → 过完整验证器。两个陷阱：**deadline 必须锚到模块自己的 `Instant::now()`**（用全局 start 等于已过期）；**给完整 unit 预算**（1215 放置搜索 ~36s）。**串行复测 0606/0976/1215 全部 PASS via pp-pin**；并行下 1215 被挤爆未进榜。并行 −5（0418/0685/0745/0826/0990）**全部是历史争抢噪声题**，串行复测均 PASS。由此确认 **`-j 6` 噪声带至少 ±5**，1165 那次本就含 3 道噪声翻正，稳定能力线 = 1162 + 3 = **1165**。`puzzle_piece` 子集 160→163/171，0 回归。`pytest`、`cargo test`、complexity gate 全过。 |
+| 2026-09-22 | same-tiling 同形铺砌预通路 + pieces/pp-pin/rose 改进（`feat/area-sum-piece-count`，doc 12） | `results/bench/20260922_e5d68a8_same-tiling-full.{txt,jsonl}`（全量） | `benchmark_rust_solver.py --timeout 40 -j 6` | **1172 / 1258** | **+10**（同口径 vs 1162；13 新解 − 3 争抢损失） | 新增 ⓪ `same-tiling` 预通路（doc 12）：等距窗口 CSP **0382/0383/0960**、小形状 DLX **0763**、shape_pattern 预钉×同形余数 **1098/1099/1100**；`area_sum` 区域数推导（去重值和=total ⟹ 区域数，**1183** via edge_csp）；pp-pin `combine_plain` 锚点覆盖重写 + 望塔剪枝（**0493**）；pieces compass 半平面计数修正（原 exclusive 计数与 validator 不符，0/103 语义错）+ frontier 完备枚举 + 玫瑰签名过滤 + block 矩形/shape_pattern 落点 + row_check 分解（**1004/0745/0223/0826**）。附带修复：rose 满单位预算（aog 超支不再饿死 rose）、probe 超时护栏（0312 树确定化 44529 nodes）、`RUST_PARTS` 4→6。**m=2 簇（1249/0987/1137/1149a/0974）仍未解**：watchtower 界改二区语义后 growth 正常搜索但撞 800k 状态上限 abort（AOG_DEBUG 实证 780k→800k；T-closure 剪枝不健全 + fence 星/must-split 缺单位传播，见第二部分）。串行临界题：1130/1215/0312/1137（solo 可解或近解，-j 6 争抢翻负）。`pytest` 301、`cargo test` 36+8（`clamps_zero_to_floor` 并行竞态 flake，单跑过）、complexity gate 全过。 |
+| 2026-09-22 | m2 自由生长传播化二轮（XOR/星形 AC/望塔关系） | `results/bench/20260922_47d2e6f_m2prop-fast.{txt,jsonl}`（快速档） | `benchmark_rust_solver.py --baseline v2-full --skip-slow --timeout 40 -j 6` | **1172 口径不变**（快速档 1170/1175） | 0（NEW=0，0 真回归） | 无新解的传播化/门控迭代（见第二部分同日条目）：XOR 关系（必分边+rose 对）、fence 星按臂共识 AC（相邻星共享边互收窄）、望塔关系（val=1 全等/val=2 两格 XOR）、T-closure 健全化（修 S' 成墙误杀）、多类型 pin 修正、cap 2M、`has_constrained_compass` 单方向进门（0418 类 25 题 pieces 不再跳过）、密度门计入预切（0974 进 m2 门）。**m=2 簇 5 题仍未破**（40s deadline 打满）——cell-variable 与边界几何线索范式错配实证，正解=edge_csp 边变量宿主迁移。REGRESSION=2（0418/1140fix）均为争抢噪声（串行 28.9s/23.0s SOLVED）。外围 7 题零回归。 |
+| 2026-09-22 | exact_piece_count 重开 + rose pair 分支声音性修复 + aog 单位预算 | `results/bench/20260922_c457981_pairfix-full.{txt,jsonl}`（全量） | `benchmark_rust_solver.py --timeout 40 -j 6` | **1176 / 1258** | **+4**（6 新解 − 2 噪声翻负） | `exact_piece_count` 重推导（doc 27 证伪前提已愈：3262e5d 修 watchtower Pass B 对角格后 two-piece parity 不再放大错强；1135/1392 复测 0.3s/1.3s SOLVED）——Cut 边 parity=1 seeding 让 **0987 40s 超时→7.4s 解出**。rose pair 分支四修：SAME 记录化（原强制任意 witness 路径不完备，0974 假穷尽→**13s SOLVED**）、Snapshot 回滚 diffs/sames（跨分支泄漏）、`select_rose_pair` 过滤 same_set（同对重复分支互递归→1340/1352 **栈溢出 -6** 修复）、pair 分支门控 parity1 源（1433/0655 64s→0.5s/1.5s）。aog 单位预算锚自身起点（原先 same-tiling 烧完后 aog 拿 0ms）→ **0268/0704/0941/0988 via aog**（~40s 整点）。新解 +6：0974/0987/0268/0704/0941/0988。m=2 簇剩 1137/1249/1149a。翻负 0418/0685 均历史争抢噪声（串行 28.9s/20s SOLVED）。`pytest`、`cargo test` 36+7、complexity gate 全过。 |
+| 2026-09-22 | loop_closure 选择性移植 + 望塔精确度判死 | `results/bench/20260922_8e9d632_lc-wd-fast.{txt,jsonl}`（快速档 + 12 题矩阵） | `benchmark_rust_solver.py --baseline v7-full --skip-slow --timeout 40 -j 6` + 直跑 | **1177 口径**（+1 via edge_csp） | **+1**（1137） | loop_closure 只移植规则 1（**须挂 ring 门**——brick 的 T 连杆可合并环，1294 曾根层 5「环」误杀）+ 规则 4（max_loops==1 且 ring 时触边框边必 Uncut）；参考的 `@` 度数规则因语义不同（区域去重数 vs 割度，官方解 241/471 反例）弃。望塔精确度判死（4 满象限内部顶点：val=1⟹度0、val=2⟹{2,4}、max_loops==1 时精确-2；m=2 官方 634/634）——**强制分支有未明交互 bug 暂关**（KNOWN BUG 注释）。**新解 1137**（m=2 簇第三员）；快速档 REG=1（1294，规则 1 缺 ring 门误杀，已修，放宽单调不丢解）。`pytest`、`cargo test`、complexity gate 全过。 |
 
 ---
 
@@ -621,6 +625,130 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
 下一步（新目标 1176）：doc 20 rose→edge_csp 边传播迁移、doc 26 未吸收技术
 （probing 增强 / mingle_shape / complement_feasibility 重估）、watchtower
 大题的 config 枚举扩展。
+
+### 2026-09-22 · same-tiling 同形铺砌预通路 + pieces/pp-pin/rose 改进（doc 12，→ 1172/1258）
+
+- **动机**：`same`/同形特例（0382/0763/1098 簇）在原路由下全灭——`is_rose_capable`
+  明确拒绝 `same`/`different`、aog 形状库在开阔区爆炸、edge_csp 形状同一性传播只
+  能叶验不能搜索、pieces DLX 没有「自由同形分区」概念。
+- **新模块 `solver/same_tiling.rs`（⓪ 预通路，`docs/rust-solver/12-same-tiling求解器.md`）**：
+  ① 循环等距窗口 CSP（`F = S ⊎ ψ(S) ⊎ … ⊎ ψ^{m-1}(S)`，滑窗恰一系统按链求解；
+  `inv` 忘乘 det 曾把镜面映到错误逆元，0382 类全灭）；② m==2 连通横截生长（ψ 对合
+  完美匹配，自配对必须拒绝）+ **m==2 自由尺寸生长**（无等距假设：S 连通生长、补集=T）；
+  ③ 小形状 DLX（s≤8 自由 s-ominoes × dihedral 落点）；④ shape_pattern 预钉 × 同形余数
+  （整除门只门控全局同形法——预钉情形各区域尺寸不等）；`derive_region_count` 四源
+  （rose 符号数 / solitary / precise / area_sum 去重值和）。
+- **m2 自由生长剪枝**：fence 星形臂一致性（局部 4 边界位 vs dihedral 星构型）、必分边
+  （boundary/constraint 两端必异区）、二区望塔界 `[d, d+min(u, 2-d)]`（**修复**：原多区
+  语义 `lo=d+1` 要求未决格各成新区，1137 的 80 个望塔在根层全灭整棵树）、T-closure。
+  **遗留（下轮 P0，m=2 簇 5 题的根因）**：① T-closure 不健全——要求全部非 S 格可达 T
+  种子，但未决格本可并入 S，S' 成「墙」时误杀官方分支（正确语义：仅 label=1 格必须
+  可达，不可达的未决格应强制并入 S）；② fence 星与必分边只有检查没有单位传播（m=2
+  下必分边即 XOR 强制，一条边定另一端）；③ `visited.len()>=800_000` 上限 abort 被报成
+  exhausted（AOG_DEBUG 实证 1249/1137 均在 780k→780k 撞顶）。0974（46 预切、无
+  fence/watchtower）进不了 local-density 门，需把预切计入密度。
+- **pieces 三修**：compass 半平面计数（原 N>S>E>W exclusive，与 validator 的象限双方向
+  半平面计数不符——**0/103 罗盘题经 pieces 曾全灭**）；`has_constrained_compass` 门控
+  放宽到任意单方向约束（原 `spec>=3 || 双零 strip` 把 0418 这类 left-only 线索全判
+  「无约束」，pieces 罗盘路径对它们从未点亮）；frontier+visited 完备枚举（共享
+  candidates 的 DFS 漏放置，0763 的官方放置缺失）；叶覆盖检查只看可填格（blocked 的
+  `None` 是合法状态，曾误拒 0763 全部 24/24 合法覆盖）。新增 block 矩形落点、
+  shape_pattern 落点、`rose_signature_ok`（每放置每种玫瑰符号恰一）、row_check 分解
+  （watchtower/econs/distinct/cell-clue/compass）。
+- **pp-pin**：`combine_plain` 重写为锚点覆盖式（一放置可盖多同形锚，消除共享
+  `candidates` 漏解 bug 类）；same-class 锚检查移除（0976 教训：干净路径被砍，叶验
+  `check_puzzle_piece` 足够）；`watchtower_facts` 提为 `pub(crate)` 与 same-tiling 共享。
+- **预算/稳健性**：rose 改满单位预算（原 `timeout_ms.saturating_sub(elapsed)` 被 aog
+  超支饿死至 0ms 跳过，0382 类）；`prop.rs` probe 超时护栏（deadline kill ≠ failed
+  literal，0312 搜索树确定化）；`RUST_PARTS` 4→6（same-tiling/pp-pin 各占单位预算）。
+- **新解 +13（串行验证，via 归因）**：1183（area_sum）、0382/0383/0763/0960（same-tiling
+  2-18ms）、1098/1099/1100（预钉余数 0.2-3s）、0493（pp-pin，25s 150 万叶 → 33ms）、
+  0223/0826（pieces 枚举 deadline+签名过滤，40s 超时 → 3ms）、1004（block DLX 74ms）、
+  0745（pattern 落点 6ms）。全量 `-j 6 --timeout 40` **1172/1258**（同口径 vs 1162 净
+  **+10**；3 道历史争抢噪声题翻负未进榜）。
+- **测试**：`pytest` 301、`cargo test` 36+8（`clamps_zero_to_floor` 为既有并行 env 竞态
+  flake，单跑通过）、`complexity_gate.py` 三关全过（m2_region_growth 拆出 growth_facts）。
+
+### 2026-09-22 · m2 自由生长传播化二轮（XOR/星形 AC/望塔关系）——簇仍未破，范式边界实证
+
+- **实现**（`same_tiling.rs`，`docs/rust-solver/12` §3.2b）：`propagate_labels` 不动点
+  ——① **XOR 关系传播**：必分边 + rose 符号对（每区恰含每符号一个 ⟹ 同型两格必异区）
+  统一成 `force_relation` 二元差/同关系，一端定另一端；多类型 pin 修正为只钉一个根格
+  （原 per-type 首格钉 S 在 ≥2 类型时漏掉混合配对——全局对换只容一个代表）；② **fence
+  星 AC**：构型域按已知边界位过滤后**按臂取共识**（全部幸存构型同值即强制，唯一构型
+  是特例），相邻 fence 星共享边（南臂=邻居北臂）互相收窄构型域，共识臂反推标签关系；
+  ③ **望塔关系**：val=1 全等（EQ 星）、val=2 两格顶点=XOR 对、其余全定同标签时末格翻转
+  （计数界仍在 `growth_prunes_ok`）；④ **T-closure 健全化**：只有强制 T 格须同属一个
+  非 S 连通分量，**不可达 T 的未决格强制并入 S**——原版要求全部非 S 格可达 T 种子，
+  S' 成「墙」即误杀官方分支（一轮根因）；⑤ 传播写入按分支快照回滚、visited 键改传播后
+  S 集、状态 cap 800k→2M（到顶是预算结果非无解证明）。
+- **门控**：`has_constrained_compass` 放宽到任意单方向约束（spec≥3 曾把 0418 类 left-only
+  线索整题拒之门外，pieces 罗盘路径对它们从未点亮——25 道 compass FAIL 题由此进门，
+  0 新解但不再 not_attempted）；same-tiling 入口与 m2 密度门**计入预切/约束边**
+  （0974: 46 预切由此进门）；precut-only 进门后只跑 m2，不再烧整除门后的等距法。
+- **结果**：外围 7 题（0382/0383/0763/0960/1098/1099/1100）零回归；**m=2 簇 5 题仍未解**
+  ——1137/1149a/0974/1249/0987 全部 40s deadline 打满（传播显著压树：从「800k cap 秒退」
+  到压树后仍爆炸；1249/0987 纯 fence 无预切无望塔，格枚举树天然巨大）。**结论：cell-
+  variable 连通子集枚举与 fence 星 / 望塔 / 预切这类边界几何线索范式错配**（约束描述
+  割边结构而非格归属），与 docs/优化/18、20 判断一致；格变量剪枝收益已尽，簇的正解是
+  边变量宿主（edge_csp 的 palisade/watchtower/parity 传播 + 边 DFS 覆盖 rose m=2）。
+- **快速档**：`results/bench/20260922_47d2e6f_m2prop-fast.{txt,jsonl}` **1170/1175**（REGRESSION=2 均为
+  0418/1140fix 历史争抢噪声题，今日串行复测 28.9s/23.0s SOLVED；NEW=0；0 真回归）。
+- `pytest`、`cargo test` 36+7（`clamps_zero_to_floor` 既有 flake）、`complexity_gate.py` 全过。
+
+### 2026-09-22 · exact_piece_count 重开 + rose pair 分支声音性修复 + aog 单位预算 → **1176/1258**
+
+- **`exact_piece_count` 重推导**（`edge_csp/mod.rs`，doc 27 §6 更新）：doc 27 的证伪前提
+  「two-piece parity 放大根层错强」已被 3262e5d（watchtower Pass B 对角格误判）等修复
+  愈合——1135/1392 从历史回归（nodes=0 假穷尽）复测为 **0.3s/1.3s SOLVED**。推导规则：
+  rose 各类型格数全相等 n ⇒ `Some(n)`。**Cut 边 parity=1 seeding 是大杀器**：搜索中每条
+  已定 Cut 边都是 XOR 事实，0987 由此从 40s 超时变 7s 解出（doc 27 §2 预言的 6.9s 兑现）。
+- **rose pair 分支四处修复**（`rose.rs`/`mod.rs`，bug 类见 `docs/优化/27` 附录）：
+  ① **记录 vs 强制**：`branch_pair_same` 把「同区」实现成强制一条任意 BFS 路径全 Uncut——
+  同区只需*存在*某条路径，强制特定 witness 漏掉「同区走另一条路」的全部解（**不完备分支
+  = 假 exhausted**，0974 曾 175ms 假穷尽）。改为记录 SAME 关系（与 DIFF 对称），parity UF
+  以 parity-0 消费。② **快照泄漏**：`Snapshot` 只回滚边轨迹，`pair_branch.diffs/sames`
+  跨分支永久残留污染后续搜索——restore 现在一并回滚。③ **同对重复分支 → 栈溢出**：记录式
+  SAME 后边状态不前进，`select_rose_pair` 不过滤 `same_set` 会再选同一对 →
+  `branch_on_pair`↔`backtrack_edges` 无限互递归（1340/1352 **exit -6 stack overflow 秒退**）。
+  ④ **pair 分支仅在 parity1 源存在时启用**（two_piece 或 2-of-a-type）：m≥3 且无 2-of-a-type
+  时 sames/diffs 无人消费、纯翻倍树（1433/0655 64s 超时 → 修后 **0.5s/1.5s SOLVED**）。
+- **aog 单位预算修复**（`solver/mod.rs`）：deadline 原锚全局 start，same-tiling 烧完单位后
+  aog 拿 0ms（attempt 链里 `aog timeout 0ms`），违反 RUST_PARTS=6 的单位预算契约；改锚自身
+  `Instant::now()`。**+4 道 aog 新解**：0268/0704/0941/0988（均 ~40s 整点，原先预算被前序
+  模块吃掉而超时）。
+- **新解 +6**：0974（ring+rose 46 预切，via edge_csp 13s）/0987（ring+fence+rose，7.4s）/
+  0268/0704/0941/0988（via aog）。**m=2 簇还剩 1137/1249/1149a**（40s 诚实超时，无假穷尽）。
+- **全量基准 -j 6 --timeout 40：1176/1258（净 +4）**；2 个翻负（0418/0685）均为历史争抢
+  噪声题（今日串行复测 28.9s/20s SOLVED）。`pytest`、`cargo test` 36+7、`complexity_gate.py` 全过。
+
+### 2026-09-22 · loop_closure 选择性移植 + 望塔精确度判死 → **1137 进账（1177/1258 口径）**
+
+- **loop_closure 选择性移植**（`prop.rs::propagate_loop_closure` + `cut_loop_count`，源自
+  `third_party/aog/src/solver/propagation/loop_closure.rs`，doc 26 §2.1 的 P1 项在
+  exact_piece_count 解锁后落地）：只移植**规则 1**（割边顶点图的闭合环数 ≤ pieces−1，
+  **必须挂 ring 门**——brick 允许 3 度 T 连杆，分离的环可经 T 合并，中间态环数不单调；
+  1294 根层 brick 强出 5「环」对 max=2 被误杀、官方 3 块解正是靠 T 连杆合并）与
+  **规则 4**（`max_loops==1` 且 ring 时，所有触边框顶点的边必 Uncut——单接口曲线
+  不能终止于边框）。`max_loops` 来源 = `exact_piece_count ∪ structural_pieces`。
+  **参考的 `@` 顶点度数规则刻意未移植**：其假设 watchtower value = 所需割度，而游戏
+  语义是**区域去重数**（Python `check_rule_watchtower` 为准）——官方解实测 471 个
+  val=2 顶点里 **241 个割度 ≠ 2**（blocked 象限与多色排列），照搬即大面积误杀。
+  规则 1（ring 子集）/4 经官方解 0 违例验证后才启用。
+- **望塔精确度判死**（`propagate_watchtower_degree`）：4 满象限内部顶点的割度即 4-循环
+  染色的转移数——val=1 ⟹ 度 0、val=2 ⟹ 度 ∈ {2,4}、val=3 ⟹ {3,4}、val=4 ⟹ 4；配合
+  `max_loops==1`（单接口）val=2 塌缩为**精确-2**（m=2 全体官方解 634/634 度=2；度 3/4
+  全部落在 blocked 象限或非 m=2 题）。blocked 象限破坏循环论证（出现奇数度），跳过。
+  **KNOWN BUG（留待下轮）**：singleton fit 后的未定边钉死（hi==c→Uncut / lo==c+x→Cut）
+  实测杀真解（1135/1392/1137 秒退），纸面与官方解都看似健全但交互 bug 未明——当前
+  只保留**矛盾判死**（fits 空 → Err），强制分支留空并附源码注释。
+- **新解 +1 via edge_csp**：**1137**（ring+inequality+watchtower+rose，m=2 簇第三员；
+  前两员为同日的 0987/0974）。m=2 簇仅剩 **1249**（fence 无 ring，规则 4 不适用）与
+  **1149a**（判死后仍超时）。
+- **快速档回归**（基线 v7-full 1176）：REGRESSION=1（1294，已定位为规则 1 缺 ring 门
+  的误杀并修复；ring 门属放宽剪枝，严格单调不丢解）+ 复测 12 题矩阵全绿（1135/1392/
+  1137/0987/0974/1294/1433/0655/1340/1352 SOLVED）。`pytest`、`cargo test`、
+  `complexity_gate.py` 全过。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

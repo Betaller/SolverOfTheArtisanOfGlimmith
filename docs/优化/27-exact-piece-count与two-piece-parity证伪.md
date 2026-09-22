@@ -110,3 +110,30 @@ parity 1 的 XOR 传递）在这套传播调用序下就是不可靠的。方向
 - doc 26 §2.1 / §2.2：loop_closure、dual_connectivity 方案（被本文阻塞）
 - `rsolver/src/solver/edge_csp/rose.rs::propagate_parity`
 - `rsolver/src/solver/edge_csp/mod.rs` 玫瑰窗初始化处的 NOTE 注释
+
+---
+
+## 7. 更新（2026-09-22）：证伪前提已愈，`exact_piece_count` 重新启用
+
+§3 推导链的结论是「two-piece parity 把**根层已有的错误边状态**放大成全局矛盾」——
+错误边状态才是真凶，parity 只是放大器。此后落地的修复（3262e5d watchtower Pass B
+对角格误判、陈旧组件快照、bricky_loopy 赌博剪枝）把根层错强清除后，放大器不再有
+可放大的错误：
+
+- 1135 / 1392（doc §2 的两道回归）：**0.3s / 1.3s SOLVED**，回归消失；
+- 0987（doc §2 的增益题）：40s 超时 → **7.4s SOLVED**，§2 预言兑现；
+- 0974（§5 提及的根层错杀）：真凶实为 **rose pair 分支的不完备 witness 路径强制 +
+  `pair_branch.diffs/sames` 快照泄漏**（见官方题状态文档 2026-09-22 条目），修复后
+  **13s SOLVED**——与 two-piece parity 无关。
+
+**处置**：`edge_csp/mod.rs` 按 aog 规则重新推导（rose 各类型格数全相等 n ⇒ `Some(n)`）；
+本文状态由「已证伪/阻塞项」改为「**历史证伪，前提已愈，已重新启用**」。loop_closure /
+dual_connectivity 的阻塞解除（dual 已挂 `structural_pieces` 先行落地）。
+
+**仍然成立的教训**：parity seeding 的声音性依赖上游传播的根层状态；任何「全局放大器」
+类传播（parity/UF/传递闭包）出错时优先查**被放大的局部事实**，而不是放大器本身。
+
+**2026-09-22 追记**：exact_piece_count 解锁后 loop_closure（doc 26 §2.1 P1）已移植
+（仅规则 1+4；参考的 `@` 度数规则与我们的 watchtower 语义不符，官方解实测 241/471
+反例，弃）。望塔精确度判死传播同日落地并解出 1137；其**强制分支存在未明交互 bug
+（singleton fit 钉边杀真解）**，已留空待查——判死部分健全且已足够。

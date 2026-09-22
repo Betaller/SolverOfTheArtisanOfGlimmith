@@ -36,6 +36,8 @@ use types::*;
 #[derive(Clone, Copy, Debug)]
 struct Snapshot {
     edges: usize,
+    diffs: usize,
+    sames: usize,
 }
 
 /// The edge-variable search state.  All fields are `pub(crate)` so the
@@ -468,24 +470,28 @@ impl<'a> Solver<'a> {
                     }
                 }
 
-                // NOTE: AOG deduces `exact_piece_count` from the rose window
-                // here ("all types occur N times => exactly N pieces",
-                // `third_party/aog/src/solver/mod.rs:139`).  We deliberately
-                // leave it `None`: writing `Some(n)` flips on the two-piece
-                // branch of `rose.rs::propagate_parity`, which seeds every Cut
-                // edge as parity=1 and forces edges Cut at the ROOT that the
-                // official solution has Uncut.  Confirmed on 1135 / 1392
-                // (watchtower, doc 27) and again 2026-09-20 on 0974
-                // (ring+rose, NO vertex clues): nodes dropped 1173 → 34 and
-                // the search exhausted — the seeding is unsound by itself,
-                // not only when watchtower leaves a wrong edge state.
-                // Count-only is not separable: the seeding lives behind
-                // `two_piece == exact_piece_count == Some(2)`.
-                // `structural_pieces` (a parallel field) carries the same
-                // count to `propagate_dual_connectivity` without touching
-                // parity.
-                // Full analysis: `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
-                solver.exact_piece_count = None;
+                // AOG deduces `exact_piece_count` from the rose window
+                // ("all types occur N times => exactly N pieces",
+                // `third_party/aog/src/solver/mod.rs:139`).  This flips on the
+                // two-piece branch of `rose.rs::propagate_parity` (Cut edges
+                // seed parity=1), which doc 27 falsified after 1135/1392/0974
+                // root-level wrong forces — but the suspected root cause
+                // (watchtower Pass B diagonal misjudge) has since been fixed
+                // (3262e5d) and the seeding proved a big search win (0987:
+                // timeout → 6.9s in doc 27 §2), so it is re-derived here and
+                // re-verified against the cluster + 1135/1392.  Count-only is
+                // not separable from the seeding (`two_piece ==
+                // exact_piece_count == Some(2)`); `structural_pieces` remains
+                // the parallel field for `propagate_dual_connectivity`.
+                // Full history: `docs/优化/27-exact-piece-count与two-piece-parity证伪.md`.
+                let n0 = solver.rose_by_type.first().map(|t| t.len()).unwrap_or(0);
+                solver.exact_piece_count = if n0 > 0
+                    && solver.rose_by_type.iter().all(|t| t.len() == n0)
+                {
+                    Some(n0)
+                } else {
+                    None
+                };
             }
         }
 
@@ -519,6 +525,8 @@ impl<'a> Solver<'a> {
     fn snapshot(&self) -> Snapshot {
         Snapshot {
             edges: self.changed.len(),
+            diffs: self.pair_branch.diffs.len(),
+            sames: self.pair_branch.sames.len(),
         }
     }
 
@@ -529,6 +537,18 @@ impl<'a> Solver<'a> {
                 self.curr_unknown += 1;
             }
             self.edges[e] = old_state;
+        }
+        // Pair-branch SAME/DIFF decisions are search-branch state too.  They
+        // used to live outside the snapshot and leaked into every sibling
+        // branch after `restore` — over-constraining the rest of the tree into
+        // false exhausts (0974-class).
+        while self.pair_branch.diffs.len() > snap.diffs {
+            let pair = self.pair_branch.diffs.pop().unwrap();
+            self.pair_branch.diff_set.remove(&pair);
+        }
+        while self.pair_branch.sames.len() > snap.sames {
+            let pair = self.pair_branch.sames.pop().unwrap();
+            self.pair_branch.same_set.remove(&pair);
         }
     }
 
@@ -560,15 +580,21 @@ impl<'a> Solver<'a> {
         }
     }
 
-    /// Entry: returns the first valid region assignment, or `None` (no solution
-    /// or timed out).  The router re-validates via `validate::validate`.
-    pub fn solve(&mut self) -> Option<Vec<RegionInfo>> {
-        self.total_cells = self.grid.total_existing_cells();
 
-        // Structural piece count (see the field doc).
-        //
-        // Source 1 — `precise`: every region has area `A`, so with `F` fillable
-        // cells the partition has exactly `F / A` pieces.
+    /// Structural piece count (see the field doc).
+    ///
+    /// Source 1 — `precise`: every region has area `A`, so with `F` fillable
+    /// cells the partition has exactly `F / A` pieces.
+    /// Source 2 — `rose_window`: every piece holds exactly one cell of each
+    /// symbol type, so if each type occurs `N` times the partition has
+    /// exactly `N` pieces.  See `rose_structural_pieces`.
+    /// Source 3 — `solitary`: every region holds exactly one clue cell and
+    /// every clue cell belongs to some region, so the two stand in
+    /// bijection and the partition has exactly `|clue cells|` pieces.
+    /// (Verified on all 87 official `solitary` puzzles, 87/87.)
+    /// Source 4 — `area_sum_piece_count`.
+    /// Plus a piece-count upper bound from the global area lower bound.
+    fn derive_structural_pieces(&mut self) {
         if let Some(a) = self
             .puzzle
             .rules
@@ -582,32 +608,29 @@ impl<'a> Solver<'a> {
                 self.structural_pieces = Some(self.total_cells / a);
             }
         }
-        // Source 2 — `rose_window`: every piece holds exactly one cell of each
-        // symbol type, so if each type occurs `N` times the partition has
-        // exactly `N` pieces.  See `rose_structural_pieces`.
         if self.structural_pieces.is_none() {
             self.structural_pieces = rose_structural_pieces(self.puzzle);
         }
-        // Source 3 — `solitary`: every region holds exactly one clue cell and
-        // every clue cell belongs to some region, so the two stand in
-        // bijection and the partition has exactly `|clue cells|` pieces.
-        // `clue_cell` already mirrors `validate::check_solitary`'s predicate
-        // (symbol / compass / number / shape_pattern / fence_pattern), so the
-        // count here is the same one the validator uses.  Verified on all 87
-        // official `solitary` puzzles: clue count == region count, 87/87.
         if self.structural_pieces.is_none() && self.rules.solitary {
             let k = self.clue_cell.iter().filter(|&&b| b).count();
             if k >= 2 {
                 self.structural_pieces = Some(k);
             }
         }
-        // Piece-count upper bound from the global area lower bound: every
-        // region has at least `min_area` cells, so there are at most
-        // `total_cells / min_area` regions.  Only meaningful when the bound
-        // actually bites (`min_area > 1`).
+        if self.structural_pieces.is_none() {
+            self.structural_pieces = self.area_sum_piece_count();
+        }
         if self.eff_min_area > 1 {
             self.structural_pieces_max = Some(self.total_cells / self.eff_min_area);
         }
+    }
+
+    /// Entry: returns the first valid region assignment, or `None` (no solution
+    /// or timed out).  The router re-validates via `validate::validate`.
+    pub fn solve(&mut self) -> Option<Vec<RegionInfo>> {
+        self.total_cells = self.grid.total_existing_cells();
+
+        self.derive_structural_pieces();
 
         // Edges adjacent to a blocked/outside cell are outer borders → Cut.
         for e in 0..self.grid.num_edges() {
@@ -696,6 +719,44 @@ impl<'a> Solver<'a> {
         }
 
         self.solution_regions.take()
+    }
+
+    /// Source 4 for `structural_pieces` — distinct area-clue values that sum
+    /// to the fillable cell count.  A cell carrying clue `v` sits in a region
+    /// of area `v` (`check_area`); cells with different values can never share
+    /// a region.  Write `k_v ≥ 1` for the number of value-`v` regions (all of
+    /// area `v`) and `t_j ≥ 1` for any clue-less ones:
+    ///
+    /// ```text
+    /// Σ_v k_v·v + Σ_j t_j = total   and   Σ_{v distinct} v = total
+    /// ```
+    ///
+    /// The left sum is at least the right, so equality forces every `k_v == 1`
+    /// and no clue-less region: the partition has exactly `#distinct` pieces,
+    /// one of each size.  (Two same-valued clue cells therefore *share* one
+    /// region — not by proximity, but because the board has no room for a
+    /// second copy.)
+    ///
+    /// Three official FAILs match (0262 {14,15,17,18}/64, 1138 {60,61}/121,
+    /// 1183 {13,14,15}/42); their answers confirm region count == #distinct
+    /// and the sizes are exactly those values.
+    fn area_sum_piece_count(&self) -> Option<usize> {
+        let mut distinct: BTreeSet<usize> = BTreeSet::new();
+        for r in 0..self.puzzle.height {
+            for c in 0..self.puzzle.width {
+                let cell = &self.puzzle.cells[r][c];
+                if !cell.blocked {
+                    if let Some(v) = cell.number {
+                        distinct.insert(v as usize);
+                    }
+                }
+            }
+        }
+        if distinct.len() >= 2 && distinct.iter().sum::<usize>() == self.total_cells {
+            Some(distinct.len())
+        } else {
+            None
+        }
     }
 
     /// Build the `solitary` feasibility bitset (consumed by
@@ -997,8 +1058,15 @@ impl<'a> Solver<'a> {
         // regresses borderline puzzles — the bulk of the work is done by edge
         // propagation; pairing only disambiguates the tail.  Safe: a wrong branch
         // is caught by `validate` at the leaf and the router falls through.
+        //
+        // Only pay for the branch when `propagate_parity` can consume the SAME/
+        // DIFF relations (a two-piece puzzle or a 2-of-a-type pair — the
+        // parity-1 sources).  On m≥3 puzzles the constraints go nowhere and the
+        // branch merely doubles the tree (1433: 64s timeout).
         let rose_branch_thr = (self.grid.num_edges() / 4).min(80);
-        if self.rose_bits_all != 0 && self.curr_unknown <= rose_branch_thr {
+        let pair_pays = self.exact_piece_count == Some(2)
+            || self.rose_by_type.iter().any(|t| t.len() == 2);
+        if self.rose_bits_all != 0 && pair_pays && self.curr_unknown <= rose_branch_thr {
             if let Some((c1, c2)) = self.select_rose_pair(score) {
                 self.branch_on_pair(c1, c2);
                 return;

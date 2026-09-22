@@ -435,12 +435,49 @@ pub fn solve_puzzle_piece_standalone(
     // No symbol types → `enumerate_pin_candidates` skips the rose balance
     // filter and just returns the dihedral placements per anchor.
     let Some(anchors) = enumerate_pin_candidates(puzzle, &[]) else {
+        if crate::aog_debug_enabled() {
+            eprintln!("pp-pin: enumerate_pin_candidates returned None");
+        }
         return ModuleOutcome::None;
     };
+    if crate::aog_debug_enabled() {
+        eprintln!(
+            "pp-pin: {} anchors, placements per anchor: {:?}",
+            anchors.len(),
+            anchors.iter().map(|a| a.placements.len()).collect::<Vec<_>>()
+        );
+    }
 
+    // Anchor metadata in the same row-major order `enumerate_pin_candidates`
+    // walked the pattern cells.
+    let mut anchor_flat: Vec<usize> = Vec::new();
+    let mut anchor_key: Vec<String> = Vec::new();
+    for r in 0..h {
+        for c in 0..w {
+            if let Some(ref pat) = puzzle.cells[r][c].shape_pattern {
+                anchor_flat.push(r * w + c);
+                anchor_key.push(crate::shapes::dihedral_key(pat));
+            }
+        }
+    }
+    let mut covered = vec![false; anchors.len()];
+    let mut taken = CellSet::new(n);
     let mut current: Vec<PinnedPlacement> = Vec::with_capacity(anchors.len());
+    let wts = watchtower_facts(puzzle);
     let mut found: Option<Vec<crate::types::RegionInfo>> = None;
-    combine_plain(&anchors, 0, &mut current, puzzle, n, deadline, &mut found);
+    combine_plain(
+        &anchors,
+        &anchor_flat,
+        &anchor_key,
+        &mut covered,
+        &mut taken,
+        &mut current,
+        puzzle,
+        n,
+        deadline,
+        &wts,
+        &mut found,
+    );
     match found {
         Some(regions) => {
             if crate::solver::validate::validate(puzzle, &regions) {
@@ -453,24 +490,119 @@ pub fn solve_puzzle_piece_standalone(
     }
 }
 
-/// Recursive disjoint-placement search; on a complete assignment the leftover
-/// cells form one region and are handed straight to the validator.
+
+/// Watchtower facts for incremental pruning: each vertex clue with the flat
+/// cell indices of the (≤4, non-blocked) cells touching it and its value.
+pub(crate) fn watchtower_facts(puzzle: &Puzzle) -> Vec<(Vec<usize>, usize)> {
+    let (h, w) = (puzzle.height, puzzle.width);
+    let mut out = Vec::new();
+    for r in 0..=h {
+        for c in 0..=w {
+            if let Some(val) = puzzle.vertices[r][c].watchtower {
+                if !(1..=4).contains(&val) {
+                    continue;
+                }
+                let mut cells = Vec::new();
+                for (dr, dc) in [(-1i64, -1i64), (-1, 0), (0, -1), (0, 0)] {
+                    let nr = r as i64 + dr;
+                    let nc = c as i64 + dc;
+                    if nr < 0 || nc < 0 || nr >= h as i64 || nc >= w as i64 {
+                        continue;
+                    }
+                    let (nr, nc) = (nr as usize, nc as usize);
+                    if !puzzle.cells[nr][nc].blocked {
+                        cells.push(nr * w + nc);
+                    }
+                }
+                out.push((cells, val as usize));
+            }
+        }
+    }
+    out
+}
+
+/// Sound incremental watchtower prune.  Placed cells already carry distinct
+/// region ids; every unplaced cell will land in a *fresh* region (a future
+/// placement or the remainder — neither may reuse a placed region).  If the
+/// watchtower value `k` falls outside `[d + (u > 0), d + u]` the partial
+/// assignment cannot be completed.
+fn watchtower_ok(facts: &[(Vec<usize>, usize)], current: &[PinnedPlacement]) -> bool {
+    for (cells, k) in facts {
+        let mut d = 0usize;
+        let mut u = 0usize;
+        for &idx in cells {
+            let mut placed = false;
+            for (ri, p) in current.iter().enumerate() {
+                if p.cells.contains(idx) {
+                    // Distinctness: two cells of one region share the id.
+                    // Count unique ids lazily via a tiny scan.
+                    let _ = ri;
+                    placed = true;
+                    break;
+                }
+            }
+            if placed {
+                d += 1; // overcount fixed below
+            } else {
+                u += 1;
+            }
+        }
+        // Recount `d` as distinct region ids properly (cells ≤ 4).
+        d = 0;
+        let mut seen: Vec<usize> = Vec::new();
+        for &idx in cells {
+            for (ri, p) in current.iter().enumerate() {
+                if p.cells.contains(idx) {
+                    if !seen.contains(&ri) {
+                        seen.push(ri);
+                    }
+                    break;
+                }
+            }
+        }
+        d = seen.len();
+        let lo = if u > 0 { d + 1 } else { d };
+        let hi = d + u;
+        if *k < lo || *k > hi {
+            return false;
+        }
+    }
+    true
+}
+
+/// Recursive anchor-covering search.  Every `shape_pattern` anchor must be
+/// covered by exactly one chosen placement; one placement may cover SEVERAL
+/// anchors of the same shape class (a region may hold several same-shape
+/// pattern clues — 0493 packs 11 anchors into 7 regions, one region holding
+/// four).  On a complete cover the leftover cells form one region (the
+/// corpus's `puzzle_piece` FAILs: pattern regions + 1 big region) and are
+/// handed straight to the validator.
 #[allow(clippy::too_many_arguments)]
 fn combine_plain(
     anchors: &[AnchorCandidates],
-    i: usize,
+    anchor_flat: &[usize],
+    anchor_key: &[String],
+    covered: &mut Vec<bool>,
+    taken: &mut CellSet,
     current: &mut Vec<PinnedPlacement>,
     puzzle: &Puzzle,
     n: usize,
     deadline: crate::clock::Instant,
+    wts: &[(Vec<usize>, usize)],
     found: &mut Option<Vec<crate::types::RegionInfo>>,
 ) {
     if found.is_some() || crate::clock::Instant::now() >= deadline {
         return;
     }
+    if !watchtower_ok(wts, current) {
+        return;
+    }
     let h = puzzle.height;
     let w = puzzle.width;
-    if i == anchors.len() {
+    let Some(a) = covered.iter().position(|&b| !b) else {
+        if crate::aog_debug_enabled() {
+            eprintln!("pp-pin: leaf with {} placements, checking remainder", current.len());
+        }
         let mut region_of: Vec<Option<usize>> = vec![None; n];
         for (ri, p) in current.iter().enumerate() {
             for idx in p.cells.iter() {
@@ -498,14 +630,59 @@ fn combine_plain(
             *found = Some(regions);
         }
         return;
-    }
-    for p in &anchors[i].placements {
-        if current.iter().any(|c| !c.cells.is_disjoint(&p.cells)) {
+    };
+    for p in &anchors[a].placements {
+        if !p.cells.contains(anchor_flat[a]) {
             continue;
         }
+        if !p.cells.is_disjoint(taken) {
+            continue;
+        }
+        // Anchors the placement swallows all become covered (a region may
+        // hold several pattern clues).  Cross-class shares are rejected by
+        // `validate::check_puzzle_piece` at the leaf — not here: an in-search
+        // class filter was measured to *lose* 0976 (its clean solution path
+        // somehow never surfaces with the filter on), while the validator
+        // makes the filter redundant for correctness.
+        let mut covers: Vec<usize> = Vec::new();
+        for (b, &bf) in anchor_flat.iter().enumerate() {
+            if covered[b] {
+                continue;
+            }
+            if p.cells.contains(bf) {
+                covers.push(b);
+            }
+        }
+        if covers.is_empty() {
+            continue;
+        }
+        for &b in &covers {
+            covered[b] = true;
+        }
+        taken.union_into(&p.cells);
         current.push(p.clone());
-        combine_plain(anchors, i + 1, current, puzzle, n, deadline, found);
+        combine_plain(
+            anchors,
+            anchor_flat,
+            anchor_key,
+            covered,
+            taken,
+            current,
+            puzzle,
+            n,
+            deadline,
+            wts,
+            found,
+        );
         current.pop();
+        // Undo `taken`: rebuild from `current` (CellSet has no subtract).
+        *taken = CellSet::new(n);
+        for q in current.iter() {
+            taken.union_into(&q.cells);
+        }
+        for &b in &covers {
+            covered[b] = false;
+        }
         if found.is_some() {
             return;
         }

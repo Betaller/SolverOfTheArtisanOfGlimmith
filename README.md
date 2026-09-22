@@ -91,14 +91,16 @@ RustSolver
 `RustSolver.solve_batch` 复用一个子进程批量求解）。内部按顺序尝试多个算法，先出答案者胜：
 
 ```
-① AoG DFS（主力，C++ 参考求解器的 1:1 移植 + 剪枝）→ ② Rose（纯玫瑰窗）
-→ ③ edge_csp（边变量 CSP）→ ④ Pieces/DLX（形状池 / 面积 / 罗盘 → 精确覆盖）
-→ ⑤ Backtrack（逐区域 DFS，兜底）
+⓪ same-tiling（同形铺砌专用：等距轨道 CSP / 横截生长 / 小形状 DLX）
+→ ① AoG DFS（主力，C++ 参考求解器的 1:1 移植 + 剪枝）→ ② Rose（纯玫瑰窗）
+→ ①b pp-pin（shape_pattern 预钉）→ ③ edge_csp（边变量 CSP）
+→ ④ Pieces/DLX（形状池 / 面积 / 罗盘 / block 矩形 / shape_pattern → 精确覆盖）
+→ ⑤ Backtrack（逐区域 DFS，默认关闭兜底）
 ```
 
-aog 求解器内部检查视为权威（`build_solution_trusted`），Rust 侧不再重验证；rose/pieces/
-backtrack 的答案须过 `solver/validate.rs` 验收门。每个题解 JSON 带 `solver` 字段标出
-答案出自哪个模块（`aog` / `rose` / `edge_csp` / `pieces` / `backtrack`），
+aog 求解器内部检查视为权威（`build_solution_trusted`），Rust 侧不再重验证；其余模块的
+答案须过 `solver/validate.rs` 验收门。每个题解 JSON 带 `solver` 字段标出
+答案出自哪个模块（`same-tiling` / `aog` / `rose` / `pp-pin` / `edge_csp` / `pieces` / `backtrack`），
 `benchmark_rust_solver.py` 以 `via=...` 输出，便于把结果归到具体求解器。
 
 题解 JSON 另带 `attempts` 数组（doc 23，可选字段，空则不输出）：per-module 求解链，每条

@@ -425,35 +425,6 @@ impl<'a> Solver<'a> {
         false
     }
 
-    /// BFS from `c1` to `c2` through Uncut+Unknown edges; records path parents in
-    /// `pair_branch.bfs_prev`. Returns true if a path exists.
-    pub(crate) fn bfs_path(&mut self, c1: CellId, c2: CellId) -> bool {
-        let n = self.grid.num_cells();
-        self.rose_visited[..n].fill(false);
-        self.pair_branch.bfs_prev.resize(n, None);
-        self.rose_visited[c1] = true;
-        self.q_buf.clear();
-        self.q_buf.push(c1);
-        while let Some(cur) = self.q_buf.pop() {
-            if cur == c2 {
-                return true;
-            }
-            for eid in self.grid.cell_edges(cur).into_iter().flatten() {
-                if self.edges[eid] == EdgeState::Cut {
-                    continue;
-                }
-                let (a, b) = self.grid.edge_cells(eid);
-                let other = if a == cur { b } else { a };
-                if !self.grid.cell_exists[other] || self.rose_visited[other] {
-                    continue;
-                }
-                self.rose_visited[other] = true;
-                self.pair_branch.bfs_prev[other] = Some((cur, eid));
-                self.q_buf.push(other);
-            }
-        }
-        false
-    }
 
     /// Number of distinct rose symbol types present in each growing component
     /// (index by component id).  Entries beyond `comp_cells` stay 0 — mirrors

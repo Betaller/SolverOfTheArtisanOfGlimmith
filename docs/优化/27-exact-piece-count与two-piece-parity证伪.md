@@ -132,3 +132,8 @@ dual_connectivity 的阻塞解除（dual 已挂 `structural_pieces` 先行落地
 
 **仍然成立的教训**：parity seeding 的声音性依赖上游传播的根层状态；任何「全局放大器」
 类传播（parity/UF/传递闭包）出错时优先查**被放大的局部事实**，而不是放大器本身。
+
+**2026-09-22 追记**：exact_piece_count 解锁后 loop_closure（doc 26 §2.1 P1）已移植
+（仅规则 1+4；参考的 `@` 度数规则与我们的 watchtower 语义不符，官方解实测 241/471
+反例，弃）。望塔精确度判死传播同日落地并解出 1137；其**强制分支存在未明交互 bug
+（singleton fit 钉边杀真解）**，已留空待查——判死部分健全且已足够。

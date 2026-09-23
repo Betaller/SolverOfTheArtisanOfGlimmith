@@ -92,7 +92,7 @@ RustSolver
 
 ```
 ⓪ same-tiling（同形铺砌专用：等距轨道 CSP / 横截生长 / 小形状 DLX）
-→ ⓪b compass-part（compass+solitary 专用：k 区域联合划分搜索，与 same-tiling 互斥进门）
+→ ⓪b compass-part（compass+solitary 专用：联合划分搜索 + cell-labeling CSP，与 same-tiling 互斥进门）
 → ① AoG DFS（主力，C++ 参考求解器的 1:1 移植 + 剪枝）→ ② Rose（纯玫瑰窗）
 → ①b pp-pin（shape_pattern 预钉）→ ③ edge_csp（边变量 CSP）
 → ④ Pieces/DLX（形状池 / 面积 / 罗盘 / block 矩形 / shape_pattern → 精确覆盖）

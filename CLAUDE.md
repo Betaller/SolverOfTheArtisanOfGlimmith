@@ -96,7 +96,7 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 - `solver/validate.rs`（完整独立验证器；原 `constraints.rs` 已于 2026-08-06 删除，逻辑并入） → `08-验证与约束检查.md`
 - `solver/edge_csp/**` → `11-edge-csp求解器.md`
 - `solver/same_tiling.rs` → `12-same-tiling求解器.md`
-- `solver/compass_part.rs`（compass+solitary 联合划分搜索） → `13-compass划分求解器.md`
+- `solver/compass_part.rs` / `solver/compass_label.rs`（compass+solitary 联合划分搜索 v1/v2） → `13-compass划分求解器.md`
 - 拼块（puzzle_piece / shape_pool）优化 → `10-拼块优化方向.md`
 - 拼块 + 玫瑰窗混合优化 → `docs/优化/09-rose-puzzle-piece优化调研.md`
 - 边界推演 / 专用求解器 / 规则组合优化 → `docs/优化/10-专用求解器方案.md`

@@ -27,6 +27,12 @@
 //!   (fixpoint over clues/dirs, shrinking pools);
 //! * residual window checks: every free connected component must be able to
 //!   host exactly the unplaced clues it contains.
+//!
+//! Residual cluster (0682 / 0683 / 1258 / 1260) defeats set enumeration:
+//! loose `-1` directions leave huge windows and the first region's lattice
+//! alone explodes.  `solve_compass_part` therefore runs a **short-leash phase**
+//! of this search, then falls back to the cell-labeling CSP in
+//! [`super::compass_label`] for the remainder of the budget.
 
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -35,7 +41,7 @@ use crate::clock::Instant;
 use crate::types::*;
 
 /// Direction indices: 0=N, 1=S, 2=E, 3=W.
-const DIRS: usize = 4;
+pub(crate) const DIRS: usize = 4;
 
 /// Per-region-growth cap on distinct cell-sets expanded.  A safety valve
 /// against RAM blowup (the 1260 OOM family); hitting it abandons the search
@@ -80,20 +86,33 @@ pub fn is_applicable(puzzle: &Puzzle) -> bool {
 }
 
 pub fn solve_compass_part(puzzle: &Puzzle, timeout_ms: u64) -> ModuleOutcome {
-    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+    let deadline = start + Duration::from_millis(timeout_ms);
     let Some(model) = Model::build(puzzle) else {
         return ModuleOutcome::None;
     };
+    // Phase 1 — frontier-growth set enumeration (fast when the area windows
+    // are tight: the currently-solved cluster finishes in ≤4s).  Short leash:
+    // its failure mode is burning the whole budget grinding a loose
+    // first-region lattice, which starves the labeling fallback below.
+    let leash = (timeout_ms / 3).clamp(8_000, 12_000).min(timeout_ms);
+    let v1_deadline = start + Duration::from_millis(leash);
     let mut st = St::new(model.h * model.w);
-    match model.dfs(&mut st, 0, deadline) {
-        Walk::Found => {
-            let regions = crate::solver::rose::build_regions(&st.region_of, model.h, model.w);
-            crate::solver::rose::accept_if_valid(regions, puzzle)
-                .map(ModuleOutcome::Solved)
-                .unwrap_or(ModuleOutcome::ValidationFailed)
-        }
-        _ => ModuleOutcome::None,
+    if matches!(model.dfs(&mut st, 0, v1_deadline), Walk::Found) {
+        return accept(puzzle, &st.region_of, &model);
     }
+    // Phase 2 — cell-labeling CSP (compass_label) on the shared Model.
+    if let Some(region_of) = crate::solver::compass_label::solve_labeling(&model, deadline) {
+        return accept(puzzle, &region_of, &model);
+    }
+    ModuleOutcome::None
+}
+
+fn accept(puzzle: &Puzzle, region_of: &[Option<usize>], model: &Model) -> ModuleOutcome {
+    let regions = crate::solver::rose::build_regions(region_of, model.h, model.w);
+    crate::solver::rose::accept_if_valid(regions, puzzle)
+        .map(ModuleOutcome::Solved)
+        .unwrap_or(ModuleOutcome::ValidationFailed)
 }
 
 enum Walk {
@@ -103,30 +122,30 @@ enum Walk {
     Aborted,
 }
 
-struct Model {
-    h: usize,
-    w: usize,
+pub(crate) struct Model {
+    pub(crate) h: usize,
+    pub(crate) w: usize,
     /// Cell idx (r*w+c) → clue id.
     clue_of: Vec<Option<usize>>,
     /// Clue id → cell idx.
-    clue_pos: Vec<usize>,
+    pub(crate) clue_pos: Vec<usize>,
     /// Per clue [N, S, E, W] targets (`None` = free direction).
-    targets: Vec<[Option<usize>; DIRS]>,
-    lo: Vec<usize>,
-    hi: Vec<usize>,
+    pub(crate) targets: Vec<[Option<usize>; DIRS]>,
+    pub(crate) lo: Vec<usize>,
+    pub(crate) hi: Vec<usize>,
     /// Placement order (tightest first), as clue ids.
     order: Vec<usize>,
     /// Linkable neighbours per cell (in-grid, both fillable, no pre-cut edge).
-    nbrs: Vec<Vec<usize>>,
-    free: Vec<bool>,
-    total_fillable: usize,
+    pub(crate) nbrs: Vec<Vec<usize>>,
+    pub(crate) free: Vec<bool>,
+    pub(crate) total_fillable: usize,
     /// Per clue/dir: free cells in the half-plane minus other clues' homes
     /// (the pool `R_j ∩ hp_d` can draw from at the root).
     hp_all: Vec<[usize; DIRS]>,
 }
 
 impl Model {
-    fn build(puzzle: &Puzzle) -> Option<Model> {
+    pub(crate) fn build(puzzle: &Puzzle) -> Option<Model> {
         let (h, w) = (puzzle.height, puzzle.width);
         let n = h * w;
         let mut free = vec![false; n];
@@ -814,7 +833,7 @@ fn residual_ok(model: &Model, st: &St, unplaced: &[usize]) -> bool {
 
 /// Half-plane membership: a quadrant cell belongs to TWO directions (a NW cell
 /// is both North and West), matching `validate::check_compass`.
-fn in_halfplane(cr: usize, cc: usize, r: usize, c: usize, d: usize) -> bool {
+pub(crate) fn in_halfplane(cr: usize, cc: usize, r: usize, c: usize, d: usize) -> bool {
     match d {
         0 => r < cr,
         1 => r > cr,

@@ -2,6 +2,7 @@
 
 pub mod aog;
 pub mod backtrack;
+pub mod compass_label;
 pub mod compass_part;
 pub mod edge_csp;
 pub mod fence;

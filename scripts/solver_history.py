@@ -243,8 +243,22 @@ def _render_png(data: dict, png_path: Path) -> None:
     ax.set_ylim(lo - pad, hi + pad)
     ax.set_xlim(-0.45, len(hist) - 0.55)
 
-    ax.set_xticks(xs)
-    ax.set_xticklabels([p["date"][5:] for p in hist], color=muted, fontsize=9)
+    # X labels thin out as history grows (30+ points crowd illegibly): show at
+    # most ~8 evenly spaced dates plus always the latest point, rotated for
+    # readability.
+    n = len(hist)
+    step = max(1, (n + 7) // 8)
+    tick_idx = [i for i in range(n) if i % step == 0]
+    if tick_idx[-1] != n - 1:
+        tick_idx.append(n - 1)
+    ax.set_xticks([xs[i] for i in tick_idx])
+    ax.set_xticklabels(
+        [hist[i]["date"][5:] for i in tick_idx],
+        color=muted,
+        fontsize=9,
+        rotation=45,
+        ha="right",
+    )
     ax.yaxis.grid(True, color=grid, linewidth=0.8)
     ax.xaxis.grid(False)
     for s in ax.spines.values():
@@ -322,10 +336,13 @@ def _svg_chart(hist: list[dict]) -> str:
         parts.append(f'<circle class="point" cx="{px:.1f}" cy="{py:.1f}" r="4.5">')
         parts.append(f"<title>{label}</title>")
         parts.append("</circle>")
-        parts.append(
-            f'<text class="axis" x="{px:.1f}" y="{h - 14}" '
-            f'text-anchor="middle">{p["date"][5:]}</text>'
-        )
+        # Thin x labels (hover tooltip still shows every point's date).
+        step = max(1, (len(hist) + 9) // 10)
+        if i % step == 0 or i == len(hist) - 1:
+            parts.append(
+                f'<text class="axis" x="{px:.1f}" y="{h - 14}" '
+                f'text-anchor="middle">{p["date"][5:]}</text>'
+            )
 
     # hover 十字线 + 提示框（JS 驱动）
     parts.append('<line class="crosshair" id="crosshair" y1="0" y2="0" visibility="hidden"/>')

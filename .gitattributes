@@ -38,3 +38,7 @@ results/bench/20260923_c0efde1_m2probe-fast.txt filter=lfs diff=lfs merge=lfs -t
 results/bench/20260923_c0efde1_m2probe-fast.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260923_276ac00_eq-leader-note.txt filter=lfs diff=lfs merge=lfs -text
 results/bin/rsolver-c0efde1-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-ef37962-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20260923_ef37962_ringchain-full.txt filter=lfs diff=lfs merge=lfs -text
+results/bench/20260923_ef37962_ringchain-full.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20260923_ef37962_ringchain-note.txt filter=lfs diff=lfs merge=lfs -text

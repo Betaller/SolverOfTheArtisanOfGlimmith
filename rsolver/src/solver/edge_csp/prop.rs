@@ -162,6 +162,9 @@ impl<'a> Solver<'a> {
             if (self.rules.bricky || self.rules.loopy) && !csp_skip("bricky") {
                 progress |= self.propagate_bricky_loopy()?;
             }
+            if self.exact_piece_count == Some(2) && !csp_skip("vparity2") {
+                progress |= self.propagate_two_piece_vertex_parity()?;
+            }
             if self.exact_piece_count.is_some() || self.structural_pieces.is_some() {
                 progress |= self.propagate_loop_closure()?;
             }
@@ -2507,107 +2510,218 @@ impl<'a> Solver<'a> {
         bridges
     }
 
-    /// Fence (palisade) propagation: enumerate the rotations compatible with the
-    /// currently-decided edges around each fence cell, then force edges where
-    /// every compatible rotation agrees (Cut/Uncut).
+    /// Fence (palisade) **star-domain AC**.  Each fence cell's placements are
+    /// the rotations of its `PalisadeKind` (mask bits N,S,W,E == `cell_edges`
+    /// order), filtered by the currently-decided incident edges.  Two adjacent
+    /// fence stars constrain the edge they share, so their placement domains
+    /// narrow each other (binary AC on shared edges), and any edge on which
+    /// all remaining placements of a star agree is forced.  The single-star
+    /// intersection alone can never force anything for 2/3-arm kinds (no mask
+    /// bit is universal across their rotations) — the shared-edge consensus is
+    /// what collapses dense fence boards (1249).
     pub(crate) fn propagate_palisade_constraints(&mut self) -> Result<bool, ()> {
-        let mut forced_cut: Vec<EdgeId> = Vec::new();
-        let mut forced_uncut: Vec<EdgeId> = Vec::new();
-
+        let mut stars: Vec<(PalisadeKind, [Option<EdgeId>; 4])> = Vec::new();
+        let mut star_of: Vec<Option<usize>> = vec![None; self.grid.num_cells()];
         for cl in &self.cell_clues {
-            let CellClue::Palisade { cell, kind } = cl else {
-                continue;
-            };
-            let cell = *cell;
-            if !self.grid.cell_exists[cell] {
-                continue;
+            if let CellClue::Palisade { cell, kind } = cl {
+                let cell = *cell;
+                if !self.grid.cell_exists[cell] {
+                    continue;
+                }
+                star_of[cell] = Some(stars.len());
+                stars.push((*kind, self.grid.cell_edges(cell)));
             }
-
-            // cell_edges order [north, south, west, east] == pattern mask bit order.
-            let edges = self.grid.cell_edges(cell);
-            let states: [EdgeState; 4] =
-                edges.map(|e| e.map(|eid| self.edges[eid]).unwrap_or(EdgeState::Cut));
-
-            let mut known_cuts = 0u8;
-            let mut known_uncuts = 0u8;
-            let mut known_cut_mask = 0u8;
+        }
+        if stars.is_empty() {
+            return Ok(false);
+        }
+        // Partner lookup: shared edge → (other star, other side).
+        let mut partner: Vec<[Option<(usize, usize)>; 4]> = vec![[None; 4]; stars.len()];
+        for si in 0..stars.len() {
             for k in 0..4 {
-                match states[k] {
-                    EdgeState::Cut => {
-                        known_cuts += 1;
-                        known_cut_mask |= 1 << k;
+                let Some(eid) = stars[si].1[k] else { continue };
+                let (a, b) = self.grid.edge_cells(eid);
+                let nb = if star_of[a] == Some(si) { b } else { a };
+                let Some(ti) = star_of[nb] else { continue };
+                for tk in 0..4 {
+                    if stars[ti].1[tk] == Some(eid) {
+                        partner[si][k] = Some((ti, tk));
                     }
-                    EdgeState::Uncut => {
-                        known_uncuts += 1;
-                    }
-                    EdgeState::Unknown => {}
-                }
-            }
-
-            let mut can_be_cut = [false; 4];
-            let mut can_be_uncut = [false; 4];
-            let mut any_compatible = false;
-
-            for rot in 0..4 {
-                let (ec, em) = kind.pattern_at_rotation(rot);
-                let unknown_count = 4 - known_cuts - known_uncuts;
-                if (known_cuts as usize) > ec {
-                    continue;
-                }
-                if (known_cuts as usize) + (unknown_count as usize) < ec {
-                    continue;
-                }
-                if (known_cut_mask & em) != known_cut_mask {
-                    continue;
-                }
-                let known_uncut_mask: u8 = (0..4u8)
-                    .filter(|&k| states[k as usize] == EdgeState::Uncut)
-                    .fold(0, |m, k| m | (1 << k));
-                if (known_uncut_mask & em) != 0 {
-                    continue;
-                }
-                any_compatible = true;
-                for k in 0..4 {
-                    if (em >> k) & 1 == 1 {
-                        can_be_cut[k] = true;
-                    } else {
-                        can_be_uncut[k] = true;
-                    }
-                }
-            }
-
-            if !any_compatible {
-                return Err(());
-            }
-
-            for k in 0..4 {
-                if states[k] != EdgeState::Unknown {
-                    continue;
-                }
-                let Some(eid) = edges[k] else { continue };
-                if can_be_cut[k] && !can_be_uncut[k] {
-                    forced_cut.push(eid);
-                } else if !can_be_cut[k] && can_be_uncut[k] {
-                    forced_uncut.push(eid);
                 }
             }
         }
-
+        let mut doms: Vec<Vec<u8>> = stars
+            .iter()
+            .map(|&(kind, ref edges)| {
+                let states = self.star_states(edges);
+                star_placements(kind, states)
+            })
+            .collect();
+        let mut changed = true;
         let mut progress = false;
-        for e in forced_cut {
-            if self.edges[e] == EdgeState::Unknown {
-                if !self.set_edge(e, EdgeState::Cut) {
+        while changed {
+            changed = false;
+            for si in 0..stars.len() {
+                let states = self.star_states(&stars[si].1);
+                let before = doms[si].len();
+                doms[si].retain(|&m| star_mask_ok(m, states));
+                if doms[si].is_empty() {
                     return Err(());
                 }
-                progress = true;
+                if doms[si].len() != before {
+                    changed = true;
+                }
+            }
+            changed |= self.star_consensus(&partner, &mut doms)?;
+            let p = self.star_force(&stars, &mut doms)?;
+            progress |= p;
+            changed |= p;
+        }
+        Ok(progress)
+    }
+
+    /// Binary AC on shared edges: two stars constrain the edge they share, so
+    /// each star's placement domain narrows to the values its partner can
+    /// mirror.  Returns whether any domain shrank.
+    fn star_consensus(
+        &self,
+        partner: &[[Option<(usize, usize)>; 4]],
+        doms: &mut [Vec<u8>],
+    ) -> Result<bool, ()> {
+        let mut changed = false;
+        for si in 0..doms.len() {
+            for k in 0..4 {
+                let Some((ti, tk)) = partner[si][k] else {
+                    continue;
+                };
+                let mut p0 = 0u8;
+                let mut p1 = 0u8;
+                for &m in &doms[si] {
+                    p0 |= 1 << ((m >> k) & 1);
+                }
+                for &m in &doms[ti] {
+                    p1 |= 1 << ((m >> tk) & 1);
+                }
+                let inter = p0 & p1;
+                if inter == 0 {
+                    return Err(());
+                }
+                let (b0, b1) = (doms[si].len(), doms[ti].len());
+                doms[si].retain(|&m| inter & (1 << ((m >> k) & 1)) != 0);
+                doms[ti].retain(|&m| inter & (1 << ((m >> tk) & 1)) != 0);
+                if doms[si].is_empty() || doms[ti].is_empty() {
+                    return Err(());
+                }
+                if doms[si].len() != b0 || doms[ti].len() != b1 {
+                    changed = true;
+                }
             }
         }
-        for e in forced_uncut {
-            if self.edges[e] == EdgeState::Unknown {
-                if !self.set_edge(e, EdgeState::Uncut) {
-                    return Err(());
+        Ok(changed)
+    }
+
+    /// Force every edge on which a star's remaining placements all agree.
+    /// Returns whether any edge was set.
+    fn star_force(
+        &mut self,
+        stars: &[(PalisadeKind, [Option<EdgeId>; 4])],
+        doms: &mut [Vec<u8>],
+    ) -> Result<bool, ()> {
+        let mut progress = false;
+        for si in 0..stars.len() {
+            for k in 0..4 {
+                let Some(eid) = stars[si].1[k] else { continue };
+                if self.edges[eid] != EdgeState::Unknown {
+                    continue;
                 }
-                progress = true;
+                let mut bits = 0u8;
+                for &m in &doms[si] {
+                    bits |= 1 << ((m >> k) & 1);
+                }
+                let target = match bits {
+                    0b01 => Some(EdgeState::Uncut),
+                    0b10 => Some(EdgeState::Cut),
+                    _ => None,
+                };
+                if let Some(t) = target {
+                    if !self.set_edge(eid, t) {
+                        return Err(());
+                    }
+                    progress = true;
+                }
+            }
+        }
+        Ok(progress)
+    }
+
+    fn star_states(&self, edges: &[Option<EdgeId>; 4]) -> [EdgeState; 4] {
+        edges.map(|e| e.map(|eid| self.edges[eid]).unwrap_or(EdgeState::Cut))
+    }
+
+    /// m=2 vertex-parity unit propagation.  With exactly two regions the four
+    /// cells around any interior vertex are 2-coloured, and a cyclic binary
+    /// sequence has an even number of transitions — so the Cut-spoke count at
+    /// every interior vertex (4 fillable cells) is **even**.  3 decided spokes
+    /// therefore force the 4th; a fully decided odd vertex is a contradiction.
+    /// Fence-star domains never couple across a vertex; this curve-pairing
+    /// half is what closes the net on fence-dense boards (1249).  Sound only
+    /// for `exact_piece_count == Some(2)` (≥3 colours allow odd transitions).
+    pub(crate) fn propagate_two_piece_vertex_parity(&mut self) -> Result<bool, ()> {
+        let mut progress = false;
+        for vr in 1..self.grid.rows {
+            for vc in 1..self.grid.cols {
+                let cells = [
+                    self.grid.cell_id(vr - 1, vc - 1),
+                    self.grid.cell_id(vr - 1, vc),
+                    self.grid.cell_id(vr, vc - 1),
+                    self.grid.cell_id(vr, vc),
+                ];
+                if cells.iter().any(|&c| !self.grid.cell_exists[c]) {
+                    continue;
+                }
+                // Cycle c0→c1→c3→c2→c0: top, right, bottom, left spokes.
+                let spokes = [
+                    self.grid.edge_between(cells[0], cells[1]),
+                    self.grid.edge_between(cells[1], cells[3]),
+                    self.grid.edge_between(cells[2], cells[3]),
+                    self.grid.edge_between(cells[0], cells[2]),
+                ];
+                let mut cut = 0usize;
+                let mut unk: Vec<EdgeId> = Vec::new();
+                let mut any_missing = false;
+                for e in spokes {
+                    let Some(eid) = e else {
+                        any_missing = true;
+                        break;
+                    };
+                    match self.edges[eid] {
+                        EdgeState::Cut => cut += 1,
+                        EdgeState::Uncut => {}
+                        EdgeState::Unknown => unk.push(eid),
+                    }
+                }
+                if any_missing {
+                    continue;
+                }
+                match unk.len() {
+                    0 => {
+                        if cut % 2 == 1 {
+                            return Err(());
+                        }
+                    }
+                    1 => {
+                        let want = if cut % 2 == 1 {
+                            EdgeState::Cut
+                        } else {
+                            EdgeState::Uncut
+                        };
+                        if !self.set_edge(unk[0], want) {
+                            return Err(());
+                        }
+                        progress = true;
+                    }
+                    _ => {}
+                }
             }
         }
         Ok(progress)
@@ -4882,4 +4996,30 @@ impl<'a> Solver<'a> {
         }
         Ok(progress)
     }
+}
+
+/// Rotation masks of a `PalisadeKind` compatible with the given incident edge
+/// states (mask bits N,S,W,E).  Deduped (symmetric kinds repeat under rotation).
+fn star_placements(kind: PalisadeKind, states: [EdgeState; 4]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut seen = [false; 16];
+    for rot in 0..4 {
+        let (_ec, em) = kind.pattern_at_rotation(rot);
+        if seen[em as usize] {
+            continue;
+        }
+        seen[em as usize] = true;
+        if star_mask_ok(em, states) {
+            out.push(em);
+        }
+    }
+    out
+}
+
+fn star_mask_ok(m: u8, states: [EdgeState; 4]) -> bool {
+    (0..4).all(|k| match states[k] {
+        EdgeState::Cut => (m >> k) & 1 == 1,
+        EdgeState::Uncut => (m >> k) & 1 == 0,
+        EdgeState::Unknown => true,
+    })
 }

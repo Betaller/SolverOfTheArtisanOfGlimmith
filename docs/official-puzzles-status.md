@@ -61,6 +61,7 @@
 | 2026-09-23 | **compass-part 联合划分搜索器**（`65c32e4`，doc 13） | `results/bench/20260923_65c32e4_cp-fast.{txt,jsonl}`（快速档）+ compass+solitary 簇直跑 | `benchmark_rust_solver.py --baseline 4a81357-full --skip-slow --timeout 40 -j 6` + 逐题直跑 | **1188 口径**（1183 + 簇直跑 5） | **+5** | 新增路由 ⓪b `compass_part.rs`（doc 13）：`{compass, solitary}` 纯净题的 k 区域联合划分搜索（solitary 锁 k=#罗盘线索；紧线索先生长、最松线索吃残余；半平面精确计数 + area 窗口联合收紧 + AC 强制钉格 + **补全算术剪枝** Σshort≤2·slots + 跨线索半平面容量剪枝）。**新解 5/9**：0312/0680/0681/1246/1259（0.1–3.3s，此前全灭：`pieces` 预枚举 2000/200k 硬截断假穷尽，参考 C++ AoG_Solver 同题 60s/30s 同超时——参考盲区）。0682/0683/1258/1260 首块松线索格网 >20M 状态（cap 实验确认），留 cell-labeling CSP 迭代。快速档 1182/1187：REG=1（1406，实验负载争抢，**串行 53.5s SOLVED** 噪声）、NEW=0（簇题全在 skip-slow 名单，收益以直跑计）。`pytest` 301、`cargo test` 41、complexity_gate 全过。同日 wdegree 强制分支 KNOWN BUG 侦查有进展（模型 1568 顶点 0 反例证健全；真凶为上游放大链，见 doc 27 追记），强制保持关闭。 |
 | 2026-09-23 | **wdegree KNOWN BUG 结案**＋陈旧组件消费端重建（`ed2e4a3`，doc 27 §8）＋进度图横坐标抽稀（`c89c6b6`） | `results/bench/20260923_ed2e4a3_wdeg-fast.{txt,jsonl}`（快速档）+ 三题串行 | `benchmark_rust_solver.py --baseline 4a81357-full --skip-slow --timeout 40 -j 6` + 直跑 | **1188 口径不变**（强制解锁稳基线） | **0**（NEW=0，REG=3 均噪声） | 真凶结案（doc 27 §8）：组件缓存「写边即失效」，`rose_separation` 卡口 BFS 从陈旧 `comp_cells` 低估可达性 → 假卡口假 Uncut（1135 (6,4)-(7,4)）→ 级联假矛盾；wdegree 强制只是轮内写流量放大器。修复＝**谁读谁重建**（watchtower / rose_separation / rose_phase3 入口各 `build_components()`，第四次陈旧组件事故的定则入档 11-edge-csp 文档）。**singleton-fit 强制正式解锁**：1135 36ms / 1392 414ms / 1137 24s 全 SOLVED（1137 较禁用提速）；回归点 1294/1017/0987/1378/1110 全绿。快速档 1182/1187：REG=3（0685/1146/1406 串行 21s/68s/56s SOLVED，全争抢噪声）、NEW=0（收益待 m=2 配套）。另 `c89c6b6` 进度图横坐标标签抽稀（PNG ~8 刻度+45°、SVG ~10 刻度）。`pytest` 301、`cargo test` 41+8、complexity_gate 全过。 |
 | 2026-09-23 | **compass-part v2 cell-labeling CSP**（`compass_label.rs`，doc 13 §6） | `results/bench/20260923_eb5bc38_cp-v2-cluster.txt` + `results/bin/rsolver-eb5bc38-linux-x86_64` | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` | **1190 口径**（1183 + 簇 7） | **+2**（0682/1260） | 松窗口残簇改打**格→标签 CSP**（doc 13 §6）：势连通域（多源位集 worklist）+ 半平面基数 AC（过近似池健全强制）+ **象限联合计数 `joint_ok`**（象限格双吃两方向，精确小目标被超额满足——逐方向池看不见，对和界区间传播一步看穿；按 (标签,8分区) 计算 n×k→8×k 提速 3.1×）+ 尺寸窗 + 可桥接性。搜索：**前沿取格**（树序交错保完备）+ 邻接优先值序。向导统计法（官方路径逐步打印值序排名）实证：S1/S31 等「不可区分对称/蛇尾远端」全是 MRV 跳跃取格的人工产物，前沿序后 0682 从爆帽（4M）变 2.1M 节点解出。**生产链**：v1 短缰绳（timeout/3，8–12s）+ v2 吃剩余预算——v1 簇 5 题 12s 内零回归（1246 最慢 4.3s）。新解 **0682（17.4s）/ 1260（12.9s）**；残簇 0683（19M 节点 60s）/ 1258（k=44，1.2M/60s）deadline 截断非穷尽（审计/向导测试证传播健全），测试 `#[ignore]` 挂起跟踪。`pytest`、`cargo test` 45+8、complexity_gate 全过。 |
+| 2026-09-23 | **m=2 搜索核重写**（doc 12 §3.2b，1249 破簇）＋ edge_csp 星域 AC/顶点偶度 | 1149a/1249/0987 直跑 + 9 题回归面 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` | **1191 口径**（1183 + compass 7 + m2 破簇 1） | **+1**（1249） | 根因改写：m=2 簇的墙**不是范式错配**——格标宿主传播一直齐全，输在搜索核（单边分支退化 S 子集枚举撞帽 + visited 只存 S 集误合并不同显式 T＝假穷尽 + 无失败标签探测）。重写 `grow_free`：**对称 S/T 二分支 + 全标签 visited 键 + 双侧连通闭包（新 s_round）+ 失败标签探测（SAC-lite，破簇关键）** + 塌缩量优先值序。**1249 160ms 破簇**；0987 873ms（原 40s 磨链）；1149a 纯 watchtower 残余（探测 1k 节点/s）。edge_csp 配套：fence 星域 AC 重写（单星求交对 2/3 臂星恒空转 → 共享边二元 AC）+ m=2 顶点偶度强制（two-piece 门控）——1249 边宿主实证根传播 180 边只锁 1（无锚点），正解在格标核。回归面 9/9 绿（two-piece 三题 + fence 四题 + 0974/0987）。`pytest`、`cargo test` 47+8、complexity_gate 全过。 |
 
 ---
 
@@ -830,6 +831,25 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
 5M/60s，deadline 截断）：剩余瓶颈是**错误子树死亡率**而非偏好精度（一处 rank-1
 误排的错误子树即吞百万级节点）——下一迭代方向为 joinability 构造化下界（桥接
 0-1 BFS 距离储备）与关节格强制（doc 13 §6.2/§6.3）。
+
+### 2026-09-23（续） · m=2 搜索核重写（doc 12 §3.2b，1249 破簇 +1）
+
+- **根因改写**：m=2 簇的墙**不是范式错配**（旧结论作废）——格标宿主一直有全套
+  传播（XOR/fence 星 AC/望塔关系/T-closure），输在**搜索核**：①单边分支（只进 S，
+  T 靠传播/封盘）退化成 S 子集枚举撞 2M 帽；②visited 键只存 S 集，对称分支下把
+  「同 S 集、不同显式 T」误合并＝假穷尽；③无失败标签探测。
+- **搜索核重写**（same_tiling `grow_free`）：对称 S/T 二分支 + 全标签 visited 键
+  （2bit/格）+ S/T 双侧连通闭包（新增 s_round 镜像）+ **失败标签探测（SAC-lite，
+  破簇关键）** + 塌缩量优先值序。`M2_SKIP=xor,fence,watch,t,s,probe` 诊断门。
+- **实测**：**1249（fence 密集）285ms→160ms via same-tiling 破簇（+1）**；
+  **0987 873ms**（原 40s 磨链后 edge_csp 兜底，链耗时大降）；1149a（纯 watchtower）
+  未解（探测 1k 节点/s × 树大；等价类合并是下一步）。two-piece 三题
+  （1135/1392/1137）+ fence 四题（0628/0903/0923fix/0924fix）零回归。
+- **edge_csp 配套**：fence 星域 AC 重写（单星求交对 2/3 臂星恒空转 → 共享边二元
+  AC）+ m=2 顶点偶度强制（二染色环转移偶；two-piece 门控）——1249 边宿主实证
+  根传播 180 边只锁 1（无锚点），正解在格标搜索核；两件套留作通用传播力。
+- 口径 **1190 → 1191**。残余：1149a（+1）、0683/1258（+2）、OOM 0224/1215（+2）。
+  `pytest`、`cargo test` 47+8（含新增 1249 回归测试）、complexity_gate 全过。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

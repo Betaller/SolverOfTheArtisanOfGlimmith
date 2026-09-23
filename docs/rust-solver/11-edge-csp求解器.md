@@ -392,3 +392,18 @@ edge_csp 解出**；0685 并行翻负但串行 20s SOLVED（噪声）。
 3 次跑出 2 次的 flaky）。现探针超时直接收轮不强制；`probe_one_round` 保留「一轮
 只强制一个字面量即返回」的原语义（实测 force-all 会因缺少强传播接力反而变弱：
 0312 从 2/3 解出退化为 0/5）。修复后 0312 树完全确定（nodes 恒 44529）。
+
+## 后续 · fence 星域 AC + m=2 顶点偶度（2026-09-23）
+
+- **fence 星域 AC**（重写 `propagate_palisade_constraints`）：原「单星 4 旋转求交」
+  对 2/3 臂星恒无强制（无普适掩码位）。重写为星域 AC——放置域 = `PalisadeKind`
+  的旋转掩码（`pattern_at_rotation`，位序 N,S,W,E = `cell_edges` 序），按已知边
+  态过滤后**相邻星共享边互收窄**（投影交集二元 AC），全域一致即强制边
+  （`star_consensus` / `star_force`）。1249 类 fence 密集板由此收网。
+- **m=2 顶点偶度强制**（`propagate_two_piece_vertex_parity`，`exact_piece_count
+  == Some(2)` 门控）：恰二区 ⟹ 内部顶点（4 可填格）的割边数**必偶**（二染色
+  环上转移数偶）——3 决 1 未决即锁第 4 条，全决奇数即矛盾。fence 星跨顶点无
+  耦合，这是曲线配对的另一半；≥3 色不成立（奇转移合法），故严格 two-piece 门控。
+  `M2_SKIP=vparity2`（诊断门 `EDGE_CSP_SKIP=vparity2`）可关。
+- 根调试：`EDGE_CSP_DEBUG` 现在入口处也打 `root unknown=…`（1249 根传播
+  180 边只锁 1——边宿主无锚点的直接证据，正解落到 same-tiling 的格标搜索核）。

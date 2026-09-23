@@ -705,6 +705,13 @@ impl<'a> Solver<'a> {
         if self.propagate().is_err() {
             return None;
         }
+        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+            eprintln!(
+                "edge_csp: root unknown={} (of {})",
+                self.curr_unknown,
+                self.grid.num_edges()
+            );
+        }
 
         self.backtrack_edges();
 

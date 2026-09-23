@@ -1167,7 +1167,7 @@ fn m2_region_growth(
         partner: &[],
     };
     state.label[root] = 0;
-    let mut visited: std::collections::HashSet<[u64; 4]> = std::collections::HashSet::new();
+    let mut visited: std::collections::HashSet<[u64; 8]> = std::collections::HashSet::new();
     grow_free(
         puzzle,
         free,
@@ -1488,9 +1488,71 @@ fn t_round(
     Some(changed)
 }
 
+/// S-reachability round — the exact mirror of `t_round`: S must also end
+/// connected, so undecided cells that cannot reach the S mass through
+/// (S ∪ undecided) can never join S and are forced to T, and an S cell cut
+/// off from the S mass is a contradiction.  One-sided closure leaves the
+/// complement-side walls invisible and the tree explodes.
+fn s_round(
+    free: &[(usize, usize)],
+    idx_of: &[Vec<usize>],
+    state: &mut GrowthState<'_>,
+    total: usize,
+    h: usize,
+    w: usize,
+) -> Prop {
+    let Some(root) = (0..total).find(|&k| state.label[k] == 0) else {
+        return Some(false); // no S seed yet (root pin normally provides one)
+    };
+    let mut reach = vec![false; total];
+    let mut q: Vec<usize> = Vec::new();
+    reach[root] = true;
+    q.push(root);
+    while let Some(u) = q.pop() {
+        let (r, c) = free[u];
+        for (nr, nc) in [
+            (r.wrapping_sub(1), c),
+            (r + 1, c),
+            (r, c.wrapping_sub(1)),
+            (r, c + 1),
+        ] {
+            if nr >= h || nc >= w {
+                continue;
+            }
+            let j = idx_of[nr][nc];
+            if j == usize::MAX || reach[j] || state.label[j] == 1 {
+                continue;
+            }
+            reach[j] = true;
+            q.push(j);
+        }
+    }
+    let mut changed = false;
+    for k in 0..total {
+        if reach[k] {
+            continue;
+        }
+        match state.label[k] {
+            0 => return None, // S would stay split
+            2 => {
+                state.set(k, 1);
+                changed = true;
+            }
+            _ => {}
+        }
+    }
+    Some(changed)
+}
+
 /// Fixpoint of the label propagators.  Every force is implied by the S-set, so
 /// the full label state is a function of it — visited-dedup on `s_cells` stays
 /// sound.
+fn m2_skip(name: &str) -> bool {
+    std::env::var("M2_SKIP")
+        .map(|v| v.split(',').any(|s| s == name))
+        .unwrap_or(false)
+}
+
 fn propagate_labels(
     puzzle: &Puzzle,
     free: &[(usize, usize)],
@@ -1503,21 +1565,35 @@ fn propagate_labels(
 ) -> bool {
     loop {
         let mut progress = false;
-        match xor_round(state, facts) {
-            None => return false,
-            Some(c) => progress |= c,
+        if !m2_skip("xor") {
+            match xor_round(state, facts) {
+                None => return false,
+                Some(c) => progress |= c,
+            }
         }
-        match fence_round(puzzle, free, idx_of, state, facts, h, w) {
-            None => return false,
-            Some(c) => progress |= c,
+        if !m2_skip("fence") {
+            match fence_round(puzzle, free, idx_of, state, facts, h, w) {
+                None => return false,
+                Some(c) => progress |= c,
+            }
         }
-        match watchtower_round(state, facts) {
-            None => return false,
-            Some(c) => progress |= c,
+        if !m2_skip("watch") {
+            match watchtower_round(state, facts) {
+                None => return false,
+                Some(c) => progress |= c,
+            }
         }
-        match t_round(free, idx_of, state, total, h, w) {
-            None => return false,
-            Some(c) => progress |= c,
+        if !m2_skip("t") {
+            match t_round(free, idx_of, state, total, h, w) {
+                None => return false,
+                Some(c) => progress |= c,
+            }
+        }
+        if !m2_skip("s") {
+            match s_round(free, idx_of, state, total, h, w) {
+                None => return false,
+                Some(c) => progress |= c,
+            }
         }
         if !progress {
             return true;
@@ -1539,7 +1615,7 @@ fn grow_free(
     idx_of: &[Vec<usize>],
     total: usize,
     state: &mut GrowthState<'_>,
-    visited: &mut std::collections::HashSet<[u64; 4]>,
+    visited: &mut std::collections::HashSet<[u64; 8]>,
     facts: &GrowthPruneFacts,
     deadline: Instant,
 ) -> Option<Vec<RegionInfo>> {
@@ -1557,21 +1633,138 @@ fn grow_free(
     if !propagate_labels(puzzle, free, idx_of, state, facts, total, h, w) {
         return None;
     }
-    // Dedup on the *post-propagation* S-set (forced-S cells are part of the
-    // key).  The key was previously inserted by the parent before propagation
-    // could extend it.
-    if !visited.insert(bitkey(&state.s_cells)) {
+    // Dedup on the full post-propagation label vector (2 bits/cell): with
+    // explicit S/T branching the S-set alone merges states that know
+    // different T-decisions and prune differently (false exhaust).
+    if !visited.insert(labelkey(&state.label)) {
         return None;
     }
     if !growth_prunes_ok(puzzle, free, idx_of, state, facts, h, w) {
         return None;
     }
+    // Failed-label probing (SAC-lite): a label whose fixpoint contradicts can
+    // never be the truth — force the opposite.  This is the standard step up
+    // from unit propagation for two-colouring-style boards: it collapses the
+    // tree long before the 2M-state budget, which plain branch+propagate
+    // cannot (the m=2 wall was never a prune-soundness issue but the tree
+    // size between forced cells).
+    if !m2_skip("probe") {
+        let mut k = 0usize;
+        while k < total {
+            if state.label[k] == 2 {
+                let mut ok = [false; 2];
+                for v in 0..2u8 {
+                    let mut tmp = GrowthState {
+                        label: state.label.clone(),
+                        s_cells: state.s_cells.clone(),
+                        partner: state.partner,
+                    };
+                    tmp.set(k, v);
+                    ok[v as usize] = propagate_labels(
+                        puzzle, free, idx_of, &mut tmp, facts, total, h, w,
+                    ) && growth_prunes_ok(puzzle, free, idx_of, &tmp, facts, h, w);
+                }
+                if !ok[0] && !ok[1] {
+                    return None;
+                }
+                if !ok[0] || !ok[1] {
+                    let v = if ok[1] { 1 } else { 0 };
+                    state.set(k, v);
+                    if !propagate_labels(puzzle, free, idx_of, state, facts, total, h, w) {
+                        return None;
+                    }
+                    if !visited.insert(labelkey(&state.label)) {
+                        return None;
+                    }
+                    if !growth_prunes_ok(puzzle, free, idx_of, state, facts, h, w) {
+                        return None;
+                    }
+                    k = 0; // restart: the force may unlock new failed labels
+                    continue;
+                }
+            }
+            k += 1;
+        }
+    }
+
     // Try sealing S here (the remaining undecided cells go to T).
     if let Some(regions) = growth_leaf_free(puzzle, free, idx_of, state, h, w) {
         return Some(regions);
     }
-    // Frontier of S; fence-adjacent cells first so the star prunes bite early.
-    let mut frontier: Vec<usize> = Vec::new();
+    // Pick one undecided cell and branch BOTH ways (S/T).  The old loop only
+    // ever branched "into S" and left T implicit until sealing — the tree
+    // degenerated into S-subset enumeration and hit the state cap long before
+    // the fence/XOR prunes could bite.  An explicit T decision fires
+    // `propagate_labels` immediately (XOR partners flip to S, fence arms
+    // resolve, watchtower bounds tighten), which is what actually collapses
+    // the m=2 boards.
+    let Some(j) = pick_undecided(free, idx_of, state, facts, h, w) else {
+        return None;
+    };
+    // Value order: the label whose propagation collapses MORE undecided cells
+    // first (measured by the failed-label probe's own two trials) — the
+    // bigger cascade is the likelier truth and dead-ends faster when wrong.
+    let mut order = [0u8, 1u8];
+    if !m2_skip("probe") {
+        let mut left = [usize::MAX; 2];
+        for v in 0..2u8 {
+            let mut tmp = GrowthState {
+                label: state.label.clone(),
+                s_cells: state.s_cells.clone(),
+                partner: state.partner,
+            };
+            tmp.set(j, v);
+            if propagate_labels(puzzle, free, idx_of, &mut tmp, facts, total, h, w) {
+                left[v as usize] = tmp.label.iter().filter(|&&l| l == 2).count();
+            }
+        }
+        if left[0] != usize::MAX && left[1] != usize::MAX && left[0] < left[1] {
+            order.swap(0, 1);
+        }
+    }
+    for v in order {
+        if Instant::now() >= deadline {
+            return None;
+        }
+        // Snapshot: child propagation may force many labels (and S cells).
+        let snap = state.label.clone();
+        let snap_len = state.s_cells.len();
+        state.set(j, v);
+        if let Some(regions) =
+            grow_free(puzzle, free, idx_of, total, state, visited, facts, deadline)
+        {
+            return Some(regions);
+        }
+        state.label.copy_from_slice(&snap);
+        state.s_cells.truncate(snap_len);
+    }
+    None
+}
+
+/// Most-constrained undecided cell first: fence-star cells (their arms couple
+/// 5 labels), then must-split pair members (XOR forces), then watchtower
+/// cells, then the S frontier, then the rest.  Ties by index (determinism).
+fn pick_undecided(
+    free: &[(usize, usize)],
+    idx_of: &[Vec<usize>],
+    state: &GrowthState<'_>,
+    facts: &GrowthPruneFacts,
+    h: usize,
+    w: usize,
+) -> Option<usize> {
+    let fence_set: std::collections::BTreeSet<usize> =
+        facts.fence.iter().map(|&(k, _)| k).collect();
+    let pair_set: std::collections::BTreeSet<usize> = facts
+        .must_split
+        .iter()
+        .flat_map(|&(a, b)| [a, b])
+        .collect();
+    let watch_set: std::collections::BTreeSet<usize> = facts
+        .watchtowers
+        .iter()
+        .flat_map(|(cs, _)| cs.iter().copied())
+        .collect();
+    let mut on_frontier = vec![false; free.len()];
     for &sk in &state.s_cells {
         let (r, c) = free[sk];
         for (nr, nc) in [
@@ -1584,35 +1777,23 @@ fn grow_free(
                 continue;
             }
             let j = idx_of[nr][nc];
-            if j == usize::MAX || state.label[j] != 2 {
-                continue;
-            }
-            if !frontier.contains(&j) {
-                frontier.push(j);
+            if j != usize::MAX && state.label[j] == 2 {
+                on_frontier[j] = true;
             }
         }
     }
-    let fence_set: std::collections::BTreeSet<usize> =
-        facts.fence.iter().map(|&(k, _)| k).collect();
-    frontier.sort_by_key(|&j| (if fence_set.contains(&j) { 0u8 } else { 1 }, j));
-
-    for j in frontier {
-        if Instant::now() >= deadline {
-            return None;
-        }
-        // Snapshot: child propagation may force many labels (and S cells).
-        let snap = state.label.clone();
-        let snap_len = state.s_cells.len();
-        state.set(j, 0);
-        if let Some(regions) =
-            grow_free(puzzle, free, idx_of, total, state, visited, facts, deadline)
-        {
-            return Some(regions);
-        }
-        state.label.copy_from_slice(&snap);
-        state.s_cells.truncate(snap_len);
-    }
-    None
+    let rank = |j: usize| {
+        (
+            if fence_set.contains(&j) { 0u8 } else { 1 },
+            if pair_set.contains(&j) { 0u8 } else { 1 },
+            if watch_set.contains(&j) { 0u8 } else { 1 },
+            if on_frontier[j] { 0u8 } else { 1 },
+            j,
+        )
+    };
+    (0..free.len())
+        .filter(|&j| state.label[j] == 2)
+        .min_by_key(|&j| rank(j))
 }
 
 /// Leaf of the free growth: everything outside S becomes T; verify both sides
@@ -1659,6 +1840,18 @@ fn bitkey(s_cells: &[usize]) -> [u64; 4] {
     let mut k = [0u64; 4];
     for &i in s_cells {
         k[i / 64] |= 1u64 << (i % 64);
+    }
+    k
+}
+
+/// Full 3-way label vector as a dedup key (2 bits per cell).  The S-set alone
+/// is only a sound key for one-sided growth: with explicit S/T branching the
+/// same S-set can hide different T-decisions (which know more fence bits and
+/// propagate differently), and merging them is a false exhaust.
+fn labelkey(labels: &[u8]) -> [u64; 8] {
+    let mut k = [0u64; 8];
+    for (i, &l) in labels.iter().enumerate() {
+        k[i / 32] |= (l as u64) << (2 * (i % 32));
     }
     k
 }
@@ -2039,6 +2232,19 @@ fn key_of_i32(cells: &[[i32; 2]]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The m=2 fence-dense cluster member (8-endgame/1249): rose P1×2 +
+    /// 23 fence stars.  Solved by the free-growth rewrite (binary branching
+    /// + failed-label probing) in well under a second.
+    #[test]
+    fn solves_m2_fence_1249() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../puzzles/official/Zone3/8-endgame/1249.json"
+        ))
+        .expect("parse");
+        let out = solve_same_tiling(&p, 30_000);
+        assert!(out.is_solved(), "1249 expected solved, got {:?}", out);
+    }
 
     /// m == 2 tiling of a 2×2 board into two dominos (identical shapes).
     #[test]

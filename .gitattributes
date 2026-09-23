@@ -29,3 +29,5 @@ results/bin/rsolver-4a81357-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260923_4a81357_milestone-full.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bin/rsolver-65c32e4-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260923_65c32e4_cp-fast.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-ed2e4a3-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20260923_ed2e4a3_wdeg-fast.jsonl filter=lfs diff=lfs merge=lfs -text

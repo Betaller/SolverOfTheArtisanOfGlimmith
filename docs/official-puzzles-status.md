@@ -59,6 +59,7 @@
 | 2026-09-22 | loop_closure 选择性移植 + 望塔精确度判死 | `results/bench/20260922_8e9d632_lc-wd-fast.{txt,jsonl}`（快速档 + 12 题矩阵） | `benchmark_rust_solver.py --baseline v7-full --skip-slow --timeout 40 -j 6` + 直跑 | **1177 口径**（+1 via edge_csp） | **+1**（1137） | loop_closure 只移植规则 1（**须挂 ring 门**——brick 的 T 连杆可合并环，1294 曾根层 5「环」误杀）+ 规则 4（max_loops==1 且 ring 时触边框边必 Uncut）；参考的 `@` 度数规则因语义不同（区域去重数 vs 割度，官方解 241/471 反例）弃。望塔精确度判死（4 满象限内部顶点：val=1⟹度0、val=2⟹{2,4}、max_loops==1 时精确-2；m=2 官方 634/634）——**强制分支有未明交互 bug 暂关**（KNOWN BUG 注释）。**新解 1137**（m=2 簇第三员）；快速档 REG=1（1294，规则 1 缺 ring 门误杀，已修，放宽单调不丢解）。`pytest`、`cargo test`、complexity gate 全过。 |
 | 2026-09-23 | 1180 里程碑合并态全量实测（`4a81357`，PR#81 合并后复核 + 进度图补录） | `results/bench/20260923_4a81357_milestone-full.{txt,jsonl}`（全量）+ `results/bin/rsolver-4a81357-linux-x86_64` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1183 / 1258** | **+7**（vs 1176 同口径；0 翻负） | CI「Benchmark & trend」在 PR#81 合并时被 runner shutdown（exit 143）打断，README 进度图停在 `c457981`@1176；本地全量实测补录（`docs/solver-history.json` 第 30 点 → 94.04%）并重绘 PNG / `/trend/` 页。对照 `c457981` FAIL 集双向 diff：**+7 全部可解释、0 真回归**——5 道为 8e9d632（loop_closure+望塔精确度判死）能力兑现（**1137/0990/1146/1147/1406**，快速档当时未全量复核），2 道噪声带回正（0418/0685）。1130 本轮 -j 6 下仍翻负（pieces:timeout 80s，串行 33s SOLVED；稳定线口径 1183+1=**1184**）。剩余 75 FAIL：compass+solitary 9 簇（**参考 C++ AoG_Solver 实测同超时**，1246/0312 60s/30s 零输出、对照 1283 秒解——参考盲区；`pieces::generate_compass_polyominoes` 无界方向格网爆炸 + 2000/200k 硬截断 → DLX 假穷尽）、OOM -9 四道（0224/1215/1260/1138）、watchtower/difference/inequality 碎簇。本轮纯文档/归档提交无代码改动（pytest/cargo 免跑，基准与二进制按规归档）。 |
 | 2026-09-23 | **compass-part 联合划分搜索器**（`65c32e4`，doc 13） | `results/bench/20260923_65c32e4_cp-fast.{txt,jsonl}`（快速档）+ compass+solitary 簇直跑 | `benchmark_rust_solver.py --baseline 4a81357-full --skip-slow --timeout 40 -j 6` + 逐题直跑 | **1188 口径**（1183 + 簇直跑 5） | **+5** | 新增路由 ⓪b `compass_part.rs`（doc 13）：`{compass, solitary}` 纯净题的 k 区域联合划分搜索（solitary 锁 k=#罗盘线索；紧线索先生长、最松线索吃残余；半平面精确计数 + area 窗口联合收紧 + AC 强制钉格 + **补全算术剪枝** Σshort≤2·slots + 跨线索半平面容量剪枝）。**新解 5/9**：0312/0680/0681/1246/1259（0.1–3.3s，此前全灭：`pieces` 预枚举 2000/200k 硬截断假穷尽，参考 C++ AoG_Solver 同题 60s/30s 同超时——参考盲区）。0682/0683/1258/1260 首块松线索格网 >20M 状态（cap 实验确认），留 cell-labeling CSP 迭代。快速档 1182/1187：REG=1（1406，实验负载争抢，**串行 53.5s SOLVED** 噪声）、NEW=0（簇题全在 skip-slow 名单，收益以直跑计）。`pytest` 301、`cargo test` 41、complexity_gate 全过。同日 wdegree 强制分支 KNOWN BUG 侦查有进展（模型 1568 顶点 0 反例证健全；真凶为上游放大链，见 doc 27 追记），强制保持关闭。 |
+| 2026-09-23 | **wdegree KNOWN BUG 结案**＋陈旧组件消费端重建（`ed2e4a3`，doc 27 §8）＋进度图横坐标抽稀（`c89c6b6`） | `results/bench/20260923_ed2e4a3_wdeg-fast.{txt,jsonl}`（快速档）+ 三题串行 | `benchmark_rust_solver.py --baseline 4a81357-full --skip-slow --timeout 40 -j 6` + 直跑 | **1188 口径不变**（强制解锁稳基线） | **0**（NEW=0，REG=3 均噪声） | 真凶结案（doc 27 §8）：组件缓存「写边即失效」，`rose_separation` 卡口 BFS 从陈旧 `comp_cells` 低估可达性 → 假卡口假 Uncut（1135 (6,4)-(7,4)）→ 级联假矛盾；wdegree 强制只是轮内写流量放大器。修复＝**谁读谁重建**（watchtower / rose_separation / rose_phase3 入口各 `build_components()`，第四次陈旧组件事故的定则入档 11-edge-csp 文档）。**singleton-fit 强制正式解锁**：1135 36ms / 1392 414ms / 1137 24s 全 SOLVED（1137 较禁用提速）；回归点 1294/1017/0987/1378/1110 全绿。快速档 1182/1187：REG=3（0685/1146/1406 串行 21s/68s/56s SOLVED，全争抢噪声）、NEW=0（收益待 m=2 配套）。另 `c89c6b6` 进度图横坐标标签抽稀（PNG ~8 刻度+45°、SVG ~10 刻度）。`pytest` 301、`cargo test` 41+8、complexity_gate 全过。 |
 
 ---
 
@@ -784,6 +785,21 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
   3. 放大器结构与 doc 27 parity 同类：输入边状态一旦有误，singleton-fit 强制级联。
      上游嫌疑收窄到 probe 沙箱恢复后的**陈旧组件缓存**（`snapshot()` 只回滚
      edges/pair_branch，`curr_comp_*` 不在快照内）——待证，见 doc 27 追记。
+
+### 2026-09-23（夜） · wdegree KNOWN BUG 结案（doc 27 §8，`ed2e4a3`）+ 进度图抽稀（`c89c6b6`）
+
+- **真凶**：陈旧组件缓存喂给 `rose_separation` 卡口 BFS 的假 Uncut 强制；
+  wdegree 强制只是写流量放大器（诊断法：probe 沙箱深度标记 + 按调用行过滤
+  试探写入 + skip 门三分——`skip=rosesep` 即活，一路锁到 `rose.rs` 卡口强制点）。
+  上一条「上游嫌疑收窄到陈旧组件缓存」的方向正确，但对象不是 snapshot 漏字段
+  （回滚机制无罪），而是**消费端不重建**。
+- **修复**：谁读谁重建（watchtower / rose_separation / rose_phase3 入口
+  `build_components()`）。singleton-fit 强制解锁后 1135/1392/1137 全 SOLVED
+  且 1137 提速（29s→24s）。
+- **进度图**：横坐标标签抽稀（PNG ~8 刻度 + 45° 旋转、SVG ~10 刻度，hover
+  保留逐点日期）。
+- 口径维持 **1188**（1183 全量 + compass 簇 5）；下一步 m=2 配套
+  （1149a/1249）与 compass-part v2（0682/0683/1258/1260）冲 1200。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

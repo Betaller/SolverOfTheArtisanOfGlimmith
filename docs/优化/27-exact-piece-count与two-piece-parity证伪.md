@@ -165,3 +165,28 @@ dual_connectivity 的阻塞解除（dual 已挂 `structural_pieces` 先行落地
      对 Solver 全字段的水位线审计）；②强制改变 select_edge/pair-branch 树形后
      触发的病态搜索路径。四象限顶点 val→割度模型、`cell_pair_indices` 与
      `vertex_cells` 行主序匹配、`flood_fill_decided` 只漫 Uncut——均逐一验证无误。
+
+---
+
+## 8. 结案（2026-09-23 晚）：真凶＝陈旧组件缓存的卡口假强制，wdegree 强制已解锁
+
+第 4 条假设排序里的「记账缺口」方向反了——**回滚机制无罪，缺的是消费端的重建**。
+完整因果链（逐层实证）：
+
+1. `build_components` 在洪水之后写 growth-edge 切割，`propagate_area_constraints` /
+   watchtower Pass A / wdegree 强制又在轮内继续写边——**组件缓存在轮内即刻陈旧**。
+2. `propagate_rose_separation` 的卡口推理（Phase 1 chokepoint）从陈旧 `comp_cells`
+   做可达性 BFS：低估「缺型可达性」→ 假卡口 → **假 Uncut 强制**（实测首错：
+   1135 的 (6,4)-(7,4) 官方 Cut 被钉 Uncut，`rose.rs` chokepoint 强制点）→
+   级联至 watchtower Pass A / bricky 假强制 → 根层矛盾 → 秒退。
+3. **wdegree 强制只是放大器**：它加大轮内写流量、拉宽陈旧窗口，让卡口假强制
+   必然触发——这解释了「强制开就杀、关就好」的全部现象（演绎本身 24/24 正确）。
+4. 修复：`propagate_watchtower` / `propagate_rose_separation` /
+   `propagate_rose_phase3` 入口各自 `build_components()`（`build_components`
+   转 `pub(crate)`）。修复后 wdegree singleton-fit 强制**安全启用**：
+   1135 36ms / 1392 414ms / 1137 24s 全 SOLVED（1137 较强制关闭时的 29s 更快），
+   回归点 1294/1017/0987/1378/1110 全绿。
+
+**通用教训（第四次陈旧组件事故）**：组件缓存是「写边即失效」的派生数据，
+**每个读它的传播器都必须自带重建（或显式延迟到下一轮）**——dual 的延迟、
+doc30 的 progress 重建、本次的消费端重建，都是同一规则的实例。谁读谁重建。

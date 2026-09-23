@@ -106,6 +106,21 @@ shape）。**任何一个报告 progress 就立刻 `build_components()` 重建�
 下一个——否则后一个会拿陈旧连通性做推理（`solitary` S3 曾因此把已合并的组件
 误判成"封闭无线索"）。
 
+**通用规则（第四次陈旧组件事故后的定则，2026-09-23）：谁读谁重建。**
+组件缓存是「写边即失效」的派生数据。轮内写边来源很多（growth-edge 切割、
+area_constraints、watchtower Pass A 强制、wdegree 强制……），凡是读
+`curr_comp_id` / `comp_cells` / `growth_edges` 的传播器都必须**在自己入口
+重建**（`propagate_watchtower` / `propagate_rose_separation` /
+`propagate_rose_phase3` 已加），或显式延迟到下一轮（dual 的旧方案）。
+2026-09-23 的事故形态：`rose_separation` 卡口推理从陈旧 `comp_cells` 做可达性
+BFS → 低估缺型可达性 → 假卡口假 Uncut（1135 (6,4)-(7,4)）→ 级联假矛盾；
+wdegree 强制只是加大轮内写流量的放大器。详见 `docs/优化/27` §8。
+
+**望塔精确度强制（`propagate_watchtower_degree` singleton-fit）已启用**：
+`hi == known_cut` → 未定边全 Uncut；`lo == known_cut + x` → 全 Cut。规则本身
+经 1568 个官方顶点 0 反例验证；此前的「杀解」即上述陈旧组件假强制，修复后
+安全（1135/1392/1137 全 SOLVED，1137 较禁用时提速）。
+
 ### 3.3 顶点度传播（`prop.rs::propagate_bricky_loopy`）
 
 **⚠ 与参考实现的关键差异（正确性修复）**：参考 aog 的 `bricky_loopy` 只数**内部边**

@@ -580,7 +580,7 @@ impl<'a> Solver<'a> {
     }
 
     /// Flood fill components, compute target/min/max areas and growth edges.
-    fn build_components(&mut self) -> Result<usize, ()> {
+    pub(crate) fn build_components(&mut self) -> Result<usize, ()> {
         let n = self.grid.num_cells();
         self.prop.comp_buf.fill(usize::MAX);
         for c in 0..n {
@@ -2863,14 +2863,25 @@ impl<'a> Solver<'a> {
             }
             let lo = *fits.iter().min().unwrap();
             let hi = *fits.iter().max().unwrap();
-            // Known bug (2026-09-22): pinning the remaining unknowns from a
-            // singleton fit (`hi == known_cut` → Uncut / `lo == known_cut + x`
-            // → Cut) killed real solutions on 1135/1392/1137 even though each
-            // individual rule looks sound on paper and against the official
-            // answers — the interaction is unresolved.  The contradiction
-            // check (`fits.is_empty()`) alone is sound and already solves
-            // 1137, so the forces stay off until the interaction is found.
-            let _ = (lo, hi);
+            // Singleton-fit pinning.  The rule is sound (doc 27 追记: 1568
+            // official vertices with 0 counterexamples; 24/24 root forces
+            // correct) but used to kill 1135/1392/1137 — the killer was the
+            // stale component cache feeding `rose_separation`'s chokepoint BFS
+            // (and Pass A), not this rule.  With the consumer-entry rebuilds
+            // the forces are safe and sharpen the search (1137: 29s → 24s).
+            if hi == known_cut {
+                for &e in &unknown {
+                    if self.set_edge(e, EdgeState::Uncut) {
+                        progress = true;
+                    }
+                }
+            } else if lo == known_cut + x {
+                for &e in &unknown {
+                    if self.set_edge(e, EdgeState::Cut) {
+                        progress = true;
+                    }
+                }
+            }
         }
         Ok(progress)
     }
@@ -2881,6 +2892,12 @@ impl<'a> Solver<'a> {
         }
         let mut progress = false;
 
+        // Stale-component guard: `build_components` writes growth-edge cuts
+        // after the flood and `propagate_area_constraints` writes mid-round —
+        // Pass A's `max_distinct == comp_count` force is unsound on the stale
+        // (under-split) grouping.  Rebuild here so Pass A sees the current
+        // edge state (same treatment dual connectivity got via deferral).
+        self.build_components()?;
         let pa = self.watchtower_pass_a()?;
         progress |= pa;
         let pb = self.watchtower_pass_b()?;

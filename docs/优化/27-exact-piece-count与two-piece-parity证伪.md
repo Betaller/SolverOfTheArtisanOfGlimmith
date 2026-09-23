@@ -153,5 +153,15 @@ dual_connectivity 的阻塞解除（dual 已挂 `structural_pieces` 先行落地
    `snapshot()`（`edge_csp/mod.rs`）只回滚 `edges`/`changed`/`pair_branch`，
    `curr_comp_id` / `curr_comp_sz` / `growth_edges` 不在快照内，沙箱内
    `build_components` 的产物会泄漏给恢复后的传播轮（"陈旧组件快照"类第三次
-   出现：S3/假 cc、D0 误冻结同源）。验证法：restore() 后强制重跑
-   build_components，再开 wdegree 强制看 1135/1392/1137 是否回到 SOLVED。
+   出现：S3/假 cc、D0 误冻结同源）。
+4. **同日深挖（假设迭代三轮，均未完全结案）**：
+   - restore() 后强制重建组件缓存 + 开强制 → 三题仍杀（stale-comp 假设不足）；
+   - **深度标记实测：根层 24 条强制 24 条正确**（对照官方解 0 反例），沙箱内
+     fits 空的 Err 仅 1 次且是合法条件矛盾（kc=3>2）——**演绎层完全无罪**；
+   - Uncut-only 非对称消融（Cut 强制全关）同样杀三题（0.3s 解 → 40s 磨满超时，
+     连假穷尽都不是）；probe 关掉也不救——**杀解在搜索机制层**，与 doc 27 §3
+     的 parity 放大器不同型；
+   - 剩余假设排序：①set_edge 写流量暴露的搜索态记账缺口（snapshot/restore
+     对 Solver 全字段的水位线审计）；②强制改变 select_edge/pair-branch 树形后
+     触发的病态搜索路径。四象限顶点 val→割度模型、`cell_pair_indices` 与
+     `vertex_cells` 行主序匹配、`flood_fill_decided` 只漫 Uncut——均逐一验证无误。

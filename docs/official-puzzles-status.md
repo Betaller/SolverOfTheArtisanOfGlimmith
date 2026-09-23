@@ -62,6 +62,7 @@
 | 2026-09-23 | **wdegree KNOWN BUG 结案**＋陈旧组件消费端重建（`ed2e4a3`，doc 27 §8）＋进度图横坐标抽稀（`c89c6b6`） | `results/bench/20260923_ed2e4a3_wdeg-fast.{txt,jsonl}`（快速档）+ 三题串行 | `benchmark_rust_solver.py --baseline 4a81357-full --skip-slow --timeout 40 -j 6` + 直跑 | **1188 口径不变**（强制解锁稳基线） | **0**（NEW=0，REG=3 均噪声） | 真凶结案（doc 27 §8）：组件缓存「写边即失效」，`rose_separation` 卡口 BFS 从陈旧 `comp_cells` 低估可达性 → 假卡口假 Uncut（1135 (6,4)-(7,4)）→ 级联假矛盾；wdegree 强制只是轮内写流量放大器。修复＝**谁读谁重建**（watchtower / rose_separation / rose_phase3 入口各 `build_components()`，第四次陈旧组件事故的定则入档 11-edge-csp 文档）。**singleton-fit 强制正式解锁**：1135 36ms / 1392 414ms / 1137 24s 全 SOLVED（1137 较禁用提速）；回归点 1294/1017/0987/1378/1110 全绿。快速档 1182/1187：REG=3（0685/1146/1406 串行 21s/68s/56s SOLVED，全争抢噪声）、NEW=0（收益待 m=2 配套）。另 `c89c6b6` 进度图横坐标标签抽稀（PNG ~8 刻度+45°、SVG ~10 刻度）。`pytest` 301、`cargo test` 41+8、complexity_gate 全过。 |
 | 2026-09-23 | **compass-part v2 cell-labeling CSP**（`compass_label.rs`，doc 13 §6） | `results/bench/20260923_eb5bc38_cp-v2-cluster.txt` + `results/bin/rsolver-eb5bc38-linux-x86_64` | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` | **1190 口径**（1183 + 簇 7） | **+2**（0682/1260） | 松窗口残簇改打**格→标签 CSP**（doc 13 §6）：势连通域（多源位集 worklist）+ 半平面基数 AC（过近似池健全强制）+ **象限联合计数 `joint_ok`**（象限格双吃两方向，精确小目标被超额满足——逐方向池看不见，对和界区间传播一步看穿；按 (标签,8分区) 计算 n×k→8×k 提速 3.1×）+ 尺寸窗 + 可桥接性。搜索：**前沿取格**（树序交错保完备）+ 邻接优先值序。向导统计法（官方路径逐步打印值序排名）实证：S1/S31 等「不可区分对称/蛇尾远端」全是 MRV 跳跃取格的人工产物，前沿序后 0682 从爆帽（4M）变 2.1M 节点解出。**生产链**：v1 短缰绳（timeout/3，8–12s）+ v2 吃剩余预算——v1 簇 5 题 12s 内零回归（1246 最慢 4.3s）。新解 **0682（17.4s）/ 1260（12.9s）**；残簇 0683（19M 节点 60s）/ 1258（k=44，1.2M/60s）deadline 截断非穷尽（审计/向导测试证传播健全），测试 `#[ignore]` 挂起跟踪。`pytest`、`cargo test` 45+8、complexity_gate 全过。 |
 | 2026-09-23 | **m=2 搜索核重写**（doc 12 §3.2b，1249 破簇）＋ edge_csp 星域 AC/顶点偶度 | 1149a/1249/0987 直跑 + 9 题回归面 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` | **1191 口径**（1183 + compass 7 + m2 破簇 1） | **+1**（1249） | 根因改写：m=2 簇的墙**不是范式错配**——格标宿主传播一直齐全，输在搜索核（单边分支退化 S 子集枚举撞帽 + visited 只存 S 集误合并不同显式 T＝假穷尽 + 无失败标签探测）。重写 `grow_free`：**对称 S/T 二分支 + 全标签 visited 键 + 双侧连通闭包（新 s_round）+ 失败标签探测（SAC-lite，破簇关键）** + 塌缩量优先值序。**1249 160ms 破簇**；0987 873ms（原 40s 磨链）；1149a 纯 watchtower 残余（探测 1k 节点/s）。edge_csp 配套：fence 星域 AC 重写（单星求交对 2/3 臂星恒空转 → 共享边二元 AC）+ m=2 顶点偶度强制（two-piece 门控）——1249 边宿主实证根传播 180 边只锁 1（无锚点），正解在格标核。回归面 9/9 绿（two-piece 三题 + fence 四题 + 0974/0987）。`pytest`、`cargo test` 47+8、complexity_gate 全过。 |
+| 2026-09-23 | **m=2 ring 框链 must-same**（doc 12 §3.2b，1149a 破簇） | 1149a 直跑 + m=2 簇 7 题回归 + 全量基准 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` + `benchmark_rust_solver.py --baseline --timeout 40 -j 6` | **1192 口径**（全量实测 1189 + skipped-slow 1137/1146 + REG 1406 串行复核） | **+1**（1149a） | **框边推论**：框边顶点自带 2 条边界边，周边两格异区的墙就是第 3 条（T）⟹ 整条周边链必同区。落地 `ring_frame_must_same` + `same_round` + `eq_leaders` 并类（blocked/预绘边断链，叶子验证兜底）。**1149a 1.5s 破簇**（52 格圈坍缩 1 标签 + val=2 望塔三缺一级联，109/87 对齐官方）；环纹 m=2 簇全员提速且全部 via same-tiling：0974 16s→650ms、1137 30s→8.6s、0987 60ms、1249 173ms。m=2 簇 **5/5 全解**。全量基准 1189/1256（REG=1 1406 串行 58s SOLVED＝争抢噪声，0 真回归；1137/1146 为 skipped-slow）。`pytest` 289、`cargo test` 49+8、complexity_gate 全过。 |
 
 ---
 
@@ -855,6 +856,29 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
   SOLVED 全争抢噪声、0 真回归**；NEW=1（1260，口径内）。另落 val=1 等价类
   DSU（探测只跑类代表）+ val=2 两格 XOR 对预入 must_split——0987 提速 ~500ms、
   1249 189ms 稳定、1135 绿；1149a 仍未解（残余）。`cargo test` 48+8 全过。
+
+### 2026-09-23（续2） · m=2 ring 框链 must-same（doc 12 §3.2b，1149a 破簇 +1）
+
+- **框边推论**：框边顶点自带 2 条边界边（两段外框），周边两格间再多一条墙就是
+  第 3 条 = T 字，被 ring 禁止 ⟹ **整条周边链必同区**。推导自
+  `validate::count_boundary_edges_at_vertex` 语义（(Some,None)=边界、(None,None)=
+  否），对任意区域数成立。
+- **落地**（same_tiling）：`ring_frame_must_same`（四条 rim 干净邻接 → `must_same`，
+  blocked / 预绘边断链）+ `same_round` 同关系传播 + `eq_leaders` 并入等价类。
+  m=2 grower 此前完全无 ring 处理——三个宿主对照：edge_csp `propagate_bricky_loopy`
+  已有边形式（框顶点 2cut+1unk→Uncut），aog `check_loopy`+pad=BLOCK 在整区提交时
+  反应式拒绝拆框，但都没有**正向**整链强制；m=2 格标搜索拿到正向形式后整圈坍缩。
+- **实测**：**1149a 1.5s via same-tiling 破簇（+1）**——52 格圈坍缩成 1 个标签，
+  val=2 望塔三缺一级联（109/87 对齐官方尺寸，rule_results 全绿）。环纹 m=2 簇
+  全员提速且全部 via same-tiling：0974 16s→**650ms**、1137 30s→**8.6s**、
+  0987→60ms、1249→173ms、1135/1392→17ms/476ms。m=2 簇 **5/5 全解**。
+  1248（m=2 点反射横截，无 ring）仍为树规模残余。
+- 口径 **1191 → 1192**。全量基准 `20260923_ringchain-full`：**1189/1256 PASS**
+  （+1137/1146 skipped-slow 历史可过 + 1406 REG 串行 58s SOLVED 全争抢噪声
+  = 口径 1192；0 真回归）。`pytest` 289、`cargo test` 49+8、complexity_gate 全过。
+  残余弹药：0683/1258（+2，compass 残簇）、OOM 0224/1215（+2）、0975a
+  （ring+rose 5 区，+1，250s 长跑也解不出——加预算路线已排除，需多区宿主吃
+  框链正向收益）、1248（+1）。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

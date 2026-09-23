@@ -692,6 +692,11 @@ struct GrowthPruneFacts {
     /// (free index a, free index b) — the two cells must end in different
     /// pieces.
     must_split: Vec<(usize, usize)>,
+    /// (free index a, free index b) — the two cells must end in the *same*
+    /// piece.  Source: the ring frame chain (see `ring_frame_must_same`) —
+    /// no wall may touch the outer frame, so every clean perimeter
+    /// adjacency is monochrome.
+    must_same: Vec<(usize, usize)>,
     /// (free indices of the vertex cells, watchtower value).
     watchtowers: Vec<(Vec<usize>, usize)>,
     /// Must-equal classes (watchtower `val == 1` groups, DSU leader per cell).
@@ -702,12 +707,60 @@ struct GrowthPruneFacts {
     eq_leader: Vec<usize>,
 }
 
-/// DSU leaders for must-equal groups (`val == 1` watchtowers).  Leader = the
-/// smallest member index (determinism).  `None` on an equal-and-differ clash.
+/// `ring` frame chain: no wall may touch the outer frame.  A frame vertex
+/// already carries two boundary edges (the two frame segments meeting
+/// there), so a wall between two perimeter cells would make the third — a
+/// T-junction the rule forbids.  Every clean perimeter-chain adjacency is
+/// therefore must-same (1149a: the whole 52-cell rim collapses to one
+/// label).  Links break at blocked cells and at pre-drawn / constraint
+/// edges — those the leaf validator keeps honest.
+fn ring_frame_must_same(
+    puzzle: &Puzzle,
+    free: &[(usize, usize)],
+    idx_of: &[Vec<usize>],
+    h: usize,
+    w: usize,
+) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    if !puzzle.rules.iter().any(|r| r.ctype == "ring") {
+        return out;
+    }
+    let mut push = |out: &mut Vec<(usize, usize)>, a: (usize, usize), b: (usize, usize), clean: bool| {
+        if !clean {
+            return;
+        }
+        let (i, j) = (idx_of[a.0][a.1], idx_of[b.0][b.1]);
+        if i != usize::MAX && j != usize::MAX && i != j {
+            out.push((i, j));
+        }
+    };
+    // Top / bottom rim: horizontal neighbours.  `h_edges[r][c]` sits between
+    // (r,c) and (r,c+1) — column index must stay < w-1.
+    for r in [0, h - 1] {
+        for c in 0..w - 1 {
+            let e = &puzzle.h_edges[r][c];
+            push(&mut out, (r, c), (r, c + 1), !e.is_boundary && e.constraint.is_none());
+        }
+    }
+    // Left / right rim: vertical neighbours.  `v_edges[r][c]` sits between
+    // (r,c) and (r+1,c) — row index must stay < h-1.
+    for c in [0, w - 1] {
+        for r in 0..h - 1 {
+            let e = &puzzle.v_edges[r][c];
+            push(&mut out, (r, c), (r + 1, c), !e.is_boundary && e.constraint.is_none());
+        }
+    }
+    out
+}
+
+/// DSU leaders for must-equal groups (`val == 1` watchtowers + must-same
+/// pairs).  Leader = the smallest member index (determinism).  `None` on an
+/// equal-and-differ clash.
 fn eq_leaders(
     total: usize,
     watchtowers: &[(Vec<usize>, usize)],
     must_split: &[(usize, usize)],
+    must_same: &[(usize, usize)],
 ) -> Option<Vec<usize>> {
     let mut parent: Vec<usize> = (0..total).collect();
     fn find(parent: &mut [usize], x: usize) -> usize {
@@ -722,6 +775,16 @@ fn eq_leaders(
             u = next;
         }
         r
+    }
+    for &(a, b) in must_same {
+        let (a, b) = (find(&mut parent, a), find(&mut parent, b));
+        if a != b {
+            if a < b {
+                parent[b] = a;
+            } else {
+                parent[a] = b;
+            }
+        }
     }
     for (cells, val) in watchtowers {
         if *val == 1 {
@@ -898,6 +961,12 @@ fn growth_prunes_ok(
             return false;
         }
     }
+    for &(a, b) in &facts.must_same {
+        let (la, lb) = (state.label[a], state.label[b]);
+        if la != 2 && lb != 2 && la != lb {
+            return false;
+        }
+    }
     // Watchtower bounds in the TWO-region world: undecided cells can only
     // join the existing S/T labels, so the reachable distinct counts are
     // exactly [d, d + min(u, 2-d)] — the old multi-region bound (lo = d+1)
@@ -1002,10 +1071,12 @@ fn m2_transversal_growth(
             }
         }
     }
+    let must_same = ring_frame_must_same(puzzle, free, idx_of, h, w);
     let facts = GrowthPruneFacts {
-        eq_leader: (0..total).collect(),
+        eq_leader: eq_leaders(total, &[], &must_split, &must_same)?,
         fence,
         must_split,
+        must_same,
         watchtowers: Vec::new(),
     };
 
@@ -1179,10 +1250,13 @@ fn growth_facts(
             must_split.push((cells[0], cells[1]));
         }
     }
+    // ring ⟹ clean rim adjacencies are must-same (the frame chain).
+    let must_same = ring_frame_must_same(puzzle, free, idx_of, h, w);
     Some(GrowthPruneFacts {
-        eq_leader: eq_leaders(free.len(), &watchtowers, &must_split)?,
+        eq_leader: eq_leaders(free.len(), &watchtowers, &must_split, &must_same)?,
         fence,
         must_split,
+        must_same,
         watchtowers,
     })
 }
@@ -1283,6 +1357,15 @@ fn xor_round(state: &mut GrowthState<'_>, facts: &GrowthPruneFacts) -> Prop {
     let mut changed = false;
     for &(a, b) in &facts.must_split {
         changed |= force_relation(state, a, b, true)?;
+    }
+    Some(changed)
+}
+
+/// One pass over the must-same pairs (ring frame chain).
+fn same_round(state: &mut GrowthState<'_>, facts: &GrowthPruneFacts) -> Prop {
+    let mut changed = false;
+    for &(a, b) in &facts.must_same {
+        changed |= force_relation(state, a, b, false)?;
     }
     Some(changed)
 }
@@ -1629,6 +1712,12 @@ fn propagate_labels(
         let mut progress = false;
         if !m2_skip("xor") {
             match xor_round(state, facts) {
+                None => return false,
+                Some(c) => progress |= c,
+            }
+        }
+        if !m2_skip("same") {
+            match same_round(state, facts) {
                 None => return false,
                 Some(c) => progress |= c,
             }
@@ -2308,6 +2397,20 @@ mod tests {
         .expect("parse");
         let out = solve_same_tiling(&p, 30_000);
         assert!(out.is_solved(), "1249 expected solved, got {:?}", out);
+    }
+
+    /// The m=2 watchtower-dense cluster member (8-endgame/1149a): ring +
+    /// 69 watchtowers + rose P1×2 on 14×14.  The ring frame chain (clean rim
+    /// adjacencies are must-same) collapses the 52-cell rim to one label and
+    /// the search closes in ~1.5s — previously a 40s timeout.
+    #[test]
+    fn solves_m2_watchtower_1149a() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../puzzles/official/Zone3/8-endgame/1149a.json"
+        ))
+        .expect("parse");
+        let out = solve_same_tiling(&p, 30_000);
+        assert!(out.is_solved(), "1149a expected solved, got {:?}", out);
     }
 
     /// m == 2 tiling of a 2×2 board into two dominos (identical shapes).

@@ -31,3 +31,5 @@ results/bin/rsolver-65c32e4-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260923_65c32e4_cp-fast.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bin/rsolver-ed2e4a3-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260923_ed2e4a3_wdeg-fast.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-eb5bc38-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20260923_eb5bc38_cp-v2-cluster.txt filter=lfs diff=lfs merge=lfs -text

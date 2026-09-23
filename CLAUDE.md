@@ -42,7 +42,7 @@ RustSolver
 
 `src/solver/rust_solver.py` spawns `rsolver/target/{release,debug}/rsolver[.exe]`; protocol is puzzle JSON → stdin, solution JSON → stdout. `default_router()` constructs `RustSolver()` eagerly, so the app and `benchmark_rust_solver.py` require the binary to be built (`cargo build --release`).
 
-`rsolver/src/solver/mod.rs` dispatches: **aog DFS** (direct port of the C++ reference in `third_party/AoG_Solver`) → **pieces** (DLX exact cover for shape_pool / area clues / constrained compass) → **backtrack** (region-by-region DFS). The aog solver's internal checks are treated as authoritative (`build_solution_trusted`) — no re-validation in Rust.
+`rsolver/src/solver/mod.rs` dispatches in order: **same-tiling** (⓪ congruent-tiling prepass) → **compass-part** (⓪b compass+solitary joint partition search; mutually exclusive gate with same-tiling) → **aog DFS** (direct port of the C++ reference in `third_party/AoG_Solver`) → **rose** (rose_window) → **pp-pin** (shape_pattern pre-pin) → **edge_csp** (edge-variable CSP) → **pieces** (DLX exact cover for shape_pool / area clues / constrained compass) → **backtrack** (region-by-region DFS, disabled by default). The aog solver's internal checks are treated as authoritative (`build_solution_trusted`) — no re-validation in Rust. Full chain docs: `docs/rust-solver/01-总体架构.md`.
 
 Recent `rsolver` work ports C++ pruning into the aog DFS: ring T-junction prune (禁T字), slash-distance prune (`dfs.cpp` lines 1260-1306), multi-char rose symbols, enlarged shape/stack arrays. The Rust backtrack solver locally enforces ring (no 3-way) and brick (no 4-way) junctions.
 
@@ -94,6 +94,9 @@ All 22 rule checkers live in `src/solver/constraints.py` (`RULE_CHECKERS`), one 
 - `solver/backtrack.rs` → `06-backtrack求解器.md`
 - `solver/rose/**` → `07-rose求解器.md`
 - `solver/validate.rs`（完整独立验证器；原 `constraints.rs` 已于 2026-08-06 删除，逻辑并入） → `08-验证与约束检查.md`
+- `solver/edge_csp/**` → `11-edge-csp求解器.md`
+- `solver/same_tiling.rs` → `12-same-tiling求解器.md`
+- `solver/compass_part.rs`（compass+solitary 联合划分搜索） → `13-compass划分求解器.md`
 - 拼块（puzzle_piece / shape_pool）优化 → `10-拼块优化方向.md`
 - 拼块 + 玫瑰窗混合优化 → `docs/优化/09-rose-puzzle-piece优化调研.md`
 - 边界推演 / 专用求解器 / 规则组合优化 → `docs/优化/10-专用求解器方案.md`

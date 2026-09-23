@@ -694,6 +694,56 @@ struct GrowthPruneFacts {
     must_split: Vec<(usize, usize)>,
     /// (free indices of the vertex cells, watchtower value).
     watchtowers: Vec<(Vec<usize>, usize)>,
+    /// Must-equal classes (watchtower `val == 1` groups, DSU leader per cell).
+    /// Probing/branching one member is identical for every member — run the
+    /// leaders only (the probe is per-node O(n) otherwise and 1149a's 196
+    /// cells × 2 trials drown the budget).  A must-split pair inside one
+    /// class is a build-time contradiction.
+    eq_leader: Vec<usize>,
+}
+
+/// DSU leaders for must-equal groups (`val == 1` watchtowers).  Leader = the
+/// smallest member index (determinism).  `None` on an equal-and-differ clash.
+fn eq_leaders(
+    total: usize,
+    watchtowers: &[(Vec<usize>, usize)],
+    must_split: &[(usize, usize)],
+) -> Option<Vec<usize>> {
+    let mut parent: Vec<usize> = (0..total).collect();
+    fn find(parent: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while parent[r] != r {
+            r = parent[r];
+        }
+        let mut u = x;
+        while parent[u] != r {
+            let next = parent[u];
+            parent[u] = r;
+            u = next;
+        }
+        r
+    }
+    for (cells, val) in watchtowers {
+        if *val == 1 {
+            for &u in &cells[1.min(cells.len())..] {
+                let (a, b) = (find(&mut parent, cells[0]), find(&mut parent, u));
+                if a != b {
+                    // union by smaller index for a stable leader
+                    if a < b {
+                        parent[b] = a;
+                    } else {
+                        parent[a] = b;
+                    }
+                }
+            }
+        }
+    }
+    for &(a, b) in must_split {
+        if find(&mut parent, a) == find(&mut parent, b) {
+            return None;
+        }
+    }
+    Some((0..total).map(|x| find(&mut parent, x)).collect())
 }
 
 fn star_configs(pattern: &[[usize; 2]]) -> Vec<[bool; 4]> {
@@ -953,6 +1003,7 @@ fn m2_transversal_growth(
         }
     }
     let facts = GrowthPruneFacts {
+        eq_leader: (0..total).collect(),
         fence,
         must_split,
         watchtowers: Vec::new(),
@@ -1079,7 +1130,7 @@ fn growth_facts(
     idx_of: &[Vec<usize>],
     h: usize,
     w: usize,
-) -> GrowthPruneFacts {
+) -> Option<GrowthPruneFacts> {
     // Prune facts (same shapes as the transversal method).
     let mut fence: Vec<(usize, Vec<[bool; 4]>)> = Vec::new();
     let mut must_split: Vec<(usize, usize)> = Vec::new();
@@ -1121,11 +1172,19 @@ fn growth_facts(
             watchtowers.push((ids, val));
         }
     }
-    GrowthPruneFacts {
+    // A 2-cell val==2 vertex is a plain XOR pair — promote it to must_split
+    // so xor_round sees it from the root.
+    for (cells, val) in &watchtowers {
+        if *val == 2 && cells.len() == 2 {
+            must_split.push((cells[0], cells[1]));
+        }
+    }
+    Some(GrowthPruneFacts {
+        eq_leader: eq_leaders(free.len(), &watchtowers, &must_split)?,
         fence,
         must_split,
         watchtowers,
-    }
+    })
 }
 
 fn m2_region_growth(
@@ -1136,7 +1195,7 @@ fn m2_region_growth(
 ) -> Option<Vec<RegionInfo>> {
     let (h, w) = (puzzle.height, puzzle.width);
     let total = free.len();
-    let mut facts = growth_facts(puzzle, free, idx_of, h, w);
+    let mut facts = growth_facts(puzzle, free, idx_of, h, w)?;
 
     // Rose symbol pairs are XOR constraints in the two-piece world (each
     // region holds exactly one cell of each type) — hand them to the parity
@@ -1152,6 +1211,9 @@ fn m2_region_growth(
     }
     for ks in seeds_of_type.values() {
         if ks.len() == 2 {
+            if facts.eq_leader[ks[0]] == facts.eq_leader[ks[1]] {
+                return None; // same val==1 class but must differ
+            }
             facts.must_split.push((ks[0], ks[1]));
         }
     }
@@ -1651,7 +1713,8 @@ fn grow_free(
     if !m2_skip("probe") {
         let mut k = 0usize;
         while k < total {
-            if state.label[k] == 2 {
+            // Must-equal class members probe identically to their leader.
+            if state.label[k] == 2 && facts.eq_leader[k] == k {
                 let mut ok = [false; 2];
                 for v in 0..2u8 {
                     let mut tmp = GrowthState {
@@ -1784,6 +1847,7 @@ fn pick_undecided(
     }
     let rank = |j: usize| {
         (
+            if facts.eq_leader[j] == j { 0u8 } else { 1 },
             if fence_set.contains(&j) { 0u8 } else { 1 },
             if pair_set.contains(&j) { 0u8 } else { 1 },
             if watch_set.contains(&j) { 0u8 } else { 1 },

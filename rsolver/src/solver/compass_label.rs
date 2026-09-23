@@ -485,20 +485,40 @@ impl Search<'_> {
         true
     }
 
-    /// Value order: labels already on x's frontier first (regions grow as
-    /// coherent blobs — a frontier cell touching a label's mass is far more
-    /// likely to join it; guided-profile lesson: out-of-order picks make
-    /// snake cells look "remote" and wreck locality), then tightest remaining
-    /// capacity (fill fixed quotas before slack), then id.
+    /// Value order (guided-profile lessons, doc 13 §6.2):
+    /// 1. **quota tightness** — if x lies in an exact half-plane of label j,
+    ///    `pool − short` measures how close that quota is to forcing; tightest
+    ///    first.  A cell inside a fixed quota "wants" the quota's label far
+    ///    more than any free-direction alternative (0683's rank-7 disasters
+    ///    and 0682's S1 both came from ignoring this).
+    /// 2. labels already on x's frontier (regions grow as coherent blobs —
+    ///    out-of-order picks make snake cells look "remote").
+    /// 3. tightest remaining capacity; 4. id (determinism).
     fn value_order(&self, st: &LabState, x: usize) -> Vec<usize> {
         let m = self.model;
+        let (r, c) = (x / m.w, x % m.w);
         let mut labels = bit_list(self.dom[x]);
         labels.sort_by_key(|&j| {
+            let (cr, cc) = (m.clue_pos[j] / m.w, m.clue_pos[j] % m.w);
+            let mut q = usize::MAX;
+            for d in 0..DIRS {
+                if let Some(t) = m.targets[j][d] {
+                    if !in_halfplane(cr, cc, r, c, d) {
+                        continue;
+                    }
+                    let pool = self.hp_cells[j][d]
+                        .iter()
+                        .filter(|&&y| st.lab[y] < 0 && self.dom[y] & (1u128 << j) != 0)
+                        .count();
+                    let short = t.saturating_sub(st.cnt[j][d]);
+                    q = q.min(pool.saturating_sub(short));
+                }
+            }
             let adj = m.nbrs[x]
                 .iter()
                 .filter(|&&y| st.lab[y] == j as i32)
                 .count();
-            (std::cmp::Reverse(adj), m.hi[j] - st.sz[j], j)
+            (std::cmp::Reverse(adj), q, m.hi[j] - st.sz[j], j)
         });
         labels
     }
@@ -878,17 +898,10 @@ mod tests {
     /// official label.  A death here proves an order-dependent unsound prune
     /// (row-major audit is green); success means the machinery is fine and
     /// plain search's branching/domains are the gap.
-    #[test]
-    fn guided_search_0682() {
-        let p = crate::io::parse_puzzle(include_str!(
-            "../../../puzzles/official/Zone3/8-endgame/0682.json"
-        ))
-        .expect("parse");
+    fn guided_run(puz_json: &str, ans_json: &str) {
+        let p = crate::io::parse_puzzle(puz_json).expect("parse");
         let model = Model::build(&p).expect("model");
-        let ans_raw: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../puzzles/official/Zone3-answer/8-endgame/0682.json"
-        ))
-        .expect("parse answer");
+        let ans_raw: serde_json::Value = serde_json::from_str(ans_json).expect("parse answer");
         let ans: Vec<Vec<[usize; 2]>> =
             serde_json::from_value(ans_raw["regions"].clone()).expect("regions");
         let mut region_of = vec![None; model.h * model.w];
@@ -937,24 +950,10 @@ mod tests {
             let labels = s.value_order(&st, x);
             let rank = labels.iter().position(|&l| l == j).unwrap();
             rank_stats.push(rank);
-            let adj_of = |l: usize| {
-                model.nbrs[x]
-                    .iter()
-                    .filter(|&&y| st.lab[y] == l as i32)
-                    .count()
-            };
             let pref = labels[0];
-            eprintln!(
-                "S{steps} x={x} dom={} off=j{j} pref=j{pref} rank={rank} adj_off={} adj_pref={} slack_off={} slack_pref={} sz_off={} sz_pref={} targets_off={}",
-                labels.len(),
-                adj_of(j),
-                adj_of(pref),
-                model.hi[j] - st.sz[j],
-                model.hi[pref] - st.sz[pref],
-                st.sz[j],
-                st.sz[pref],
-                model.targets[j].iter().filter(|t| t.is_some()).count(),
-            );
+            if rank > 0 {
+                eprintln!("MIS {steps} x={x} dom={} off=j{j} pref=j{pref} rank={rank}", labels.len());
+            }
             assert!(st.try_assign(&model, x, j), "guided assign conflict");
             if !s.fixpoint(&mut st) {
                 panic!(
@@ -964,10 +963,35 @@ mod tests {
             }
         }
         let at_first = rank_stats.iter().filter(|&&r| r == 0).count();
+        let mis = rank_stats.iter().filter(|&&r| r > 0).count();
         eprintln!(
-            "guided steps={steps} official-rank-first={at_first} avg-rank={:.2} max-rank={}",
+            "guided steps={steps} official-rank-first={at_first} misranks={mis} avg-rank={:.2} max-rank={}",
             rank_stats.iter().sum::<usize>() as f64 / steps as f64,
             rank_stats.iter().max().unwrap_or(&0)
+        );
+    }
+
+    #[test]
+    fn guided_search_0682() {
+        guided_run(
+            include_str!("../../../puzzles/official/Zone3/8-endgame/0682.json"),
+            include_str!("../../../puzzles/official/Zone3-answer/8-endgame/0682.json"),
+        );
+    }
+
+    #[test]
+    fn guided_search_0683() {
+        guided_run(
+            include_str!("../../../puzzles/official/Zone3/6-compass-main/0683.json"),
+            include_str!("../../../puzzles/official/Zone3-answer/6-compass-main/0683.json"),
+        );
+    }
+
+    #[test]
+    fn guided_search_1258() {
+        guided_run(
+            include_str!("../../../puzzles/official/Zone3/6-compass-main/1258.json"),
+            include_str!("../../../puzzles/official/Zone3-answer/6-compass-main/1258.json"),
         );
     }
 }

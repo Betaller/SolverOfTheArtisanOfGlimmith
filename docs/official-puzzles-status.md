@@ -57,6 +57,7 @@
 | 2026-09-22 | m2 自由生长传播化二轮（XOR/星形 AC/望塔关系） | `results/bench/20260922_47d2e6f_m2prop-fast.{txt,jsonl}`（快速档） | `benchmark_rust_solver.py --baseline v2-full --skip-slow --timeout 40 -j 6` | **1172 口径不变**（快速档 1170/1175） | 0（NEW=0，0 真回归） | 无新解的传播化/门控迭代（见第二部分同日条目）：XOR 关系（必分边+rose 对）、fence 星按臂共识 AC（相邻星共享边互收窄）、望塔关系（val=1 全等/val=2 两格 XOR）、T-closure 健全化（修 S' 成墙误杀）、多类型 pin 修正、cap 2M、`has_constrained_compass` 单方向进门（0418 类 25 题 pieces 不再跳过）、密度门计入预切（0974 进 m2 门）。**m=2 簇 5 题仍未破**（40s deadline 打满）——cell-variable 与边界几何线索范式错配实证，正解=edge_csp 边变量宿主迁移。REGRESSION=2（0418/1140fix）均为争抢噪声（串行 28.9s/23.0s SOLVED）。外围 7 题零回归。 |
 | 2026-09-22 | exact_piece_count 重开 + rose pair 分支声音性修复 + aog 单位预算 | `results/bench/20260922_c457981_pairfix-full.{txt,jsonl}`（全量） | `benchmark_rust_solver.py --timeout 40 -j 6` | **1176 / 1258** | **+4**（6 新解 − 2 噪声翻负） | `exact_piece_count` 重推导（doc 27 证伪前提已愈：3262e5d 修 watchtower Pass B 对角格后 two-piece parity 不再放大错强；1135/1392 复测 0.3s/1.3s SOLVED）——Cut 边 parity=1 seeding 让 **0987 40s 超时→7.4s 解出**。rose pair 分支四修：SAME 记录化（原强制任意 witness 路径不完备，0974 假穷尽→**13s SOLVED**）、Snapshot 回滚 diffs/sames（跨分支泄漏）、`select_rose_pair` 过滤 same_set（同对重复分支互递归→1340/1352 **栈溢出 -6** 修复）、pair 分支门控 parity1 源（1433/0655 64s→0.5s/1.5s）。aog 单位预算锚自身起点（原先 same-tiling 烧完后 aog 拿 0ms）→ **0268/0704/0941/0988 via aog**（~40s 整点）。新解 +6：0974/0987/0268/0704/0941/0988。m=2 簇剩 1137/1249/1149a。翻负 0418/0685 均历史争抢噪声（串行 28.9s/20s SOLVED）。`pytest`、`cargo test` 36+7、complexity gate 全过。 |
 | 2026-09-22 | loop_closure 选择性移植 + 望塔精确度判死 | `results/bench/20260922_8e9d632_lc-wd-fast.{txt,jsonl}`（快速档 + 12 题矩阵） | `benchmark_rust_solver.py --baseline v7-full --skip-slow --timeout 40 -j 6` + 直跑 | **1177 口径**（+1 via edge_csp） | **+1**（1137） | loop_closure 只移植规则 1（**须挂 ring 门**——brick 的 T 连杆可合并环，1294 曾根层 5「环」误杀）+ 规则 4（max_loops==1 且 ring 时触边框边必 Uncut）；参考的 `@` 度数规则因语义不同（区域去重数 vs 割度，官方解 241/471 反例）弃。望塔精确度判死（4 满象限内部顶点：val=1⟹度0、val=2⟹{2,4}、max_loops==1 时精确-2；m=2 官方 634/634）——**强制分支有未明交互 bug 暂关**（KNOWN BUG 注释）。**新解 1137**（m=2 簇第三员）；快速档 REG=1（1294，规则 1 缺 ring 门误杀，已修，放宽单调不丢解）。`pytest`、`cargo test`、complexity gate 全过。 |
+| 2026-09-23 | 1180 里程碑合并态全量实测（`4a81357`，PR#81 合并后复核 + 进度图补录） | `results/bench/20260923_4a81357_milestone-full.{txt,jsonl}`（全量）+ `results/bin/rsolver-4a81357-linux-x86_64` | `benchmark_rust_solver.py --timeout 40 -j 6` | **1183 / 1258** | **+7**（vs 1176 同口径；0 翻负） | CI「Benchmark & trend」在 PR#81 合并时被 runner shutdown（exit 143）打断，README 进度图停在 `c457981`@1176；本地全量实测补录（`docs/solver-history.json` 第 30 点 → 94.04%）并重绘 PNG / `/trend/` 页。对照 `c457981` FAIL 集双向 diff：**+7 全部可解释、0 真回归**——5 道为 8e9d632（loop_closure+望塔精确度判死）能力兑现（**1137/0990/1146/1147/1406**，快速档当时未全量复核），2 道噪声带回正（0418/0685）。1130 本轮 -j 6 下仍翻负（pieces:timeout 80s，串行 33s SOLVED；稳定线口径 1183+1=**1184**）。剩余 75 FAIL：compass+solitary 9 簇（**参考 C++ AoG_Solver 实测同超时**，1246/0312 60s/30s 零输出、对照 1283 秒解——参考盲区；`pieces::generate_compass_polyominoes` 无界方向格网爆炸 + 2000/200k 硬截断 → DLX 假穷尽）、OOM -9 四道（0224/1215/1260/1138）、watchtower/difference/inequality 碎簇。本轮纯文档/归档提交无代码改动（pytest/cargo 免跑，基准与二进制按规归档）。 |
 
 ---
 
@@ -749,6 +750,23 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
   的误杀并修复；ring 门属放宽剪枝，严格单调不丢解）+ 复测 12 题矩阵全绿（1135/1392/
   1137/0987/0974/1294/1433/0655/1340/1352 SOLVED）。`pytest`、`cargo test`、
   `complexity_gate.py` 全过。
+
+### 2026-09-23 · 1183 全量实测归档 + 进度图补录（1200 轮弹药侦察）
+
+- **动机**：CI「Benchmark & trend」被 runner shutdown 打断（`##[error]The runner has received
+  a shutdown signal`，exit 143，非代码问题），README 徽章/曲线停在 `c457981`@1176。本地按同
+  口径（`--timeout 40 -j 6`）对合并态 `4a81357` 全量实测 **1183/1258（94.04%）**，经
+  `solver_history.py append/render` 补录为第 30 个数据点。
+- **+7 逐一对账（vs `c457981` FAIL 集，0 翻负）**：1137/0990/1146/1147/1406 是 8e9d632
+  loop_closure+望塔判死的能力兑现（快速档 NEW=0 是基线口径所误，全量实证 +5）；0418/0685
+  为争抢噪声带回正。1130 稳定线成员本轮仍翻负（串行 33s SOLVED）。
+- **1200 轮侦察结论**（详见主表备注）：compass+solitary 9 簇是最大可攻坚簇。根因 =
+  `pieces.rs::generate_compass_polyominoes` 对 `-1` 无界方向的 frontier 生长无 size 上界，
+  靠 `MAX_COMPASS_PLACEMENTS=2000` / `MAX_COMPASS_ENUM_STATES=200_000` 硬截断，真解放置被
+  截掉后 DLX 报假穷尽（`pieces:exhausted`）。**参考 C++ AoG_Solver 对照实测同超时**（1246
+  60s / 0312 30s 零输出；对照题 1283 秒解，harness 无误）——参考实现盲区，正解是新算法
+  （solitary 锁 k=#compass 线索数的 k 区域联合划分搜索：紧线索先生长、松线索吃残余 + 全线索
+  半平面增量计数 + area 联合界 + 连通可达剪枝），非移植。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

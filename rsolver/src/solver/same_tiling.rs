@@ -202,9 +202,8 @@ fn pattern_pinned_cyclic(
     deadline: Instant,
 ) -> Option<Vec<RegionInfo>> {
     use crate::solver::rose::puzzle_piece_pin::{
-        enumerate_pin_assignments, enumerate_pin_candidates, remainder_per_type,
+        enumerate_pin_candidates, for_each_pin_assignment, PinnedPlacement,
     };
-    let (h, w) = (puzzle.height, puzzle.width);
     let symbol_types = crate::shapes::rose_symbol_types(puzzle);
     if symbol_types.is_empty() {
         // Without rose bookkeeping `remainder_per_type` has nothing to count.
@@ -214,75 +213,83 @@ fn pattern_pinned_cyclic(
     if anchors.is_empty() {
         return None;
     }
-    let assignments = enumerate_pin_assignments(puzzle, anchors, &symbol_types, m_total);
-
-    for assignment in &assignments {
+    let mut found: Option<Vec<RegionInfo>> = None;
+    for_each_pin_assignment(puzzle, anchors, &symbol_types, deadline, &mut |pinned: &[PinnedPlacement]| {
         if Instant::now() >= deadline {
-            return None;
+            return false;
         }
-        let n_pin = assignment.pinned.len();
-        let Some(m_rem) = remainder_per_type(assignment, puzzle, &symbol_types, w) else {
-            continue;
-        };
-        // Region bookkeeping: every region holds exactly one of each rose type.
-        if m_rem + n_pin != m_total {
-            continue;
+        if let Some(regions) = try_pinned_remainder(puzzle, free, pinned, m_total, &symbol_types, deadline) {
+            found = Some(regions);
+            return false;
         }
-        let mut region_of: Vec<Option<usize>> = vec![None; h * w];
-        let mut pinned_mask = vec![false; h * w];
-        let mut ok = true;
-        for (ri, p) in assignment.pinned.iter().enumerate() {
-            for idx in p.cells.iter() {
-                if region_of[idx].is_some() {
-                    ok = false;
-                    break;
-                }
-                region_of[idx] = Some(ri);
-                pinned_mask[idx] = true;
-            }
-            if !ok {
-                break;
-            }
-        }
-        if !ok {
-            continue;
-        }
-        let rem: Vec<(usize, usize)> = free
-            .iter()
-            .copied()
-            .filter(|&(r, c)| !pinned_mask[r * w + c])
-            .collect();
+        true
+    });
+    found
+}
 
-        if m_rem == 0 {
-            if rem.is_empty() {
-                let regions = crate::solver::rose::build_regions(&region_of, h, w);
-                if crate::solver::validate::validate(puzzle, &regions) {
-                    return Some(regions);
-                }
+/// One pin assignment → try the leftover as `m_rem` congruent pieces (or a
+/// single region when `m_rem == 1`).  The congruence of the leftover pieces
+/// is only ever *proposed* — `validate` accepts or rejects, so a wrong guess
+/// can never leak.
+fn try_pinned_remainder(
+    puzzle: &Puzzle,
+    free: &[(usize, usize)],
+    pinned: &[crate::solver::rose::puzzle_piece_pin::PinnedPlacement],
+    m_total: usize,
+    symbol_types: &[String],
+    deadline: Instant,
+) -> Option<Vec<RegionInfo>> {
+    use crate::solver::rose::puzzle_piece_pin::remainder_per_type;
+    let (h, w) = (puzzle.height, puzzle.width);
+    let n_pin = pinned.len();
+    let Some(m_rem) = remainder_per_type(pinned, puzzle, symbol_types, w) else {
+        return None;
+    };
+    // Region bookkeeping: every region holds exactly one of each rose type.
+    if m_rem + n_pin != m_total {
+        return None;
+    }
+    let mut region_of: Vec<Option<usize>> = vec![None; h * w];
+    let mut pinned_mask = vec![false; h * w];
+    for (ri, p) in pinned.iter().enumerate() {
+        for idx in p.cells.iter() {
+            if region_of[idx].is_some() {
+                return None;
             }
-            continue;
+            region_of[idx] = Some(ri);
+            pinned_mask[idx] = true;
         }
-        if m_rem == 1 {
-            for &(r, c) in &rem {
-                region_of[r * w + c] = Some(n_pin);
-            }
+    }
+    let rem: Vec<(usize, usize)> = free
+        .iter()
+        .copied()
+        .filter(|&(r, c)| !pinned_mask[r * w + c])
+        .collect();
+
+    if m_rem == 0 {
+        if rem.is_empty() {
             let regions = crate::solver::rose::build_regions(&region_of, h, w);
             if crate::solver::validate::validate(puzzle, &regions) {
                 return Some(regions);
             }
-            continue;
         }
-        let mut rem_idx = vec![vec![usize::MAX; w]; h];
-        for (i, &(r, c)) in rem.iter().enumerate() {
-            rem_idx[r][c] = i;
+        return None;
+    }
+    if m_rem == 1 {
+        for &(r, c) in &rem {
+            region_of[r * w + c] = Some(n_pin);
         }
-        if let Some(regions) =
-            cyclic_isometry(puzzle, &rem, &rem_idx, m_rem, deadline, &region_of, n_pin)
-        {
+        let regions = crate::solver::rose::build_regions(&region_of, h, w);
+        if crate::solver::validate::validate(puzzle, &regions) {
             return Some(regions);
         }
+        return None;
     }
-    None
+    let mut rem_idx = vec![vec![usize::MAX; w]; h];
+    for (i, &(r, c)) in rem.iter().enumerate() {
+        rem_idx[r][c] = i;
+    }
+    cyclic_isometry(puzzle, &rem, &rem_idx, m_rem, deadline, &region_of, n_pin)
 }
 
 fn finish(puzzle: &Puzzle, regions: Vec<RegionInfo>) -> ModuleOutcome {
@@ -707,47 +714,86 @@ struct GrowthPruneFacts {
     eq_leader: Vec<usize>,
 }
 
-/// `ring` frame chain: no wall may touch the outer frame.  A frame vertex
-/// already carries two boundary edges (the two frame segments meeting
+/// `ring` frame chain runs: no wall may touch the outer frame.  A frame
+/// vertex already carries two boundary edges (the two frame segments meeting
 /// there), so a wall between two perimeter cells would make the third — a
-/// T-junction the rule forbids.  Every clean perimeter-chain adjacency is
-/// therefore must-same (1149a: the whole 52-cell rim collapses to one
-/// label).  Links break at blocked cells and at pre-drawn / constraint
-/// edges — those the leaf validator keeps honest.
+/// T-junction the rule forbids.  Every clean perimeter adjacency is
+/// therefore same-region, chaining the rim into monochrome **runs**.
+/// Runs break at blocked cells and at pre-drawn / constraint edges — those
+/// the leaf validator keeps honest.  Empty (no `ring` rule) = no deduction.
+pub(crate) fn ring_frame_runs(puzzle: &Puzzle) -> Vec<Vec<(usize, usize)>> {
+    let mut runs: Vec<Vec<(usize, usize)>> = Vec::new();
+    let (h, w) = (puzzle.height, puzzle.width);
+    if !puzzle.rules.iter().any(|r| r.ctype == "ring") || h < 2 || w < 2 {
+        return runs;
+    }
+    // Rim cells in cycle order (top → right → bottom ← left ↑).
+    let mut chain: Vec<(usize, usize)> = Vec::new();
+    for c in 0..w {
+        chain.push((0, c));
+    }
+    for r in 1..h {
+        chain.push((r, w - 1));
+    }
+    for c in (0..w - 1).rev() {
+        chain.push((h - 1, c));
+    }
+    for r in (1..h - 1).rev() {
+        chain.push((r, 0));
+    }
+    let n = chain.len();
+    // Clean link between two adjacent rim cells (shared edge is neither a
+    // pre-drawn boundary nor a constraint edge, and neither cell is blocked).
+    let clean_link = |a: (usize, usize), b: (usize, usize)| -> bool {
+        if puzzle.cells[a.0][a.1].blocked || puzzle.cells[b.0][b.1].blocked {
+            return false;
+        }
+        if a.0 == b.0 {
+            let e = &puzzle.h_edges[a.0][a.1.min(b.1)];
+            !e.is_boundary && e.constraint.is_none()
+        } else {
+            let e = &puzzle.v_edges[a.0.min(b.0)][a.1];
+            !e.is_boundary && e.constraint.is_none()
+        }
+    };
+    // Split into runs on broken links (wrap-around link included) and
+    // blocked cells.
+    let mut cur: Vec<(usize, usize)> = Vec::new();
+    for i in 0..n {
+        let cell = chain[i];
+        if puzzle.cells[cell.0][cell.1].blocked {
+            if !cur.is_empty() {
+                runs.push(std::mem::take(&mut cur));
+            }
+            continue;
+        }
+        let link = clean_link(cell, chain[(i + 1) % n]);
+        cur.push(cell);
+        if !link {
+            runs.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        runs.push(cur);
+    }
+    runs
+}
+
+/// `ring` frame chain: the must-same pairs (consecutive cells within each run).
 fn ring_frame_must_same(
     puzzle: &Puzzle,
-    free: &[(usize, usize)],
     idx_of: &[Vec<usize>],
     h: usize,
     w: usize,
 ) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
-    if !puzzle.rules.iter().any(|r| r.ctype == "ring") {
-        return out;
-    }
-    let mut push = |out: &mut Vec<(usize, usize)>, a: (usize, usize), b: (usize, usize), clean: bool| {
-        if !clean {
-            return;
-        }
-        let (i, j) = (idx_of[a.0][a.1], idx_of[b.0][b.1]);
-        if i != usize::MAX && j != usize::MAX && i != j {
-            out.push((i, j));
-        }
-    };
-    // Top / bottom rim: horizontal neighbours.  `h_edges[r][c]` sits between
-    // (r,c) and (r,c+1) — column index must stay < w-1.
-    for r in [0, h - 1] {
-        for c in 0..w - 1 {
-            let e = &puzzle.h_edges[r][c];
-            push(&mut out, (r, c), (r, c + 1), !e.is_boundary && e.constraint.is_none());
-        }
-    }
-    // Left / right rim: vertical neighbours.  `v_edges[r][c]` sits between
-    // (r,c) and (r+1,c) — row index must stay < h-1.
-    for c in [0, w - 1] {
-        for r in 0..h - 1 {
-            let e = &puzzle.v_edges[r][c];
-            push(&mut out, (r, c), (r + 1, c), !e.is_boundary && e.constraint.is_none());
+    let _ = (h, w);
+    for run in ring_frame_runs(puzzle) {
+        for pair in run.windows(2) {
+            let (i, j) = (idx_of[pair[0].0][pair[0].1], idx_of[pair[1].0][pair[1].1]);
+            if i != usize::MAX && j != usize::MAX && i != j {
+                out.push((i, j));
+            }
         }
     }
     out
@@ -1071,7 +1117,7 @@ fn m2_transversal_growth(
             }
         }
     }
-    let must_same = ring_frame_must_same(puzzle, free, idx_of, h, w);
+    let must_same = ring_frame_must_same(puzzle, idx_of, h, w);
     let facts = GrowthPruneFacts {
         eq_leader: eq_leaders(total, &[], &must_split, &must_same)?,
         fence,
@@ -1251,7 +1297,7 @@ fn growth_facts(
         }
     }
     // ring ⟹ clean rim adjacencies are must-same (the frame chain).
-    let must_same = ring_frame_must_same(puzzle, free, idx_of, h, w);
+    let must_same = ring_frame_must_same(puzzle, idx_of, h, w);
     Some(GrowthPruneFacts {
         eq_leader: eq_leaders(free.len(), &watchtowers, &must_split, &must_same)?,
         fence,
@@ -2411,6 +2457,20 @@ mod tests {
         .expect("parse");
         let out = solve_same_tiling(&p, 30_000);
         assert!(out.is_solved(), "1149a expected solved, got {:?}", out);
+    }
+
+    /// Pattern-pinned remainder cluster member (11-mixed-rules/0224): 12
+    /// shape_pattern anchors + rose P1×13 on 9×13 (12 pin regions of 3 + a
+    /// 74-cell remainder).  The streamed pin walk with the exact-one-symbol
+    /// filter closes in ~10 ms — the old materialising product OOMed at 14 GB.
+    #[test]
+    fn solves_pattern_pin_0224() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../puzzles/official/Zone1/11-mixed-rules/0224.json"
+        ))
+        .expect("parse");
+        let out = solve_same_tiling(&p, 30_000);
+        assert!(out.is_solved(), "0224 expected solved, got {:?}", out);
     }
 
     /// m == 2 tiling of a 2×2 board into two dominos (identical shapes).

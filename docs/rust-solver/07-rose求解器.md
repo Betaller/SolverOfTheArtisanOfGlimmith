@@ -88,11 +88,14 @@ shape_pool 题，导致 0732 等 `puzzle_piece + rose_window` 题 aog 3s 解不�
 
 **机制**（`rose/puzzle_piece_pin.rs`）：
 1. `enumerate_pin_candidates`：对每个 `shape_pattern` 格，枚举 pattern 的 dihedral 变体（≤8）×
-   合法放置（锚点在变体内、全在网格、不压 blocked、不跨预画边界），用符号约束过滤
-  （per-type 计数必须相等，否则剩余无法均分）。
-2. `enumerate_pin_assignments`：多锚点笛卡尔积（互不重叠 + 余数平衡）。
+   合法放置（锚点在变体内、全在网格、不压 blocked、不跨预画边界），符号过滤为
+   **恰 1 个/类型**（rose 语义：预钉即整个区域；旧「计数相等」对单类型恒真＝空转，
+   0224 的组合积曾爆到 14 GB）；ring 框链 run 过滤（放置含 rim 格必须含整 run）。
+2. `for_each_pin_assignment`：多锚点笛卡尔积**流式**访回（不物化全组合；MRV 锚序 +
+   节点帽 2M + 指派帽 5 万 + deadline；访回返回 false 即停）。
 3. 对每个 assignment：缩减 `all_positions`（移除预钉格）→ 算 `m'`（剩余每类符号数）→
-   调 `region_match(m', reduced_all_positions)` → `merge_pinned` 合并预钉区域 → `accept_if_valid`。
+   校验 `m' + n_pin == m` → 调 `region_match(m', reduced_all_positions)` → `merge_pinned`
+   合并预钉区域 → `accept_if_valid`。
 4. **m'=1 快速路径** `try_single_region`：剩余格若单一 4-连通分量（不跨预画边界）→ 直接成单区域，
    避开 region_match 的 `CANDIDATE_CAP=20000` 候选截断（大区域候选易被截断）。
 
@@ -324,8 +327,20 @@ rose 不适用、edge_csp 排除 `puzzle_piece`、pieces 的 DLX 没有"大无�
 2ms exhausted、backtrack 禁用）。
 
 两个陷阱：**deadline 必须锚到模块自己的 `Instant::now()`**（用全局 start 等于
-已过期）；**给完整 unit 预算**（1215 的放置搜索要 ~36s）。范围限制与
-`docs/优化/32` 见该文档。
+已过期）；**给完整 unit 预算**。范围限制与 `docs/优化/32` 见该文档。
+
+**2026-09-23 修订（前置到 aog 之前 + 三层剪枝，1215/0224 破簇）**：
+- **路由**：pp-pin 独立预钉块移到 aog **之前**（门控不变：`puzzle_piece` 且
+  非 rose-capable）。旧序里 aog 形状库在 1215 上 14 GB OOM 把进程带走，pp-pin
+  根本轮不到；前置后 1215 **544ms via pp-pin**（旧放置树走 ~36s 仍输给 OOM）。
+- **三层剪枝**（`combine_plain`）：① ring 框链 run 过滤进候选生成
+  （`ring_frame_runs`：放置含 rim 格必须含整条干净 run，否则必把墙贴上框）；
+  ② MRV 锚序（`pick_anchor_mrv`，含跨锚覆盖的可达性判定——一个放置可吞多锚，
+  仅"全无可达放置"才是死枝）；③ 已决顶点 ring/brick 度检查（`new_pin_vertices_ok`，
+  四象限全定才判，ring 禁 3、brick 禁 4）。
+- **流式化**（rose 分支同享）：`enumerate_pin_assignments` 物化全组合 →
+  `for_each_pin_assignment` 流式访回 + 双帽 + 恰 1 符号过滤。**0224**（12 锚
+  ×单类型 rose，旧过滤恒真）从 14 GB OOM → **11ms via same-tiling**。
 
 
 ## 2026-09-22 修订（预算饿死修复 + 锚点覆盖式 pp-pin + 枚举 deadline）

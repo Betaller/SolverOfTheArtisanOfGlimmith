@@ -196,16 +196,21 @@ fn placement_symbol_counts(
 /// shape_pattern cell (each non-empty after filtering), or `None` if any
 /// anchor has zero viable placements.
 ///
-/// Filter rule: a pinned region must contain the **same** count of every
-/// symbol type (rose regions are balanced).  Equivalently, the placement's
-/// per-type counts must all be equal — any other distribution can never
-/// partition the remaining symbols into balanced rose regions.
+/// Filter rule (rose_window semantics): a pinned placement *is* a whole
+/// region, so it must hold **exactly one** cell of every symbol type.  (The
+/// earlier "counts all equal" test was vacuous for single-type puzzles —
+/// every placement passed — which let the assignment product explode, e.g.
+/// 0224 ballooning to 14 GB.)
 pub fn enumerate_pin_candidates(
     puzzle: &Puzzle,
     symbol_types: &[String],
 ) -> Option<Vec<AnchorCandidates>> {
     let w = puzzle.width;
     let mut anchors: Vec<AnchorCandidates> = Vec::new();
+    // ring frame runs (empty unless the puzzle has `ring`): a placement is a
+    // whole region, so it either covers an entire monochrome rim run or
+    // none of it — partial coverage would saw a wall into the frame.
+    let runs = crate::solver::same_tiling::ring_frame_runs(puzzle);
 
     for r in 0..puzzle.height {
         for c in 0..w {
@@ -217,11 +222,27 @@ pub fn enumerate_pin_candidates(
             let mut placements: Vec<PinnedPlacement> = Vec::new();
             for v in &variants {
                 for cells in placements_for_variant(puzzle, v, r, c) {
-                    // Symbol-balance filter: per-type counts must all be equal.
+                    // Rose rule: one cell of each symbol type per region.
                     if !symbol_types.is_empty() {
                         let counts = placement_symbol_counts(puzzle, &cells, w, symbol_types);
-                        let first = counts[0];
-                        if !counts.iter().all(|&x| x == first) {
+                        if !counts.iter().all(|&x| x == 1) {
+                            continue;
+                        }
+                    }
+                    // ring frame runs must land wholly inside one region.
+                    if !runs.is_empty() {
+                        let mut bad = false;
+                        for run in &runs {
+                            let any =
+                                run.iter().any(|&(rr, cc)| cells.contains(&(rr * w + cc)));
+                            let all =
+                                run.iter().all(|&(rr, cc)| cells.contains(&(rr * w + cc)));
+                            if any && !all {
+                                bad = true;
+                                break;
+                            }
+                        }
+                        if bad {
                             continue;
                         }
                     }
@@ -263,22 +284,29 @@ fn same_set(a: &CellSet, b: &CellSet) -> bool {
     a.len() == b.len() && a.iter().all(|x| b.contains(x))
 }
 
-/// One complete pin assignment: one placement per anchor, pairwise disjoint.
-/// Produced by combining each anchor's candidates and keeping non-overlapping
-/// combinations whose union of pinned cells leaves a symbol-balanced remainder.
-pub struct PinAssignment {
-    pub pinned: Vec<PinnedPlacement>,
-}
+/// Budget caps for the pin-assignment walk — outcomes of hitting one are
+/// *budget* results (this method simply stops proposing), never proofs of
+/// unsolvability.  `validate` still gates whatever is returned.
+const MAX_COMBINE_NODES: usize = 2_000_000;
+const MAX_PIN_ASSIGNMENTS: usize = 50_000;
 
-/// Enumerate all valid pin assignments (one placement per anchor, pairwise
-/// disjoint, remainder symbol-balanced).  Caps the combination count to avoid
-/// blow-up on puzzles with many shape_pattern cells.
-pub fn enumerate_pin_assignments(
+/// Stream every valid pin assignment (one placement per anchor, pairwise
+/// disjoint, symbol-balanced remainder) to `visitor`, which returns `false`
+/// to stop early.  Anchors are walked in MRV order (fewest placements
+/// first) and the walk is bounded by `MAX_COMBINE_NODES` tree nodes,
+/// `MAX_PIN_ASSIGNMENTS` complete assignments and `deadline`.  Returns
+/// `true` iff the whole tree was walked (no cap/timeout hit).
+///
+/// This used to materialise the full Cartesian product into a `Vec` — 0224
+/// (12 anchors × vacuously-filtered placements) ballooned to 14 GB and got
+/// OOM-killed.  Streaming + the exact-one-symbol filter keeps it tiny.
+pub fn for_each_pin_assignment(
     puzzle: &Puzzle,
-    anchors: Vec<AnchorCandidates>,
+    mut anchors: Vec<AnchorCandidates>,
     symbol_types: &[String],
-    rose_m: usize,
-) -> Vec<PinAssignment> {
+    deadline: crate::clock::Instant,
+    visitor: &mut dyn FnMut(&[PinnedPlacement]) -> bool,
+) -> bool {
     let w = puzzle.width;
     // Precompute per-type total symbol counts on the full grid.
     let mut total_per_type = vec![0usize; symbol_types.len()];
@@ -291,29 +319,61 @@ pub fn enumerate_pin_assignments(
             }
         }
     }
-
-    let mut results: Vec<PinAssignment> = Vec::new();
+    // MRV: anchors with the fewest placements first — shrinks the product
+    // tree without losing any complete assignment.
+    anchors.sort_by_key(|a| a.placements.len());
+    let mut state = CombineState {
+        nodes: 0,
+        assignments: 0,
+        truncated: false,
+    };
     let mut current: Vec<PinnedPlacement> = Vec::with_capacity(anchors.len());
-    combine(&anchors, 0, &mut current, &mut results, puzzle, symbol_types, &total_per_type, rose_m, w);
-    results
+    combine(
+        &anchors,
+        0,
+        &mut current,
+        puzzle,
+        symbol_types,
+        &total_per_type,
+        w,
+        deadline,
+        visitor,
+        &mut state,
+    );
+    !state.truncated
 }
 
-/// Recursive Cartesian product with disjointness + remainder-balance pruning.
+struct CombineState {
+    nodes: usize,
+    assignments: usize,
+    truncated: bool,
+}
+
+/// Recursive Cartesian product with disjointness + remainder-balance
+/// pruning, streaming complete assignments to the visitor.
 fn combine(
     anchors: &[AnchorCandidates],
     i: usize,
     current: &mut Vec<PinnedPlacement>,
-    results: &mut Vec<PinAssignment>,
     puzzle: &Puzzle,
     symbol_types: &[String],
     total_per_type: &[usize],
-    rose_m: usize,
     w: usize,
+    deadline: crate::clock::Instant,
+    visitor: &mut dyn FnMut(&[PinnedPlacement]) -> bool,
+    state: &mut CombineState,
 ) {
+    if state.truncated {
+        return;
+    }
+    state.nodes += 1;
+    if state.nodes > MAX_COMBINE_NODES || crate::clock::Instant::now() >= deadline {
+        state.truncated = true;
+        return;
+    }
     if i == anchors.len() {
-        // Complete assignment: check the remainder is symbol-balanced.
-        // remainder per type = total - sum(pinned per type); must all be equal
-        // so the remaining cells partition into balanced rose regions.
+        // Complete assignment: check the remainder is symbol-balanced
+        // (equal per-type remainders partition into balanced rose regions).
         let mut rem = total_per_type.to_vec();
         for p in current.iter() {
             let counts = placement_symbol_counts(puzzle, &p.cells.iter().collect::<Vec<_>>(), w, symbol_types);
@@ -323,20 +383,24 @@ fn combine(
         }
         let first = rem[0];
         if rem.iter().all(|&x| x == first) {
-            results.push(PinAssignment {
-                pinned: current.clone(),
-            });
+            state.assignments += 1;
+            if state.assignments > MAX_PIN_ASSIGNMENTS || !visitor(current) {
+                state.truncated = true;
+            }
         }
         return;
     }
     for p in &anchors[i].placements {
+        if state.truncated {
+            return;
+        }
         // Disjoint with all currently chosen.
         let disjoint = current.iter().all(|c| c.cells.is_disjoint(&p.cells));
         if !disjoint {
             continue;
         }
         current.push(p.clone());
-        combine(anchors, i + 1, current, results, puzzle, symbol_types, total_per_type, rose_m, w);
+        combine(anchors, i + 1, current, puzzle, symbol_types, total_per_type, w, deadline, visitor, state);
         current.pop();
     }
 }
@@ -345,7 +409,7 @@ fn combine(
 /// Returns `Some(count)` if the remainder is balanced (all types equal), else
 /// `None` — in which case the assignment cannot yield a valid rose partition.
 pub fn remainder_per_type(
-    assignment: &PinAssignment,
+    pinned: &[PinnedPlacement],
     puzzle: &Puzzle,
     symbol_types: &[String],
     w: usize,
@@ -360,7 +424,7 @@ pub fn remainder_per_type(
             }
         }
     }
-    for p in &assignment.pinned {
+    for p in pinned {
         let counts = placement_symbol_counts(puzzle, &p.cells.iter().collect::<Vec<_>>(), w, symbol_types);
         for (ti, &c) in counts.iter().enumerate() {
             total[ti] -= c;
@@ -394,6 +458,50 @@ mod tests {
         let pat = vec![[0, 0], [0, 1], [1, 0], [1, 1]];
         let vs = dihedral_variants(&pat);
         assert_eq!(vs.len(), 1);
+    }
+
+    /// Corpus anchor: 1215 (`puzzle_piece + brick + ring`, 6 pattern regions
+    /// + one 69-cell remainder) must go through the standalone pre-pin — the
+    /// ring frame-run filter + MRV + junction checks collapse the placement
+    /// tree to ~0.5 s (previously a ~36 s walk that lost to aog's OOM).
+    #[test]
+    fn solves_pp_pin_1215() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/2-loopy/1215.json"
+        ))
+        .expect("parse");
+        let out = solve_puzzle_piece_standalone(&p, 30_000);
+        assert!(out.is_solved(), "1215 expected solved, got {:?}", out);
+    }
+
+    /// The exact-one-symbol filter: a pinned placement is a whole rose
+    /// region and must hold exactly one cell of each type (0224's 12 anchors
+    /// × vacuous filter used to balloon the assignment product to 14 GB).
+    /// A domino pattern at (0,0) with P1 on both (0,0) and (0,1): the
+    /// horizontal placement holds two P1 (rejected), the vertical one holds
+    /// exactly one (kept).
+    #[test]
+    fn pin_candidates_require_one_symbol_each() {
+        let json = r#"{"grid":{"height":3,"width":3},
+            "cells":[{"row":0,"col":0,"symbol":"P1","shape_pattern":[[0,0],[0,1]]},
+                     {"row":0,"col":1,"symbol":"P1"},{"row":0,"col":2},
+                     {"row":1,"col":0},{"row":1,"col":1},{"row":1,"col":2},
+                     {"row":2,"col":0},{"row":2,"col":1},{"row":2,"col":2}],
+            "edges":[],"vertices":[],"rules":[{"type":"puzzle_piece"},{"type":"rose_window","params":{"symbol_types":["P1"]}}]}"#;
+        let puzzle = crate::io::parse_puzzle(json).unwrap();
+        let types = vec!["P1".to_string()];
+        let anchors = enumerate_pin_candidates(&puzzle, &types).expect("candidates");
+        assert_eq!(anchors.len(), 1);
+        assert!(!anchors[0].placements.is_empty());
+        for p in &anchors[0].placements {
+            let counts =
+                placement_symbol_counts(&puzzle, &p.cells.iter().collect::<Vec<_>>(), 3, &types);
+            assert_eq!(counts, vec![1], "placement must hold exactly one P1");
+            assert!(
+                !p.cells.contains(1) || !p.cells.contains(0),
+                "the 2-symbol horizontal placement must be filtered out"
+            );
+        }
     }
 }
 
@@ -599,7 +707,7 @@ fn combine_plain(
     }
     let h = puzzle.height;
     let w = puzzle.width;
-    let Some(a) = covered.iter().position(|&b| !b) else {
+    if covered.iter().all(|&b| b) {
         if crate::aog_debug_enabled() {
             eprintln!("pp-pin: leaf with {} placements, checking remainder", current.len());
         }
@@ -629,6 +737,11 @@ fn combine_plain(
         if crate::solver::validate::validate(puzzle, &regions) {
             *found = Some(regions);
         }
+        return;
+    }
+    // MRV over the uncovered anchors; an anchor with zero viable placements
+    // kills the whole branch (it can never be covered).
+    let Some(a) = pick_anchor_mrv(anchors, anchor_flat, covered, taken) else {
         return;
     };
     for p in &anchors[a].placements {
@@ -661,19 +774,22 @@ fn combine_plain(
         }
         taken.union_into(&p.cells);
         current.push(p.clone());
-        combine_plain(
-            anchors,
-            anchor_flat,
-            anchor_key,
-            covered,
-            taken,
-            current,
-            puzzle,
-            n,
-            deadline,
-            wts,
-            found,
-        );
+        // ring/brick junction degrees on the vertices this pin decided.
+        if new_pin_vertices_ok(puzzle, current, taken, w, h) {
+            combine_plain(
+                anchors,
+                anchor_flat,
+                anchor_key,
+                covered,
+                taken,
+                current,
+                puzzle,
+                n,
+                deadline,
+                wts,
+                found,
+            );
+        }
         current.pop();
         // Undo `taken`: rebuild from `current` (CellSet has no subtract).
         *taken = CellSet::new(n);
@@ -687,4 +803,143 @@ fn combine_plain(
             return;
         }
     }
+}
+
+/// MRV anchor choice over the uncovered anchors.  Branching walks the
+/// picked anchor's own placement list (complete: a true region covering the
+/// anchor matches that anchor's pattern class and so is in its list), so the
+/// pick prefers fewest still-viable own placements.  A placement may swallow
+/// several anchors at once, so an anchor with no own placements left can
+/// still be covered as a side effect — only the *uncoverable* case (no
+/// viable placement of any uncovered list reaches it) is a dead branch.
+/// `None` = dead branch.
+fn pick_anchor_mrv(
+    anchors: &[AnchorCandidates],
+    anchor_flat: &[usize],
+    covered: &[bool],
+    taken: &CellSet,
+) -> Option<usize> {
+    // Viable placements of each uncovered anchor's own list.
+    let viable_of: Vec<Vec<&PinnedPlacement>> = anchors
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            if covered[i] {
+                Vec::new()
+            } else {
+                a.placements
+                    .iter()
+                    .filter(|p| p.cells.is_disjoint(taken))
+                    .collect()
+            }
+        })
+        .collect();
+    let mut best: Option<(usize, usize)> = None;
+    for (i, _) in anchors.iter().enumerate() {
+        if covered[i] {
+            continue;
+        }
+        let own = viable_of[i].len();
+        let reachable = viable_of
+            .iter()
+            .flatten()
+            .any(|p| p.cells.contains(anchor_flat[i]));
+        if !reachable {
+            return None; // no viable placement can ever cover this anchor
+        }
+        if own == 0 {
+            continue; // covered only as a side effect of another anchor
+        }
+        if best.map_or(true, |(_, bn)| own < bn) {
+            best = Some((i, own));
+        }
+    }
+    best.map(|(i, _)| i)
+}
+
+/// Pin id owning `idx`, if any.
+fn owner_pin(current: &[PinnedPlacement], idx: usize) -> Option<usize> {
+    current.iter().position(|p| p.cells.contains(idx))
+}
+
+/// ring/brick junction degrees on the vertices around the newest pin.  Only
+/// vertices whose every quadrant is decided (pinned / blocked / outside) are
+/// checked — an undecided quadrant could still join a later pin or the
+/// remainder, leaving the final degree open.  `ring` forbids degree 3 (T),
+/// `brick` degree 4 (cross); both together cap the degree at 2.
+fn new_pin_vertices_ok(
+    puzzle: &Puzzle,
+    current: &[PinnedPlacement],
+    taken: &CellSet,
+    w: usize,
+    h: usize,
+) -> bool {
+    let ring = puzzle.rules.iter().any(|r| r.ctype == "ring");
+    let brick = puzzle.rules.iter().any(|r| r.ctype == "brick");
+    if (!ring && !brick) || current.is_empty() {
+        return true;
+    }
+    let last = &current[current.len() - 1];
+    for idx in last.cells.iter() {
+        let (cr, cc) = ((idx / w) as i32, (idx % w) as i32);
+        for vr in [cr - 1, cr] {
+            for vc in [cc - 1, cc] {
+                if !vertex_degree_ok_at(puzzle, current, taken, w, h, vr, vc, ring, brick) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Degree check at one lattice vertex (quadrants (vr,vc),(vr,vc+1),
+/// (vr+1,vc),(vr+1,vc+1), mirroring `validate::count_boundary_edges_at_vertex`).
+fn vertex_degree_ok_at(
+    puzzle: &Puzzle,
+    current: &[PinnedPlacement],
+    taken: &CellSet,
+    w: usize,
+    h: usize,
+    vr: i32,
+    vc: i32,
+    ring: bool,
+    brick: bool,
+) -> bool {
+    let quads = [(vr, vc), (vr, vc + 1), (vr + 1, vc), (vr + 1, vc + 1)];
+    let mut region = [None::<usize>; 4];
+    for (qi, &(r, c)) in quads.iter().enumerate() {
+        if r < 0 || c < 0 || r >= h as i32 || c >= w as i32 {
+            continue; // outside → None
+        }
+        let (ru, cu) = (r as usize, c as usize);
+        if puzzle.cells[ru][cu].blocked {
+            continue; // blocked → None
+        }
+        let q = ru * w + cu;
+        if !taken.contains(q) {
+            return true; // undecided quadrant — degree not yet determined
+        }
+        region[qi] = Some(owner_pin(current, q).unwrap_or(usize::MAX));
+    }
+    // Edge pairs at the vertex: top (0,1), bottom (2,3), left (0,2), right (1,3).
+    let mut count = 0usize;
+    for (a, b) in [(0usize, 1usize), (2, 3), (0, 2), (1, 3)] {
+        match (region[a], region[b]) {
+            (Some(x), Some(y)) => {
+                if x != y {
+                    count += 1;
+                }
+            }
+            (None, None) => {}
+            _ => count += 1,
+        }
+    }
+    if ring && count == 3 {
+        return false;
+    }
+    if brick && count == 4 {
+        return false;
+    }
+    true
 }

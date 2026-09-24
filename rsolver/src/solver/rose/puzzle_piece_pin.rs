@@ -1127,6 +1127,7 @@ struct FreeRem<'a> {
     facts: &'a Vec<WtUnitFact>,
     facts_of_unit: &'a Vec<Vec<usize>>,
     ord: &'a Vec<(u32, u32)>,
+    diff: &'a Vec<(u32, u32, usize)>,
     sz_lo: &'a Vec<usize>,
     sz_hi: &'a Vec<usize>,
     /// Rose-cardinality mode: per-unit symbol-type bitmask (empty = off).
@@ -1274,9 +1275,7 @@ impl<'a> FreeRem<'a> {
             }
             out.push(Some(l as u32));
         }
-        if self.n_types == 0 {
-            out.push(None);
-        } else if self.lab_units.len() < self.max_labels {
+        if self.max_labels == 0 || self.lab_units.len() < self.max_labels {
             out.push(None);
         }
         out
@@ -1313,14 +1312,14 @@ impl<'a> FreeRem<'a> {
         // exactly `n_types` (the region count = symbols-per-type), so spawn
         // stops at that ceiling, and a fresh label must still be able to
         // collect one unit of every type it lacks.
-        if self.n_types > 0 {
-            if self.lab_units.len() < self.max_labels
+        let spawn_ok = if self.max_labels > 0 {
+            self.lab_units.len() < self.max_labels
                 && self.label_potential_ok(std::slice::from_ref(&u))
-                && self.spawn_completable(u)
-            {
-                out.push(None);
-            }
-        } else if self.label_potential_ok(std::slice::from_ref(&u)) {
+                && (self.n_types == 0 || self.spawn_completable(u))
+        } else {
+            self.label_potential_ok(std::slice::from_ref(&u))
+        };
+        if spawn_ok {
             out.push(None);
         }
         out
@@ -1565,11 +1564,39 @@ impl<'a> FreeRem<'a> {
                 return false;
             }
             if let (Some(a), Some(b)) = (la, lb) {
+                let (lo_a, _hi_a) = windows[a as usize];
+                let (lo_b, hi_b) = windows[b as usize];
+                if std::cmp::max(lo_b, lo_a + 1) > hi_b {
+                    return false;
+                }
+            }
+        }
+        // `difference` walls: |size_a − size_b| = v — a shared label is only
+        // possible for v == 0, and the windows must admit a pair at distance v.
+        for &(ua, ub, v) in self.diff {
+            let la = self.lab_of[ua as usize];
+            let lb = self.lab_of[ub as usize];
+            if la == lb && la.is_some() {
+                if v != 0 {
+                    return false;
+                }
+                continue;
+            }
+            if let (Some(a), Some(b)) = (la, lb) {
                 let (lo_a, hi_a) = windows[a as usize];
                 let (lo_b, hi_b) = windows[b as usize];
-                let _ = hi_a;
-                // need some size_a < size_b inside the windows
-                if std::cmp::max(lo_b, lo_a + 1) > hi_b {
+                let min_gap = lo_a.abs_diff(lo_b).min(hi_a.abs_diff(lo_b)).min(lo_a.abs_diff(hi_b));
+                let _ = min_gap;
+                // windows admit |a−b| = v iff [min|a−b|, max|a−b|] ∋ v
+                let max_gap = std::cmp::max(hi_a.abs_diff(lo_b), hi_b.abs_diff(lo_a));
+                let min_abs = if hi_a < lo_b {
+                    lo_b - hi_a
+                } else if hi_b < lo_a {
+                    lo_a - hi_b
+                } else {
+                    0
+                };
+                if v < min_abs || v > max_gap {
                     return false;
                 }
             }
@@ -1746,6 +1773,61 @@ fn solve_compass_remainder(
     }
 }
 
+/// Transitive window relaxation over the order DAG (`size(a) < size(b)`) and
+/// the difference pairs (|a−b| = v): lo/hi tightened to a fixpoint — the chain
+/// structure then forces concrete sizes (0152-class pure inequality).
+fn relax_size_windows(
+    ord: &[(u32, u32)],
+    diff: &[(u32, u32, usize)],
+    lo: &mut [usize],
+    hi: &mut [usize],
+) {
+    let n_units = lo.len();
+    for _ in 0..n_units + 1 {
+        let mut changed = false;
+        for &(ua, ub) in ord.iter() {
+            let (a, b) = (ua as usize, ub as usize);
+            if lo[a] < usize::MAX && lo[b] < lo[a] + 1 {
+                lo[b] = lo[a] + 1;
+                changed = true;
+            }
+            if hi[b] != usize::MAX && hi[a] > hi[b].saturating_sub(1) {
+                hi[a] = hi[b].saturating_sub(1);
+                changed = true;
+            }
+        }
+        for &(ua, ub, v) in diff.iter() {
+            let (a, b) = (ua as usize, ub as usize);
+            // |sa − sb| = v ⇒ lo_b ≥ lo_a − v, hi_b ≤ hi_a + v (both directions).
+            if lo[a] > v && lo[b] < lo[a] - v {
+                lo[b] = lo[a] - v;
+                changed = true;
+            }
+            if lo[b] > v && lo[a] < lo[b] - v {
+                lo[a] = lo[b] - v;
+                changed = true;
+            }
+            if hi[a] != usize::MAX {
+                let t = hi[a] + v;
+                if hi[b] > t {
+                    hi[b] = t;
+                    changed = true;
+                }
+            }
+            if hi[b] != usize::MAX {
+                let t = hi[b] + v;
+                if hi[a] > t {
+                    hi[a] = t;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
 /// Directed size orders from `inequality` edges (`size(a) < size(b)`; `value
 /// == 1` flips — matching `validate::edge_constraint_ok`).  Returns the
 /// unit-unit orders plus per-unit size floors/caps (from pinned sides), or
@@ -1758,13 +1840,14 @@ fn collect_size_orders(
     pin_of: &[Option<usize>],
     free_index: &std::collections::HashMap<usize, u32>,
     unit_of_cell: &[u32],
-) -> Option<(Vec<(u32, u32)>, Vec<usize>, Vec<usize>)> {
+) -> Option<(Vec<(u32, u32)>, Vec<(u32, u32, usize)>, Vec<usize>, Vec<usize>)> {
     let n_units = unit_of_cell
         .iter()
         .copied()
         .max()
         .map_or(0, |m| m as usize + 1);
     let mut ord: Vec<(u32, u32)> = Vec::new();
+    let mut diff: Vec<(u32, u32, usize)> = Vec::new();
     let mut lo = vec![1usize; n_units];
     let mut hi = vec![usize::MAX; n_units];
     let mut edge = |a: usize,
@@ -1802,11 +1885,40 @@ fn collect_size_orders(
         }
         Some(())
     };
+    let mut diff_edge = |a: usize,
+                         b: usize,
+                         v: usize,
+                         diff: &mut Vec<(u32, u32)>,
+                         diffv: &mut Vec<(u32, u32, usize)>|
+     -> Option<()> {
+        let _ = diff;
+        match (pin_of[a], pin_of[b]) {
+            (Some(_), Some(_)) => Some(()),
+            (None, None) => {
+                let ua = unit_of_cell[free_index[&a] as usize];
+                let ub = unit_of_cell[free_index[&b] as usize];
+                if ua == ub {
+                    return if v == 0 { Some(()) } else { None };
+                }
+                diffv.push((ua, ub, v));
+                Some(())
+            }
+            _ => Some(()),
+        }
+    };
     for r in 0..puzzle.height {
         for c in 0..puzzle.width.saturating_sub(1) {
             if let Some(ec) = &puzzle.h_edges[r][c].constraint {
                 if matches!(ec.ctype, crate::types::EdgeConstraintType::Inequality) {
                     edge(r * w + c, r * w + c + 1, ec.value == Some(1), &mut ord, &mut lo, &mut hi)?;
+                } else if matches!(ec.ctype, crate::types::EdgeConstraintType::Difference) {
+                    diff_edge(
+                        r * w + c,
+                        r * w + c + 1,
+                        ec.value.unwrap_or(0).max(0) as usize,
+                        &mut Vec::new(),
+                        &mut diff,
+                    )?;
                 }
             }
         }
@@ -1816,11 +1928,25 @@ fn collect_size_orders(
             if let Some(ec) = &puzzle.v_edges[r][c].constraint {
                 if matches!(ec.ctype, crate::types::EdgeConstraintType::Inequality) {
                     edge(r * w + c, (r + 1) * w + c, ec.value == Some(1), &mut ord, &mut lo, &mut hi)?;
+                } else if matches!(ec.ctype, crate::types::EdgeConstraintType::Difference) {
+                    diff_edge(
+                        r * w + c,
+                        (r + 1) * w + c,
+                        ec.value.unwrap_or(0).max(0) as usize,
+                        &mut Vec::new(),
+                        &mut diff,
+                    )?;
                 }
             }
         }
     }
-    Some((ord, lo, hi))
+    relax_size_windows(&ord, &diff, &mut lo, &mut hi);
+    for u in 0..n_units {
+        if lo[u] > hi[u] {
+            return None;
+        }
+    }
+    Some((ord, diff, lo, hi))
 }
 
 /// Must-same closure (UF) + pre-drawn walls as must-split + unit compression
@@ -1897,6 +2023,110 @@ fn build_free_units(
     let unit_adj: Vec<Vec<u32>> = unit_adj.into_iter().map(|s| s.into_iter().collect()).collect();
 
     Some((unit_cells, unit_of_cell, unit_adj, split))
+}
+
+/// Area-bounded partition (1351 class: `range`/`precise` with an emergent
+/// region count): every region's size lives in `area_bounds`, so the FreeRem
+/// size windows + the spawn ceiling `total / min_sz` carry the whole search.
+/// Pre-drawn walls arrive as must-split via `build_free_units`.
+pub(crate) fn solve_range_partition(
+    puzzle: &Puzzle,
+    n: usize,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let has = |t: &str| puzzle.rules.iter().any(|r| r.ctype == t);
+    if !(has("range") || has("precise") || has("inequality") || has("difference")) {
+        return None;
+    }
+    let w = puzzle.width;
+    let pin_of: Vec<Option<usize>> = vec![None; n];
+    let mut free_index: std::collections::HashMap<usize, u32> =
+        std::collections::HashMap::new();
+    let mut free_cells: Vec<usize> = Vec::new();
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if !puzzle.cells[r][c].blocked {
+            free_index.insert(idx, free_cells.len() as u32);
+            free_cells.push(idx);
+        }
+    }
+    let (lo, hi) = crate::shapes::area_bounds(puzzle);
+    // Watchtower cardinalities ride along (0985 class: range + watchtower):
+    // pairwise must-same merges go through the UF in `build_free_units`, the
+    // pairwise must-split pairs land in the split set.
+    let facts_raw = watchtower_facts(puzzle);
+    let (wt_same, wt_split) = match wt_free_relations(&facts_raw, &pin_of, &free_index) {
+        Some(v) => v,
+        None => return None,
+    };
+    let (unit_cells, unit_of_cell, unit_adj, split) = build_free_units(
+        &free_cells,
+        &free_index,
+        &wt_same,
+        &wt_split,
+        puzzle,
+        w,
+    )?;
+    let pinned: Vec<PinnedPlacement> = Vec::new();
+    let (ord, diff, ext_lo, ext_hi) =
+        collect_size_orders(puzzle, w, &pinned, &pin_of, &free_index, &unit_of_cell)?;
+    let total = free_cells.len();
+    let max_labels = if lo >= 1 { total / lo } else { 0 };
+    if max_labels == 0 {
+        return None;
+    }
+    let unit_types: Vec<u64> = vec![0u64; unit_cells.len()];
+    let sz_lo: Vec<usize> = (0..unit_cells.len()).map(|i| lo.max(ext_lo[i])).collect();
+    let sz_hi: Vec<usize> = (0..unit_cells.len()).map(|i| hi.min(ext_hi[i])).collect();
+    let mut facts: Vec<WtUnitFact> = Vec::new();
+    let mut facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); unit_cells.len()];
+    for (cells, value) in &facts_raw {
+        let mut slots = Vec::new();
+        for &idx in cells {
+            match pin_of[idx] {
+                Some(p) => slots.push(WtSlot::Pin(p)),
+                None => {
+                    let u = unit_of_cell[free_index[&idx] as usize];
+                    slots.push(WtSlot::Unit(u));
+                    if !facts_of_unit[u as usize].contains(&(facts.len())) {
+                        facts_of_unit[u as usize].push(facts.len());
+                    }
+                }
+            }
+        }
+        facts.push(WtUnitFact {
+            slots,
+            value: *value,
+        });
+    }
+    // Bounded slice: the range/inequality/difference gate fires on many FAILs
+    // whose searches never converge — without the cap range-part burns the
+    // full unit budget per puzzle and starves the later modules (1146 at
+    // -j 6).  1351 solves in <5 s, so 12 s is a wide margin.
+    let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(12_000);
+    let leaf_deadline = if slice < deadline { slice } else { deadline };
+    let mut search = FreeRem {
+        puzzle,
+        pinned: &pinned,
+        w,
+        unit_cells: &unit_cells,
+        unit_adj: &unit_adj,
+        split: &split,
+        facts: &facts,
+        facts_of_unit: &facts_of_unit,
+        ord: &ord,
+        diff: &diff,
+        sz_lo: &sz_lo,
+        sz_hi: &sz_hi,
+        unit_types: &unit_types,
+        n_types: 0,
+        max_labels,
+        lab_of: vec![None; unit_cells.len()],
+        lab_units: Vec::new(),
+        deadline: leaf_deadline,
+        nodes: 0,
+    };
+    search.search()
 }
 
 /// Rose-cardinality partition (0975a class): every region holds exactly one
@@ -1995,8 +2225,10 @@ pub(crate) fn solve_cardinal_partition(
         }
     }
     let ord: Vec<(u32, u32)> = Vec::new();
-    let sz_lo: Vec<usize> = vec![1usize; unit_cells.len()];
-    let sz_hi: Vec<usize> = vec![usize::MAX; unit_cells.len()];
+    let diff: Vec<(u32, u32, usize)> = Vec::new();
+    let (alo, ahi) = crate::shapes::area_bounds(puzzle);
+    let sz_lo: Vec<usize> = vec![alo; unit_cells.len()];
+    let sz_hi: Vec<usize> = vec![ahi; unit_cells.len()];
     let facts: Vec<WtUnitFact> = Vec::new();
     let facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); unit_cells.len()];
     let pinned: Vec<PinnedPlacement> = Vec::new();
@@ -2014,6 +2246,7 @@ pub(crate) fn solve_cardinal_partition(
         facts: &facts,
         facts_of_unit: &facts_of_unit,
         ord: &ord,
+        diff: &diff,
         sz_lo: &sz_lo,
         sz_hi: &sz_hi,
         unit_types: &unit_types,
@@ -2076,14 +2309,14 @@ fn solve_multi_remainder(
 
     let (unit_cells, unit_of_cell, unit_adj, split) =
         build_free_units(&free_cells, &free_index, &same, &split_pairs, puzzle, w)?;
-    let (ord, sz_lo, sz_hi) =
+    let (ord, diff, sz_lo, sz_hi) =
         collect_size_orders(puzzle, w, pinned, &pin_of, &free_index, &unit_of_cell)?;
     let unit_types: Vec<u64> = vec![0u64; unit_cells.len()];
     let n_types = 0usize;
     let max_labels = 0usize;
     // Order pairs are also must-differ pairs.
     let mut split = split;
-    for &(ua, ub) in &ord {
+    for &(ua, ub) in ord.iter() {
         split.insert(canon_pair(ua, ub));
     }
 
@@ -2131,6 +2364,7 @@ fn solve_multi_remainder(
         facts: &facts,
         facts_of_unit: &facts_of_unit,
         ord: &ord,
+        diff: &diff,
         sz_lo: &sz_lo,
         sz_hi: &sz_hi,
         unit_types: &unit_types,
@@ -2399,6 +2633,33 @@ mod multi_rem_tests {
         let built = crate::solver::rose::build_regions(&region_of, p.height, w);
         let ok = crate::solver::validate::validate(&p, &built);
         assert!(ok, "official 0975a labeling must pass validate");
+    }
+
+    /// 1351 (pure range, min=9): the area-bounded FreeRem must crack the
+    /// emergent-count partition (35 cells, 3 regions [17,9,9]).
+    #[test]
+    fn solves_range_partition_1351() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone2/5-minmax/1351.json"
+        ))
+        .expect("parse");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+        let out = solve_range_partition(&p, p.height * p.width, deadline);
+        assert!(out.is_some(), "1351 range partition must solve");
+    }
+
+    /// 0289 (range min=5 + rose 2 types) — WIP tracker (same endgame gap).
+    #[test]
+    #[ignore]
+    fn solves_cardinal_0289() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone2/5-minmax/0289.json"
+        ))
+        .expect("parse");
+        let types = crate::shapes::rose_symbol_types(&p);
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+        let out = solve_cardinal_partition(&p, &types, p.height * p.width, deadline);
+        assert!(out.is_some(), "0289 cardinal must solve");
     }
 
     /// 0975a (ring + rose_window) — WIP tracker: the leaf accepts the truth

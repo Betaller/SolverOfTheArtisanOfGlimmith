@@ -282,6 +282,35 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         attempts.push(not_attempted("rose", note));
     }
 
+    // Area-bounded partition (range/precise with an emergent region count):
+    // the FreeRem size windows + spawn ceiling carry the search (1351 class —
+    // aog/edge_csp both flail on these).  Self-sliced 8 s, false-negative only.
+    {
+        let rr_start = Instant::now();
+        let outcome = match rose::puzzle_piece_pin::solve_range_partition(
+            puzzle,
+            puzzle.height * puzzle.width,
+            rr_start + std::time::Duration::from_millis(timeout_ms),
+        ) {
+            Some(regions) => ModuleOutcome::Solved(regions),
+            None => ModuleOutcome::None,
+        };
+        let elapsed = rr_start.elapsed().as_millis() as u64;
+        match outcome {
+            ModuleOutcome::Solved(regions) => {
+                attempts.push(SolverAttempt {
+                    solver: "range-part".into(),
+                    status: SolverStatus::Success,
+                    elapsed_ms: elapsed,
+                    note: None,
+                });
+                return build_solution(regions, &start, puzzle, "range-part", attempts);
+            }
+            other => record_module_with_elapsed("range-part", other, rr_start + std::time::Duration::from_millis(timeout_ms), elapsed, &mut attempts),
+        }
+    }
+
+
     // Solver dispatch:
     // 1. edge_csp post-fallback for edge-constraint-dense puzzles (ring / brick /
     //    watchtower / compass / inequality / difference) that aog couldn't solve.

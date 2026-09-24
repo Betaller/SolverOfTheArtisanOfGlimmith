@@ -71,6 +71,7 @@
 | 2026-09-24 | **inequality 余数尺寸窗**（doc 07 修订3，0899 破簇） | 0899 直跑 + pp 子集 | 直跑 `rsolver` + `cargo test --release` + `benchmark_rust_solver.py --rules puzzle_piece` | **1198 口径**（1198） | **+1**（0899） | `solve_multi_remainder` 驱动门扩 inequality（有向面积序）：`collect_size_orders` 静态界（pin 侧→单元标签 lo/hi；双 pin 违序根判死；自由对=序+must-differ）+ **可达性上界**（标签可长到的最大格数=围袋大小——错钉组合的口袋与界冲突在根 fixpoint 判死，0899 的 2.7M 预钉组合走 µs 级根判死）+ 序对窗检查。**0899 全解 via pp-pin（+1）**；官方钉隔离 0.06s。`cargo test` 60+8、`pytest` 292、complexity_gate 全过。 |
 | 2026-09-24 | **compass_label 桥过滤+走廊强制**（doc 13 §6.6，结构/性能） | compass/pp 双子集 + 0683/1258 专项 | `benchmark_rust_solver.py --rules compass/puzzle_piece` + tmp_diag | **1198 口径不变**（compass 112/129、pp 170/171 均 0 真回归） | 0（残簇未破） | 死因画像：0683 的 6M 节点 70% 死在 joinable 且集中在 64-79 已派＝「桥格被划走、连通死亡过晚显形」。修：①域感知桥过滤（域不含 j 的格不能当 j 的桥）②**单连通走廊强制**（纯 j 分量只被一座桥触到⇒该桥强制入 j；零桥⇒立判死）——0683 25s 节点 6.0M→1.3M（−73%），死亡移向近叶（树在逼近全解态）；③exact-cover 帽取池域+成对 Hall（中性）。0683/1258 60s 仍未解（差末段基数收尾）；常规题普适提速（测试墙钟 15s→6.3s）。`cargo test` 60+8、`pytest` 292、complexity_gate 全过。 |
 | 2026-09-24 | **rose 基数标记雏形**（doc 07 修订4，0975a WIP） | 官方叶直验 + 0975a 搜索探针 | 直跑测试 | **1198 口径不变** | 0（WIP） | `solve_cardinal_partition`：框链单元+同型 must-split+`rose_step` 完成度强制+标签帽。诊断：官方划分直喂叶子 ✓ 通过；搜索核 120s/1.89M 节点无全指派（~70% 已派的潜在连通判死；「26k 空树穷尽」系 1k 节点/s 超时误判）。附带 `cheap_domain`（FreeRem 12× 提速、0994/0899/1093 零回归）。路由暂撤、测试 `#[ignore]` 挂跟踪。`cargo test` 61+8、`pytest` 292、complexity_gate 全过。 |
+| 2026-09-24 | **size-constraint 分区**（doc 07 修订5，1351 破簇） | 1351 直跑 + range FAIL 群探针 | 直跑 `rsolver` + `cargo test --release` | **1199 口径**（1198 + 1351） | **+1**（1351） | `solve_range_partition`（range/precise/inequality/difference 无锚分区）：尺寸窗+spawn 帽+望塔 facts+`relax_size_windows` 序/差值传递窗松弛。**1351 全链 4.8s via range-part**（35 格 3 区，aog/edge_csp 双扑空的引擎缺口）；顺带修 must-same 误插 split bug。高标签/伴生题未解（FreeRem 末段共同短板）。`cargo test` 62+8、`pytest` 292、complexity_gate 全过。 |
 
 ---
 
@@ -1045,6 +1046,20 @@ multi_rem 测试墙钟 15s→6.3s；compass 子集 112/129、pp 子集 170/171 �
 是 1k 节点/s 的**超时误判**。附带 `cheap_domain`（FreeRem 12× 提速、三题零
 回归）。路由接线暂撤、求解测试 `#[ignore]` 挂跟踪。`cargo test` 61+8、
 `pytest` 292、complexity_gate 全过。口径维持 **1198**。
+
+### 2026-09-24（续7） · size-constraint 分区（doc 07 修订5，1351 破簇 +1 → 1199）
+
+`puzzle_piece` 多余数之外的第二个 FreeRem 宿主：**面积约束分区**
+`solve_range_partition`（range/precise/inequality/difference，无锚）——尺寸窗
++ spawn 帽 + 望塔 facts + **序/差值传递窗松弛**（`relax_size_windows`）。
+
+- **1351 全链 4.8s via range-part（+1）**：35 格 3 区 [17,9,9] 纯 range min=9，
+  aog/edge_csp 双扑空的「小题引擎缺口」。
+- 顺带修复 range-part 原型的 must-same 误插 split bug（WT 组被强制拆开）。
+- 未解（FreeRem 末段收敛共同短板）：0985/0189（高标签计数）、0206/0928/0929/
+  0152/0270（伴生/序约束搜索慢）、0770（90 格）。
+- 口径 **1198 → 1199**。冲 1200 还差 1。`cargo test` 62+8、`pytest` 292、
+  complexity_gate 全过。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

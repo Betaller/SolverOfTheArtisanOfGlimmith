@@ -428,3 +428,13 @@ must-split、框链 run 合成单元、`rose_step` 完成度强制（缺类只�
 - 附带产出：FreeRem `cheap_domain`（MRV/单例扫描用 O(1) 近似域、全域只算选中
   单元）——FreeRem 12× 节点提速，0994/0899/1093 零回归。
 - 路由接线**暂撤**（`rose/mod.rs` 留 WIP 注释）；求解测试 `#[ignore]` 挂跟踪。
+
+**2026-09-24 修订5（size-constraint 分区 `solve_range_partition`，1351 破簇 +1）**：
+range/precise/inequality/difference 的面积约束分区（无锚）：FreeRem 尺寸窗
+（`area_bounds` 静态界 + `collect_size_orders` 的钉侧/序对/差值对）+ spawn 帽
+=⌊total/min⌋ + 望塔 facts 顺乘。**序/差值传递窗松弛**（`relax_size_windows`，
+Bellman-Ford 式：`lo_b≥lo_a+1`、`|a−b|=v` 双向 ±v）——链式序强制具体尺寸
+（0152 类纯 inequality 的关键传播）。实测：**1351 全链 4.8s via range-part
+（+1）**——35 格 3 区 [17,9,9]，aog/edge_csp 双扑空。多标签高计数题
+（0985 ≤16 区、0189 ≥30 区）与伴生题（0206/0928/0929 等）仍未解——
+FreeRem 末段收敛是共同短板（见修订4）。求解测试 1351 锁定。

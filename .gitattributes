@@ -46,3 +46,7 @@ results/bin/rsolver-cb7d43f-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260923_cb7d43f_pppin-fast.txt filter=lfs diff=lfs merge=lfs -text
 results/bench/20260923_cb7d43f_pppin-fast.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260923_cb7d43f_pppin-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-65620bb-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_65620bb_partners-full.txt filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_65620bb_partners-full.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_65620bb_partners-note.txt filter=lfs diff=lfs merge=lfs -text

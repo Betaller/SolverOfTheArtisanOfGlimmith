@@ -80,3 +80,7 @@ results/bin/rsolver-87d36b1-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_87d36b1_endgame.txt filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_87d36b1_endgame.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_87d36b1_endgame-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-83f03fe-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_83f03fe_size-case.txt filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_83f03fe_size-case.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_83f03fe_size-case-note.txt filter=lfs diff=lfs merge=lfs -text

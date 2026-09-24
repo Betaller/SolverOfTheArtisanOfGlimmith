@@ -1034,6 +1034,24 @@ fn canon_pair(a: u32, b: u32) -> (u32, u32) {
     }
 }
 
+/// Windows `[alo,ahi] × [blo,bhi]` admit `|a−b| = v` iff the achievable gap
+/// range (a contiguous interval — continuous image of a connected set)
+/// covers `v`.
+fn gap_feasible(alo: usize, ahi: usize, blo: usize, bhi: usize, v: usize) -> bool {
+    if alo > ahi || blo > bhi {
+        return false;
+    }
+    let max_gap = std::cmp::max(ahi.abs_diff(blo), bhi.abs_diff(alo));
+    let min_abs = if ahi < blo {
+        blo - ahi
+    } else if bhi < alo {
+        alo - bhi
+    } else {
+        0
+    };
+    v >= min_abs && v <= max_gap
+}
+
 /// Watchtower cardinality → pairwise must-same / must-split over free cells.
 ///
 /// Free labels never coincide with pin labels (a pinned region's shape is
@@ -1137,6 +1155,9 @@ struct FreeRem<'a> {
     max_labels: usize,
     lab_of: Vec<Option<u32>>,
     lab_units: Vec<Vec<u32>>,
+    /// Per-label size windows from the last `compute_windows` round (join
+    /// checks in `domain` read them; fixpoint refreshes every round).
+    win_cache: Vec<(usize, usize)>,
     deadline: crate::clock::Instant,
     nodes: usize,
 }
@@ -1163,11 +1184,6 @@ impl<'a> FreeRem<'a> {
         self.fixpoint()?;
         if self.lab_of.iter().all(|l| l.is_some()) {
             return self.leaf_regions();
-        }
-        {
-            let a = self.lab_of.iter().filter(|l| l.is_some()).count();
-            if a > self.nodes % 1000 {
-            }
         }
         let u = self.pick_mrv()?;
         let values = self.value_order(u);
@@ -1208,9 +1224,10 @@ impl<'a> FreeRem<'a> {
     /// lets each spawn become joinable by the next unit.
     fn fixpoint(&mut self) -> Option<()> {
         'outer: loop {
-            if !self.joinable_all() || !self.wt_all_ok() || !self.sizes_ok() {
+            if !self.joinable_all() || !self.wt_all_ok() {
                 return None;
             }
+            self.win_cache = self.compute_windows()?;
             match self.rose_step() {
                 RoseStep::Dead => return None,
                 RoseStep::Force(u, l) => {
@@ -1219,6 +1236,11 @@ impl<'a> FreeRem<'a> {
                     continue;
                 }
                 RoseStep::Ok => {}
+            }
+            if let Some((u, l)) = self.corridor_force() {
+                self.lab_units[l as usize].push(u);
+                self.lab_of[u as usize] = Some(l);
+                continue;
             }
             for u in 0..self.lab_of.len() as u32 {
                 if self.lab_of[u as usize].is_some() {
@@ -1273,6 +1295,13 @@ impl<'a> FreeRem<'a> {
                     continue;
                 }
             }
+            let mut merged = Vec::with_capacity(units.len() + 1);
+            merged.extend_from_slice(units);
+            merged.push(u);
+            let (lo, hi) = self.merge_statics(&merged, Some(l as u32));
+            if lo > hi {
+                continue;
+            }
             out.push(Some(l as u32));
         }
         if self.max_labels == 0 || self.lab_units.len() < self.max_labels {
@@ -1302,7 +1331,7 @@ impl<'a> FreeRem<'a> {
             }
             let mut merged = units.clone();
             merged.push(u);
-            if self.label_potential_ok(&merged) && self.static_cap_ok(&merged) {
+            if self.label_potential_ok(&merged) && self.merge_window_ok(&merged, Some(l as u32)) {
                 out.push(Some(l as u32));
             }
         }
@@ -1315,9 +1344,11 @@ impl<'a> FreeRem<'a> {
         let spawn_ok = if self.max_labels > 0 {
             self.lab_units.len() < self.max_labels
                 && self.label_potential_ok(std::slice::from_ref(&u))
+                && self.merge_window_ok(std::slice::from_ref(&u), None)
                 && (self.n_types == 0 || self.spawn_completable(u))
         } else {
             self.label_potential_ok(std::slice::from_ref(&u))
+                && self.merge_window_ok(std::slice::from_ref(&u), None)
         };
         if spawn_ok {
             out.push(None);
@@ -1527,12 +1558,19 @@ impl<'a> FreeRem<'a> {
         RoseStep::Ok
     }
 
-    /// Inequality size windows: every label must fit `size < cap` from its
-    /// pinned-side orders, and orders between two placed labels must still
-    /// admit `size(a) < size(b)`.  The cap is further limited by the label's
-    /// reachability extent (the enclosure a pinned geometry leaves open —
-    /// the wrong-pin root-die for the 0899 class).
-    fn sizes_ok(&self) -> bool {
+    /// Per-label size windows: member statics ∩ reach extent, tightened by
+    /// one-sided ord/diff caps against placed labels, then transitively
+    /// relaxed (Bellman-Ford) across placed label pairs — this also catches
+    /// dynamic ord cycles (`L1 < L2 < L3 < L1` inflates `lo` past `hi`) that
+    /// pairwise checks miss.  `None` = contradiction.
+    fn compute_windows(&self) -> Option<Vec<(usize, usize)>> {
+        let mut wins = self.base_windows()?;
+        self.one_sided_tighten(&mut wins);
+        self.pair_relax(&mut wins)?;
+        Some(wins)
+    }
+
+    fn base_windows(&self) -> Option<Vec<(usize, usize)>> {
         let mut windows: Vec<(usize, usize)> = Vec::with_capacity(self.lab_units.len());
         for units in &self.lab_units {
             if units.is_empty() {
@@ -1540,85 +1578,284 @@ impl<'a> FreeRem<'a> {
                 continue;
             }
             let cur: usize = units.iter().map(|&v| self.unit_cells[v as usize].len()).sum();
-            let mut lo = cur;
-            let mut hi = usize::MAX;
-            for &v in units {
-                let i = v as usize;
-                lo = lo.max(self.sz_lo[i]);
-                hi = hi.min(self.sz_hi[i]);
-            }
+            let (mut lo, mut hi) = self.merge_statics(units, None);
+            lo = lo.max(cur);
             let reach = self.label_reach(units).1;
-            if reach < lo || cur > hi || reach < cur {
-                return false;
+            if reach < lo || cur > hi {
+                return None;
             }
             hi = hi.min(reach);
             if lo > hi {
-                return false;
+                return None;
             }
             windows.push((lo, hi));
         }
+        Some(windows)
+    }
+
+    /// One-sided caps: `ord (ua, ub)` with only one end placed bounds that
+    /// end's window through the other end's static window (`size(La) <
+    /// size(Lf) ≤ sz_hi[ub]`, `size(Lb) > size(Lf) ≥ sz_lo[ua]`); diff pairs
+    /// widen by ±v and die when no pair at gap v survives.
+    fn one_sided_tighten(&self, wins: &mut [(usize, usize)]) {
         for &(ua, ub) in self.ord {
-            let la = self.lab_of[ua as usize];
-            let lb = self.lab_of[ub as usize];
+            let (la, lb) = (self.lab_of[ua as usize], self.lab_of[ub as usize]);
+            match (la, lb) {
+                (Some(a), None) => {
+                    let cap = self.sz_hi[ub as usize];
+                    if cap != usize::MAX {
+                        let w = &mut wins[a as usize];
+                        if w.1 > cap - 1 {
+                            w.1 = cap - 1;
+                        }
+                    }
+                }
+                (None, Some(b)) => {
+                    let floor = self.sz_lo[ua as usize] + 1;
+                    let w = &mut wins[b as usize];
+                    if w.0 < floor {
+                        w.0 = floor;
+                    }
+                }
+                _ => {}
+            }
+        }
+        for &(ua, ub, v) in self.diff {
+            let (la, lb) = (self.lab_of[ua as usize], self.lab_of[ub as usize]);
+            match (la, lb) {
+                (Some(a), None) => {
+                    let (blo, bhi) = (self.sz_lo[ub as usize], self.sz_hi[ub as usize]);
+                    let w = &mut wins[a as usize];
+                    if !gap_feasible(w.0, w.1, blo, bhi, v) {
+                        w.0 = 1;
+                        w.1 = 0;
+                    } else if bhi != usize::MAX && w.1 > bhi + v {
+                        w.1 = bhi + v;
+                    }
+                }
+                (None, Some(b)) => {
+                    let (alo, ahi) = (self.sz_lo[ua as usize], self.sz_hi[ua as usize]);
+                    let w = &mut wins[b as usize];
+                    if !gap_feasible(w.0, w.1, alo, ahi, v) {
+                        w.0 = 1;
+                        w.1 = 0;
+                    } else if ahi != usize::MAX && w.1 > ahi + v {
+                        w.1 = ahi + v;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Bellman-Ford over placed label pairs + gap feasibility.  `false` =
+    /// contradiction (incl. dynamic ord cycles).
+    fn pair_relax(&self, wins: &mut Vec<(usize, usize)>) -> Option<()> {
+        let n = wins.len();
+        let mut lab_ord: Vec<(u32, u32)> = Vec::new();
+        let mut lab_diff: Vec<(u32, u32, usize)> = Vec::new();
+        for &(ua, ub) in self.ord {
+            let (la, lb) = (self.lab_of[ua as usize], self.lab_of[ub as usize]);
             if la == lb && la.is_some() {
-                return false;
+                return None;
             }
             if let (Some(a), Some(b)) = (la, lb) {
-                let (lo_a, _hi_a) = windows[a as usize];
-                let (lo_b, hi_b) = windows[b as usize];
-                if std::cmp::max(lo_b, lo_a + 1) > hi_b {
-                    return false;
+                lab_ord.push((a, b));
+            }
+        }
+        for &(ua, ub, v) in self.diff {
+            let (la, lb) = (self.lab_of[ua as usize], self.lab_of[ub as usize]);
+            if la == lb && la.is_some() {
+                if v != 0 {
+                    return None;
+                }
+                continue;
+            }
+            if let (Some(a), Some(b)) = (la, lb) {
+                lab_diff.push((a, b, v));
+            }
+        }
+        let mut lo: Vec<usize> = wins.iter().map(|w| w.0).collect();
+        let mut hi: Vec<usize> = wins.iter().map(|w| w.1).collect();
+        relax_size_windows(&lab_ord, &lab_diff, &mut lo, &mut hi);
+        for i in 0..n {
+            if lo[i] > hi[i] {
+                return None;
+            }
+            wins[i] = (lo[i], hi[i]);
+        }
+        for &(a, b, v) in &lab_diff {
+            let (lo_a, hi_a) = wins[a as usize];
+            let (lo_b, hi_b) = wins[b as usize];
+            if !gap_feasible(lo_a, hi_a, lo_b, hi_b, v) {
+                return None;
+            }
+        }
+        Some(())
+    }
+
+    /// Static size window of a hypothetical label (`units`, optionally a join
+    /// into `joined`): member statics ∩ the target label's cached window.
+    fn merge_statics(&self, units: &[u32], joined: Option<u32>) -> (usize, usize) {
+        let mut lo = 0usize;
+        let mut hi = usize::MAX;
+        for &v in units {
+            if self.sz_lo[v as usize] > lo {
+                lo = self.sz_lo[v as usize];
+            }
+            if self.sz_hi[v as usize] < hi {
+                hi = self.sz_hi[v as usize];
+            }
+        }
+        if let Some(l) = joined {
+            if let Some(&(wlo, whi)) = self.win_cache.get(l as usize) {
+                if wlo > lo {
+                    lo = wlo;
+                }
+                if whi < hi {
+                    hi = whi;
                 }
             }
         }
-        // `difference` walls: |size_a − size_b| = v — a shared label is only
-        // possible for v == 0, and the windows must admit a pair at distance v.
+        (lo, hi)
+    }
+
+    /// Full merge feasibility (statics + ord/diff vs everything outside).
+    fn merge_window_ok(&self, units: &[u32], joined: Option<u32>) -> bool {
+        let (mut lo, mut hi) = self.merge_statics(units, joined);
+        if !self.merge_ord_caps(units, joined, &mut lo, &mut hi) {
+            return false;
+        }
+        let cur: usize = units.iter().map(|&v| self.unit_cells[v as usize].len()).sum();
+        lo <= hi && cur <= hi
+    }
+
+    fn merge_ord_caps(
+        &self,
+        units: &[u32],
+        joined: Option<u32>,
+        lo: &mut usize,
+        hi: &mut usize,
+    ) -> bool {
+        for &(ua, ub) in self.ord {
+            let in_a = self.in_merge(ua, units, joined);
+            let in_b = self.in_merge(ub, units, joined);
+            if in_a && in_b {
+                return false; // size(L) < size(L)
+            }
+            if in_a {
+                if !self.cap_other(ub, units, joined, true, lo, hi) {
+                    return false;
+                }
+            } else if in_b && !self.cap_other(ua, units, joined, false, lo, hi) {
+                return false;
+            }
+        }
         for &(ua, ub, v) in self.diff {
-            let la = self.lab_of[ua as usize];
-            let lb = self.lab_of[ub as usize];
-            if la == lb && la.is_some() {
+            let in_a = self.in_merge(ua, units, joined);
+            let in_b = self.in_merge(ub, units, joined);
+            if in_a && in_b {
                 if v != 0 {
                     return false;
                 }
                 continue;
             }
-            if let (Some(a), Some(b)) = (la, lb) {
-                let (lo_a, hi_a) = windows[a as usize];
-                let (lo_b, hi_b) = windows[b as usize];
-                let min_gap = lo_a.abs_diff(lo_b).min(hi_a.abs_diff(lo_b)).min(lo_a.abs_diff(hi_b));
-                let _ = min_gap;
-                // windows admit |a−b| = v iff [min|a−b|, max|a−b|] ∋ v
-                let max_gap = std::cmp::max(hi_a.abs_diff(lo_b), hi_b.abs_diff(lo_a));
-                let min_abs = if hi_a < lo_b {
-                    lo_b - hi_a
-                } else if hi_b < lo_a {
-                    lo_a - hi_b
-                } else {
-                    0
-                };
-                if v < min_abs || v > max_gap {
+            if in_a {
+                if !self.cap_other_diff(ub, units, joined, v, lo, hi) {
                     return false;
                 }
+            } else if in_b && !self.cap_other_diff(ua, units, joined, v, lo, hi) {
+                return false;
             }
         }
         true
     }
 
-    /// Static part of the size cap (inequality vs pinned sides).
-    fn static_cap_ok(&self, units: &[u32]) -> bool {
-        let cur: usize = units.iter().map(|&v| self.unit_cells[v as usize].len()).sum();
-        let mut hi = usize::MAX;
-        for &v in units {
-            hi = hi.min(self.sz_hi[v as usize]);
+    fn in_merge(&self, x: u32, units: &[u32], joined: Option<u32>) -> bool {
+        if units.contains(&x) {
+            return true;
         }
-        cur <= hi
+        match (self.lab_of[x as usize], joined) {
+            (Some(l), Some(j)) => l == j,
+            _ => false,
+        }
     }
 
-    /// Every multi-unit label must remain connectable through undecided cells
-    /// that are not must-split from the label (they may still join it).
+    /// `mine < theirs` (smaller=true side): cap my hi by theirs' ceiling.
+    fn cap_other(
+        &self,
+        other: u32,
+        units: &[u32],
+        joined: Option<u32>,
+        mine_smaller: bool,
+        lo: &mut usize,
+        hi: &mut usize,
+    ) -> bool {
+        let (olo, ohi) = self.other_window(other, units, joined);
+        if mine_smaller {
+            // size(mine) < size(other) ≤ ohi  ⇒  hi ≤ ohi − 1;
+            // size(other) ≥ size(mine)+1 ≥ lo+1  ⇒  olo ≥ lo+1 must hold.
+            if ohi != usize::MAX {
+                if *hi > ohi - 1 {
+                    *hi = ohi - 1;
+                }
+            }
+            std::cmp::max(olo, *lo + 1) <= ohi
+        } else {
+            // size(other) < size(mine): floor mine at olo+1.  Feasibility only
+            // needs the tightened mine window non-empty and the other window
+            // sane — mine is the *larger* side, so its ceiling is unrelated
+            // to `ohi` (capping mine by ohi was the 0899 false reject).
+            if *lo < olo + 1 {
+                *lo = olo + 1;
+            }
+            olo <= ohi && *lo <= *hi
+        }
+    }
+
+    fn cap_other_diff(
+        &self,
+        other: u32,
+        units: &[u32],
+        joined: Option<u32>,
+        v: usize,
+        lo: &mut usize,
+        hi: &mut usize,
+    ) -> bool {
+        let (olo, ohi) = self.other_window(other, units, joined);
+        if !gap_feasible(*lo, *hi, olo, ohi, v) {
+            return false;
+        }
+        if ohi != usize::MAX && *hi > ohi + v {
+            *hi = ohi + v;
+        }
+        if olo > v && *lo < olo - v {
+            *lo = olo - v;
+        }
+        true
+    }
+
+    /// Window of the label on the far side of a constraint: a placed label's
+    /// cache window, or the far unit's static window when unassigned.
+    fn other_window(&self, other: u32, units: &[u32], joined: Option<u32>) -> (usize, usize) {
+        if units.contains(&other) {
+            return (usize::MAX, usize::MAX); // in-merge handled by caller
+        }
+        match self.lab_of[other as usize] {
+            Some(l) if Some(l) != joined => {
+                self.win_cache.get(l as usize).copied().unwrap_or((0, usize::MAX))
+            }
+            Some(_) => (usize::MAX, usize::MAX),
+            None => (self.sz_lo[other as usize], self.sz_hi[other as usize]),
+        }
+    }
+
+    /// Every label (incl. non-contiguous single must-same classes) must remain
+    /// connectable through undecided cells that are not must-split from the
+    /// label (they may still join it).
     fn joinable_all(&self) -> bool {
         for units in &self.lab_units {
-            if units.len() >= 2 && !self.label_potential_ok(units) {
+            if !units.is_empty() && !self.label_potential_ok(units) {
                 return false;
             }
         }
@@ -1633,6 +1870,17 @@ impl<'a> FreeRem<'a> {
     /// (connectable); `extent` is the reachable passable count — the upper
     /// bound the label can ever grow to (cells + recruit-able bridges).
     fn label_reach(&self, units: &[u32]) -> (usize, usize) {
+        let (flag, extent, _) = self.label_reach_vis(units, None);
+        (flag, extent)
+    }
+
+    /// `label_reach` with the visited set exposed (corridor hull) and an
+    /// optional excluded unit (`exclude` = "what if this unit never joins?").
+    fn label_reach_vis(
+        &self,
+        units: &[u32],
+        exclude: Option<u32>,
+    ) -> (usize, usize, Vec<bool>) {
         let h = self.puzzle.height;
         let w = self.w;
         let n = h * w;
@@ -1648,6 +1896,9 @@ impl<'a> FreeRem<'a> {
         }
         for (j, cells) in self.unit_cells.iter().enumerate() {
             if self.lab_of[j].is_some() {
+                continue;
+            }
+            if Some(j as u32) == exclude {
                 continue;
             }
             if units.iter().any(|&v| self.is_split(j as u32, v)) {
@@ -1687,7 +1938,47 @@ impl<'a> FreeRem<'a> {
                 }
             }
         }
-        (if reached == need { usize::MAX } else { reached }, extent)
+        let flag = if reached == need { usize::MAX } else { reached };
+        (flag, extent, seen)
+    }
+
+    /// Sound bridge force (the k-label port of compass_label's corridor
+    /// forcing): when every passable connection between a label's cells runs
+    /// through one unassigned unit's cells, that unit must join the label —
+    /// otherwise the label can never end up connected.  Returns one force;
+    /// fixpoint recomputes after applying it.
+    fn corridor_force(&self) -> Option<(u32, u32)> {
+        const BUDGET: usize = 64;
+        let mut budget = BUDGET;
+        for (li, units) in self.lab_units.iter().enumerate() {
+            if units.is_empty() {
+                continue;
+            }
+            let (flag, _, vis) = self.label_reach_vis(units, None);
+            if flag != usize::MAX {
+                continue;
+            }
+            for b in 0..self.unit_cells.len() as u32 {
+                if self.lab_of[b as usize].is_some() {
+                    continue;
+                }
+                if units.iter().any(|&v| self.is_split(b, v)) {
+                    continue;
+                }
+                if !self.unit_cells[b as usize].iter().any(|&c| vis[c]) {
+                    continue;
+                }
+                if budget == 0 {
+                    return None;
+                }
+                budget -= 1;
+                let (flag, _, _) = self.label_reach_vis(units, Some(b));
+                if flag != usize::MAX {
+                    return Some((b, li as u32));
+                }
+            }
+        }
+        None
     }
 
     fn leaf_regions(&self) -> Option<Vec<crate::types::RegionInfo>> {
@@ -1826,6 +2117,100 @@ fn relax_size_windows(
             break;
         }
     }
+}
+
+/// Distinct-size chain deduction over the unit-ord digraph (0152 class).
+///
+/// A directed path `u1 → u2 → … → uc` forces pairwise-distinct label sizes
+/// `s1 < s2 < … < sc` (a shared label would be `size(L) < size(L)`), so with
+/// every region at least `g` cells the chain sum obeys
+/// `Σ s_k ≥ c·g + c·(c−1)/2 =: floor`.  Labels outside the chain add `m·g`
+/// more, hence `m ≤ (total − floor) / g` and the total label count is capped
+/// at `c + m`.  When `floor == total` everything is pinned: `s_k = g+k−1`
+/// exactly (the 0152 case: 8-chain over a 36-cell board = sizes 1..8), no
+/// label outside the chain may exist, and every free unit must join one of
+/// the chain labels.
+///
+/// Returns the label-count bound.  `None` = the ord digraph has a cycle
+/// (strict orders around a cycle are unsatisfiable — Bellman-Ford on
+/// `usize::MAX`-hi windows cannot see this).
+fn chain_size_deduction(
+    ord: &[(u32, u32)],
+    lo: &mut [usize],
+    hi: &mut [usize],
+    total: usize,
+    g: usize,
+) -> Option<usize> {
+    let n = lo.len();
+    let g = g.max(1);
+    // Kahn topo order; cycle ⇒ unsat.
+    let mut indeg = vec![0usize; n];
+    let mut outs: Vec<Vec<u32>> = vec![Vec::new(); n];
+    for &(ua, ub) in ord {
+        outs[ua as usize].push(ub);
+        indeg[ub as usize] += 1;
+    }
+    let mut queue: Vec<u32> = (0..n as u32).filter(|&u| indeg[u as usize] == 0).collect();
+    let mut topo: Vec<u32> = Vec::with_capacity(n);
+    while let Some(u) = queue.pop() {
+        topo.push(u);
+        for &v in &outs[u as usize] {
+            indeg[v as usize] -= 1;
+            if indeg[v as usize] == 0 {
+                queue.push(v);
+            }
+        }
+    }
+    if topo.len() != n {
+        return None;
+    }
+    // Longest directed path (chain) with parent pointers.
+    let mut dist = vec![1usize; n];
+    let mut parent = vec![u32::MAX; n];
+    for &u in &topo {
+        for &v in &outs[u as usize] {
+            if dist[u as usize] + 1 > dist[v as usize] {
+                dist[v as usize] = dist[u as usize] + 1;
+                parent[v as usize] = u;
+            }
+        }
+    }
+    let (mut c, mut end) = (0usize, 0u32);
+    for u in 0..n {
+        if dist[u] > c {
+            c = dist[u];
+            end = u as u32;
+        }
+    }
+    if c == 0 {
+        return Some(usize::MAX);
+    }
+    let mut chain: Vec<u32> = Vec::with_capacity(c);
+    let mut cur = end;
+    while cur != u32::MAX {
+        chain.push(cur);
+        cur = parent[cur as usize];
+    }
+    chain.reverse(); // u1 (smallest) .. uc (largest)
+    let floor = c * g + c * (c - 1) / 2;
+    if floor > total {
+        return None;
+    }
+    for (k, &u) in chain.iter().enumerate() {
+        let s_min = g + k;
+        let s_max = total - floor + s_min;
+        let i = u as usize;
+        if lo[i] < s_min {
+            lo[i] = s_min;
+        }
+        if hi[i] > s_max {
+            hi[i] = s_max;
+        }
+        if lo[i] > hi[i] {
+            return None;
+        }
+    }
+    Some(c + (total - floor) / g)
 }
 
 /// Directed size orders from `inequality` edges (`size(a) < size(b)`; `value
@@ -2068,10 +2453,21 @@ pub(crate) fn solve_range_partition(
         w,
     )?;
     let pinned: Vec<PinnedPlacement> = Vec::new();
-    let (ord, diff, ext_lo, ext_hi) =
+    let (ord, diff, mut ext_lo, mut ext_hi) =
         collect_size_orders(puzzle, w, &pinned, &pin_of, &free_index, &unit_of_cell)?;
     let total = free_cells.len();
-    let max_labels = if lo >= 1 { total / lo } else { 0 };
+    let mut max_labels = if lo >= 1 { total / lo } else { 0 };
+    // Distinct-size chain deduction (0152 class): a directed ord chain of c
+    // units forces c distinct sizes summing to ≥ c·g+c(c−1)/2 — when that
+    // floor saturates `total` every size is pinned exactly and the label
+    // count drops to the chain length.
+    if let Some(cap) = chain_size_deduction(&ord, &mut ext_lo, &mut ext_hi, total, lo) {
+        if cap < max_labels {
+            max_labels = cap;
+        }
+    } else {
+        return None;
+    }
     if max_labels == 0 {
         return None;
     }
@@ -2123,6 +2519,7 @@ pub(crate) fn solve_range_partition(
         max_labels,
         lab_of: vec![None; unit_cells.len()],
         lab_units: Vec::new(),
+        win_cache: Vec::new(),
         deadline: leaf_deadline,
         nodes: 0,
     };
@@ -2254,6 +2651,7 @@ pub(crate) fn solve_cardinal_partition(
         max_labels,
         lab_of: vec![None; unit_cells.len()],
         lab_units: Vec::new(),
+        win_cache: Vec::new(),
         deadline: leaf_deadline,
         nodes: 0,
     };
@@ -2372,6 +2770,7 @@ fn solve_multi_remainder(
         max_labels,
         lab_of: vec![None; unit_cells.len()],
         lab_units: Vec::new(),
+        win_cache: Vec::new(),
         deadline: leaf_deadline,
         nodes: 0,
     };
@@ -2703,5 +3102,59 @@ mod multi_rem_tests {
         .expect("parse");
         let out = solve_puzzle_piece_standalone(&p, 30_000);
         assert!(out.is_solved(), "1093 expected solved, got {:?}", out);
+    }
+
+    /// 0152 (pure inequality, 6×6): the 7 clue walls form one directed ord
+    /// chain of 8 units whose distinct-size sum floor (1+…+8 = 36) saturates
+    /// the grid — `chain_size_deduction` pins every region size exactly and
+    /// caps the label count at 8.
+    #[test]
+    fn solves_range_partition_0152() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/5-inequality/0152.json"
+        ))
+        .expect("parse");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+        let out = solve_range_partition(&p, p.height * p.width, deadline);
+        assert!(out.is_some(), "0152 chain deduction must solve");
+    }
+
+    /// 0270 (pure difference, 7×7, 13 regions): window-intersection joins +
+    /// corridor forcing drive the endgame home (0.4 s).
+    #[test]
+    fn solves_range_partition_0270() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/4-difference/0270.json"
+        ))
+        .expect("parse");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+        let out = solve_range_partition(&p, p.height * p.width, deadline);
+        assert!(out.is_some(), "0270 range partition must solve");
+    }
+
+    /// 0929 (non_block + difference, 5×6, 6 regions): endgame tracker.
+    #[test]
+    #[ignore]
+    fn solves_range_partition_0929() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/4-difference/0929.json"
+        ))
+        .expect("parse");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+        let out = solve_range_partition(&p, p.height * p.width, deadline);
+        assert!(out.is_some(), "0929 range partition must solve");
+    }
+
+    /// 0770 (pure range min=12, 9×10, 7 regions): endgame tracker.
+    #[test]
+    #[ignore]
+    fn solves_range_partition_0770() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone2/5-minmax/0770.json"
+        ))
+        .expect("parse");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+        let out = solve_range_partition(&p, p.height * p.width, deadline);
+        assert!(out.is_some(), "0770 range partition must solve");
     }
 }

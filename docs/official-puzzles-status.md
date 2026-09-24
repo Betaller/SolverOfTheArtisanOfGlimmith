@@ -65,6 +65,7 @@
 | 2026-09-23 | **m=2 ring 框链 must-same**（doc 12 §3.2b，1149a 破簇） | 1149a 直跑 + m=2 簇 7 题回归 + 全量基准 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` + `benchmark_rust_solver.py --baseline --timeout 40 -j 6` | **1192 口径**（全量实测 1189 + skipped-slow 1137/1146 + REG 1406 串行复核） | **+1**（1149a） | **框边推论**：框边顶点自带 2 条边界边，周边两格异区的墙就是第 3 条（T）⟹ 整条周边链必同区。落地 `ring_frame_must_same` + `same_round` + `eq_leaders` 并类（blocked/预绘边断链，叶子验证兜底）。**1149a 1.5s 破簇**（52 格圈坍缩 1 标签 + val=2 望塔三缺一级联，109/87 对齐官方）；环纹 m=2 簇全员提速且全部 via same-tiling：0974 16s→650ms、1137 30s→8.6s、0987 60ms、1249 173ms。m=2 簇 **5/5 全解**。全量基准 1189/1256（REG=1 1406 串行 58s SOLVED＝争抢噪声，0 真回归；1137/1146 为 skipped-slow）。`pytest` 289、`cargo test` 49+8、complexity_gate 全过。 |
 | 2026-09-23 | **pp-pin 前置 + 预钉三层剪枝**（doc 07，1215/0224 OOM 破簇） | 1215/0224/0976 直跑 + 快速档基准 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` + `benchmark_rust_solver.py --baseline --skip-slow --timeout 40 -j 6` | **1194 口径**（1192 + 1215/0224） | **+2**（1215、0224） | OOM 根因：`enumerate_pin_assignments` 物化全笛卡尔积（注释说有 cap 实际没有），0224 12 锚 × 单类型 rose 符号过滤恒真 → 14 GB 被杀。修：**恰 1 符号/类型过滤**（rose 语义）+ `for_each_pin_assignment` 流式访回（MRV + 节点/指派双帽 + deadline）。1215 另有 aog 形状库 OOM 先杀进程的问题——pp-pin 独立块**前置到 aog 之前**（门控不变）+ combine_plain 三层剪枝（ring 框链 run 过滤 / MRV 跨锚可达 / 已决顶点 ring-brick 度）。实测：**1215 544ms via pp-pin**（旧 36s 树还输给 OOM）、**0224 11ms via same-tiling**、0976 3.3s 不回归。`pytest` 289、`cargo test` 52+8、complexity_gate 全过。 |
 | 2026-09-24 | **m=2 伴侣对 XOR**（doc 12 §3.2 重写，1248 破簇） | 1248 直跑 + m=2 簇 10 题回归 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` | **1195 口径**（1194 + 1248） | **+1**（1248） | **T=ψ(S) 同余 ≡ 伴侣对 XOR**（反称标注自动成立）——对合伴侣对喂进 `must_split`，同余题交给完整 m=2 搜索核（对称二分支+全标签键+SAC+闭包）。真 ψ 树 ~0.3s（1248 全解 **2.2s**，原 40s+ 超时）。配套：has_gemini 盲生长缰绳 2s（防磨光预算饿死精确宿主）；修复**根标签键预插撞车假穷尽**（六树 <20k 瞬死、M2_SKIP 任何组合救不回——「传播器怎么关都没用」即此症状）。m=2 簇 10/10 回归全绿（0382/0960 同形对 10ms）。`pytest` 289、`cargo test` 53+8、complexity_gate 全过。 |
+| 2026-09-24 | **独立验证器 watchtower 空转修复**（正确性，`_carry_clues`） | `results/bench/20260924_wt-recheck.jsonl`（49 题 aog-PASS 复核片段） | `benchmark_rust_solver.py --dir <49 watchtower aog-PASS> --timeout 40 -j 6` | **1195 口径不变**（49/49 复核 **0 夹带**） | 0（正确性加固） | **Router 复验网关的 watchtower 检查曾空转**：`solution_to_board` 只搬单元格线索，重建 Board 的顶点 `watchtower=None` → `_check_watchtower` 对全 None 顶点恒 True；叠加 aog `build_solution_trusted` 跳过 Rust 复验，watchtower 题错解可借道（手搓 Board 的单测共享 Vertex 对象，天然掩盖）。修复＝`_carry_clues` 搬顶点/边/外框线索（architecture.md §4.5）；新增 3 用例含 0994 真实回归（大区在桥格 (0,0) 拆分曾骗过复验，实为 WT(5,4)=2 见 3 区）。**存量 49 道 aog-PASS watchtower 题重解重验全过——0 夹带**，口径维持 1195。`pytest` 292、`cargo test` 53+8、complexity_gate 全过。 |
 
 ---
 
@@ -924,6 +925,29 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
   m=2 簇 10/10 回归全绿（0382/0960 各 10ms）。`pytest` 289、`cargo test`
   53+8（+1248 回归测试）、complexity_gate 全过。
   残余弹药：0683/1258（+2）、0975a（+1）+ FAIL 池（+3）冲 1200。
+
+### 2026-09-24（续） · 独立验证器 watchtower 空转修复（正确性，0 求解能力变化）
+
+侦查 0994 多余数（puzzle_piece+watchtower）时发现**复验网关的洞**：
+`solution_to_board` 只搬单元格线索，重建 `Board` 的顶点全部 `watchtower=None`
+⟹ `_check_watchtower` 恒 True（空转）。路由器复验（`base.py`）与
+`benchmark_rust_solver.py` 都走这条路径；又因 aog 是唯一 `build_solution_trusted`
+（跳过 Rust 侧 `validate::validate`）的模块，**watchtower 题的 aog 错解可以溜过
+全部两道闸**。手搓 Board 的既有单测把同一 `Vertex` 对象共享给 puzzle 与 board，
+只测得到直读路径——只有重建路径暴露（bug 类：复验入口≠手搓路径 ⇒ 盲区）。
+
+- **发现路径**：0994 官方大区（39 格）在桥格 (0,0) 拆成 `{(0,0)}+27+11` 三区，
+  复验竟判过；手工数 WT(5,4)=2 出现 3 个不同区才钉死是验证器洞（拆分本身
+  也再次证明官方解唯一性靠的就是大区连通性——(0,0) 是桥格，任何拆分断链）。
+- **修复**：`_carry_clues` 搬顶点 watchtower / 边 is_boundary+constraint /
+  outer_boundaries（architecture.md §4.5 立约定）。新增 3 用例
+  （`TestSolutionToBoardCarriesVertexClues`），含 0994 拆分必须被望塔拒绝的
+  真实回归。`solution_to_board` 圈复杂度一度 17>10，抽 `_carry_clues` 后过门禁。
+- **存量排查**：85 道 watchtower 题里 **49 道 PASS 走 aog trusted 路径**（风险面），
+  修复后重解重验 `20260924_wt-recheck`：**49/49 全过、0 夹带**——洞真实但无泄漏，
+  **口径维持 1195/1200**。`pytest` 292、`cargo test` 53+8、complexity_gate 全过。
+- 0994/1435 多余数 puzzle_piece 类（pp-pin 叶子仅支持「余数=单区」）仍是
+  FAIL 池弹药（+2~3），与本修复无关。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

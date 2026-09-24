@@ -276,6 +276,25 @@ class Solution:
 | 对称性破缺 | 颜色标签交换对称，固定第一个区域的编号 |
 | 解缓存 | 对已探索的状态缓存结果（带截止大小） |
 
+### 4.5 验证网关（独立复验）
+
+路由器对**每个**求解器的输出做独立复验（`src/validation/validator.py` 的
+`IndependentValidator`），与求解器内部的规则检查解耦——buggy 求解器的错解
+绝不能溜过（CLAUDE.md 关键不变量）。复验入口是
+`solution_to_board(puzzle, solution)` 重建棋盘后 `validate(puzzle, board)`。
+
+**约定：`solution_to_board` 必须搬运谜题的全部线索**——单元格线索
+（number / symbol / shape_pattern / compass / fence_pattern / blocked）、
+**顶点线索（watchtower）**、边线索（is_boundary / constraint）、外边框。
+各检查函数有的直读 `puzzle`（预画边界、边约束），有的读 `board`
+（`_check_watchtower` 读 `board.vertices()`）；重建路径漏拷顶点线索时
+watchtower 检查对全 `None` 顶点**空转放行**（2026-09-24 修复——此前 aog 的
+`build_solution_trusted` 跳过 Rust 侧复验，错解在 watchtower 题上可借道
+路由器的复验网关；49 道存量 aog-PASS 复核 **0 夹带**）。手搓 Board 的单元
+测试把同一 `Vertex` 对象共享给 puzzle 与 board，天然掩盖该洞，只有重建路径
+会暴露——新增用例一律走 `solution_to_board`（`tests/unit/
+test_independent_validator.py::TestSolutionToBoardCarriesVertexClues`）。
+
 ---
 
 ## 5. UI 设计

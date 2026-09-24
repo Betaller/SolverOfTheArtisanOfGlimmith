@@ -73,6 +73,7 @@
 | 2026-09-24 | **rose 基数标记雏形**（doc 07 修订4，0975a WIP） | 官方叶直验 + 0975a 搜索探针 | 直跑测试 | **1198 口径不变** | 0（WIP） | `solve_cardinal_partition`：框链单元+同型 must-split+`rose_step` 完成度强制+标签帽。诊断：官方划分直喂叶子 ✓ 通过；搜索核 120s/1.89M 节点无全指派（~70% 已派的潜在连通判死；「26k 空树穷尽」系 1k 节点/s 超时误判）。附带 `cheap_domain`（FreeRem 12× 提速、0994/0899/1093 零回归）。路由暂撤、测试 `#[ignore]` 挂跟踪。`cargo test` 61+8、`pytest` 292、complexity_gate 全过。 |
 | 2026-09-24 | **size-constraint 分区**（doc 07 修订5，1351 破簇） | 1351 直跑 + range FAIL 群探针 | 直跑 `rsolver` + `cargo test --release` | **1199 口径**（1198 + 1351） | **+1**（1351） | `solve_range_partition`（range/precise/inequality/difference 无锚分区）：尺寸窗+spawn 帽+望塔 facts+`relax_size_windows` 序/差值传递窗松弛。**1351 全链 4.8s via range-part**（35 格 3 区，aog/edge_csp 双扑空的引擎缺口）；顺带修 must-same 误插 split bug。高标签/伴生题未解（FreeRem 末段共同短板）。`cargo test` 62+8、`pytest` 292、complexity_gate 全过。 |
 | 2026-09-24 | **FreeRem 末段收敛三件套**（doc 07 修订6，0152/0270/0206 破簇） | range 三子集基准 `20260924_<sha>_endgame.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 30 -j 6` ×3 子集（155 题） | **1202 口径**（1199 + 0152 + 0270 + 0206） | **+3**（0152/0270/0206） | 互异链和钉死（0152 的 8 元序链和=36 饱和 ⇒ 尺寸恰 1..8，隔离 0.03s）+ 窗口交合并检查 + k 标签走廊强制（0270 49 格 13 区 0.4s；0206 伴生题同获救）。子集 145/155，10 FAIL 全部在 65620bb 全量基线中本就 FAIL（0 真回归）。`cap_other` 较大侧窗误杀由 0899 官方钉隔离测试当场抓住。0929/0289/0770 仍跟踪中。`cargo test` 63+8、`pytest` 292、complexity_gate 全过。**冲 1200 里程碑达成。** |
+| 2026-09-24 | **尺寸情形枚举**（doc 07 修订7，0929 破簇） | range 三子集基准 `20260924_<sha>_size-case.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 30 -j 6` ×3 子集（155 题） | **1203 口径**（1202 + 0929） | **+1**（0929） | `enum_size_cases`：约束图连通时 DFS 枚举差值链存活尺寸元组（区间窗看不见的析取偏移集），每情形精确窗+标签数帽独立搜索，plain 保底。充分性探针先行（官方尺寸直喂 20 节点秒解）。SAC-lite 与约束度引导序两方案证伪回退（后者曾把 0206 拖到 >12s；正确形态=窗口宽升序）。子集 146/155、0 真回归。`cargo test` 65+8、`pytest` 292、complexity_gate 全过。 |
 
 ---
 
@@ -1084,6 +1085,39 @@ multi_rem 测试墙钟 15s→6.3s；compass 子集 112/129、pp 子集 170/171 �
   0770（90 格纯 range）、0975a、0683/1258。
 - 口径 **1199 → 1202，冲 1200 里程碑达成**。`cargo test` 63+8、`pytest` 292、
   complexity_gate 全过。
+
+### 2026-09-24（续9） · 1200 里程碑：合入 main（PR#83）+ 整理一次代码
+
+PR#83 合入（compass-part → FreeRem 全程 35 提交，口径 1177 → 1202）。
+**里程碑整理**：rsolver 编译警告 23 → **0**（无行为变化，豁免基准）——死
+代码删除（`deepest`/`total_bits`/watchtower_ok 死计数、backtrack 穷尽 match
+的死 `_` 臂）、无用 mut/变量前缀、`solve_cardinal_partition` WIP 期
+`#[allow(dead_code)]`、`propagate_area_bounds` 降 `pub(crate)`、
+`polyomino::enumerate_free_polyominoes` 备用生成器标注、aog `L` 变量名
+C++ 移植豁免。`cargo test` 64+8 全过。新基线 **1202**，下一标准
+**1222**（baseline+20）。
+
+### 2026-09-24（续10） · 尺寸情形枚举（doc 07 修订7，0929 破簇 +1 → 1203，收束）
+
+FreeRem 尺寸域的最后一块：区间窗对差值链的**析取偏移集**（`s1−s3∈{±4±2}`）
+与奇偶同余不可见，0929 死因画像 = 181k mid-tree 尺寸窗死亡 + 0 全指派。
+按隔离范式先做**充分性探针**（tmp_diag_0929b：官方尺寸直喂搜索核 → 20 节点
+秒解）确认尺寸域是钥匙，然后**枚举代替传播**（`enum_size_cases`）：
+
+- 约束图（ord∪diff）连通时 DFS 枚举存活尺寸元组（成对约束 + 和恒等式 +
+  情形标签数帽；断连图笛卡尔爆炸 → 跳过走 plain），每情形独立搜索。
+- 0929 仅 24 情形、真元组在列；**窗口宽升序 MRV** 让精确窗锚点先派。
+- 预算经济学：每情形 800ms + 情形总预算 6s + plain 保底 ≥6s——0206 类
+  （情形全错、靠 plain 3.3s 解）不再被情形烧预算。
+- **两证伪**（回退入档）：k 标签 SAC-lite（0 新解、拖慢 plain 末段）；
+  MRV 约束度引导序（0929 情形受益但 0206 plain 3.3s→>12s）。
+- 子集基准 146/155：**0929 via range-part 新解**，0206/0152/0270/1351 保持，
+  余 9 FAIL 对照全量基线本就 FAIL——**0 真回归**。
+- 口径 **1202 → 1203**。`cargo test` 65+8、`pytest` 292、complexity_gate 全过。
+- **按计划收束**：PR 合入 + 进度图刷新后本轮任务结束。残余弹药备忘：
+  0289/0770（multiset/基数域）、0975a（基数引擎末段）、0683/1258（象限基数
+  收尾）、0262/0586/0839/0912/0928/0930d/1407a（断连约束图 → 多组件笛卡尔
+  情形是下一步）。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

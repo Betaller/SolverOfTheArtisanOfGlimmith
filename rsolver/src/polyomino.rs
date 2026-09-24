@@ -48,6 +48,7 @@ pub fn transforms(shape: &Shape) -> Vec<Vec<[isize; 2]>> {
 /// repeatedly attach a neighbour cell, keep only the canonical (dihedral-min)
 /// form of each new shape.  Used by the homogeneous (gemini) exact-cover path
 /// in `pieces.rs`.  Sizes up to ~10 are cheap; callers should cap larger areas.
+#[allow(dead_code)] // gemini exact-cover path currently bypasses this generator
 pub fn enumerate_free_polyominoes(area: usize) -> Vec<Shape> {
     if area == 0 {
         return Vec::new();

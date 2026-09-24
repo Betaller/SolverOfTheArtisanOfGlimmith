@@ -639,27 +639,20 @@ pub(crate) fn watchtower_facts(puzzle: &Puzzle) -> Vec<(Vec<usize>, usize)> {
 /// assignment cannot be completed.
 fn watchtower_ok(facts: &[(Vec<usize>, usize)], current: &[PinnedPlacement]) -> bool {
     for (cells, k) in facts {
-        let mut d = 0usize;
         let mut u = 0usize;
         for &idx in cells {
             let mut placed = false;
-            for (ri, p) in current.iter().enumerate() {
+            for p in current.iter() {
                 if p.cells.contains(idx) {
-                    // Distinctness: two cells of one region share the id.
-                    // Count unique ids lazily via a tiny scan.
-                    let _ = ri;
                     placed = true;
                     break;
                 }
             }
-            if placed {
-                d += 1; // overcount fixed below
-            } else {
+            if !placed {
                 u += 1;
             }
         }
-        // Recount `d` as distinct region ids properly (cells ≤ 4).
-        d = 0;
+        // Count `d` as distinct placed region ids (cells ≤ 4).
         let mut seen: Vec<usize> = Vec::new();
         for &idx in cells {
             for (ri, p) in current.iter().enumerate() {
@@ -671,7 +664,7 @@ fn watchtower_ok(facts: &[(Vec<usize>, usize)], current: &[PinnedPlacement]) -> 
                 }
             }
         }
-        d = seen.len();
+        let d = seen.len();
         let lo = if u > 0 { d + 1 } else { d };
         let hi = d + u;
         if *k < lo || *k > hi {
@@ -1164,6 +1157,29 @@ struct FreeRem<'a> {
 
 const MAX_FREE_NODES: usize = 2_000_000;
 
+/// Death-attribution counters (test builds only): keyed by (check,
+/// assigned/16).  The 0929-class endgame diagnosis tool — where a search
+/// dies tells which propagation is missing.
+#[cfg(test)]
+thread_local! {
+    static DIES: std::cell::RefCell<std::collections::HashMap<(&'static str, usize), usize>> =
+        Default::default();
+}
+#[cfg(test)]
+fn die_note(tag: &'static str, assigned: usize) {
+    DIES.with(|d| {
+        *d.borrow_mut().entry((tag, assigned / 16)).or_insert(0) += 1;
+    });
+}
+#[cfg(test)]
+pub(crate) fn dies_snapshot() -> std::collections::HashMap<(&'static str, usize), usize> {
+    DIES.with(|d| d.borrow().clone())
+}
+#[cfg(test)]
+fn dies_reset() {
+    DIES.with(|d| d.borrow_mut().clear());
+}
+
 impl<'a> FreeRem<'a> {
     fn is_split(&self, a: u32, b: u32) -> bool {
         self.split.contains(&canon_pair(a, b))
@@ -1192,17 +1208,7 @@ impl<'a> FreeRem<'a> {
         for val in values {
             self.lab_of = snap_lab.clone();
             self.lab_units = snap_units.clone();
-            match val {
-                Some(l) => {
-                    self.lab_units[l as usize].push(u);
-                    self.lab_of[u as usize] = Some(l);
-                }
-                None => {
-                    let l = self.lab_units.len() as u32;
-                    self.lab_units.push(vec![u]);
-                    self.lab_of[u as usize] = Some(l);
-                }
-            }
+            self.apply_value(u, val);
             if let Some(res) = self.search() {
                 return Some(res);
             }
@@ -1215,6 +1221,22 @@ impl<'a> FreeRem<'a> {
         None
     }
 
+    /// Attach `u` to an existing label (`Some`) or mint a fresh one (`None`).
+    fn apply_value(&mut self, u: u32, val: Option<u32>) {
+        match val {
+            Some(l) => {
+                self.lab_units[l as usize].push(u);
+                self.lab_of[u as usize] = Some(l);
+            }
+            None => {
+                let l = self.lab_units.len() as u32;
+                self.lab_units.push(vec![u]);
+                self.lab_of[u as usize] = Some(l);
+            }
+        }
+    }
+
+
     /// Propagate to a fixpoint.  `None` = contradiction (dead node).
     ///
     /// Forces apply **one unit at a time with a full recompute**: with
@@ -1224,12 +1246,32 @@ impl<'a> FreeRem<'a> {
     /// lets each spawn become joinable by the next unit.
     fn fixpoint(&mut self) -> Option<()> {
         'outer: loop {
-            if !self.joinable_all() || !self.wt_all_ok() {
+            #[cfg(test)]
+            let a = self.lab_of.iter().filter(|l| l.is_some()).count();
+            if !self.joinable_all() {
+                #[cfg(test)]
+                die_note("joinable", a);
                 return None;
             }
-            self.win_cache = self.compute_windows()?;
+            if !self.wt_all_ok() {
+                #[cfg(test)]
+                die_note("wt", a);
+                return None;
+            }
+            self.win_cache = match self.compute_windows() {
+                Some(w) => w,
+                None => {
+                    #[cfg(test)]
+                    die_note("windows", a);
+                    return None;
+                }
+            };
             match self.rose_step() {
-                RoseStep::Dead => return None,
+                RoseStep::Dead => {
+                    #[cfg(test)]
+                    die_note("rose", a);
+                    return None;
+                }
                 RoseStep::Force(u, l) => {
                     self.lab_units[l as usize].push(u);
                     self.lab_of[u as usize] = Some(l);
@@ -1248,20 +1290,14 @@ impl<'a> FreeRem<'a> {
                 }
                 let dom = self.cheap_domain(u);
                 match dom.len() {
-                    0 => return None,
+                    0 => {
+                        #[cfg(test)]
+                        die_note("dom0", a);
+                        return None;
+                    }
                     1 => {
                         let val = dom[0];
-                        match val {
-                            Some(l) => {
-                                self.lab_units[l as usize].push(u);
-                                self.lab_of[u as usize] = Some(l);
-                            }
-                            None => {
-                                let l = self.lab_units.len() as u32;
-                                self.lab_units.push(vec![u]);
-                                self.lab_of[u as usize] = Some(l);
-                            }
-                        }
+                        self.apply_value(u, val);
                         continue 'outer;
                     }
                     _ => {}
@@ -1382,15 +1418,22 @@ impl<'a> FreeRem<'a> {
     }
 
     /// MRV: smallest domain; ties: most WT facts, then lowest first cell.
+    /// (A constraint-degree tie-break — ord/diff incidences first — was tried
+    /// and falsified: 0206's plain search went 3.3 s → >12 s on the changed
+    /// trajectory.)
     fn pick_mrv(&self) -> Option<u32> {
-        let mut best_key: Option<(usize, std::cmp::Reverse<usize>, usize)> = None;
+        let mut best_key: Option<(usize, usize, std::cmp::Reverse<usize>, usize)> = None;
         let mut best_u = None;
         for u in 0..self.lab_of.len() as u32 {
             if self.lab_of[u as usize].is_some() {
                 continue;
             }
+            // Narrow size window first: in size-case runs the constraint
+            // anchors carry exact windows and lead the assignment (0929's
+            // collapse); in plain runs widths are mostly equal (no-op).
             let key = (
                 self.cheap_domain(u).len(),
+                self.sz_hi[u as usize].saturating_sub(self.sz_lo[u as usize]),
                 std::cmp::Reverse(self.facts_of_unit[u as usize].len()),
                 self.unit_cells[u as usize][0],
             );
@@ -2003,6 +2046,8 @@ impl<'a> FreeRem<'a> {
         if crate::solver::validate::validate(self.puzzle, &regions) {
             Some(regions)
         } else {
+            #[cfg(test)]
+            die_note("leaf_reject", self.lab_of.len());
             None
         }
     }
@@ -2115,6 +2160,150 @@ fn relax_size_windows(
         }
         if !changed {
             break;
+        }
+    }
+}
+
+/// Enumerate exact per-unit size cases for a **connected** ord/diff
+/// constraint graph (0929 class).  The sufficiency probe (tmp_diag_0929b)
+/// showed the search collapses to ~20 nodes once every unit's label size is
+/// pinned; the gap system's disjunctions (signed-sum offsets) are invisible
+/// to interval windows, so enumerate the surviving size tuples here instead.
+/// Assumes each constraint unit holds its own label — merging with equal
+/// sizes stays expressible and anything missed falls back to the plain
+/// un-hinted search.  Returns `(per-unit exact windows, label count)` cases.
+fn enum_size_cases(
+    ord: &[(u32, u32)],
+    diff: &[(u32, u32, usize)],
+    sz_lo: &[usize],
+    sz_hi: &[usize],
+    total: usize,
+    g: usize,
+    max_labels: usize,
+) -> Vec<(Vec<(usize, usize)>, usize)> {
+    const CASE_CAP: usize = 256;
+    let n = sz_lo.len();
+    // Adjacency over the constraint graph; disconnected graphs are skipped
+    // (the cartesian product across components explodes — the plain search
+    // already covers those).  kind 0 = ord ("my size < their size"), kind 1
+    // = diff gap `|a−b| = val`.
+    let mut adj: Vec<Vec<(u32, u8, usize)>> = vec![Vec::new(); n];
+    let mut touched = vec![false; n];
+    for &(a, b) in ord {
+        adj[a as usize].push((b, 0, 0));
+        adj[b as usize].push((a, 0, 1));
+        touched[a as usize] = true;
+        touched[b as usize] = true;
+    }
+    for &(a, b, v) in diff {
+        adj[a as usize].push((b, 1, v));
+        adj[b as usize].push((a, 1, v));
+        touched[a as usize] = true;
+        touched[b as usize] = true;
+    }
+    let members: Vec<u32> = (0..n as u32).filter(|&u| touched[u as usize]).collect();
+    if members.is_empty() {
+        return Vec::new();
+    }
+    let mut seen = vec![false; n];
+    let mut stack = vec![members[0] as usize];
+    seen[members[0] as usize] = true;
+    let mut comp = 0usize;
+    while let Some(u) = stack.pop() {
+        comp += 1;
+        for &(v, _, _) in &adj[u] {
+            if !seen[v as usize] {
+                seen[v as usize] = true;
+                stack.push(v as usize);
+            }
+        }
+    }
+    if comp != members.len() {
+        return Vec::new(); // disconnected — leave to the plain search
+    }
+    // Highest-degree first keeps the DFS pruned early.
+    let mut order = members.clone();
+    order.sort_by_key(|&u| std::cmp::Reverse(adj[u as usize].len()));
+    let mut cases: Vec<(Vec<(usize, usize)>, usize)> = Vec::new();
+    let mut assign: std::collections::HashMap<u32, usize> = Default::default();
+    enum_comp_dfs(
+        &order,
+        0,
+        &adj,
+        sz_lo,
+        sz_hi,
+        total,
+        g,
+        max_labels,
+        &mut assign,
+        &mut cases,
+        CASE_CAP,
+    );
+    // Most-constrained first: the true case packs the bulk of the board into
+    // the constraint labels (0929: rest = 3 of 30), so smallest remainder
+    // (= largest anchor sum) leads.
+    cases.sort_by_key(|(win, _)| {
+        std::cmp::Reverse(win.iter().map(|&(a, _)| a).sum::<usize>())
+    });
+    cases
+}
+
+fn enum_comp_dfs(
+    order: &[u32],
+    k: usize,
+    adj: &[Vec<(u32, u8, usize)>],
+    sz_lo: &[usize],
+    sz_hi: &[usize],
+    total: usize,
+    g: usize,
+    max_labels: usize,
+    assign: &mut std::collections::HashMap<u32, usize>,
+    cases: &mut Vec<(Vec<(usize, usize)>, usize)>,
+    cap: usize,
+) {
+    if cases.len() >= cap {
+        return;
+    }
+    if k == order.len() {
+        let sum: usize = assign.values().sum();
+        let rest = total.saturating_sub(sum);
+        let n_lbl = assign.len() + if rest > 0 { 1 } else { 0 };
+        if sum <= total && n_lbl <= max_labels && (rest == 0 || rest >= g) {
+            let mut win = vec![(0usize, 0usize); sz_lo.len()];
+            for (u, s) in assign.iter() {
+                win[*u as usize] = (*s, *s);
+            }
+            cases.push((win, n_lbl));
+        }
+        return;
+    }
+    let u = order[k];
+    for s in sz_lo[u as usize]..=sz_hi[u as usize].min(total) {
+        let mut ok = true;
+        for &(v, kind, val) in &adj[u as usize] {
+            if let Some(&t) = assign.get(&v) {
+                // kind 0 + val 0 = my < their; kind 0 + val 1 = their < my.
+                let fits = if kind == 0 {
+                    if val == 0 {
+                        s < t
+                    } else {
+                        t < s
+                    }
+                } else {
+                    s.abs_diff(t) == val
+                };
+                if !fits {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            assign.insert(u, s);
+            enum_comp_dfs(
+                order, k + 1, adj, sz_lo, sz_hi, total, g, max_labels, assign, cases, cap,
+            );
+            assign.remove(&u);
         }
     }
 }
@@ -2235,7 +2424,7 @@ fn collect_size_orders(
     let mut diff: Vec<(u32, u32, usize)> = Vec::new();
     let mut lo = vec![1usize; n_units];
     let mut hi = vec![usize::MAX; n_units];
-    let mut edge = |a: usize,
+    let edge = |a: usize,
                     b: usize,
                     reversed: bool,
                     ord: &mut Vec<(u32, u32)>,
@@ -2270,7 +2459,7 @@ fn collect_size_orders(
         }
         Some(())
     };
-    let mut diff_edge = |a: usize,
+    let diff_edge = |a: usize,
                          b: usize,
                          v: usize,
                          diff: &mut Vec<(u32, u32)>,
@@ -2340,7 +2529,7 @@ fn collect_size_orders(
 #[allow(clippy::type_complexity)]
 fn build_free_units(
     free_cells: &[usize],
-    free_index: &std::collections::HashMap<usize, u32>,
+    _free_index: &std::collections::HashMap<usize, u32>,
     same: &[(u32, u32)],
     split_pairs: &[(u32, u32)],
     puzzle: &Puzzle,
@@ -2414,6 +2603,75 @@ fn build_free_units(
 /// region count): every region's size lives in `area_bounds`, so the FreeRem
 /// size windows + the spawn ceiling `total / min_sz` carry the whole search.
 /// Pre-drawn walls arrive as must-split via `build_free_units`.
+/// Merge a case's exact-window overrides (`0` = sentinel, keep base) into
+/// the concrete `sz_lo`/`sz_hi` pair for one run.
+fn merge_case_windows(
+    case_lo: &[usize],
+    case_hi: &[usize],
+    base_lo: &[usize],
+    base_hi: &[usize],
+) -> (Vec<usize>, Vec<usize>) {
+    let mut lo: Vec<usize> = Vec::with_capacity(base_lo.len());
+    let mut hi: Vec<usize> = Vec::with_capacity(base_hi.len());
+    for u in 0..base_lo.len() {
+        if case_lo[u] != 0 || case_hi[u] != 0 {
+            lo.push(case_lo[u]);
+            hi.push(case_hi[u]);
+        } else {
+            lo.push(base_lo[u]);
+            hi.push(base_hi[u]);
+        }
+    }
+    (lo, hi)
+}
+
+/// Per-run deadline: 800 ms per size case (the true case converges in
+/// ~0.5 s; wrong cases die shallow), full residual for the plain run.
+fn run_deadline(is_case: bool, module_deadline: crate::clock::Instant) -> crate::clock::Instant {
+    let budget = if is_case {
+        std::time::Duration::from_millis(800)
+    } else {
+        std::time::Duration::from_secs(12)
+    };
+    let t = crate::clock::Instant::now() + budget;
+    if t < module_deadline {
+        t
+    } else {
+        module_deadline
+    }
+}
+
+/// Size-window runs to try: one exact-window run per enumerated size case
+/// (untouched units keep `(0, 0)` = base windows) with the case's own label
+/// count as the spawn ceiling, then the plain un-hinted run last (the
+/// residual budget fallback).
+fn range_windows_runs(
+    ord: &[(u32, u32)],
+    diff: &[(u32, u32, usize)],
+    sz_lo: &[usize],
+    sz_hi: &[usize],
+    total: usize,
+    g: usize,
+    max_labels: usize,
+) -> Vec<(Vec<usize>, Vec<usize>, usize)> {
+    let cases = enum_size_cases(ord, diff, sz_lo, sz_hi, total, g, max_labels);
+    let mut runs: Vec<(Vec<usize>, Vec<usize>, usize)> = Vec::with_capacity(cases.len() + 1);
+    for (win, n_lbl) in &cases {
+        let mut lo = vec![0usize; sz_lo.len()];
+        let mut hi = vec![0usize; sz_hi.len()];
+        for (u, &(a, b)) in win.iter().enumerate() {
+            if a != 0 || b != 0 {
+                lo[u] = a;
+                hi[u] = b;
+            }
+        }
+        // Sentinel 0 = keep base window at run time.
+        runs.push((lo, hi, *n_lbl));
+    }
+    runs.push((vec![0usize; sz_lo.len()], vec![0usize; sz_hi.len()], max_labels));
+    runs
+}
+
 pub(crate) fn solve_range_partition(
     puzzle: &Puzzle,
     n: usize,
@@ -2500,30 +2758,62 @@ pub(crate) fn solve_range_partition(
     // full unit budget per puzzle and starves the later modules (1146 at
     // -j 6).  1351 solves in <5 s, so 12 s is a wide margin.
     let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(12_000);
-    let leaf_deadline = if slice < deadline { slice } else { deadline };
-    let mut search = FreeRem {
-        puzzle,
-        pinned: &pinned,
-        w,
-        unit_cells: &unit_cells,
-        unit_adj: &unit_adj,
-        split: &split,
-        facts: &facts,
-        facts_of_unit: &facts_of_unit,
-        ord: &ord,
-        diff: &diff,
-        sz_lo: &sz_lo,
-        sz_hi: &sz_hi,
-        unit_types: &unit_types,
-        n_types: 0,
-        max_labels,
-        lab_of: vec![None; unit_cells.len()],
-        lab_units: Vec::new(),
-        win_cache: Vec::new(),
-        deadline: leaf_deadline,
-        nodes: 0,
+    let module_deadline = if slice < deadline { slice } else { deadline };
+    // Size cases first (0929 class): the true case converges in ~20 nodes and
+    // wrong cases die at the root, so a tiny per-case slice bounds the tail;
+    // the un-hinted plain run keeps the residual budget (0270 class).
+    // `RANGE_CASES=0` diagnostic switch: skip the size-case runs (measure
+    // the plain path alone).
+    let mut runs = if std::env::var("RANGE_CASES").map(|v| v == "0").unwrap_or(false) {
+        range_windows_runs(&[], &[], &sz_lo, &sz_hi, total, lo, max_labels)
+    } else {
+        range_windows_runs(&ord, &diff, &sz_lo, &sz_hi, total, lo, max_labels)
     };
-    search.search()
+    let n_cases = runs.len().saturating_sub(1);
+    let case_deadline = {
+        let t = crate::clock::Instant::now() + std::time::Duration::from_millis(6_000);
+        if t < module_deadline {
+            t
+        } else {
+            module_deadline
+        }
+    };
+    for (i, (case_lo, case_hi, case_max)) in runs.drain(..).enumerate() {
+        let is_case = i < n_cases;
+        if is_case && crate::clock::Instant::now() >= case_deadline {
+            continue; // case budget spent — fall through to the plain run
+        }
+        if crate::clock::Instant::now() >= module_deadline {
+            break;
+        }
+        let (slo, shi) = merge_case_windows(&case_lo, &case_hi, &sz_lo, &sz_hi);
+        let mut search = FreeRem {
+            puzzle,
+            pinned: &pinned,
+            w,
+            unit_cells: &unit_cells,
+            unit_adj: &unit_adj,
+            split: &split,
+            facts: &facts,
+            facts_of_unit: &facts_of_unit,
+            ord: &ord,
+            diff: &diff,
+            sz_lo: &slo,
+            sz_hi: &shi,
+            unit_types: &unit_types,
+            n_types: 0,
+            max_labels: case_max,
+            lab_of: vec![None; unit_cells.len()],
+            lab_units: Vec::new(),
+            win_cache: Vec::new(),
+            deadline: run_deadline(is_case, module_deadline),
+            nodes: 0,
+        };
+        if let Some(res) = search.search() {
+            return Some(res);
+        }
+    }
+    None
 }
 
 /// Rose-cardinality partition (0975a class): every region holds exactly one
@@ -2531,6 +2821,8 @@ pub(crate) fn solve_range_partition(
 /// apart by the same-type must-split pairs and completed one type at a time
 /// (`rose_step`).  The ring frame chain collapses the rim into a single unit
 /// (`ring_frame_runs`).  No pins — the whole board is the residue.
+/// WIP: routing not wired yet (see `rose/mod.rs`) — exercised by tests only.
+#[allow(dead_code)]
 pub(crate) fn solve_cardinal_partition(
     puzzle: &Puzzle,
     symbol_types: &[String],
@@ -2552,7 +2844,6 @@ pub(crate) fn solve_cardinal_partition(
             }
         }
     }
-    let pin_of: Vec<Option<usize>> = vec![None; n];
     let mut free_index: std::collections::HashMap<usize, u32> =
         std::collections::HashMap::new();
     let mut free_cells: Vec<usize> = Vec::new();
@@ -2588,7 +2879,7 @@ pub(crate) fn solve_cardinal_partition(
             }
         }
     }
-    let (mut unit_cells, unit_of_cell, unit_adj, mut split) =
+    let (unit_cells, unit_of_cell, unit_adj, split) =
         match build_free_units(&free_cells, &free_index, &same, &split_pairs, puzzle, w) {
             Some(v) => v,
             None => {
@@ -2629,8 +2920,6 @@ pub(crate) fn solve_cardinal_partition(
     let facts: Vec<WtUnitFact> = Vec::new();
     let facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); unit_cells.len()];
     let pinned: Vec<PinnedPlacement> = Vec::new();
-    let _ = &mut unit_cells;
-    let _ = &mut split;
     let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(8_000);
     let leaf_deadline = if slice < deadline { slice } else { deadline };
     let mut search = FreeRem {
@@ -2656,7 +2945,6 @@ pub(crate) fn solve_cardinal_partition(
         nodes: 0,
     };
     let out = search.search();
-    let deepest = 0usize;
     out
 }
 
@@ -3132,9 +3420,9 @@ mod multi_rem_tests {
         assert!(out.is_some(), "0270 range partition must solve");
     }
 
-    /// 0929 (non_block + difference, 5×6, 6 regions): endgame tracker.
+    /// 0929 (non_block + difference, 5×6, 6 regions): the size-case
+    /// enumeration pins the gap-chain's disjunctions (3.6 s).
     #[test]
-    #[ignore]
     fn solves_range_partition_0929() {
         let p = crate::io::parse_puzzle(include_str!(
             "../../../../puzzles/official/Zone3/4-difference/0929.json"
@@ -3156,5 +3444,160 @@ mod multi_rem_tests {
         let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
         let out = solve_range_partition(&p, p.height * p.width, deadline);
         assert!(out.is_some(), "0770 range partition must solve");
+    }
+
+    /// Death-attribution dump for the 0929-class endgame gap.
+    /// `cargo test -- --ignored tmp_diag_0929 --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_0929() {
+        dies_reset();
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/4-difference/0929.json"
+        ))
+        .expect("parse");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(12);
+        let out = solve_range_partition(&p, p.height * p.width, deadline);
+        eprintln!("tmp_diag_0929 solved={}", out.is_some());
+        let mut rows: Vec<_> = dies_snapshot().into_iter().collect();
+        rows.sort_by_key(|(k, _)| *k);
+        for ((tag, bucket), n) in rows {
+            eprintln!("die {tag:12} assigned~{:<3} x{}", bucket * 16, n);
+        }
+    }
+
+    /// 0206 economics probe: plain-only (RANGE_CASES=0) vs cases.  Run both:
+    /// `cargo test -- --ignored tmp_diag_0206 --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_0206() {
+        for mode in ["1", "0"] {
+            std::env::set_var("RANGE_CASES", mode);
+            dies_reset();
+            let p = crate::io::parse_puzzle(include_str!(
+                "../../../../puzzles/official/Zone3/4-difference/0206.json"
+            ))
+            .expect("parse");
+            let t0 = std::time::Instant::now();
+            let out = solve_range_partition(&p, p.height * p.width, crate::clock::Instant::now() + std::time::Duration::from_secs(12));
+            eprintln!(
+                "tmp_diag_0206 cases={mode} solved={} wall={:?}",
+                out.is_some(),
+                t0.elapsed()
+            );
+        }
+        std::env::remove_var("RANGE_CASES");
+    }
+
+    /// Sufficiency probe: feed the official per-region sizes as exact static
+    /// windows.  If the search then converges instantly, size domains are the
+    /// missing key for the 0929 class (⇒ disjunctive gap/bitset windows).
+    #[test]
+    #[ignore]
+    fn tmp_diag_0929b_exact_sizes() {
+        dies_reset();
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/4-difference/0929.json"
+        ))
+        .expect("parse");
+        let ans: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../puzzles/official/Zone3-answer/4-difference/0929.json"
+        ))
+        .expect("parse answer");
+        let n = p.height * p.width;
+        let w = p.width;
+        let mut region_size = vec![0usize; n];
+        for region in ans["regions"].as_array().unwrap() {
+            let cells: Vec<(usize, usize)> = region
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| {
+                    (
+                        c[0].as_u64().unwrap() as usize,
+                        c[1].as_u64().unwrap() as usize,
+                    )
+                })
+                .collect();
+            for &(r, c) in &cells {
+                region_size[r * w + c] = cells.len();
+            }
+        }
+        let pin_of: Vec<Option<usize>> = vec![None; n];
+        let mut free_index: std::collections::HashMap<usize, u32> =
+            std::collections::HashMap::new();
+        let mut free_cells: Vec<usize> = Vec::new();
+        for idx in 0..n {
+            let (r, c) = (idx / w, idx % w);
+            if !p.cells[r][c].blocked {
+                free_index.insert(idx, free_cells.len() as u32);
+                free_cells.push(idx);
+            }
+        }
+        let facts_raw = watchtower_facts(&p);
+        let (wt_same, wt_split) =
+            wt_free_relations(&facts_raw, &pin_of, &free_index).expect("wt relations");
+        let (unit_cells, unit_of_cell, unit_adj, split) =
+            build_free_units(&free_cells, &free_index, &wt_same, &wt_split, &p, w).expect("units");
+        let pinned: Vec<PinnedPlacement> = Vec::new();
+        let (ord, diff, _ext_lo, _ext_hi) =
+            collect_size_orders(&p, w, &pinned, &pin_of, &free_index, &unit_of_cell).expect("ord");
+        // Official size hints on the constraint-graph units only (the true
+        // case's production shape) — measure how heavy the loose tail is.
+        let mut in_diff = vec![false; unit_cells.len()];
+        for &(a, b, _) in &diff {
+            in_diff[a as usize] = true;
+            in_diff[b as usize] = true;
+        }
+        let sz_lo: Vec<usize> = (0..unit_cells.len())
+            .map(|i| {
+                if in_diff[i] {
+                    region_size[unit_cells[i][0]]
+                } else {
+                    1
+                }
+            })
+            .collect();
+        let sz_hi: Vec<usize> = (0..unit_cells.len())
+            .map(|i| {
+                if in_diff[i] {
+                    region_size[unit_cells[i][0]]
+                } else {
+                    30
+                }
+            })
+            .collect();
+        let unit_types: Vec<u64> = vec![0u64; unit_cells.len()];
+        let facts: Vec<WtUnitFact> = Vec::new();
+        let facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); unit_cells.len()];
+        let mut search = FreeRem {
+            puzzle: &p,
+            pinned: &pinned,
+            w,
+            unit_cells: &unit_cells,
+            unit_adj: &unit_adj,
+            split: &split,
+            facts: &facts,
+            facts_of_unit: &facts_of_unit,
+            ord: &ord,
+            diff: &diff,
+            sz_lo: &sz_lo,
+            sz_hi: &sz_hi,
+            unit_types: &unit_types,
+            n_types: 0,
+            max_labels: 6,
+            lab_of: vec![None; unit_cells.len()],
+            lab_units: Vec::new(),
+            win_cache: Vec::new(),
+            deadline: crate::clock::Instant::now() + std::time::Duration::from_secs(12),
+            nodes: 0,
+        };
+        let out = search.search();
+        eprintln!("tmp_diag_0929b solved={} nodes={}", out.is_some(), search.nodes);
+        let mut rows: Vec<_> = dies_snapshot().into_iter().collect();
+        rows.sort_by_key(|(k, _)| *k);
+        for ((tag, bucket), n) in rows {
+            eprintln!("die {tag:12} assigned~{:<3} x{}", bucket * 16, n);
+        }
     }
 }

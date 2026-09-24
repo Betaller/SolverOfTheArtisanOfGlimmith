@@ -1507,7 +1507,7 @@ impl<'a> Solver<'a> {
             pairs.push(if smaller_first { (ci1, ci2) } else { (ci2, ci1) });
         }
 
-        let mut progress = self.narrow_inequality_bounds(&pairs)?;
+        let progress = self.narrow_inequality_bounds(&pairs)?;
 
         for (e, smaller_first) in ineq_clues {
             if self.edges[e] != EdgeState::Cut {
@@ -3152,7 +3152,7 @@ impl<'a> Solver<'a> {
             })
             .collect();
 
-        for (vi, vj, value, edge_ids, is_cycle, n) in constraints {
+        for (_vi, _vj, value, edge_ids, is_cycle, n) in constraints {
             if edge_ids.is_empty() {
                 // The cells around this vertex share no edge *here*.  They can
                 // still end up in the same region via a path outside the

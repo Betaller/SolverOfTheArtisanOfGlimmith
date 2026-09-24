@@ -70,6 +70,7 @@
 | 2026-09-24 | **compass+solitary 余数**（doc 07 修订2，1093 破簇） | 1093 直跑 + compass/puzzle_piece 子集 | 直跑 `rsolver` + `cargo test --release` + `benchmark_rust_solver.py --rules compass/puzzle_piece` | **1197 口径**（1196 + 1093） | **+1**（1093） | `solitary` 钉死自由区数=自由线索格数 ⇒ 自由标签有身份，委托 `compass_label::solve_labeling`（`Model::build_excluding` 预钉格不可填）。**顺带修复预绘墙语义洞**（doc 13 §6.5）：墙=must-differ 而非仅连通断开（1093 (3,1)-(4,1) 绕行同标签骗过 joinable），`Model.wall_pairs`+域过滤；错钉叶子无解证明可达 4.4s ⇒ 每尝试 100ms 切片。**1093 全解 via pp-pin（+1）**；官方钉隔离 0.01s、官方放置枚举 6/6；pp 子集 169/171、compass 子集 112/129（0 真回归）。`cargo test` 58+8、`pytest` 292、complexity_gate 全过。 |
 | 2026-09-24 | **inequality 余数尺寸窗**（doc 07 修订3，0899 破簇） | 0899 直跑 + pp 子集 | 直跑 `rsolver` + `cargo test --release` + `benchmark_rust_solver.py --rules puzzle_piece` | **1198 口径**（1198） | **+1**（0899） | `solve_multi_remainder` 驱动门扩 inequality（有向面积序）：`collect_size_orders` 静态界（pin 侧→单元标签 lo/hi；双 pin 违序根判死；自由对=序+must-differ）+ **可达性上界**（标签可长到的最大格数=围袋大小——错钉组合的口袋与界冲突在根 fixpoint 判死，0899 的 2.7M 预钉组合走 µs 级根判死）+ 序对窗检查。**0899 全解 via pp-pin（+1）**；官方钉隔离 0.06s。`cargo test` 60+8、`pytest` 292、complexity_gate 全过。 |
 | 2026-09-24 | **compass_label 桥过滤+走廊强制**（doc 13 §6.6，结构/性能） | compass/pp 双子集 + 0683/1258 专项 | `benchmark_rust_solver.py --rules compass/puzzle_piece` + tmp_diag | **1198 口径不变**（compass 112/129、pp 170/171 均 0 真回归） | 0（残簇未破） | 死因画像：0683 的 6M 节点 70% 死在 joinable 且集中在 64-79 已派＝「桥格被划走、连通死亡过晚显形」。修：①域感知桥过滤（域不含 j 的格不能当 j 的桥）②**单连通走廊强制**（纯 j 分量只被一座桥触到⇒该桥强制入 j；零桥⇒立判死）——0683 25s 节点 6.0M→1.3M（−73%），死亡移向近叶（树在逼近全解态）；③exact-cover 帽取池域+成对 Hall（中性）。0683/1258 60s 仍未解（差末段基数收尾）；常规题普适提速（测试墙钟 15s→6.3s）。`cargo test` 60+8、`pytest` 292、complexity_gate 全过。 |
+| 2026-09-24 | **rose 基数标记雏形**（doc 07 修订4，0975a WIP） | 官方叶直验 + 0975a 搜索探针 | 直跑测试 | **1198 口径不变** | 0（WIP） | `solve_cardinal_partition`：框链单元+同型 must-split+`rose_step` 完成度强制+标签帽。诊断：官方划分直喂叶子 ✓ 通过；搜索核 120s/1.89M 节点无全指派（~70% 已派的潜在连通判死；「26k 空树穷尽」系 1k 节点/s 超时误判）。附带 `cheap_domain`（FreeRem 12× 提速、0994/0899/1093 零回归）。路由暂撤、测试 `#[ignore]` 挂跟踪。`cargo test` 61+8、`pytest` 292、complexity_gate 全过。 |
 
 ---
 
@@ -1034,6 +1035,16 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
 multi_rem 测试墙钟 15s→6.3s；compass 子集 112/129、pp 子集 170/171 均 **0 真回归**。
 `cargo test` 60+8、`pytest` 292、complexity_gate 全过（joinable CC=25 拆
 `corridor_forces` 后过 20）。
+
+### 2026-09-24（续6） · rose 基数标记雏形（0975a WIP，0 解——诊断完备留续作）
+
+0975a 专用引擎 `solve_cardinal_partition`（doc 07 修订4）：框链 run 单元 +
+同型符号 must-split + `rose_step` 完成度强制 + 标签帽。**诊断链完整**：官方
+划分直喂叶子 ✓ 通过（建模无误）；搜索核 120s/1.89M 节点无全指派（死于 ~70%
+已派的潜在连通）——真解在树中、缺 k 标签版 SAC/引导序；且澄清「26k 空树穷尽」
+是 1k 节点/s 的**超时误判**。附带 `cheap_domain`（FreeRem 12× 提速、三题零
+回归）。路由接线暂撤、求解测试 `#[ignore]` 挂跟踪。`cargo test` 61+8、
+`pytest` 292、complexity_gate 全过。口径维持 **1198**。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

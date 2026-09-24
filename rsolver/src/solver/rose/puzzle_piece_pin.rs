@@ -1103,6 +1103,13 @@ fn wt_free_relations(
     Some((same, split))
 }
 
+/// Verdict of the rose-cardinality completion step.
+enum RoseStep {
+    Ok,
+    Dead,
+    Force(u32, u32),
+}
+
 /// Connected-partition DFS over must-same *units*.  Each unit joins the label
 /// of an adjacent already-assigned unit or spawns a fresh label; fixed unit
 /// order makes this enumeration canonical (each partition exactly once).
@@ -1122,6 +1129,11 @@ struct FreeRem<'a> {
     ord: &'a Vec<(u32, u32)>,
     sz_lo: &'a Vec<usize>,
     sz_hi: &'a Vec<usize>,
+    /// Rose-cardinality mode: per-unit symbol-type bitmask (empty = off).
+    unit_types: &'a Vec<u64>,
+    n_types: usize,
+    /// Region (= label) count: symbols-per-type, NOT the type count.
+    max_labels: usize,
     lab_of: Vec<Option<u32>>,
     lab_units: Vec<Vec<u32>>,
     deadline: crate::clock::Instant,
@@ -1150,6 +1162,11 @@ impl<'a> FreeRem<'a> {
         self.fixpoint()?;
         if self.lab_of.iter().all(|l| l.is_some()) {
             return self.leaf_regions();
+        }
+        {
+            let a = self.lab_of.iter().filter(|l| l.is_some()).count();
+            if a > self.nodes % 1000 {
+            }
         }
         let u = self.pick_mrv()?;
         let values = self.value_order(u);
@@ -1193,11 +1210,20 @@ impl<'a> FreeRem<'a> {
             if !self.joinable_all() || !self.wt_all_ok() || !self.sizes_ok() {
                 return None;
             }
+            match self.rose_step() {
+                RoseStep::Dead => return None,
+                RoseStep::Force(u, l) => {
+                    self.lab_units[l as usize].push(u);
+                    self.lab_of[u as usize] = Some(l);
+                    continue;
+                }
+                RoseStep::Ok => {}
+            }
             for u in 0..self.lab_of.len() as u32 {
                 if self.lab_of[u as usize].is_some() {
                     continue;
                 }
-                let dom = self.domain(u);
+                let dom = self.cheap_domain(u);
                 match dom.len() {
                     0 => return None,
                     1 => {
@@ -1224,6 +1250,38 @@ impl<'a> FreeRem<'a> {
 
     /// Feasible values: existing labels the unit may join (not must-split
     /// from any member and the merge stays potential-connectable) plus SPAWN.
+    /// Cheap over-approximation of `domain` (no BFS): used for MRV and the
+    /// singleton scan — the full domain is only computed for the chosen unit.
+    /// Over-approximate ⇒ fewer forces/dies ⇒ sound.
+    fn cheap_domain(&self, u: u32) -> Vec<Option<u32>> {
+        let mut out: Vec<Option<u32>> = Vec::new();
+        for (l, units) in self.lab_units.iter().enumerate() {
+            if units.is_empty() {
+                continue;
+            }
+            if units.iter().any(|&v| self.is_split(u, v)) {
+                continue;
+            }
+            if self.n_types > 0 {
+                let tm = self.unit_types[u as usize];
+                let mut taken = 0u64;
+                for &v in units {
+                    taken |= self.unit_types[v as usize];
+                }
+                if taken & tm != 0 {
+                    continue;
+                }
+            }
+            out.push(Some(l as u32));
+        }
+        if self.n_types == 0 {
+            out.push(None);
+        } else if self.lab_units.len() < self.max_labels {
+            out.push(None);
+        }
+        out
+    }
+
     fn domain(&self, u: u32) -> Vec<Option<u32>> {
         let mut out: Vec<Option<u32>> = Vec::new();
         for (l, units) in self.lab_units.iter().enumerate() {
@@ -1233,6 +1291,16 @@ impl<'a> FreeRem<'a> {
             if units.iter().any(|&v| self.is_split(u, v)) {
                 continue;
             }
+            if self.n_types > 0 {
+                let tm = self.unit_types[u as usize];
+                let mut taken = 0u64;
+                for &v in units {
+                    taken |= self.unit_types[v as usize];
+                }
+                if taken & tm != 0 {
+                    continue;
+                }
+            }
             let mut merged = units.clone();
             merged.push(u);
             if self.label_potential_ok(&merged) && self.static_cap_ok(&merged) {
@@ -1241,11 +1309,46 @@ impl<'a> FreeRem<'a> {
         }
         // SPAWN: the unit's own label is trivially connectable when it is a
         // single cell; a non-contiguous must-same class needs its cells
-        // connectable through bridges.
-        if self.label_potential_ok(std::slice::from_ref(&u)) {
+        // connectable through bridges.  In rose mode the label count is
+        // exactly `n_types` (the region count = symbols-per-type), so spawn
+        // stops at that ceiling, and a fresh label must still be able to
+        // collect one unit of every type it lacks.
+        if self.n_types > 0 {
+            if self.lab_units.len() < self.max_labels
+                && self.label_potential_ok(std::slice::from_ref(&u))
+                && self.spawn_completable(u)
+            {
+                out.push(None);
+            }
+        } else if self.label_potential_ok(std::slice::from_ref(&u)) {
             out.push(None);
         }
         out
+    }
+
+    /// Can a fresh label rooted at `u` still collect one unit of every type
+    /// it does not already carry?
+    fn spawn_completable(&self, u: u32) -> bool {
+        let mut have = self.unit_types[u as usize];
+        let full: u64 = if self.n_types >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << self.n_types) - 1
+        };
+        let missing = full & !have;
+        if missing == 0 {
+            return true;
+        }
+        for j in 0..self.unit_cells.len() as u32 {
+            if self.lab_of[j as usize].is_some() || j == u {
+                continue;
+            }
+            if self.is_split(j, u) {
+                continue;
+            }
+            have |= self.unit_types[j as usize];
+        }
+        have & missing == missing
     }
 
     /// MRV: smallest domain; ties: most WT facts, then lowest first cell.
@@ -1257,7 +1360,7 @@ impl<'a> FreeRem<'a> {
                 continue;
             }
             let key = (
-                self.domain(u).len(),
+                self.cheap_domain(u).len(),
                 std::cmp::Reverse(self.facts_of_unit[u as usize].len()),
                 self.unit_cells[u as usize][0],
             );
@@ -1347,6 +1450,82 @@ impl<'a> FreeRem<'a> {
             d
         };
         f.value >= lo && f.value <= hi
+    }
+
+    /// Rose cardinality ("each region holds exactly one of each symbol
+    /// type"): labels must collect one unit per type; a label that can no
+    /// longer reach a missing type is dead, and a missing type with only one
+    /// reachable unit is forced.
+    fn rose_step(&self) -> RoseStep {
+        if self.n_types == 0 {
+            return RoseStep::Ok;
+        }
+        let full: u64 = if self.n_types >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << self.n_types) - 1
+        };
+        for (li, units) in self.lab_units.iter().enumerate() {
+            if units.is_empty() {
+                continue;
+            }
+            let mut taken = 0u64;
+            for &v in units {
+                let tm = self.unit_types[v as usize];
+                if taken & tm != 0 {
+                    return RoseStep::Dead;
+                }
+                taken |= tm;
+            }
+            let missing = full & !taken;
+            if missing == 0 {
+                continue;
+            }
+            let reach = self.label_reach(units);
+            if reach.0 != usize::MAX {
+                return RoseStep::Dead;
+            }
+            let mut cands: Vec<u32> = Vec::new();
+            for j in 0..self.unit_cells.len() as u32 {
+                if self.lab_of[j as usize].is_some() {
+                    continue;
+                }
+                let tm = self.unit_types[j as usize];
+                if tm & missing == 0 {
+                    continue;
+                }
+                if units.iter().any(|&v| self.is_split(j, v)) {
+                    continue;
+                }
+                cands.push(j);
+            }
+            for t in 0..self.n_types {
+                let bit = 1u64 << t;
+                if missing & bit == 0 {
+                    continue;
+                }
+                let mut only: Option<u32> = None;
+                let mut count = 0usize;
+                for &j in &cands {
+                    if self.unit_types[j as usize] & bit != 0 {
+                        count += 1;
+                        only = Some(j);
+                        if count > 1 {
+                            break;
+                        }
+                    }
+                }
+                if count == 0 {
+                    return RoseStep::Dead;
+                }
+                if count == 1 {
+                    if let Some(j) = only {
+                        return RoseStep::Force(j, li as u32);
+                    }
+                }
+            }
+        }
+        RoseStep::Ok
     }
 
     /// Inequality size windows: every label must fit `size < cap` from its
@@ -1644,50 +1823,6 @@ fn collect_size_orders(
     Some((ord, lo, hi))
 }
 
-fn solve_multi_remainder(
-    puzzle: &Puzzle,
-    pinned: &[PinnedPlacement],
-    n: usize,
-    deadline: crate::clock::Instant,
-) -> Option<Vec<crate::types::RegionInfo>> {
-    let w = puzzle.width;
-    let mut pin_of: Vec<Option<usize>> = vec![None; n];
-    for (ri, p) in pinned.iter().enumerate() {
-        for idx in p.cells.iter() {
-            pin_of[idx] = Some(ri);
-        }
-    }
-    let mut free_cells: Vec<usize> = Vec::new();
-    for idx in 0..n {
-        let (r, c) = (idx / w, idx % w);
-        if !puzzle.cells[r][c].blocked && pin_of[idx].is_none() {
-            free_cells.push(idx);
-        }
-    }
-    if free_cells.is_empty() {
-        return None;
-    }
-    // Cell → free-cell ordinal for the union-find.
-    let mut free_index: std::collections::HashMap<usize, u32> =
-        std::collections::HashMap::new();
-    for (i, &idx) in free_cells.iter().enumerate() {
-        free_index.insert(idx, i as u32);
-    }
-    let facts_raw = watchtower_facts(puzzle);
-    // v1 scope: the free-partition search needs a *driving* constraint —
-    // watchtower cardinalities (0994 class: they force the singletons /
-    // must-same corridors) or inequality edges (0899 class: directed size
-    // order across pre-drawn walls; the potential-connect closure then
-    // derives the enclosed singletons).  Truly constraint-free residues
-    // (1435: 59 units of `mixed`) degenerate into a Bell-number walk and
-    // every wrong pin leaf of 1215 would burn its slice here instead of
-    // falling through to the next leaf.
-    let has_inequality = puzzle.rules.iter().any(|r| r.ctype == "inequality");
-    if facts_raw.is_empty() && !has_inequality {
-        return None;
-    }
-    let (same, split_pairs) = wt_free_relations(&facts_raw, &pin_of, &free_index)?;
-
 /// Must-same closure (UF) + pre-drawn walls as must-split + unit compression
 /// + unit adjacency.  Returns `(unit_cells, unit_of_cell, unit_adj, split)`;
 /// `None` on a must-same class straddling a must-split pair.
@@ -1764,10 +1899,188 @@ fn build_free_units(
     Some((unit_cells, unit_of_cell, unit_adj, split))
 }
 
+/// Rose-cardinality partition (0975a class): every region holds exactly one
+/// unit of each symbol type, so the free labeling has emergent labels pinned
+/// apart by the same-type must-split pairs and completed one type at a time
+/// (`rose_step`).  The ring frame chain collapses the rim into a single unit
+/// (`ring_frame_runs`).  No pins — the whole board is the residue.
+pub(crate) fn solve_cardinal_partition(
+    puzzle: &Puzzle,
+    symbol_types: &[String],
+    n: usize,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let w = puzzle.width;
+    if symbol_types.len() < 2 {
+        return None;
+    }
+    // Per-cell symbol type index.
+    let mut type_of_cell: Vec<Option<usize>> = vec![None; n];
+    for r in 0..puzzle.height {
+        for c in 0..w {
+            if let Some(sym) = puzzle.cells[r][c].symbol.as_ref() {
+                if let Some(ti) = symbol_types.iter().position(|t| t == sym) {
+                    type_of_cell[r * w + c] = Some(ti);
+                }
+            }
+        }
+    }
+    let pin_of: Vec<Option<usize>> = vec![None; n];
+    let mut free_index: std::collections::HashMap<usize, u32> =
+        std::collections::HashMap::new();
+    let mut free_cells: Vec<usize> = Vec::new();
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if !puzzle.cells[r][c].blocked {
+            free_index.insert(idx, free_cells.len() as u32);
+            free_cells.push(idx);
+        }
+    }
+    // must-split: same-type symbol pairs (two equal symbols never share a
+    // region — each region holds exactly one of each type).
+    let mut split_pairs: Vec<(u32, u32)> = Vec::new();
+    for i in 0..free_cells.len() {
+        for j in (i + 1)..free_cells.len() {
+            let (a, b) = (free_cells[i], free_cells[j]);
+            match (type_of_cell[a], type_of_cell[b]) {
+                (Some(ta), Some(tb)) if ta == tb => {
+                    split_pairs.push((i as u32, j as u32));
+                }
+                _ => {}
+            }
+        }
+    }
+    // must-same: the ring frame chain (rim vertices forbid the wall between
+    // two rim cells — the whole clean run is one region).
+    let mut same: Vec<(u32, u32)> = Vec::new();
+    for run in crate::solver::same_tiling::ring_frame_runs(puzzle) {
+        for pair in run.windows(2) {
+            let (a, b) = (pair[0].0 * w + pair[0].1, pair[1].0 * w + pair[1].1);
+            if let (Some(&ia), Some(&ib)) = (free_index.get(&a), free_index.get(&b)) {
+                same.push((ia, ib));
+            }
+        }
+    }
+    let (mut unit_cells, unit_of_cell, unit_adj, mut split) =
+        match build_free_units(&free_cells, &free_index, &same, &split_pairs, puzzle, w) {
+            Some(v) => v,
+            None => {
+                return None;
+            }
+        };
+    // Per-unit symbol-type bitmask; a unit carrying two of one type is dead.
+    let n_types = symbol_types.len();
+    // The region (= label) count is the symbols-per-type count (each region
+    // holds exactly one of each type) — NOT the type count.
+    let max_labels = symbol_types
+        .iter()
+        .map(|s| {
+            (0..puzzle.height)
+                .flat_map(|r| (0..w).map(move |c| (r, c)))
+                .filter(|&(r, c)| puzzle.cells[r][c].symbol.as_deref() == Some(s.as_str()))
+                .count()
+        })
+        .min()
+        .unwrap_or(0)
+        .max(1);
+    let mut unit_types: Vec<u64> = vec![0u64; unit_cells.len()];
+    for (i, &idx) in free_cells.iter().enumerate() {
+        if let Some(t) = type_of_cell[idx] {
+            let u = unit_of_cell[i] as usize;
+            let bit = 1u64 << t;
+            if unit_types[u] & bit != 0 {
+                return None;
+            }
+            unit_types[u] |= bit;
+        }
+    }
+    let ord: Vec<(u32, u32)> = Vec::new();
+    let sz_lo: Vec<usize> = vec![1usize; unit_cells.len()];
+    let sz_hi: Vec<usize> = vec![usize::MAX; unit_cells.len()];
+    let facts: Vec<WtUnitFact> = Vec::new();
+    let facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); unit_cells.len()];
+    let pinned: Vec<PinnedPlacement> = Vec::new();
+    let _ = &mut unit_cells;
+    let _ = &mut split;
+    let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(8_000);
+    let leaf_deadline = if slice < deadline { slice } else { deadline };
+    let mut search = FreeRem {
+        puzzle,
+        pinned: &pinned,
+        w,
+        unit_cells: &unit_cells,
+        unit_adj: &unit_adj,
+        split: &split,
+        facts: &facts,
+        facts_of_unit: &facts_of_unit,
+        ord: &ord,
+        sz_lo: &sz_lo,
+        sz_hi: &sz_hi,
+        unit_types: &unit_types,
+        n_types,
+        max_labels,
+        lab_of: vec![None; unit_cells.len()],
+        lab_units: Vec::new(),
+        deadline: leaf_deadline,
+        nodes: 0,
+    };
+    let out = search.search();
+    let deepest = 0usize;
+    out
+}
+
+fn solve_multi_remainder(
+    puzzle: &Puzzle,
+    pinned: &[PinnedPlacement],
+    n: usize,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let w = puzzle.width;
+    let mut pin_of: Vec<Option<usize>> = vec![None; n];
+    for (ri, p) in pinned.iter().enumerate() {
+        for idx in p.cells.iter() {
+            pin_of[idx] = Some(ri);
+        }
+    }
+    let mut free_cells: Vec<usize> = Vec::new();
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if !puzzle.cells[r][c].blocked && pin_of[idx].is_none() {
+            free_cells.push(idx);
+        }
+    }
+    if free_cells.is_empty() {
+        return None;
+    }
+    // Cell → free-cell ordinal for the union-find.
+    let mut free_index: std::collections::HashMap<usize, u32> =
+        std::collections::HashMap::new();
+    for (i, &idx) in free_cells.iter().enumerate() {
+        free_index.insert(idx, i as u32);
+    }
+    let facts_raw = watchtower_facts(puzzle);
+    // v1 scope: the free-partition search needs a *driving* constraint —
+    // watchtower cardinalities (0994 class: they force the singletons /
+    // must-same corridors) or inequality edges (0899 class: directed size
+    // order across pre-drawn walls; the potential-connect closure then
+    // derives the enclosed singletons).  Truly constraint-free residues
+    // (1435: 59 units of `mixed`) degenerate into a Bell-number walk and
+    // every wrong pin leaf of 1215 would burn its slice here instead of
+    // falling through to the next leaf.
+    let has_inequality = puzzle.rules.iter().any(|r| r.ctype == "inequality");
+    if facts_raw.is_empty() && !has_inequality {
+        return None;
+    }
+    let (same, split_pairs) = wt_free_relations(&facts_raw, &pin_of, &free_index)?;
+
+
     let (unit_cells, unit_of_cell, unit_adj, split) =
         build_free_units(&free_cells, &free_index, &same, &split_pairs, puzzle, w)?;
     let (ord, sz_lo, sz_hi) =
         collect_size_orders(puzzle, w, pinned, &pin_of, &free_index, &unit_of_cell)?;
+    let unit_types: Vec<u64> = vec![0u64; unit_cells.len()];
+    let n_types = 0usize;
+    let max_labels = 0usize;
     // Order pairs are also must-differ pairs.
     let mut split = split;
     for &(ua, ub) in &ord {
@@ -1820,6 +2133,9 @@ fn build_free_units(
         ord: &ord,
         sz_lo: &sz_lo,
         sz_hi: &sz_hi,
+        unit_types: &unit_types,
+        n_types,
+        max_labels,
         lab_of: vec![None; unit_cells.len()],
         lab_units: Vec::new(),
         deadline: leaf_deadline,
@@ -2042,6 +2358,64 @@ mod multi_rem_tests {
         let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(25);
         let out = solve_multi_remainder(&p, &pinned, p.height * w, deadline);
         assert!(out.is_some(), "free partition with official pins must solve");
+    }
+
+    /// Guided check: the official 0975a labeling must survive `leaf_regions`.
+    #[test]
+    fn cardinal_leaf_accepts_official_0975a() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/8-endgame/0975a.json"
+        ))
+        .expect("parse");
+        let ans: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../puzzles/official/Zone3-answer/8-endgame/0975a.json"
+        ))
+        .expect("parse answer");
+        let w = p.width;
+        let n = p.height * w;
+        let regions: Vec<Vec<(usize, usize)>> = ans["regions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                r.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| {
+                        (
+                            c[0].as_u64().unwrap() as usize,
+                            c[1].as_u64().unwrap() as usize,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut region_of: Vec<Option<usize>> = vec![None; n];
+        for (i, r) in regions.iter().enumerate() {
+            for &(rr, cc) in r {
+                region_of[rr * w + cc] = Some(i);
+            }
+        }
+        let built = crate::solver::rose::build_regions(&region_of, p.height, w);
+        let ok = crate::solver::validate::validate(&p, &built);
+        assert!(ok, "official 0975a labeling must pass validate");
+    }
+
+    /// 0975a (ring + rose_window) — WIP tracker: the leaf accepts the truth
+    /// and the machinery is sound, but the search's endgame does not converge
+    /// in budget (1.9M nodes / 120 s, no full assignment).  Run manually:
+    /// `cargo test -- --ignored solves_cardinal`.
+    #[test]
+    #[ignore]
+    fn solves_cardinal_partition_0975a() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/8-endgame/0975a.json"
+        ))
+        .expect("parse");
+        let types = crate::shapes::rose_symbol_types(&p);
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(120);
+        let out = solve_cardinal_partition(&p, &types, p.height * p.width, deadline);
+        assert!(out.is_some(), "0975a cardinal partition must solve");
     }
 
     /// End-to-end: 0899 (`puzzle_piece + inequality`) — the free partition is

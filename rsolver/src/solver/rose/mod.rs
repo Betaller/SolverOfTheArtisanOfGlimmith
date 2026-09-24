@@ -168,6 +168,12 @@ fn rose_plain_and_growth(
     // rose_growth never ran and rose_window puzzles hung until the harness kill.
     // 60% is enough for region_match to complete on the solvable puzzles (which
     // finish in seconds anyway) while leaving 40% for the rose_growth fallback.
+    // 2026-09-24 (WIP, disabled): `solve_cardinal_partition` — the
+    // rose-cardinality labeling for the 0975a class (ring frame chain +
+    // exactly-one-of-each-type).  The leaf accepts the official truth and the
+    // machinery is sound, but the search endgame does not converge in budget
+    // yet (see doc 07 修订4); re-enable once the labeling search converges.
+
     let rm_budget = (timeout_ms * 3) / 5;
     if crate::aog_debug_enabled() {
         eprintln!("rose: region_match start (types={} m={} rm_budget={})", symbol_types.len(), m, rm_budget);

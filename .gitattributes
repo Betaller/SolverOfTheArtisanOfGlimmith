@@ -70,3 +70,6 @@ results/bin/rsolver-1ed099e-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_1ed099e_corridor-compass.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_1ed099e_corridor-pp.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_1ed099e_corridor-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-db3b325-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_db3b325_cardinal-wip.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_db3b325_cardinal-wip-note.txt filter=lfs diff=lfs merge=lfs -text

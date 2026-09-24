@@ -66,6 +66,7 @@
 | 2026-09-23 | **pp-pin 前置 + 预钉三层剪枝**（doc 07，1215/0224 OOM 破簇） | 1215/0224/0976 直跑 + 快速档基准 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` + `benchmark_rust_solver.py --baseline --skip-slow --timeout 40 -j 6` | **1194 口径**（1192 + 1215/0224） | **+2**（1215、0224） | OOM 根因：`enumerate_pin_assignments` 物化全笛卡尔积（注释说有 cap 实际没有），0224 12 锚 × 单类型 rose 符号过滤恒真 → 14 GB 被杀。修：**恰 1 符号/类型过滤**（rose 语义）+ `for_each_pin_assignment` 流式访回（MRV + 节点/指派双帽 + deadline）。1215 另有 aog 形状库 OOM 先杀进程的问题——pp-pin 独立块**前置到 aog 之前**（门控不变）+ combine_plain 三层剪枝（ring 框链 run 过滤 / MRV 跨锚可达 / 已决顶点 ring-brick 度）。实测：**1215 544ms via pp-pin**（旧 36s 树还输给 OOM）、**0224 11ms via same-tiling**、0976 3.3s 不回归。`pytest` 289、`cargo test` 52+8、complexity_gate 全过。 |
 | 2026-09-24 | **m=2 伴侣对 XOR**（doc 12 §3.2 重写，1248 破簇） | 1248 直跑 + m=2 簇 10 题回归 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` | **1195 口径**（1194 + 1248） | **+1**（1248） | **T=ψ(S) 同余 ≡ 伴侣对 XOR**（反称标注自动成立）——对合伴侣对喂进 `must_split`，同余题交给完整 m=2 搜索核（对称二分支+全标签键+SAC+闭包）。真 ψ 树 ~0.3s（1248 全解 **2.2s**，原 40s+ 超时）。配套：has_gemini 盲生长缰绳 2s（防磨光预算饿死精确宿主）；修复**根标签键预插撞车假穷尽**（六树 <20k 瞬死、M2_SKIP 任何组合救不回——「传播器怎么关都没用」即此症状）。m=2 簇 10/10 回归全绿（0382/0960 同形对 10ms）。`pytest` 289、`cargo test` 53+8、complexity_gate 全过。 |
 | 2026-09-24 | **独立验证器 watchtower 空转修复**（正确性，`_carry_clues`） | `results/bench/20260924_wt-recheck.jsonl`（49 题 aog-PASS 复核片段） | `benchmark_rust_solver.py --dir <49 watchtower aog-PASS> --timeout 40 -j 6` | **1195 口径不变**（49/49 复核 **0 夹带**） | 0（正确性加固） | **Router 复验网关的 watchtower 检查曾空转**：`solution_to_board` 只搬单元格线索，重建 Board 的顶点 `watchtower=None` → `_check_watchtower` 对全 None 顶点恒 True；叠加 aog `build_solution_trusted` 跳过 Rust 复验，watchtower 题错解可借道（手搓 Board 的单测共享 Vertex 对象，天然掩盖）。修复＝`_carry_clues` 搬顶点/边/外框线索（architecture.md §4.5）；新增 3 用例含 0994 真实回归（大区在桥格 (0,0) 拆分曾骗过复验，实为 WT(5,4)=2 见 3 区）。**存量 49 道 aog-PASS watchtower 题重解重验全过——0 夹带**，口径维持 1195。`pytest` 292、`cargo test` 53+8、complexity_gate 全过。 |
+| 2026-09-24 | **pp-pin 多余数余数**（doc 07，0994 破簇） | 0994/1215/0224/0976 直跑 + puzzle_piece 子集基准 | 直跑 `rsolver` + `cargo test --release` + `benchmark_rust_solver.py --rules puzzle_piece` | **1196 口径**（1195 + 0994） | **+1**（0994） | pp-pin 叶子原只支持「余数=单区」；新增望塔驱动的 `solve_multi_remainder`（`FreeRem`）：望塔基数→must_same/must_split 成对强制（UF 合成单元）+ compass_label 范式搜索核（域过滤∪SPAWN + fixpoint 潜在连通/WT 界 + MRV + 快照回滚）。两个实现要点：值域必须含全部既有标签（邻接受限 join 漏真解）、单例强制必须逐个+重算（涌现标签下批量强制＝每单元铸一标签判死根节点）。v1 门控＝需望塔事实（1435 mixed 驱动类暂不接，防 1215 类错叶子磨预算）。**0994 ~2.8s via pp-pin 破簇（+1）**；1215/0224/0976 零回归。`cargo test` 55+8、`pytest` 292、complexity_gate 全过（solve_multi_remainder/combine_plain 认知复杂度 23/22 拆函数后 ≤20）。 |
 
 ---
 
@@ -948,6 +949,35 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
   **口径维持 1195/1200**。`pytest` 292、`cargo test` 53+8、complexity_gate 全过。
 - 0994/1435 多余数 puzzle_piece 类（pp-pin 叶子仅支持「余数=单区」）仍是
   FAIL 池弹药（+2~3），与本修复无关。
+
+### 2026-09-24（续2） · pp-pin 多余数余数（doc 07，0994 破簇 +1 → 1196）
+
+0994（puzzle_piece+watchtower，10 图案锚 + 1 大环区 39 格 + 4 望塔强制单格）解剖
+清楚后，给 pp-pin 叶子补**望塔驱动的余数划分搜索** `solve_multi_remainder`
+（`FreeRem`，compass_label 范式）：
+
+- **望塔基数 → 成对强制**：顶点 `value = p + k`（自由格标签永不与 pin 同域），
+  f 个自由格恰 k 标签 ⇒ f==2 同/异成对、f≥3 k==f 全异 / k==1 全同；预绘墙
+  must-split。must-same UF 合成单元——0994 的 `(4,3)~(5,4)`（WT(5,4)=2 强制的
+  对角对）是唯一性来源：它俩只能经 (0,3) 走廊连通，(0,3) 被判他域即潜在连通剪死。
+- **搜索核**：域过滤（可并入标签∪SPAWN）+ fixpoint（潜在连通 joinable / WT 界 /
+  空域判死 / 单例强制）+ MRV + 快照回滚。**两个实现要点**（都吃过亏）：
+  1. **值域必须含全部既有标签**（不限邻接）：同一区的两个种子先后各自 spawn 后
+     永远无法合并（0994 的 (0,0)/(1,4) 即此）——邻接受限 join 漏真解；
+  2. **单例强制必须逐个生效+全量重算**：涌现标签下根节点每单元的域都是 `{SPAWN}`，
+     批量强制＝每单元铸一个标签（0994 根：37 单元→37 标签→WT 界判死，症状是
+     「根节点即 DIE」）。
+- **v1 门控**：需 ≥1 望塔事实才启动（0994 类的驱动约束）。无顶点线索的多余数类
+  （1435 `mixed` 驱动、0899 inequality、1093 compass+solitary）暂不接——无约束
+  域下退化成 Bell 数游走，还会让 1215 类错叶子磨预算（单余数失败后必须立即落回
+  下一叶子）。留作后续扩展。
+- **实测**：**0994 全链 ~2.8s via pp-pin（+1）**；官方预钉隔离测试 0.02s 解出自由
+  划分（回归测试两枚入 `multi_rem_tests`）。1215/0224/0976 零回归。`cargo test`
+  55+8、`pytest` 292、complexity_gate 全过（两个 23/22 认知复杂度拆函数后过 20
+  阈值）；`clamps_zero_to_floor` 偶发失败为 main.rs 测试 with_env 写进程环境变量
+  的并行竞争 flaky（串行 3×8 全过，既有问题非本次引入）。
+- 口径 **1195 → 1196**。冲 1200 剩 +4：0683/1258（+2）、0975a（+1）、
+  1435/0899/1093 多余数扩展或 FAIL 池（+1~3）。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

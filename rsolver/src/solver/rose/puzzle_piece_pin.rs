@@ -28,7 +28,7 @@ use std::collections::HashSet;
 
 use crate::types::Puzzle;
 
-use super::cells::CellSet;
+use super::cells::{CellSet, PreBoundaries};
 
 /// One viable placement of one shape_pattern cell's pinned region.
 #[derive(Clone)]
@@ -518,13 +518,16 @@ mod tests {
 /// region) exhausts in 2ms — and with edge_csp deliberately not tolerating
 /// `puzzle_piece`, nothing else in the chain can even attempt it.
 ///
-/// Exact for the shape the corpus actually has here: pin every `shape_pattern`
-/// region, then treat the *entire* remainder as a single region and run it
-/// through the full validator.  A wrong remainder is rejected by `validate`;
-/// if no assignment yields a valid single-remainder partition this returns
-/// `None` and the rest of the chain runs unchanged.  Regions that hold more
-/// than one `shape_pattern` cell (0493) or leave several unconstrained
-/// remainder regions (0994/1435) are out of scope and fall through.
+/// Pin every `shape_pattern` region, then solve the remainder: first as a
+/// single region (0976 class — the corpus's common shape), and if that is
+/// rejected, through `solve_multi_remainder` — the watchtower-driven free
+/// partition (0994 class: pattern regions + 1 big wrap + WT-forced
+/// singletons).  A wrong remainder is rejected by `validate`; if no assignment
+/// yields a valid partition this returns `None` and the rest of the chain runs
+/// unchanged.  Regions that hold more than one `shape_pattern` cell (0493) are
+/// handled (an anchor-swallowing placement covers several anchors); the
+/// WT-less multi-remainder class (1435: `mixed` drives the split) is still out
+/// of scope and falls through.
 pub fn solve_puzzle_piece_standalone(
     puzzle: &Puzzle,
     timeout_ms: u64,
@@ -678,6 +681,59 @@ fn watchtower_ok(facts: &[(Vec<usize>, usize)], current: &[PinnedPlacement]) -> 
     true
 }
 
+/// Complete-cover leaf: try the remainder as one region (0976 class), then
+/// fall back to the watchtower-driven multi-region free partition (0994
+/// class).  `validate` gates whatever is produced.
+fn finish_leaf(
+    puzzle: &Puzzle,
+    current: &[PinnedPlacement],
+    n: usize,
+    deadline: crate::clock::Instant,
+    found: &mut Option<Vec<crate::types::RegionInfo>>,
+) {
+    if crate::aog_debug_enabled() {
+        eprintln!("pp-pin: leaf with {} placements, checking remainder", current.len());
+    }
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let mut region_of: Vec<Option<usize>> = vec![None; n];
+    for (ri, p) in current.iter().enumerate() {
+        for idx in p.cells.iter() {
+            region_of[idx] = Some(ri);
+        }
+    }
+    // The whole remainder is one region — the case the corpus's
+    // `puzzle_piece` FAILs actually have (pattern regions + 1 big region).
+    let rem_id = current.len();
+    let mut has_remainder = false;
+    for idx in 0..n {
+        let r = idx / w;
+        let c = idx % w;
+        if !puzzle.cells[r][c].blocked && region_of[idx].is_none() {
+            region_of[idx] = Some(rem_id);
+            has_remainder = true;
+        }
+    }
+    // Patterns already tile the board exactly — nothing to solve.
+    if !has_remainder && current.is_empty() {
+        return;
+    }
+    let regions = super::build_regions(&region_of, h, w);
+    if crate::solver::validate::validate(puzzle, &regions) {
+        *found = Some(regions);
+        return;
+    }
+    // Single-remainder rejected → the remainder may need splitting into
+    // several free regions (0994/1435 class: pattern regions + 1 big wrap
+    // + WT-forced singletons).  `solve_multi_remainder` re-derives the
+    // free partition under the watchtower cardinalities.
+    if has_remainder {
+        if let Some(regions) = solve_multi_remainder(puzzle, current, n, deadline) {
+            *found = Some(regions);
+        }
+    }
+}
+
 /// Recursive anchor-covering search.  Every `shape_pattern` anchor must be
 /// covered by exactly one chosen placement; one placement may cover SEVERAL
 /// anchors of the same shape class (a region may hold several same-shape
@@ -708,35 +764,7 @@ fn combine_plain(
     let h = puzzle.height;
     let w = puzzle.width;
     if covered.iter().all(|&b| b) {
-        if crate::aog_debug_enabled() {
-            eprintln!("pp-pin: leaf with {} placements, checking remainder", current.len());
-        }
-        let mut region_of: Vec<Option<usize>> = vec![None; n];
-        for (ri, p) in current.iter().enumerate() {
-            for idx in p.cells.iter() {
-                region_of[idx] = Some(ri);
-            }
-        }
-        // The whole remainder is one region — the case the corpus's
-        // `puzzle_piece` FAILs actually have (pattern regions + 1 big region).
-        let rem_id = current.len();
-        let mut has_remainder = false;
-        for idx in 0..n {
-            let r = idx / w;
-            let c = idx % w;
-            if !puzzle.cells[r][c].blocked && region_of[idx].is_none() {
-                region_of[idx] = Some(rem_id);
-                has_remainder = true;
-            }
-        }
-        // Patterns already tile the board exactly — nothing to solve.
-        if !has_remainder && current.is_empty() {
-            return;
-        }
-        let regions = super::build_regions(&region_of, h, w);
-        if crate::solver::validate::validate(puzzle, &regions) {
-            *found = Some(regions);
-        }
+        finish_leaf(puzzle, current, n, deadline, found);
         return;
     }
     // MRV over the uncovered anchors; an anchor with zero viable placements
@@ -942,4 +970,699 @@ fn vertex_degree_ok_at(
         return false;
     }
     true
+}
+
+// ---------------------------------------------------------------------------
+// Multi-remainder free partition (0994 / 1435 class)
+// ---------------------------------------------------------------------------
+
+/// Union-find over free cells for the WT-derived must-same relation.
+struct Uf {
+    parent: Vec<u32>,
+}
+
+impl Uf {
+    fn new(n: usize) -> Self {
+        Self {
+            parent: (0..n as u32).collect(),
+        }
+    }
+    fn find(&mut self, x: u32) -> u32 {
+        let mut r = x;
+        while self.parent[r as usize] != r {
+            r = self.parent[r as usize];
+        }
+        let mut cur = x;
+        while self.parent[cur as usize] != r {
+            let p = self.parent[cur as usize];
+            self.parent[cur as usize] = r;
+            cur = p;
+        }
+        r
+    }
+    fn union(&mut self, a: u32, b: u32) {
+        let (ra, rb) = (self.find(a), self.find(b));
+        if ra != rb {
+            self.parent[rb as usize] = ra;
+        }
+    }
+}
+
+/// One watchtower vertex as slots over pins / free units.
+enum WtSlot {
+    Pin(usize),
+    Unit(u32),
+}
+
+struct WtUnitFact {
+    slots: Vec<WtSlot>,
+    value: usize,
+}
+
+fn canon_pair(a: u32, b: u32) -> (u32, u32) {
+    if a < b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Watchtower cardinality → pairwise must-same / must-split over free cells.
+///
+/// Free labels never coincide with pin labels (a pinned region's shape is
+/// fixed, so no free cell may join one), so a vertex with `p` distinct pin
+/// labels and `f` free cells must end with `value = p + k` distinct labels
+/// where `k` is the number of distinct labels among those `f` cells:
+/// `f == 2 && k == 1` forces the pair together, `k == f` forces all pairs
+/// apart, `f >= 3 && k == 1` forces all together.  Returns `None` on a
+/// cardinality that no free labeling can satisfy (unsolvable).
+#[allow(clippy::type_complexity)]
+fn wt_free_relations(
+    facts: &[(Vec<usize>, usize)],
+    pin_of: &[Option<usize>],
+    free_index: &std::collections::HashMap<usize, u32>,
+) -> Option<(Vec<(u32, u32)>, Vec<(u32, u32)>)> {
+    let mut same = Vec::new();
+    let mut split = Vec::new();
+    for (cells, value) in facts {
+        let mut pins: Vec<usize> = Vec::new();
+        let mut units: Vec<u32> = Vec::new();
+        for &idx in cells {
+            match pin_of[idx] {
+                Some(p) => {
+                    if !pins.contains(&p) {
+                        pins.push(p);
+                    }
+                }
+                None => {
+                    let u = free_index[&idx];
+                    if !units.contains(&u) {
+                        units.push(u);
+                    }
+                }
+            }
+        }
+        let k = value.checked_sub(pins.len())?;
+        if units.is_empty() {
+            if k != 0 {
+                return None;
+            }
+            continue;
+        }
+        let f = units.len();
+        if k < 1 || k > f {
+            return None;
+        }
+        if f == 2 {
+            if k == 1 {
+                same.push((units[0], units[1]));
+            } else {
+                split.push((units[0], units[1]));
+            }
+        } else if k == 1 {
+            for i in 0..f {
+                for j in (i + 1)..f {
+                    same.push((units[i], units[j]));
+                }
+            }
+        } else if k == f {
+            for i in 0..f {
+                for j in (i + 1)..f {
+                    split.push((units[i], units[j]));
+                }
+            }
+        }
+    }
+    Some((same, split))
+}
+
+/// Connected-partition DFS over must-same *units*.  Each unit joins the label
+/// of an adjacent already-assigned unit or spawns a fresh label; fixed unit
+/// order makes this enumeration canonical (each partition exactly once).
+/// Pruning: ① WT cardinality bounds, ② must-split (incl. pre-drawn walls),
+/// ③ potential-connectivity closure — a label's cells must stay connectable
+/// through undecided cells (0994's `(4,3)~(5,4)` class only connects through
+/// `(0,3)`, so labelling `(0,3)` elsewhere dies instantly, not at the leaf).
+struct FreeRem<'a> {
+    puzzle: &'a Puzzle,
+    pinned: &'a [PinnedPlacement],
+    w: usize,
+    unit_cells: &'a Vec<Vec<usize>>,
+    unit_adj: &'a Vec<Vec<u32>>,
+    split: &'a std::collections::HashSet<(u32, u32)>,
+    facts: &'a Vec<WtUnitFact>,
+    facts_of_unit: &'a Vec<Vec<usize>>,
+    lab_of: Vec<Option<u32>>,
+    lab_units: Vec<Vec<u32>>,
+    deadline: crate::clock::Instant,
+    nodes: usize,
+}
+
+const MAX_FREE_NODES: usize = 2_000_000;
+
+impl<'a> FreeRem<'a> {
+    fn is_split(&self, a: u32, b: u32) -> bool {
+        self.split.contains(&canon_pair(a, b))
+    }
+
+    /// compass_label-style domain search: fixpoint (joinable + domains +
+    /// singleton forces) then MRV branch with snapshot rollback.  The value
+    /// domain of a unit is every *existing* label it could still join
+    /// (potential-connectable, not must-split) plus SPAWN — a full domain is
+    /// required for completeness (two seeds of one region must be able to
+    /// land on one label even before they are adjacent through assigned
+    /// cells; the adjacency-only join rule loses those partitions).
+    fn search(&mut self) -> Option<Vec<crate::types::RegionInfo>> {
+        self.nodes += 1;
+        if self.nodes > MAX_FREE_NODES || crate::clock::Instant::now() >= self.deadline {
+            return None;
+        }
+        self.fixpoint()?;
+        if self.lab_of.iter().all(|l| l.is_some()) {
+            return self.leaf_regions();
+        }
+        let u = self.pick_mrv()?;
+        let values = self.value_order(u);
+        let snap_lab = self.lab_of.clone();
+        let snap_units = self.lab_units.clone();
+        for val in values {
+            self.lab_of = snap_lab.clone();
+            self.lab_units = snap_units.clone();
+            match val {
+                Some(l) => {
+                    self.lab_units[l as usize].push(u);
+                    self.lab_of[u as usize] = Some(l);
+                }
+                None => {
+                    let l = self.lab_units.len() as u32;
+                    self.lab_units.push(vec![u]);
+                    self.lab_of[u as usize] = Some(l);
+                }
+            }
+            if let Some(res) = self.search() {
+                return Some(res);
+            }
+            if crate::clock::Instant::now() >= self.deadline {
+                return None;
+            }
+        }
+        self.lab_of = snap_lab;
+        self.lab_units = snap_units;
+        None
+    }
+
+    /// Propagate to a fixpoint.  `None` = contradiction (dead node).
+    ///
+    /// Forces apply **one unit at a time with a full recompute**: with
+    /// emergent labels every unit's domain starts as `{SPAWN}`, so a batch
+    /// force would mint one label per unit in a single round and kill the node
+    /// (0994 root: 37 units → 37 labels → WT bounds die).  Sequential forcing
+    /// lets each spawn become joinable by the next unit.
+    fn fixpoint(&mut self) -> Option<()> {
+        'outer: loop {
+            if !self.joinable_all() || !self.wt_all_ok() {
+                return None;
+            }
+            for u in 0..self.lab_of.len() as u32 {
+                if self.lab_of[u as usize].is_some() {
+                    continue;
+                }
+                let dom = self.domain(u);
+                match dom.len() {
+                    0 => return None,
+                    1 => {
+                        let val = dom[0];
+                        match val {
+                            Some(l) => {
+                                self.lab_units[l as usize].push(u);
+                                self.lab_of[u as usize] = Some(l);
+                            }
+                            None => {
+                                let l = self.lab_units.len() as u32;
+                                self.lab_units.push(vec![u]);
+                                self.lab_of[u as usize] = Some(l);
+                            }
+                        }
+                        continue 'outer;
+                    }
+                    _ => {}
+                }
+            }
+            return Some(());
+        }
+    }
+
+    /// Feasible values: existing labels the unit may join (not must-split
+    /// from any member and the merge stays potential-connectable) plus SPAWN.
+    fn domain(&self, u: u32) -> Vec<Option<u32>> {
+        let mut out: Vec<Option<u32>> = Vec::new();
+        for (l, units) in self.lab_units.iter().enumerate() {
+            if units.is_empty() {
+                continue;
+            }
+            if units.iter().any(|&v| self.is_split(u, v)) {
+                continue;
+            }
+            let mut merged = units.clone();
+            merged.push(u);
+            if self.label_potential_ok(&merged) {
+                out.push(Some(l as u32));
+            }
+        }
+        // SPAWN: the unit's own label is trivially connectable when it is a
+        // single cell; a non-contiguous must-same class needs its cells
+        // connectable through bridges.
+        if self.label_potential_ok(std::slice::from_ref(&u)) {
+            out.push(None);
+        }
+        out
+    }
+
+    /// MRV: smallest domain; ties: most WT facts, then lowest first cell.
+    fn pick_mrv(&self) -> Option<u32> {
+        let mut best_key: Option<(usize, std::cmp::Reverse<usize>, usize)> = None;
+        let mut best_u = None;
+        for u in 0..self.lab_of.len() as u32 {
+            if self.lab_of[u as usize].is_some() {
+                continue;
+            }
+            let key = (
+                self.domain(u).len(),
+                std::cmp::Reverse(self.facts_of_unit[u as usize].len()),
+                self.unit_cells[u as usize][0],
+            );
+            if best_key.map_or(true, |bk| key < bk) {
+                best_key = Some(key);
+                best_u = Some(u);
+            }
+        }
+        best_u
+    }
+
+    /// Adjacent labels first (fast truth discovery), then the rest, SPAWN last.
+    fn value_order(&self, u: u32) -> Vec<Option<u32>> {
+        let dom = self.domain(u);
+        let mut adj: Vec<u32> = Vec::new();
+        for &v in &self.unit_adj[u as usize] {
+            if let Some(l) = self.lab_of[v as usize] {
+                if dom.contains(&Some(l)) && !adj.contains(&l) {
+                    adj.push(l);
+                }
+            }
+        }
+        adj.sort_unstable();
+        let mut out: Vec<Option<u32>> = adj.iter().map(|&l| Some(l)).collect();
+        for val in &dom {
+            if val.is_some() && !out.contains(val) {
+                out.push(*val);
+            }
+        }
+        if dom.contains(&None) {
+            out.push(None);
+        }
+        out
+    }
+
+    /// The new unit may not share its label with a must-split mate.
+    #[allow(dead_code)]
+    fn join_split_ok(&self, u: u32, lab: u32) -> bool {
+        !self.lab_units[lab as usize]
+            .iter()
+            .any(|&v| v != u && self.is_split(u, v))
+    }
+
+    /// Sound WT bounds for every vertex.
+    fn wt_all_ok(&self) -> bool {
+        for fi in 0..self.facts.len() {
+            if !self.wt_fact_ok(fi) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn wt_fact_ok(&self, fi: usize) -> bool {
+        let f = &self.facts[fi];
+        let mut pins: Vec<usize> = Vec::new();
+        let mut frees: Vec<u32> = Vec::new();
+        let mut unassigned: Vec<u32> = Vec::new();
+        for slot in &f.slots {
+            match slot {
+                WtSlot::Pin(p) => {
+                    if !pins.contains(p) {
+                        pins.push(*p);
+                    }
+                }
+                WtSlot::Unit(x) => match self.lab_of[*x as usize] {
+                    Some(l) => {
+                        if !frees.contains(&l) {
+                            frees.push(l);
+                        }
+                    }
+                    None => {
+                        if !unassigned.contains(x) {
+                            unassigned.push(*x);
+                        }
+                    }
+                },
+            }
+        }
+        let d = pins.len() + frees.len();
+        let hi = d + unassigned.len();
+        let lo = if unassigned.is_empty() {
+            d
+        } else if frees.is_empty() {
+            d + 1
+        } else {
+            d
+        };
+        f.value >= lo && f.value <= hi
+    }
+
+    /// Every multi-unit label must remain connectable through undecided cells
+    /// that are not must-split from the label (they may still join it).
+    fn joinable_all(&self) -> bool {
+        for units in &self.lab_units {
+            if units.len() >= 2 && !self.label_potential_ok(units) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn label_potential_ok(&self, units: &[u32]) -> bool {
+        let h = self.puzzle.height;
+        let w = self.w;
+        let n = h * w;
+        let mut passable = vec![false; n];
+        let mut label_marks = vec![false; n];
+        let mut start = usize::MAX;
+        for &v in units {
+            for &c in &self.unit_cells[v as usize] {
+                passable[c] = true;
+                label_marks[c] = true;
+                start = start.min(c);
+            }
+        }
+        for (j, cells) in self.unit_cells.iter().enumerate() {
+            if self.lab_of[j].is_some() {
+                continue;
+            }
+            if units.iter().any(|&v| self.is_split(j as u32, v)) {
+                continue;
+            }
+            for &c in cells {
+                passable[c] = true;
+            }
+        }
+        let pre = PreBoundaries::from_puzzle(self.puzzle);
+        let mut seen = vec![false; n];
+        let mut stack = vec![start];
+        seen[start] = true;
+        let mut reached = 0usize;
+        let need: usize = units.iter().map(|&v| self.unit_cells[v as usize].len()).sum();
+        while let Some(c) = stack.pop() {
+            if label_marks[c] {
+                reached += 1;
+            }
+            let (r, col) = (c / w, c % w);
+            for (dr, dc) in [(-1i32, 0), (1, 0), (0, -1), (0, 1)] {
+                let nr = r as i32 + dr;
+                let nc = col as i32 + dc;
+                if nr < 0 || nc < 0 || nr >= h as i32 || nc >= w as i32 {
+                    continue;
+                }
+                let (nr, nc) = (nr as usize, nc as usize);
+                if pre.contains(r, col, nr, nc) {
+                    continue;
+                }
+                let nidx = nr * w + nc;
+                if passable[nidx] && !seen[nidx] {
+                    seen[nidx] = true;
+                    stack.push(nidx);
+                }
+            }
+        }
+        reached == need
+    }
+
+    fn leaf_regions(&self) -> Option<Vec<crate::types::RegionInfo>> {
+        let h = self.puzzle.height;
+        let w = self.w;
+        let n = h * w;
+        let mut region_of: Vec<Option<usize>> = vec![None; n];
+        for (ri, p) in self.pinned.iter().enumerate() {
+            for idx in p.cells.iter() {
+                region_of[idx] = Some(ri);
+            }
+        }
+        let base = self.pinned.len();
+        for (lab, units) in self.lab_units.iter().enumerate() {
+            for &v in units {
+                for &idx in &self.unit_cells[v as usize] {
+                    region_of[idx] = Some(base + lab);
+                }
+            }
+        }
+        let regions = super::build_regions(&region_of, h, w);
+        if crate::solver::validate::validate(self.puzzle, &regions) {
+            Some(regions)
+        } else {
+            None
+        }
+    }
+}
+
+/// Partition the free cells (everything outside the pinned placements) into
+/// connected regions under the watchtower cardinalities — the multi-remainder
+/// counterpart of the single-remainder leaf (0976 class).  0994 (pattern
+/// regions + 1 big wrap + 4 WT-forced singletons) lives here.
+fn solve_multi_remainder(
+    puzzle: &Puzzle,
+    pinned: &[PinnedPlacement],
+    n: usize,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let w = puzzle.width;
+    let mut pin_of: Vec<Option<usize>> = vec![None; n];
+    for (ri, p) in pinned.iter().enumerate() {
+        for idx in p.cells.iter() {
+            pin_of[idx] = Some(ri);
+        }
+    }
+    let mut free_cells: Vec<usize> = Vec::new();
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if !puzzle.cells[r][c].blocked && pin_of[idx].is_none() {
+            free_cells.push(idx);
+        }
+    }
+    if free_cells.is_empty() {
+        return None;
+    }
+    // Cell → free-cell ordinal for the union-find.
+    let mut free_index: std::collections::HashMap<usize, u32> =
+        std::collections::HashMap::new();
+    for (i, &idx) in free_cells.iter().enumerate() {
+        free_index.insert(idx, i as u32);
+    }
+    let facts_raw = watchtower_facts(puzzle);
+    // v1 scope: the free-partition search is *driven* by the watchtower
+    // cardinalities (they force the singletons / must-same corridors of the
+    // 0994 class).  Without a single vertex clue the search degenerates into
+    // a Bell-number partition walk (1435: 59 units, 0 facts — hopeless; and
+    // every wrong pin leaf of 1215 would burn its slice here instead of
+    // falling through to the next leaf).  Leave the WT-less multi-remainder
+    // class (mixed/inequality-driven) to a later extension.
+    if facts_raw.is_empty() {
+        return None;
+    }
+    let (same, split_pairs) = wt_free_relations(&facts_raw, &pin_of, &free_index)?;
+
+/// Must-same closure (UF) + pre-drawn walls as must-split + unit compression
+/// + unit adjacency.  Returns `(unit_cells, unit_of_cell, unit_adj, split)`;
+/// `None` on a must-same class straddling a must-split pair.
+#[allow(clippy::type_complexity)]
+fn build_free_units(
+    free_cells: &[usize],
+    free_index: &std::collections::HashMap<usize, u32>,
+    same: &[(u32, u32)],
+    split_pairs: &[(u32, u32)],
+    puzzle: &Puzzle,
+    w: usize,
+) -> Option<(Vec<Vec<usize>>, Vec<u32>, Vec<Vec<u32>>, std::collections::HashSet<(u32, u32)>)> {
+    // Must-same closure + pre-drawn walls as must-split.
+    let mut uf = Uf::new(free_cells.len());
+    for &(a, b) in same {
+        uf.union(a, b);
+    }
+    let mut split_cell: Vec<(u32, u32)> = split_pairs.to_vec();
+    let pre = PreBoundaries::from_puzzle(puzzle);
+    for i in 0..free_cells.len() {
+        for j in (i + 1)..free_cells.len() {
+            let (a, b) = (free_cells[i], free_cells[j]);
+            let ((r1, c1), (r2, c2)) = ((a / w, a % w), (b / w, b % w));
+            let adj = (r1 == r2 && c1.abs_diff(c2) == 1) || (c1 == c2 && r1.abs_diff(r2) == 1);
+            if adj && pre.contains(r1, c1, r2, c2) {
+                split_cell.push((i as u32, j as u32));
+            }
+        }
+    }
+
+    // Compress must-same classes into units.
+    let mut root_to_unit: std::collections::HashMap<u32, u32> =
+        std::collections::HashMap::new();
+    let mut unit_cells: Vec<Vec<usize>> = Vec::new();
+    let mut unit_of_cell: Vec<u32> = vec![u32::MAX; free_cells.len()];
+    for (i, &idx) in free_cells.iter().enumerate() {
+        let r = uf.find(i as u32);
+        let u = *root_to_unit.entry(r).or_insert_with(|| {
+            unit_cells.push(Vec::new());
+            (unit_cells.len() - 1) as u32
+        });
+        unit_cells[u as usize].push(idx);
+        unit_of_cell[i] = u;
+    }
+    // Conflict: a must-same class straddling a must-split pair is unsolvable.
+    let mut split: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
+    for &(a, b) in &split_cell {
+        let (ua, ub) = (unit_of_cell[a as usize], unit_of_cell[b as usize]);
+        if ua == ub {
+            return None;
+        }
+        split.insert(canon_pair(ua, ub));
+    }
+
+    // Unit adjacency (join rule) over non-wall free-free edges.
+    let mut unit_adj: Vec<std::collections::BTreeSet<u32>> =
+        vec![Default::default(); unit_cells.len()];
+    for i in 0..free_cells.len() {
+        for j in (i + 1)..free_cells.len() {
+            let (a, b) = (free_cells[i], free_cells[j]);
+            let ((r1, c1), (r2, c2)) = ((a / w, a % w), (b / w, b % w));
+            let adj = (r1 == r2 && c1.abs_diff(c2) == 1) || (c1 == c2 && r1.abs_diff(r2) == 1);
+            if adj && !pre.contains(r1, c1, r2, c2) {
+                let (ua, ub) = (unit_of_cell[i], unit_of_cell[j]);
+                if ua != ub {
+                    unit_adj[ua as usize].insert(ub);
+                    unit_adj[ub as usize].insert(ua);
+                }
+            }
+        }
+    }
+    let unit_adj: Vec<Vec<u32>> = unit_adj.into_iter().map(|s| s.into_iter().collect()).collect();
+
+    Some((unit_cells, unit_of_cell, unit_adj, split))
+}
+
+    let (unit_cells, unit_of_cell, unit_adj, split) =
+        build_free_units(&free_cells, &free_index, &same, &split_pairs, puzzle, w)?;
+
+    // Recast the WT facts over (pin, unit) slots.
+    let mut facts: Vec<WtUnitFact> = Vec::new();
+    let mut facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); unit_cells.len()];
+    for (cells, value) in &facts_raw {
+        let mut slots = Vec::new();
+        for &idx in cells {
+            match pin_of[idx] {
+                Some(p) => slots.push(WtSlot::Pin(p)),
+                None => {
+                    let u = unit_of_cell[free_index[&idx] as usize];
+                    slots.push(WtSlot::Unit(u));
+                    if !facts_of_unit[u as usize].contains(&(facts.len())) {
+                        facts_of_unit[u as usize].push(facts.len());
+                    }
+                }
+            }
+        }
+        facts.push(WtUnitFact { slots, value: *value });
+    }
+
+    if crate::aog_debug_enabled() {
+        eprintln!(
+            "pp-pin: multi-remainder: {} free cells, {} units, {} wt facts, {} split pairs",
+            free_cells.len(),
+            unit_cells.len(),
+            facts.len(),
+            split.len()
+        );
+    }
+    let mut search = FreeRem {
+        puzzle,
+        pinned,
+        w,
+        unit_cells: &unit_cells,
+        unit_adj: &unit_adj,
+        split: &split,
+        facts: &facts,
+        facts_of_unit: &facts_of_unit,
+        lab_of: vec![None; unit_cells.len()],
+        lab_units: Vec::new(),
+        deadline,
+        nodes: 0,
+    };
+    search.search()
+}
+
+#[cfg(test)]
+mod multi_rem_tests {
+    use super::*;
+
+    /// Isolation anchor: with 0994's **official** pin assignment the free
+    /// partition search must reconstruct the wrap + 4 WT-forced singletons.
+    #[test]
+    fn multi_remainder_official_pins_0994() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/3-vertex-radar/0994.json"
+        ))
+        .expect("parse");
+        let ans: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../puzzles/official/Zone3-answer/3-vertex-radar/0994.json"
+        ))
+        .expect("parse answer");
+        let w = p.width;
+        let mut pinned: Vec<PinnedPlacement> = Vec::new();
+        for region in ans["regions"].as_array().unwrap() {
+            let cells: Vec<(usize, usize)> = region
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| {
+                    (
+                        c[0].as_u64().unwrap() as usize,
+                        c[1].as_u64().unwrap() as usize,
+                    )
+                })
+                .collect();
+            let anchor = cells
+                .iter()
+                .copied()
+                .find(|&(r, c)| p.cells[r][c].shape_pattern.is_some());
+            if let Some((ar, ac)) = anchor {
+                let mut set = CellSet::new(p.height * w);
+                for &(r, c) in &cells {
+                    set.insert(r * w + c);
+                }
+                pinned.push(PinnedPlacement {
+                    anchor: ar * w + ac,
+                    cells: set,
+                });
+            }
+        }
+        assert_eq!(pinned.len(), 10, "0994 has 10 pattern regions");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(20);
+        let out = solve_multi_remainder(&p, &pinned, p.height * w, deadline);
+        assert!(out.is_some(), "free partition with official pins must solve");
+    }
+
+    /// End-to-end: the standalone pre-pin must solve 0994 (multi-remainder).
+    #[test]
+    fn solves_multi_remainder_0994() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/3-vertex-radar/0994.json"
+        ))
+        .expect("parse");
+        let out = solve_puzzle_piece_standalone(&p, 30_000);
+        assert!(out.is_solved(), "0994 expected solved, got {:?}", out);
+    }
 }

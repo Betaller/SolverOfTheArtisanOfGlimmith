@@ -175,7 +175,7 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
                 });
                 return build_solution(regions, &start, puzzle, "pp-pin", attempts);
             }
-            _ => attempts.push(not_attempted("pp-pin", "no valid single-remainder pin")),
+            _ => attempts.push(not_attempted("pp-pin", "no valid pin assignment")),
         }
     }
 

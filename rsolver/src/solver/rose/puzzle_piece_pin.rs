@@ -1974,6 +1974,30 @@ mod multi_rem_tests {
         assert!(out.is_some(), "compass remainder with official pins must solve");
     }
 
+    /// TEMP diagnostic for the compass residual cluster (run manually).
+    #[test]
+    #[ignore]
+    fn tmp_diag_0683() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/6-compass-main/0683.json"
+        ))
+        .expect("parse");
+        let out = crate::solver::compass_part::solve_compass_part(&p, 60_000);
+        eprintln!("0683 SOLVED={}", out.is_solved());
+    }
+
+    /// TEMP diagnostic for the compass residual cluster (run manually).
+    #[test]
+    #[ignore]
+    fn tmp_diag_1258() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/6-compass-main/1258.json"
+        ))
+        .expect("parse");
+        let out = crate::solver::compass_part::solve_compass_part(&p, 60_000);
+        eprintln!("1258 SOLVED={}", out.is_solved());
+    }
+
     /// Isolation anchor for the inequality remainder path.
     #[test]
     fn ineq_remainder_official_pins_0899() {

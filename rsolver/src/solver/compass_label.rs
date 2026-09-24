@@ -61,12 +61,21 @@ pub(crate) fn solve_labeling(model: &Model, deadline: Instant) -> Option<Vec<Opt
         dom: vec![0; n],
         marks: vec![0; n],
         mark_gen: 0,
+        comp_scratch: vec![u32::MAX; n],
+        touch_scratch: vec![0; n],
         nodes: 0,
         deadline,
+        #[cfg(test)]
+        dies: std::collections::HashMap::new(),
     };
     let found = s.search(&mut st);
     #[cfg(test)]
-    set_last_nodes(s.nodes);
+    {
+        set_last_nodes(s.nodes);
+        let mut items: Vec<_> = s.dies.iter().collect();
+        items.sort();
+        eprintln!("DBG dies nodes={} {:?}", s.nodes, items);
+    }
     found.then(|| st.to_region_of(model))
 }
 
@@ -160,8 +169,13 @@ struct Search<'m> {
     dom: Vec<u128>,
     marks: Vec<u32>,
     mark_gen: u32,
+    /// Scratch for `joinable`'s component/touch analysis (no per-call allocs).
+    comp_scratch: Vec<u32>,
+    touch_scratch: Vec<u128>,
     nodes: usize,
     deadline: Instant,
+    #[cfg(test)]
+    dies: std::collections::HashMap<(&'static str, usize), usize>,
 }
 
 impl Search<'_> {
@@ -200,9 +214,39 @@ impl Search<'_> {
     }
 
     fn fixpoint(&mut self, st: &mut LabState) -> bool {
+        // Bridge filter (dom-aware reachability): a cell that can no longer
+        // join label `j` must not bridge `j`'s parts — the old "all unassigned
+        // bridges" reachability deferred every connectivity death to the
+        // moment the bridge got assigned (0683: 4.2M of 6M nodes died in
+        // `joinable` at 64-79 assigned).  Domains only ever shrink, so a
+        // stale superset just weakens the first round (sound).
+        let k = self.model.clue_pos.len();
+        let full = if k >= 128 { u128::MAX } else { (1u128 << k) - 1 };
+        for x in 0..self.model.h * self.model.w {
+            if self.model.free[x] && st.lab[x] < 0 {
+                self.dom[x] = full;
+            }
+        }
         loop {
-            if !self.joinable(st) {
+            let mut jforces: Vec<(usize, usize)> = Vec::new();
+            if !self.joinable(st, &mut jforces) {
+                #[cfg(test)]
+                {
+                    let assigned = st.lab.iter().filter(|&&l| l >= 0).count();
+                    *self.dies.entry(("joinable", assigned / 16)).or_insert(0) += 1;
+                }
                 return false;
+            }
+            if !jforces.is_empty() {
+                for (x, jj) in jforces {
+                    if st.lab[x] >= 0 {
+                        continue;
+                    }
+                    if !st.try_assign(self.model, x, jj) {
+                        return false;
+                    }
+                }
+                continue;
             }
             self.compute_can(st);
             self.compute_domains(st);
@@ -212,14 +256,37 @@ impl Search<'_> {
                     continue;
                 }
                 if !joint_ok(need_after(self.model, st, j, None), cap) {
+                    #[cfg(test)]
+                    {
+                        let assigned = st.lab.iter().filter(|&&l| l >= 0).count();
+                        *self.dies.entry(("joint", assigned / 16)).or_insert(0) += 1;
+                    }
                     return false;
                 }
             }
             let mut forces: Vec<(usize, usize)> = Vec::new();
-            if !self.size_step(st, &mut forces) || !self.cardinality_step(st, &mut forces) {
+            if !self.size_step(st, &mut forces) {
+                #[cfg(test)]
+                {
+                    let assigned = st.lab.iter().filter(|&&l| l >= 0).count();
+                    *self.dies.entry(("size", assigned / 16)).or_insert(0) += 1;
+                }
+                return false;
+            }
+            if !self.cardinality_step(st, &mut forces) {
+                #[cfg(test)]
+                {
+                    let assigned = st.lab.iter().filter(|&&l| l >= 0).count();
+                    *self.dies.entry(("card", assigned / 16)).or_insert(0) += 1;
+                }
                 return false;
             }
             if !self.singleton_step(st, &mut forces) {
+                #[cfg(test)]
+                {
+                    let assigned = st.lab.iter().filter(|&&l| l >= 0).count();
+                    *self.dies.entry(("emptydom", assigned / 16)).or_insert(0) += 1;
+                }
                 return false;
             }
             if forces.is_empty() {
@@ -283,7 +350,7 @@ impl Search<'_> {
                 if st.lab[y] >= 0 {
                     continue;
                 }
-                let add = cx & !self.can[y];
+                let add = cx & !self.can[y] & self.dom[y];
                 if add != 0 {
                     self.can[y] |= add;
                     q.push_back(y);
@@ -405,9 +472,11 @@ impl Search<'_> {
     /// exact-cover check `Σ lo-need ≤ unassigned ≤ Σ hi-spare`.
     fn size_step(&self, st: &LabState, forces: &mut Vec<(usize, usize)>) -> bool {
         let m = self.model;
+        let k = m.clue_pos.len();
         let mut need = 0usize;
         let mut cap = 0usize;
-        for j in 0..m.clue_pos.len() {
+        let mut pots: Vec<Vec<usize>> = Vec::with_capacity(k);
+        for j in 0..k {
             let mut pot: Vec<usize> = Vec::new();
             for x in 0..m.h * m.w {
                 if m.free[x] && st.lab[x] < 0 && self.dom[x] & (1u128 << j) != 0 {
@@ -423,9 +492,37 @@ impl Search<'_> {
                 }
             }
             need += m.lo[j].saturating_sub(st.sz[j]);
-            cap += m.hi[j] - st.sz[j];
+            // The true cap is the *pool* — a loose static `hi` (the -1
+            // residual-eater labels) must not inflate the exact-cover bound.
+            cap += (m.hi[j] - st.sz[j]).min(pot.len());
+            pots.push(pot);
         }
-        !(need > st.unassigned || cap < st.unassigned)
+        if need > st.unassigned || cap < st.unassigned {
+            return false;
+        }
+        // Pairwise Hall over the domain pools: every label pair must find
+        // enough cells that can reach either side (the ≥2-ary joint bound the
+        // per-label windows never see).
+        for a in 0..k {
+            for b in (a + 1)..k {
+                let lo_pair = (m.lo[a].saturating_sub(st.sz[a]))
+                    + (m.lo[b].saturating_sub(st.sz[b]));
+                if lo_pair == 0 {
+                    continue;
+                }
+                let mask = (1u128 << a) | (1u128 << b);
+                let mut pool = 0usize;
+                for x in 0..m.h * m.w {
+                    if m.free[x] && st.lab[x] < 0 && self.dom[x] & mask != 0 {
+                        pool += 1;
+                    }
+                }
+                if pool < lo_pair {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// Half-plane cardinality AC per (clue, direction) with an exact target.
@@ -463,21 +560,28 @@ impl Search<'_> {
     /// Each label's placed cells must lie in one (unassigned ∪ label)
     /// component of `nbrs` — necessary for final connectivity, and exactly
     /// connectivity once nothing is unassigned.
-    fn joinable(&mut self, st: &LabState) -> bool {
+    /// Label cells must end connected.  With dom-aware bridges this both dies
+    /// early and forces single-link corridors (see `corridor_forces`).
+    fn joinable(&mut self, st: &LabState, forces: &mut Vec<(usize, usize)>) -> bool {
         let m = self.model;
-        let mut stack: Vec<usize> = Vec::new();
+        let n = m.h * m.w;
         for j in 0..m.clue_pos.len() {
+            if !self.corridor_forces(st, j, forces) {
+                return false;
+            }
+            // Overall dom-bridge connectivity of the placed cells.
             self.mark_gen += 1;
             let gen = self.mark_gen;
+            let mut stack: Vec<usize> = Vec::new();
             let start = m.clue_pos[j];
             self.marks[start] = gen;
-            stack.clear();
             stack.push(start);
             let mut seen = 1usize;
             while let Some(u) = stack.pop() {
                 for &y in &m.nbrs[u] {
                     let own = st.lab[y] >= 0 && st.lab[y] as usize == j;
-                    if !(own || st.lab[y] < 0) || self.marks[y] == gen {
+                    let bridge = st.lab[y] < 0 && self.dom[y] & (1u128 << j) != 0;
+                    if !(own || bridge) || self.marks[y] == gen {
                         continue;
                     }
                     self.marks[y] = gen;
@@ -489,6 +593,89 @@ impl Search<'_> {
             }
             if seen != st.sz[j] {
                 return false;
+            }
+        }
+        let _ = n;
+        true
+    }
+
+    /// Split label `j`'s placed cells into pure-`j` components and analyse
+    /// their dom-bridge links: a component only reachable through one bridge
+    /// `x` must take `x` (the old check let such `x` wander to another label
+    /// and only died when it did — 0683's bucket-4 massacre); a component
+    /// with no bridge at all is dead.  `false` = contradiction.
+    fn corridor_forces(
+        &mut self,
+        st: &LabState,
+        j: usize,
+        forces: &mut Vec<(usize, usize)>,
+    ) -> bool {
+        let m = self.model;
+        let n = m.h * m.w;
+        let mut stack: Vec<usize> = Vec::new();
+        self.mark_gen += 1;
+        let gen = self.mark_gen;
+        let mut comp_count = 0u32;
+        for x in 0..n {
+            self.comp_scratch[x] = u32::MAX;
+            self.touch_scratch[x] = 0;
+        }
+        for x in 0..n {
+            if m.free[x] && st.lab[x] as usize == j && self.comp_scratch[x] == u32::MAX {
+                self.marks[x] = gen;
+                stack.clear();
+                stack.push(x);
+                self.comp_scratch[x] = comp_count;
+                while let Some(u) = stack.pop() {
+                    for &y in &m.nbrs[u] {
+                        if m.free[y] && st.lab[y] as usize == j && self.comp_scratch[y] == u32::MAX {
+                            self.comp_scratch[y] = comp_count;
+                            self.marks[y] = gen;
+                            stack.push(y);
+                        }
+                    }
+                }
+                comp_count += 1;
+            }
+        }
+        if comp_count <= 1 {
+            return true;
+        }
+        for x in 0..n {
+            if !(m.free[x] && st.lab[x] < 0 && self.dom[x] & (1u128 << j) != 0) {
+                continue;
+            }
+            let mut mask = 0u128;
+            for &y in &m.nbrs[x] {
+                let c = self.comp_scratch[y];
+                if c != u32::MAX {
+                    mask |= 1u128 << c;
+                }
+            }
+            self.touch_scratch[x] = mask;
+        }
+        for ci in 0..comp_count {
+            let bit = 1u128 << ci;
+            let mut only: Option<usize> = None;
+            let mut count = 0usize;
+            for x in 0..n {
+                if self.touch_scratch[x] & bit != 0 {
+                    count += 1;
+                    only = Some(x);
+                    if count > 1 {
+                        break;
+                    }
+                }
+            }
+            if count == 0 {
+                return false;
+            }
+            if count == 1 {
+                if let Some(x) = only {
+                    if st.lab[x] < 0 {
+                        forces.push((x, j));
+                    }
+                }
             }
         }
         true
@@ -846,8 +1033,12 @@ mod tests {
             dom: vec![0; model.h * model.w],
             marks: vec![0; model.h * model.w],
             mark_gen: 0,
+            comp_scratch: vec![u32::MAX; model.h * model.w],
+            touch_scratch: vec![0; model.h * model.w],
             nodes: 0,
             deadline: Instant::now() + Duration::from_secs(30),
+        #[cfg(test)]
+        dies: std::collections::HashMap::new(),
         };
         // Root fixpoint first — a wrong force here poisons every branch.
         if !s.fixpoint(&mut st) {
@@ -933,8 +1124,12 @@ mod tests {
             dom: vec![0; model.h * model.w],
             marks: vec![0; model.h * model.w],
             mark_gen: 0,
+            comp_scratch: vec![u32::MAX; model.h * model.w],
+            touch_scratch: vec![0; model.h * model.w],
             nodes: 0,
             deadline: Instant::now() + Duration::from_secs(30),
+        #[cfg(test)]
+        dies: std::collections::HashMap::new(),
         };
         let n = model.h * model.w;
         if !s.fixpoint(&mut st) {

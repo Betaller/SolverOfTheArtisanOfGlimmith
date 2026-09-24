@@ -73,3 +73,6 @@ results/bench/20260924_1ed099e_corridor-note.txt filter=lfs diff=lfs merge=lfs -
 results/bin/rsolver-db3b325-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_db3b325_cardinal-wip.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_db3b325_cardinal-wip-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-410cb3f-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_410cb3f_range-part.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_410cb3f_range-part-note.txt filter=lfs diff=lfs merge=lfs -text

@@ -149,7 +149,22 @@ pub fn solve_same_tiling(puzzle: &Puzzle, timeout_ms: u64) -> ModuleOutcome {
             .filter(|e| e.is_boundary || e.constraint.is_some())
             .count();
     if m == 2 && local_density >= 10 {
-        if let Some(regions) = m2_region_growth(puzzle, &free, &idx_of, deadline) {
+        // Congruence-implied splits (gemini / same) belong to the ψ-paired
+        // search below (partner-XOR grow_free): the congruence-blind growth
+        // can burn the whole module budget on them (1248: 120s) and starve
+        // the exact host.  Keep a short blind attempt for safety, then let
+        // `cyclic_isometry` take the rest.
+        let m2_deadline = if has_gemini {
+            let leash = Instant::now() + std::time::Duration::from_secs(2);
+            if leash < deadline {
+                leash
+            } else {
+                deadline
+            }
+        } else {
+            deadline
+        };
+        if let Some(regions) = m2_region_growth(puzzle, &free, &idx_of, m2_deadline) {
             return finish(puzzle, regions);
         }
         if crate::aog_debug_enabled() {
@@ -926,34 +941,6 @@ fn star_configs(pattern: &[[usize; 2]]) -> Vec<[bool; 4]> {
 }
 
 
-/// Leaf of the m=2 growth: build the two regions from the labels and run the
-/// full validator.
-fn growth_leaf(
-    puzzle: &Puzzle,
-    free: &[(usize, usize)],
-    state: &GrowthState<'_>,
-    h: usize,
-    w: usize,
-) -> Option<Vec<RegionInfo>> {
-    let mut region_of: Vec<Option<usize>> = vec![None; h * w];
-    let mut side: [Vec<[usize; 2]>; 2] = [Vec::new(), Vec::new()];
-    for (k, &lab) in state.label.iter().enumerate() {
-        let cell = free[k];
-        side[lab as usize].push([cell.0, cell.1]);
-        region_of[cell.0 * w + cell.1] = Some(lab as usize);
-    }
-    for s in 0..2 {
-        if !piece_ok(puzzle, &side[s], h, w) {
-            return None;
-        }
-    }
-    let regions = crate::solver::rose::build_regions(&region_of, h, w);
-    if crate::solver::validate::validate(puzzle, &regions) {
-        return Some(regions);
-    }
-    None
-}
-
 /// Incremental rule prunes: fence-pattern star consistency and must-split
 /// edges (Gemini marks / pre-drawn boundaries).
 fn growth_prunes_ok(
@@ -1118,6 +1105,17 @@ fn m2_transversal_growth(
         }
     }
     let must_same = ring_frame_must_same(puzzle, idx_of, h, w);
+    // The involution's pair structure IS the congruence constraint: an
+    // antisymmetric labeling has T = ψ(S) automatically (x ∈ T ⟺ ψ(x) ∈ S).
+    // Feeding the pairs as XOR relations hands the search to the full m=2
+    // core (symmetric binary branching + full-label visited + SAC probing)
+    // instead of the old one-sided transversal growth — 1248's free-pair
+    // explosion was the old core's single-sided branching all over again.
+    for k in 0..total {
+        if k < partner[k] {
+            must_split.push((k, partner[k]));
+        }
+    }
     let facts = GrowthPruneFacts {
         eq_leader: eq_leaders(total, &[], &must_split, &must_same)?,
         fence,
@@ -1131,7 +1129,7 @@ fn m2_transversal_growth(
         s_cells: Vec::new(),
         partner: &partner,
     };
-    let mut visited: std::collections::HashSet<[u64; 4]> =
+    let mut visited: std::collections::HashSet<[u64; 8]> =
         std::collections::HashSet::new();
     // WLOG one fixed root: both orientations of the lex-min pair yield the
     // swapped partition; try the lex-min cell in S first and its partner as
@@ -1149,17 +1147,12 @@ fn m2_transversal_growth(
         state.label[root] = 0;
         state.label[partner[root]] = 1;
         state.s_cells.push(root);
-        visited.insert(bitkey(&state.s_cells));
-        if let Some(regions) = grow_transversal(
-            puzzle,
-            free,
-            idx_of,
-            total,
-            &mut state,
-            &mut visited,
-            &facts,
-            deadline,
-        ) {
+        // No pre-insert here: `grow_free` inserts the post-propagation key at
+        // its own entry — a pre-inserted root key collides with it and the
+        // tree dies instantly (false exhaust).
+        if let Some(regions) =
+            grow_free(puzzle, free, idx_of, total, &mut state, &mut visited, &facts, deadline)
+        {
             return Some(regions);
         }
     }
@@ -1167,70 +1160,10 @@ fn m2_transversal_growth(
 }
 
 
-/// Undecided cells reachable from S over undecided cells (assigned T cells are
-/// walls), together with the immediate frontier of S.  Every undecided pair
-/// must touch the closure — its future S-member has to be reachable — else the
-/// branch can never assign all pairs; this prunes the deep dead ends (S walled
-/// in at |S| ≈ 48) long before the leaf.
-fn reachable_closure(
-    free: &[(usize, usize)],
-    idx_of: &[Vec<usize>],
-    state: &GrowthState<'_>,
-    total: usize,
-    h: usize,
-    w: usize,
-) -> (Vec<usize>, Vec<bool>) {
-    let mut frontier: Vec<usize> = Vec::new();
-    let mut closure: Vec<bool> = vec![false; total];
-    let mut q2: Vec<usize> = Vec::new();
-    let mut seed = |state: &GrowthState<'_>, closure: &mut Vec<bool>, q2: &mut Vec<usize>, sk: usize| {
-        let (r, c) = free[sk];
-        for (nr, nc) in [
-            (r.wrapping_sub(1), c),
-            (r + 1, c),
-            (r, c.wrapping_sub(1)),
-            (r, c + 1),
-        ] {
-            if nr >= h || nc >= w {
-                continue;
-            }
-            let j = idx_of[nr][nc];
-            if j == usize::MAX || state.label[j] != 2 || closure[j] {
-                continue;
-            }
-            closure[j] = true;
-            q2.push(j);
-        }
-    };
-    for &sk in &state.s_cells {
-        seed(state, &mut closure, &mut q2, sk);
-    }
-    while let Some(u) = q2.pop() {
-        seed(state, &mut closure, &mut q2, u);
-    }
-    for &sk in &state.s_cells {
-        let (r, c) = free[sk];
-        for (nr, nc) in [
-            (r.wrapping_sub(1), c),
-            (r + 1, c),
-            (r, c.wrapping_sub(1)),
-            (r, c + 1),
-        ] {
-            if nr >= h || nc >= w {
-                continue;
-            }
-            let j = idx_of[nr][nc];
-            if j == usize::MAX || state.label[j] != 2 {
-                continue;
-            }
-            if !frontier.contains(&j) {
-                frontier.push(j);
-            }
-        }
-    }
-    frontier.sort_unstable();
-    (frontier, closure)
-}
+/// Dead code removed: the one-sided transversal growth (`grow_transversal`),
+/// its `reachable_closure` frontier helper and the S-set `bitkey` were
+/// replaced by the full m=2 core driven over the involution's partner XORs
+/// (see `m2_transversal_growth`).
 
 
 /// m == 2 free-size growth (no isometry required).  Grow S from the
@@ -2034,15 +1967,6 @@ fn growth_leaf_free(
     None
 }
 
-/// Bitset key of the S cell-index set (supports up to 256 free cells).
-fn bitkey(s_cells: &[usize]) -> [u64; 4] {
-    let mut k = [0u64; 4];
-    for &i in s_cells {
-        k[i / 64] |= 1u64 << (i % 64);
-    }
-    k
-}
-
 /// Full 3-way label vector as a dedup key (2 bits per cell).  The S-set alone
 /// is only a sound key for one-sided growth: with explicit S/T branching the
 /// same S-set can hide different T-decisions (which know more fence bits and
@@ -2059,74 +1983,6 @@ struct GrowthState<'p> {
     label: Vec<u8>,
     s_cells: Vec<usize>,
     partner: &'p [usize],
-}
-
-fn grow_transversal(
-    puzzle: &Puzzle,
-    free: &[(usize, usize)],
-    idx_of: &[Vec<usize>],
-    total: usize,
-    state: &mut GrowthState<'_>,
-    visited: &mut std::collections::HashSet<[u64; 4]>,
-    facts: &GrowthPruneFacts,
-    deadline: Instant,
-) -> Option<Vec<RegionInfo>> {
-    // Per-(M, t) state cap: wrong involutive pairings (grid symmetries) also
-    // pass the matching check and would otherwise burn huge trees before the
-    // loop reaches the true ψ.
-    if Instant::now() >= deadline || visited.len() >= 500_000 {
-        return None;
-    }
-    let (h, w) = (puzzle.height, puzzle.width);
-    if crate::aog_debug_enabled() && visited.len() % 10000 == 0 && visited.len() > 0 {
-        eprintln!("same-tiling: growth states={} |S|={}", visited.len(), state.s_cells.len());
-    }
-    if state.s_cells.len() == total / 2 {
-        // All pairs assigned (each step assigns one); build and validate.
-        return growth_leaf(puzzle, free, state, h, w);
-    }
-    if !growth_prunes_ok(puzzle, free, idx_of, state, facts, h, w) {
-        return None;
-    }
-    // Frontier = undecided cells adjacent to S, plus the undecided-reachable
-    // closure prune (see `reachable_closure`).
-    let (mut frontier, closure) = reachable_closure(free, idx_of, state, total, h, w);
-    for k in 0..total {
-        if state.label[k] != 2 {
-            continue;
-        }
-        // k runs over one member per undecided pair only.
-        let p = state.partner[k];
-        if !closure[k] && !closure[p] {
-            return None;
-        }
-    }
-    frontier.sort_unstable();
-    for j in frontier {
-        if Instant::now() >= deadline {
-            return None;
-        }
-        let p = state.partner[j];
-        if state.label[p] != 2 {
-            continue; // pair already split; j cannot join S
-        }
-        state.s_cells.push(j);
-        if !visited.insert(bitkey(&state.s_cells)) {
-            state.s_cells.pop();
-            continue;
-        }
-        state.label[j] = 0;
-        state.label[p] = 1;
-        if let Some(regions) =
-            grow_transversal(puzzle, free, idx_of, total, state, visited, facts, deadline)
-        {
-            return Some(regions);
-        }
-        state.s_cells.pop();
-        state.label[j] = 2;
-        state.label[p] = 2;
-    }
-    None
 }
 
 /// Walk each S-seed's ψ-orbit for m steps into `region_of` (ids `base..base+m`)
@@ -2457,6 +2313,21 @@ mod tests {
         .expect("parse");
         let out = solve_same_tiling(&p, 30_000);
         assert!(out.is_solved(), "1149a expected solved, got {:?}", out);
+    }
+
+    /// Congruent m=2 cluster member (8-endgame/1248): precise 50/50 +
+    /// homogeneous + 13 fence stars on 10×10.  The involution's partner pairs
+    /// fed as XORs turn the congruence into antisymmetric constraints and the
+    /// full m=2 core (SAC + closures) closes in ~2s — the old one-sided
+    /// transversal growth burned its 2^(50) pair space.
+    #[test]
+    fn solves_m2_congruent_1248() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../puzzles/official/Zone3/8-endgame/1248.json"
+        ))
+        .expect("parse");
+        let out = solve_same_tiling(&p, 30_000);
+        assert!(out.is_solved(), "1248 expected solved, got {:?}", out);
     }
 
     /// Pattern-pinned remainder cluster member (11-mixed-rules/0224): 12

@@ -64,6 +64,7 @@
 | 2026-09-23 | **m=2 搜索核重写**（doc 12 §3.2b，1249 破簇）＋ edge_csp 星域 AC/顶点偶度 | 1149a/1249/0987 直跑 + 9 题回归面 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` | **1191 口径**（1183 + compass 7 + m2 破簇 1） | **+1**（1249） | 根因改写：m=2 簇的墙**不是范式错配**——格标宿主传播一直齐全，输在搜索核（单边分支退化 S 子集枚举撞帽 + visited 只存 S 集误合并不同显式 T＝假穷尽 + 无失败标签探测）。重写 `grow_free`：**对称 S/T 二分支 + 全标签 visited 键 + 双侧连通闭包（新 s_round）+ 失败标签探测（SAC-lite，破簇关键）** + 塌缩量优先值序。**1249 160ms 破簇**；0987 873ms（原 40s 磨链）；1149a 纯 watchtower 残余（探测 1k 节点/s）。edge_csp 配套：fence 星域 AC 重写（单星求交对 2/3 臂星恒空转 → 共享边二元 AC）+ m=2 顶点偶度强制（two-piece 门控）——1249 边宿主实证根传播 180 边只锁 1（无锚点），正解在格标核。回归面 9/9 绿（two-piece 三题 + fence 四题 + 0974/0987）。`pytest`、`cargo test` 47+8、complexity_gate 全过。 |
 | 2026-09-23 | **m=2 ring 框链 must-same**（doc 12 §3.2b，1149a 破簇） | 1149a 直跑 + m=2 簇 7 题回归 + 全量基准 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` + `benchmark_rust_solver.py --baseline --timeout 40 -j 6` | **1192 口径**（全量实测 1189 + skipped-slow 1137/1146 + REG 1406 串行复核） | **+1**（1149a） | **框边推论**：框边顶点自带 2 条边界边，周边两格异区的墙就是第 3 条（T）⟹ 整条周边链必同区。落地 `ring_frame_must_same` + `same_round` + `eq_leaders` 并类（blocked/预绘边断链，叶子验证兜底）。**1149a 1.5s 破簇**（52 格圈坍缩 1 标签 + val=2 望塔三缺一级联，109/87 对齐官方）；环纹 m=2 簇全员提速且全部 via same-tiling：0974 16s→650ms、1137 30s→8.6s、0987 60ms、1249 173ms。m=2 簇 **5/5 全解**。全量基准 1189/1256（REG=1 1406 串行 58s SOLVED＝争抢噪声，0 真回归；1137/1146 为 skipped-slow）。`pytest` 289、`cargo test` 49+8、complexity_gate 全过。 |
 | 2026-09-23 | **pp-pin 前置 + 预钉三层剪枝**（doc 07，1215/0224 OOM 破簇） | 1215/0224/0976 直跑 + 快速档基准 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` + `benchmark_rust_solver.py --baseline --skip-slow --timeout 40 -j 6` | **1194 口径**（1192 + 1215/0224） | **+2**（1215、0224） | OOM 根因：`enumerate_pin_assignments` 物化全笛卡尔积（注释说有 cap 实际没有），0224 12 锚 × 单类型 rose 符号过滤恒真 → 14 GB 被杀。修：**恰 1 符号/类型过滤**（rose 语义）+ `for_each_pin_assignment` 流式访回（MRV + 节点/指派双帽 + deadline）。1215 另有 aog 形状库 OOM 先杀进程的问题——pp-pin 独立块**前置到 aog 之前**（门控不变）+ combine_plain 三层剪枝（ring 框链 run 过滤 / MRV 跨锚可达 / 已决顶点 ring-brick 度）。实测：**1215 544ms via pp-pin**（旧 36s 树还输给 OOM）、**0224 11ms via same-tiling**、0976 3.3s 不回归。`pytest` 289、`cargo test` 52+8、complexity_gate 全过。 |
+| 2026-09-24 | **m=2 伴侣对 XOR**（doc 12 §3.2 重写，1248 破簇） | 1248 直跑 + m=2 簇 10 题回归 | 直跑 `rsolver`（RSOLVER_TIMEOUT_MS=40000）+ `cargo test --release` | **1195 口径**（1194 + 1248） | **+1**（1248） | **T=ψ(S) 同余 ≡ 伴侣对 XOR**（反称标注自动成立）——对合伴侣对喂进 `must_split`，同余题交给完整 m=2 搜索核（对称二分支+全标签键+SAC+闭包）。真 ψ 树 ~0.3s（1248 全解 **2.2s**，原 40s+ 超时）。配套：has_gemini 盲生长缰绳 2s（防磨光预算饿死精确宿主）；修复**根标签键预插撞车假穷尽**（六树 <20k 瞬死、M2_SKIP 任何组合救不回——「传播器怎么关都没用」即此症状）。m=2 簇 10/10 回归全绿（0382/0960 同形对 10ms）。`pytest` 289、`cargo test` 53+8、complexity_gate 全过。 |
 
 ---
 
@@ -901,6 +902,28 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
   SOLVED**（23.5s/35.5s via aog）＝争抢噪声、**0 真回归**。`pytest` 289、
   `cargo test` 52+8（+3 回归测试）、complexity_gate 全过。
   残余弹药：0683/1258（+2）、0975a（+1，多区框链宿主）、1248（+1）+ FAIL 池。
+
+### 2026-09-24 · m=2 伴侣对 XOR（doc 12 §3.2 重写，1248 破簇 +1）
+
+- **同余 ≡ 反称**：对合 ψ 下 T=ψ(S) 等价于每对 {x,ψ(x)} 恰一入 S——伴侣对
+  直接作 XOR 入 `must_split`，同余题全部交给完整 m=2 搜索核（对称二分支 +
+  全标签 visited + SAC + 双侧闭包 + fence 星 AC）。真 ψ（点反射 t=(9,9)，
+  (M,t) 循环第一个过匹配检查）的树 **~0.3s**；1248 全解 **2.2s via
+  same-tiling**（原 40s+ 超时，旧单边横截生长在 2^(50) 自由对上走不完）。
+- **根键预插撞车（假穷尽 bug 类）**：旧横截约定「调用方预插 visited 根键」
+  与 `grow_free` 入口自插撞车 → 六棵 ψ×根树第一步即假穷尽。症状极具迷惑性：
+  **M2_SKIP 任何传播器组合都救不回、状态行 <20k 全簇瞬死**——排查假穷尽先查
+  visited 键的所有插入点。已删旧 `grow_transversal`/`reachable_closure`/`bitkey`。
+- **盲生长缰绳 2s**（`has_gemini`）：congruence-blind 的 m2_region_growth 看不见
+  同余结构，曾把整份预算磨光（1248: 120s）饿死精确宿主；同余题归 ψ-配对搜索
+  与窗口 CSP（任意 ψ 的补集=ψ(S)）。
+- 口径 **1194 → 1195**。全量基准 `20260924_partners-full`：**1191/1256 PASS**
+  （1248 榜内 2.3s 确认；A/B/C 26/26、Zone1 308/312、Zone2 426/438、
+  Zone3 431/479），REG=1（0445）串行 142s SOLVED via edge_csp ＝争抢噪声，
+  1406 同（59s SOLVED）；SKIPPED-SLOW=2（0685/1146 历史可过）；**0 真回归**。
+  m=2 簇 10/10 回归全绿（0382/0960 各 10ms）。`pytest` 289、`cargo test`
+  53+8（+1248 回归测试）、complexity_gate 全过。
+  残余弹药：0683/1258（+2）、0975a（+1）+ FAIL 池（+3）冲 1200。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

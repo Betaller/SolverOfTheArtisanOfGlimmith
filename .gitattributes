@@ -57,3 +57,8 @@ results/bin/rsolver-5711e70-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_5711e70_pp-multirem.txt filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_5711e70_pp-multirem.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_5711e70_pp-multirem-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-6578647-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_6578647_pp-compass-rem.txt filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_6578647_pp-compass-rem-pp.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_6578647_pp-compass-rem-compass.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_6578647_pp-compass-rem-note.txt filter=lfs diff=lfs merge=lfs -text

@@ -2,6 +2,8 @@
 
 pub mod aog;
 pub mod backtrack;
+pub mod compass_label;
+pub mod compass_part;
 pub mod edge_csp;
 pub mod fence;
 pub mod pieces;
@@ -59,6 +61,37 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // success it is attached to the returned `Solution`.
     let mut attempts: Vec<SolverAttempt> = Vec::new();
 
+    // Compass+solitary joint partition searcher (`compass_part`): runs first
+    // and exclusively of `same_tiling` when the puzzle is pure compass+solitary.
+    // aog / edge_csp each burn a full unit timing out on the `6-compass-main`
+    // family and `pieces` falsely reports exhausted (its pre-enumerated compass
+    // placements are hard-truncated at 2000 — see the module doc), so this
+    // purpose-built joint search goes before all of them and can win the whole
+    // unit budget.  Its failure path falls through to aog / edge_csp / pieces
+    // unchanged (chain length stays ≤ RUST_PARTS=6 because `same_tiling` is
+    // skipped for these puzzles).
+    let cp_applicable = compass_part::is_applicable(puzzle);
+    if cp_applicable {
+        let cp_start = Instant::now();
+        let cp_deadline = cp_start + std::time::Duration::from_millis(timeout_ms);
+        let outcome = compass_part::solve_compass_part(puzzle, timeout_ms);
+        let elapsed = cp_start.elapsed().as_millis() as u64;
+        match outcome {
+            ModuleOutcome::Solved(regions) => {
+                attempts.push(SolverAttempt {
+                    solver: "compass-part".into(),
+                    status: SolverStatus::Success,
+                    elapsed_ms: elapsed,
+                    note: None,
+                });
+                return build_solution(regions, &start, puzzle, "compass-part", attempts);
+            }
+            other => {
+                record_module_with_elapsed("compass-part", other, cp_deadline, elapsed, &mut attempts)
+            }
+        }
+    }
+
     // Congruent-tiling pre-pass (`same_tiling`): the global `same` rule, the
     // pattern-pinned congruent-remainder clusters, and homogeneous (Gemini)
     // two-region splits.  Cheap and exact when it applies (cyclic isometry
@@ -92,8 +125,9 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             .flatten()
             .filter(|e| e.is_boundary || e.constraint.is_some())
             .count();
-    if puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "homogeneous")
-        || st_local_density > 0
+    if !cp_applicable
+        && (puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "homogeneous")
+            || st_local_density > 0)
     {
         let st_start = Instant::now();
         let st_deadline = st_start + std::time::Duration::from_millis(timeout_ms);
@@ -112,6 +146,36 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             other => {
                 record_module_with_elapsed("same-tiling", other, st_deadline, elapsed, &mut attempts)
             }
+        }
+    }
+
+    // Standalone `shape_pattern` pre-pin for `puzzle_piece` puzzles that are
+    // not rose-capable (so `solve_rose_with_pin` never runs).  `pieces`' DLX
+    // cannot model "N pattern regions + one big unconstrained region" — 0976
+    // exhausts in 2ms and nothing else in the chain can attempt it.  Runs
+    // BEFORE aog because aog shape-library-explodes on exactly this class and
+    // OOM-kills the process before the later phases can try (1215: exit -9 at
+    // 14 GB).  Cheap when it does not apply (a few dihedral placements per
+    // anchor) and validated end-to-end, so a wrong pin can never leak out.
+    // The ring frame-run + MRV + junction prunes collapse the tree to
+    // milliseconds (1215: 541 ms; it previously needed ~36 s and still lost
+    // to the aog OOM).
+    let has_pp = puzzle.rules.iter().any(|r| r.ctype == "puzzle_piece");
+    if has_pp && !is_rose_capable(puzzle) {
+        let pp_start = Instant::now();
+        let outcome = rose::puzzle_piece_pin::solve_puzzle_piece_standalone(puzzle, timeout_ms);
+        let elapsed = pp_start.elapsed().as_millis() as u64;
+        match outcome {
+            ModuleOutcome::Solved(regions) => {
+                attempts.push(SolverAttempt {
+                    solver: "pp-pin".into(),
+                    status: SolverStatus::Success,
+                    elapsed_ms: elapsed,
+                    note: None,
+                });
+                return build_solution(regions, &start, puzzle, "pp-pin", attempts);
+            }
+            _ => attempts.push(not_attempted("pp-pin", "no valid pin assignment")),
         }
     }
 
@@ -218,34 +282,34 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         attempts.push(not_attempted("rose", note));
     }
 
-    // Standalone `shape_pattern` pre-pin for `puzzle_piece` puzzles that have no
-    // `rose_window` (so `solve_rose_with_pin` never ran above).  `pieces`' DLX
-    // cannot model "N pattern regions + one big unconstrained region" — 0976
-    // exhausts in 2ms and nothing else in the chain can attempt it.  Cheap when
-    // it does not apply (a few dihedral placements per anchor) and validated
-    // end-to-end, so a wrong pin can never leak out.
-    let has_pp = puzzle.rules.iter().any(|r| r.ctype == "puzzle_piece");
-    if has_pp && !rose_capable {
-        let pp_start = Instant::now();
-        // Full unit budget, like every other module: the placement search on
-        // 1215 needs ~36s of a 40s budget, and the wall clock
-        // (`timeout × RUST_PARTS × SLACK` = 40 × 4 × 1.2 = 192s) still covers
-        // aog(40) + pp-pin(40) + pieces(40) with room for the OOM retry.
-        let outcome = rose::puzzle_piece_pin::solve_puzzle_piece_standalone(puzzle, timeout_ms);
-        let elapsed = pp_start.elapsed().as_millis() as u64;
+    // Area-bounded partition (range/precise with an emergent region count):
+    // the FreeRem size windows + spawn ceiling carry the search (1351 class —
+    // aog/edge_csp both flail on these).  Self-sliced 8 s, false-negative only.
+    {
+        let rr_start = Instant::now();
+        let outcome = match rose::puzzle_piece_pin::solve_range_partition(
+            puzzle,
+            puzzle.height * puzzle.width,
+            rr_start + std::time::Duration::from_millis(timeout_ms),
+        ) {
+            Some(regions) => ModuleOutcome::Solved(regions),
+            None => ModuleOutcome::None,
+        };
+        let elapsed = rr_start.elapsed().as_millis() as u64;
         match outcome {
             ModuleOutcome::Solved(regions) => {
                 attempts.push(SolverAttempt {
-                    solver: "pp-pin".into(),
+                    solver: "range-part".into(),
                     status: SolverStatus::Success,
                     elapsed_ms: elapsed,
                     note: None,
                 });
-                return build_solution(regions, &start, puzzle, "pp-pin", attempts);
+                return build_solution(regions, &start, puzzle, "range-part", attempts);
             }
-            _ => attempts.push(not_attempted("pp-pin", "no valid single-remainder pin")),
+            other => record_module_with_elapsed("range-part", other, rr_start + std::time::Duration::from_millis(timeout_ms), elapsed, &mut attempts),
         }
     }
+
 
     // Solver dispatch:
     // 1. edge_csp post-fallback for edge-constraint-dense puzzles (ring / brick /

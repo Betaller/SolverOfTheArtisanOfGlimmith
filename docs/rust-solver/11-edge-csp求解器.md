@@ -106,6 +106,21 @@ shape）。**任何一个报告 progress 就立刻 `build_components()` 重建�
 下一个——否则后一个会拿陈旧连通性做推理（`solitary` S3 曾因此把已合并的组件
 误判成"封闭无线索"）。
 
+**通用规则（第四次陈旧组件事故后的定则，2026-09-23）：谁读谁重建。**
+组件缓存是「写边即失效」的派生数据。轮内写边来源很多（growth-edge 切割、
+area_constraints、watchtower Pass A 强制、wdegree 强制……），凡是读
+`curr_comp_id` / `comp_cells` / `growth_edges` 的传播器都必须**在自己入口
+重建**（`propagate_watchtower` / `propagate_rose_separation` /
+`propagate_rose_phase3` 已加），或显式延迟到下一轮（dual 的旧方案）。
+2026-09-23 的事故形态：`rose_separation` 卡口推理从陈旧 `comp_cells` 做可达性
+BFS → 低估缺型可达性 → 假卡口假 Uncut（1135 (6,4)-(7,4)）→ 级联假矛盾；
+wdegree 强制只是加大轮内写流量的放大器。详见 `docs/优化/27` §8。
+
+**望塔精确度强制（`propagate_watchtower_degree` singleton-fit）已启用**：
+`hi == known_cut` → 未定边全 Uncut；`lo == known_cut + x` → 全 Cut。规则本身
+经 1568 个官方顶点 0 反例验证；此前的「杀解」即上述陈旧组件假强制，修复后
+安全（1135/1392/1137 全 SOLVED，1137 较禁用时提速）。
+
 ### 3.3 顶点度传播（`prop.rs::propagate_bricky_loopy`）
 
 **⚠ 与参考实现的关键差异（正确性修复）**：参考 aog 的 `bricky_loopy` 只数**内部边**
@@ -377,3 +392,18 @@ edge_csp 解出**；0685 并行翻负但串行 20s SOLVED（噪声）。
 3 次跑出 2 次的 flaky）。现探针超时直接收轮不强制；`probe_one_round` 保留「一轮
 只强制一个字面量即返回」的原语义（实测 force-all 会因缺少强传播接力反而变弱：
 0312 从 2/3 解出退化为 0/5）。修复后 0312 树完全确定（nodes 恒 44529）。
+
+## 后续 · fence 星域 AC + m=2 顶点偶度（2026-09-23）
+
+- **fence 星域 AC**（重写 `propagate_palisade_constraints`）：原「单星 4 旋转求交」
+  对 2/3 臂星恒无强制（无普适掩码位）。重写为星域 AC——放置域 = `PalisadeKind`
+  的旋转掩码（`pattern_at_rotation`，位序 N,S,W,E = `cell_edges` 序），按已知边
+  态过滤后**相邻星共享边互收窄**（投影交集二元 AC），全域一致即强制边
+  （`star_consensus` / `star_force`）。1249 类 fence 密集板由此收网。
+- **m=2 顶点偶度强制**（`propagate_two_piece_vertex_parity`，`exact_piece_count
+  == Some(2)` 门控）：恰二区 ⟹ 内部顶点（4 可填格）的割边数**必偶**（二染色
+  环上转移数偶）——3 决 1 未决即锁第 4 条，全决奇数即矛盾。fence 星跨顶点无
+  耦合，这是曲线配对的另一半；≥3 色不成立（奇转移合法），故严格 two-piece 门控。
+  `M2_SKIP=vparity2`（诊断门 `EDGE_CSP_SKIP=vparity2`）可关。
+- 根调试：`EDGE_CSP_DEBUG` 现在入口处也打 `root unknown=…`（1249 根传播
+  180 边只锁 1——边宿主无锚点的直接证据，正解落到 same-tiling 的格标搜索核）。

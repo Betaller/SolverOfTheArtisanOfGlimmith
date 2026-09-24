@@ -137,3 +137,56 @@ dual_connectivity 的阻塞解除（dual 已挂 `structural_pieces` 先行落地
 （仅规则 1+4；参考的 `@` 度数规则与我们的 watchtower 语义不符，官方解实测 241/471
 反例，弃）。望塔精确度判死传播同日落地并解出 1137；其**强制分支存在未明交互 bug
 （singleton fit 钉边杀真解）**，已留空待查——判死部分健全且已足够。
+
+**2026-09-23 追记（wdegree 交互侦查，未结案）**：
+
+1. **强制模型已证健全**：val→割度四前提（1→0、2→{2,4}、3→{3,4}、4→4）对 1568 个
+   官方满象限顶点 **0 反例**；两条塌缩前提同样干净（m=2 val=2 → deg==2：634/634；
+   ring 顶点无奇割度：587/587，含边界顶点）。纸面推导与官方数据一致，强制规则
+   本身无罪。
+2. **追踪法陷阱（复现者必读）**：给 `set_edge` 加 `#[track_caller]` 写入追踪时，
+   `self.probe(|s| s.set_edge(...))` 沙箱里的**试探性假设**也会被记成"写入"。
+   由此曾误判"根层存在错误强制"——按调用行过滤试探写入后，1135 根层演绎写入
+   与官方解完全一致。判定演绎错误必须先排除试探。
+3. **放大器结构与本文 §3 同型**：singleton-fit 强制把输入边状态里的单点错误
+   放大成全局矛盾。剩余嫌疑：probe 沙箱 `restore()` 后的**陈旧组件缓存**——
+   `snapshot()`（`edge_csp/mod.rs`）只回滚 `edges`/`changed`/`pair_branch`，
+   `curr_comp_id` / `curr_comp_sz` / `growth_edges` 不在快照内，沙箱内
+   `build_components` 的产物会泄漏给恢复后的传播轮（"陈旧组件快照"类第三次
+   出现：S3/假 cc、D0 误冻结同源）。
+4. **同日深挖（假设迭代三轮，均未完全结案）**：
+   - restore() 后强制重建组件缓存 + 开强制 → 三题仍杀（stale-comp 假设不足）；
+   - **深度标记实测：根层 24 条强制 24 条正确**（对照官方解 0 反例），沙箱内
+     fits 空的 Err 仅 1 次且是合法条件矛盾（kc=3>2）——**演绎层完全无罪**；
+   - Uncut-only 非对称消融（Cut 强制全关）同样杀三题（0.3s 解 → 40s 磨满超时，
+     连假穷尽都不是）；probe 关掉也不救——**杀解在搜索机制层**，与 doc 27 §3
+     的 parity 放大器不同型；
+   - 剩余假设排序：①set_edge 写流量暴露的搜索态记账缺口（snapshot/restore
+     对 Solver 全字段的水位线审计）；②强制改变 select_edge/pair-branch 树形后
+     触发的病态搜索路径。四象限顶点 val→割度模型、`cell_pair_indices` 与
+     `vertex_cells` 行主序匹配、`flood_fill_decided` 只漫 Uncut——均逐一验证无误。
+
+---
+
+## 8. 结案（2026-09-23 晚）：真凶＝陈旧组件缓存的卡口假强制，wdegree 强制已解锁
+
+第 4 条假设排序里的「记账缺口」方向反了——**回滚机制无罪，缺的是消费端的重建**。
+完整因果链（逐层实证）：
+
+1. `build_components` 在洪水之后写 growth-edge 切割，`propagate_area_constraints` /
+   watchtower Pass A / wdegree 强制又在轮内继续写边——**组件缓存在轮内即刻陈旧**。
+2. `propagate_rose_separation` 的卡口推理（Phase 1 chokepoint）从陈旧 `comp_cells`
+   做可达性 BFS：低估「缺型可达性」→ 假卡口 → **假 Uncut 强制**（实测首错：
+   1135 的 (6,4)-(7,4) 官方 Cut 被钉 Uncut，`rose.rs` chokepoint 强制点）→
+   级联至 watchtower Pass A / bricky 假强制 → 根层矛盾 → 秒退。
+3. **wdegree 强制只是放大器**：它加大轮内写流量、拉宽陈旧窗口，让卡口假强制
+   必然触发——这解释了「强制开就杀、关就好」的全部现象（演绎本身 24/24 正确）。
+4. 修复：`propagate_watchtower` / `propagate_rose_separation` /
+   `propagate_rose_phase3` 入口各自 `build_components()`（`build_components`
+   转 `pub(crate)`）。修复后 wdegree singleton-fit 强制**安全启用**：
+   1135 36ms / 1392 414ms / 1137 24s 全 SOLVED（1137 较强制关闭时的 29s 更快），
+   回归点 1294/1017/0987/1378/1110 全绿。
+
+**通用教训（第四次陈旧组件事故）**：组件缓存是「写边即失效」的派生数据，
+**每个读它的传播器都必须自带重建（或显式延迟到下一轮）**——dual 的延迟、
+doc30 的 progress 重建、本次的消费端重建，都是同一规则的实例。谁读谁重建。

@@ -168,6 +168,12 @@ fn rose_plain_and_growth(
     // rose_growth never ran and rose_window puzzles hung until the harness kill.
     // 60% is enough for region_match to complete on the solvable puzzles (which
     // finish in seconds anyway) while leaving 40% for the rose_growth fallback.
+    // 2026-09-24 (WIP, disabled): `solve_cardinal_partition` — the
+    // rose-cardinality labeling for the 0975a class (ring frame chain +
+    // exactly-one-of-each-type).  The leaf accepts the official truth and the
+    // machinery is sound, but the search endgame does not converge in budget
+    // yet (see doc 07 修订4); re-enable once the labeling search converges.
+
     let rm_budget = (timeout_ms * 3) / 5;
     if crate::aog_debug_enabled() {
         eprintln!("rose: region_match start (types={} m={} rm_budget={})", symbol_types.len(), m, rm_budget);
@@ -221,9 +227,6 @@ fn solve_rose_with_pin(
     start: &Instant,
     timeout_ms: u64,
 ) -> ModuleOutcome {
-    let h = puzzle.height;
-    let w = puzzle.width;
-    let n_bits = h * w;
     let dbg = crate::aog_debug_enabled();
 
     let anchors = match puzzle_piece_pin::enumerate_pin_candidates(puzzle, symbol_types) {
@@ -238,99 +241,136 @@ fn solve_rose_with_pin(
             return ModuleOutcome::None;
         }
     };
-    let assignments =
-        puzzle_piece_pin::enumerate_pin_assignments(puzzle, anchors, symbol_types, m);
 
-    if crate::aog_debug_enabled() {
-        eprintln!(
-            "rose-pp-pin: {} assignments to try (m={})",
-            assignments.len(),
-            m
-        );
-    }
-
+    let mut outcome: Option<ModuleOutcome> = None;
     let mut validation_failed = false;
     let deadline = *start + std::time::Duration::from_millis(timeout_ms);
-    for assignment in &assignments {
-        // Budget guard: stop trying assignments if we're out of time.
-        if crate::clock::Instant::now() >= deadline {
-            break;
-        }
-
-        // Remainder per-type count (must be balanced → that's the new m').
-        let m_remainder = match puzzle_piece_pin::remainder_per_type(assignment, puzzle, symbol_types, w) {
-            Some(c) => c,
-            None => continue,
-        };
-        if m_remainder == 0 && !all_positions_empty_after_pin(all_positions, assignment, n_bits) {
-            // No symbol cells remain but cells do — region_match needs ≥1 seed.
-            continue;
-        }
-
-        // Reduced all_positions = original minus all pinned cells.
-        let mut reduced = all_positions.clone();
-        for p in &assignment.pinned {
-            for idx in p.cells.iter() {
-                reduced.remove(idx);
-            }
-        }
-
-        if crate::aog_debug_enabled() {
-            eprintln!(
-                "rose-pp-pin: assignment {} pinned regions, remainder={} cells m'={}",
-                assignment.pinned.len(),
-                reduced.len(),
-                m_remainder
-            );
-        }
-
-        // Fast path: m' == 1 means the remainder is a single rose region.  If
-        // the remaining cells form one connected component containing every
-        // remaining symbol cell, that IS the region — no MRV search needed.
-        // This sidesteps region_match's candidate-cap (20000) which can drop
-        // the large single-region candidate on big remainders.
-        if m_remainder == 1 {
-            if let Some(single) = try_single_region(puzzle, pre, &reduced, symbol_types, w) {
-                let merged = merge_pinned(single, assignment, w);
-                match accept_if_valid(merged, puzzle) {
-                    Some(ok) => return ModuleOutcome::Solved(ok),
-                    None => validation_failed = true,
+    puzzle_piece_pin::for_each_pin_assignment(
+        puzzle,
+        anchors,
+        symbol_types,
+        deadline,
+        &mut |pinned: &[puzzle_piece_pin::PinnedPlacement]| {
+            match try_one_pin(puzzle, pre, pinned, symbol_types, m, all_positions, start, timeout_ms) {
+                PinTry::Solved(regions) => {
+                    outcome = Some(ModuleOutcome::Solved(regions));
+                    false
                 }
+                PinTry::Rejected => {
+                    validation_failed = true;
+                    true
+                }
+                PinTry::Miss => true,
             }
-            // else fall through to region_match (may still find it via MRV).
-        }
-
-        // region_match on the remainder.  m' = m_remainder (each remaining rose
-        // region contains one of each remaining symbol per type... actually m'
-        // is the per-type count in the remainder, which equals the region
-        // count only if each region has one per type — the standard rose model).
-        let remaining_ms = timeout_ms.saturating_sub(start.elapsed().as_millis() as u64);
-        if remaining_ms == 0 {
-            break;
-        }
-        let rose_regions = region_match::solve_by_region_match(
-            puzzle,
-            pre,
-            symbol_types,
-            m_remainder,
-            &reduced,
-            start,
-            remaining_ms,
-        );
-        let Some(rose_regions) = rose_regions else { continue };
-
-        // Merge: rose_regions + pinned regions (each pinned region gets a
-        // fresh region_id above the rose ids).
-        let merged = merge_pinned(rose_regions, assignment, w);
-        match accept_if_valid(merged, puzzle) {
-            Some(ok) => return ModuleOutcome::Solved(ok),
-            None => validation_failed = true,
-        }
+        },
+    );
+    if let Some(o) = outcome {
+        return o;
     }
     if validation_failed {
         ModuleOutcome::ValidationFailed
     } else {
         ModuleOutcome::None
+    }
+}
+
+/// Per-assignment outcome for `solve_rose_with_pin`'s streamed walk.
+enum PinTry {
+    Solved(Vec<RegionInfo>),
+    /// A candidate solution was built but `validate` rejected it.
+    Rejected,
+    /// This assignment produced nothing (pruned / remainder unsolvable).
+    Miss,
+}
+
+/// Try one pin assignment: reduce the search set, run the m'==1 fast path
+/// and/or `region_match` on the remainder, then merge + accept.
+fn try_one_pin(
+    puzzle: &Puzzle,
+    pre: &PreBoundaries,
+    pinned: &[puzzle_piece_pin::PinnedPlacement],
+    symbol_types: &[String],
+    m: usize,
+    all_positions: &CellSet,
+    start: &Instant,
+    timeout_ms: u64,
+) -> PinTry {
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let n_bits = h * w;
+
+    // Remainder per-type count (must be balanced → that's the new m').
+    let m_remainder = match puzzle_piece_pin::remainder_per_type(pinned, puzzle, symbol_types, w) {
+        Some(c) => c,
+        None => return PinTry::Miss,
+    };
+    // Region bookkeeping: pinned regions + remainder regions must total m.
+    if m_remainder + pinned.len() != m {
+        return PinTry::Miss;
+    }
+    if m_remainder == 0 && !all_positions_empty_after_pin(all_positions, pinned, n_bits) {
+        // No symbol cells remain but cells do — region_match needs ≥1 seed.
+        return PinTry::Miss;
+    }
+
+    // Reduced all_positions = original minus all pinned cells.
+    let mut reduced = all_positions.clone();
+    for p in pinned {
+        for idx in p.cells.iter() {
+            reduced.remove(idx);
+        }
+    }
+
+    if crate::aog_debug_enabled() {
+        eprintln!(
+            "rose-pp-pin: assignment {} pinned regions, remainder={} cells m'={}",
+            pinned.len(),
+            reduced.len(),
+            m_remainder
+        );
+    }
+
+    // Fast path: m' == 1 means the remainder is a single rose region.  If
+    // the remaining cells form one connected component containing every
+    // remaining symbol cell, that IS the region — no MRV search needed.
+    // This sidesteps region_match's candidate-cap (20000) which can drop
+    // the large single-region candidate on big remainders.
+    if m_remainder == 1 {
+        if let Some(single) = try_single_region(puzzle, pre, &reduced, symbol_types, w) {
+            let merged = merge_pinned(single, pinned, w);
+            return match accept_if_valid(merged, puzzle) {
+                Some(ok) => PinTry::Solved(ok),
+                None => PinTry::Rejected,
+            };
+        }
+        // else fall through to region_match (may still find it via MRV).
+    }
+
+    // region_match on the remainder.  m' = m_remainder (each remaining rose
+    // region contains one of each remaining symbol per type... actually m'
+    // is the per-type count in the remainder, which equals the region
+    // count only if each region has one per type — the standard rose model).
+    let remaining_ms = timeout_ms.saturating_sub(start.elapsed().as_millis() as u64);
+    if remaining_ms == 0 {
+        return PinTry::Miss;
+    }
+    let rose_regions = region_match::solve_by_region_match(
+        puzzle,
+        pre,
+        symbol_types,
+        m_remainder,
+        &reduced,
+        start,
+        remaining_ms,
+    );
+    let Some(rose_regions) = rose_regions else { return PinTry::Miss };
+
+    // Merge: rose_regions + pinned regions (each pinned region gets a
+    // fresh region_id above the rose ids).
+    let merged = merge_pinned(rose_regions, pinned, w);
+    match accept_if_valid(merged, puzzle) {
+        Some(ok) => PinTry::Solved(ok),
+        None => PinTry::Rejected,
     }
 }
 
@@ -405,11 +445,11 @@ fn try_single_region(
 /// True if `all_positions` minus the pinned cells is non-empty.
 fn all_positions_empty_after_pin(
     all_positions: &CellSet,
-    assignment: &puzzle_piece_pin::PinAssignment,
+    pinned: &[puzzle_piece_pin::PinnedPlacement],
     _n_bits: usize,
 ) -> bool {
     let mut count = all_positions.len();
-    for p in &assignment.pinned {
+    for p in pinned {
         // Only count cells actually in all_positions (they always are, since
         // placements avoid blocked cells).
         for idx in p.cells.iter() {
@@ -424,12 +464,12 @@ fn all_positions_empty_after_pin(
 /// Merge rose regions with pinned regions, assigning fresh region_ids.
 fn merge_pinned(
     mut rose_regions: Vec<RegionInfo>,
-    assignment: &puzzle_piece_pin::PinAssignment,
+    pinned: &[puzzle_piece_pin::PinnedPlacement],
     w: usize,
 ) -> Vec<RegionInfo> {
     let next_id = rose_regions.iter().map(|r| r.region_id).max().map_or(0, |m| m + 1);
     let _ = w;
-    for (i, p) in assignment.pinned.iter().enumerate() {
+    for (i, p) in pinned.iter().enumerate() {
         let mut cells: Vec<[usize; 2]> = p.cells.iter().map(|idx| [idx / w, idx % w]).collect();
         cells.sort();
         let area = cells.len();

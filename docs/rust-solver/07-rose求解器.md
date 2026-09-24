@@ -88,11 +88,14 @@ shape_pool 题，导致 0732 等 `puzzle_piece + rose_window` 题 aog 3s 解不�
 
 **机制**（`rose/puzzle_piece_pin.rs`）：
 1. `enumerate_pin_candidates`：对每个 `shape_pattern` 格，枚举 pattern 的 dihedral 变体（≤8）×
-   合法放置（锚点在变体内、全在网格、不压 blocked、不跨预画边界），用符号约束过滤
-  （per-type 计数必须相等，否则剩余无法均分）。
-2. `enumerate_pin_assignments`：多锚点笛卡尔积（互不重叠 + 余数平衡）。
+   合法放置（锚点在变体内、全在网格、不压 blocked、不跨预画边界），符号过滤为
+   **恰 1 个/类型**（rose 语义：预钉即整个区域；旧「计数相等」对单类型恒真＝空转，
+   0224 的组合积曾爆到 14 GB）；ring 框链 run 过滤（放置含 rim 格必须含整 run）。
+2. `for_each_pin_assignment`：多锚点笛卡尔积**流式**访回（不物化全组合；MRV 锚序 +
+   节点帽 2M + 指派帽 5 万 + deadline；访回返回 false 即停）。
 3. 对每个 assignment：缩减 `all_positions`（移除预钉格）→ 算 `m'`（剩余每类符号数）→
-   调 `region_match(m', reduced_all_positions)` → `merge_pinned` 合并预钉区域 → `accept_if_valid`。
+   校验 `m' + n_pin == m` → 调 `region_match(m', reduced_all_positions)` → `merge_pinned`
+   合并预钉区域 → `accept_if_valid`。
 4. **m'=1 快速路径** `try_single_region`：剩余格若单一 4-连通分量（不跨预画边界）→ 直接成单区域，
    避开 region_match 的 `CANDIDATE_CAP=20000` 候选截断（大区域候选易被截断）。
 
@@ -324,8 +327,57 @@ rose 不适用、edge_csp 排除 `puzzle_piece`、pieces 的 DLX 没有"大无�
 2ms exhausted、backtrack 禁用）。
 
 两个陷阱：**deadline 必须锚到模块自己的 `Instant::now()`**（用全局 start 等于
-已过期）；**给完整 unit 预算**（1215 的放置搜索要 ~36s）。范围限制与
-`docs/优化/32` 见该文档。
+已过期）；**给完整 unit 预算**。范围限制与 `docs/优化/32` 见该文档。
+
+**2026-09-23 修订（前置到 aog 之前 + 三层剪枝，1215/0224 破簇）**：
+- **路由**：pp-pin 独立预钉块移到 aog **之前**（门控不变：`puzzle_piece` 且
+  非 rose-capable）。旧序里 aog 形状库在 1215 上 14 GB OOM 把进程带走，pp-pin
+  根本轮不到；前置后 1215 **544ms via pp-pin**（旧放置树走 ~36s 仍输给 OOM）。
+- **三层剪枝**（`combine_plain`）：① ring 框链 run 过滤进候选生成
+  （`ring_frame_runs`：放置含 rim 格必须含整条干净 run，否则必把墙贴上框）；
+  ② MRV 锚序（`pick_anchor_mrv`，含跨锚覆盖的可达性判定——一个放置可吞多锚，
+  仅"全无可达放置"才是死枝）；③ 已决顶点 ring/brick 度检查（`new_pin_vertices_ok`，
+  四象限全定才判，ring 禁 3、brick 禁 4）。
+- **流式化**（rose 分支同享）：`enumerate_pin_assignments` 物化全组合 →
+  `for_each_pin_assignment` 流式访回 + 双帽 + 恰 1 符号过滤。**0224**（12 锚
+  ×单类型 rose，旧过滤恒真）从 14 GB OOM → **11ms via same-tiling**。
+
+**2026-09-24 修订（多余数余数 `solve_multi_remainder`，0994 破簇 +1）**：
+叶子原只支持「余数=单区」（0976 类）；0994 类（pattern 区 + 1 大环区 + 望塔强制
+单格）余数要拆成多区。新增望塔驱动的**余数划分搜索**（`FreeRem`）：
+
+- **望塔基数 → 成对关系**：顶点上 `value = p + k`（p = 异域 pin 标签数，自由格标签
+  永不与 pin 同域），`f` 个自由格恰 `k` 个不同标签 ⇒ `f==2` 时同/异成对强制、
+  `f≥3` 时 `k==f` 全异 / `k==1` 全同；预绘墙同为 must-split。must-same 经 UF 合成
+  **单元**（0994 的 `(4,3)~(5,4)` 类是对角单元——其连通性只能走 `(0,3)` 走廊）。
+- **搜索核**（compass_label 范式）：域过滤（可并入标签 = 潜在连通可桥接 + 非
+  must-split，∪ SPAWN）+ fixpoint（joinable 潜在连通 / WT 界 / 空域判死 / 单例
+  强制）+ MRV 分支 + 快照回滚。两个关键实现要点：
+  1. **值域必须含全部既有标签**（不限邻接）——邻接受限 join 会漏真解：同一区的两
+     个种子先后各自 spawn 后永远无法合并（0994 的 (0,0)/(1,4) 即此）；
+  2. **单例强制必须逐个生效+全量重算**，不能批量——涌现标签下根节点每单元的域都
+     是 `{SPAWN}`，批量强制＝每单元铸一个标签（0994 根：37 单元 → 37 标签 → WT
+     界判死）。
+- **v1 门控**：余数搜索需 ≥1 望塔事实才启动（0994 类的驱动约束）；无顶点线索的
+  多余数类（1435 `mixed` 驱动）退化成 Bell 数划分游走，暂不接（防止 1215 类错
+  叶子磨预算——单余数失败后落回下一叶子）。
+- 实测：**0994 全解 ~2.8s via pp-pin**（官方预钉隔离测试 0.02s）；1215/0224/0976
+  零回归。
+
+**2026-09-24 修订2（compass+solitary 余数 `solve_compass_remainder`，1093 破簇 +1）**：
+`solitary` 把自由区域数钉死为自由线索格数（1093：6 图案区 + 7 罗盘区）——自由
+划分的标签**有身份**（= 罗盘格），直接委托 `compass_label::solve_labeling`
+（`Model::build_excluding` 把预钉格当不可填：不进标签、不计半平面）。
+两个配套修复：
+
+1. **预绘墙 = must-differ**（compass_label 域过滤补丁，见 doc 13）：模型原把预绘墙
+   当「连通断开」，但墙两侧可绕行连通 ⇒ 同标签仍合法——1093 的 `(3,1)-(4,1)`
+   即被跨墙同区骗过直到 `validate` 兜底。`Model.wall_pairs` + `base_domains`
+   域过滤强制异标签。
+2. **每尝试 100ms 切片**：错钉叶子的无解证明可达 4.4s（1093 两个就把 30s 预算
+   吃光、真叶子饿死在外）；真叶子标记解 ~10ms，100ms 是 10× 余量。
+- 实测：**1093 全解 via pp-pin（+1）**；官方钉隔离 0.01s、官方放置枚举回归测试
+  锁定枚举面。
 
 
 ## 2026-09-22 修订（预算饿死修复 + 锚点覆盖式 pp-pin + 枚举 deadline）
@@ -347,3 +399,68 @@ pieces 解出。
   25s 150 万叶子压到 33ms；
 - 同类锚检查（不同形状类不可共享区域）实测会丢 0976 的干净解路径，正确性本就由
   `validate::check_puzzle_piece` 兜底，故不设（见源码注释）。
+
+**2026-09-24 修订3（inequality 余数：尺寸窗推导，0899 破簇 +1）**：
+`solve_multi_remainder` 的驱动门扩到 inequality（有向面积序 `size(a)<size(b)`，
+`value==1` 翻转——对齐 `validate::edge_constraint_ok`）。核心是**尺寸窗推导**
+（`collect_size_orders` + `sizes_ok`）：
+
+- 静态界：墙一侧钉死（pin 尺寸已知）⇒ 另一侧单元的标签得 `hi = pin-1` 或
+  `lo = pin+1`；两侧钉死且违序 ⇒ 预钉组合根判死；两侧自由 ⇒ 单元对序
+  （同时是 must-differ——没有标签满足 `size(L)<size(L)`）。
+- **可达性上界**（`label_reach` 的 extent）：标签能长到的最大格数＝其当前格
+  ＋可招募桥格的可达数——被钉块围出的口袋即硬帽。错钉组合的口袋与界冲突
+  在**根 fixpoint 判死**（0899 的 2.7M 预钉组合，错叶全走 µs 级根判死路径；
+  正解叶子靠围袋单格强制 + 尺寸闭包直接落出）。
+- 两标签都已放置时的序对窗检查：`max(lo_b, lo_a+1) > hi_b` ⇒ 死。
+- 实测：**0899 全解 via pp-pin（+1）**；官方钉隔离 0.06s。
+
+**2026-09-24 修订4（rose 基数标记 `solve_cardinal_partition`，0975a 雏形/WIP）**：
+0975a 类（环纹框链 + 每类符号恰一）的专用标记搜索：标签=涌现、同型符号对
+must-split、框链 run 合成单元、`rose_step` 完成度强制（缺类只剩一座桥⇒强制）
++ 标签帽=每类符号数、`spawn_completable`。**诊断结论**（供续作）：
+
+- 官方划分直喂 `leaf_regions` **通过**（叶子/建模无误）；
+- 搜索核末段不收敛：120s/1.89M 节点无一全指派（廉价域改造后 15k 节点/s），
+  死亡集中在 ~70% 已派——标签走廊被错误占后的潜在连通判死；真解路径在树中
+  但缺 SAC/引导序就找不到（m=2 核的 SAC-lite 尚未移植到 k 标签版）；
+- 确认是**超时非穷尽**（曾误判 26k 空树穷尽——1k 节点/s 的错觉）。
+- 附带产出：FreeRem `cheap_domain`（MRV/单例扫描用 O(1) 近似域、全域只算选中
+  单元）——FreeRem 12× 节点提速，0994/0899/1093 零回归。
+- 路由接线**暂撤**（`rose/mod.rs` 留 WIP 注释）；求解测试 `#[ignore]` 挂跟踪。
+
+**2026-09-24 修订5（size-constraint 分区 `solve_range_partition`，1351 破簇 +1）**：
+range/precise/inequality/difference 的面积约束分区（无锚）：FreeRem 尺寸窗
+（`area_bounds` 静态界 + `collect_size_orders` 的钉侧/序对/差值对）+ spawn 帽
+=⌊total/min⌋ + 望塔 facts 顺乘。**序/差值传递窗松弛**（`relax_size_windows`，
+Bellman-Ford 式：`lo_b≥lo_a+1`、`|a−b|=v` 双向 ±v）——链式序强制具体尺寸
+（0152 类纯 inequality 的关键传播）。实测：**1351 全链 4.8s via range-part
+（+1）**——35 格 3 区 [17,9,9]，aog/edge_csp 双扑空。多标签高计数题
+（0985 ≤16 区、0189 ≥30 区）与伴生题（0206/0928/0929 等）仍未解——
+FreeRem 末段收敛是共同短板（见修订4）。求解测试 1351 锁定。
+
+**2026-09-24 修订6（FreeRem 末段收敛三件套，0152/0270/0206 破簇 +3）**：
+修订4 诊断的「末段收敛不足」共同短板，三项强化一次落地：
+
+1. **互异链和钉死 `chain_size_deduction`**（0152 的 0.03s 破簇钥匙）：
+   有向序链 `u1→…→uc`（ord 对即 must-differ，成链即两两互异尺寸）
+   `s1<…<sc`、每区 ≥g ⇒ 链和 ≥ `c·g+c(c−1)/2`；链外标签每个再吃 ≥g
+   ⇒ 标签数 ≤ `c+(total−floor)/g`。**和饱和情形（floor==total）直接钉死
+   每环精确尺寸** `s_k=g+k−1` 且标签数=c：0152 的 7 面 inequality 墙恰好
+   构成 8 元单向链，1+…+8=36=盘面 ⇒ 8 区尺寸恰为 1..8、28 个自由格只能
+   按精确窗归链，搜索秒落。顺带补了 **ord 环判定**（Kahn 拓扑，Bellman-Ford
+   对 `usize::MAX` 上界的环不可见）。
+2. **窗口交合并检查**（`merge_statics`/`merge_window_ok`/`merge_ord_caps`）：
+   join/spawn 时成员静态窗 ∩ 目标标签缓存窗 ∩ 相对已放置标签的单侧序/差
+   帽（`size(La)≤sz_hi[ub]−1`、`lo≥sz_lo[oa]+1`、gap 可行性）；`sizes_ok`
+   升级为 `compute_windows`（基础窗 + 单侧收紧 + **标签级 Bellman-Ford 传递
+   闭包**——闭包同时抓动态序环 L1<L2<L3<L1）。0270（49 格 13 区纯
+   difference）0.4s 破簇即靠窗口交把末段分支剪平。
+3. **k 标签走廊强制 `corridor_force`**（compass_label §6.6 的移植）：
+   某未派单元的格子是标签连通的唯一桥 ⇒ 强制并入该标签；`label_reach_vis`
+   增 exclude 参数做「移除 b 还连通吗」BFS，预算 64 BFS/轮防爆。
+
+一个修坑记录：`cap_other` 里「较大侧窗须 ≤ 对侧上界」是**误杀**（较大侧
+天花板与 ohi 无关，只需收紧后窗口非空）——0899 的官方钉隔离测试立刻
+抓住（正解合并被拒）。教训复用：FreeRem 家族任何新传播，先过
+`*_official_pins_*` 隔离测试再谈解题数。

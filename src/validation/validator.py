@@ -74,6 +74,31 @@ class ValidationResult:
     errors: list[str] = field(default_factory=list)
 
 
+def _carry_clues(puzzle: Puzzle, board: Board) -> None:
+    """Copy vertex / edge / outer-border clues onto a freshly built board.
+
+    `_check_watchtower` reads `board.vertices()`, and a fresh `Board` builds its
+    vertices with `watchtower=None` — without this copy the watchtower check
+    passes **vacuously** on the router re-validation path (`base.py`) and the
+    benchmark, so a wrong watchtower answer could smuggle through (aog's
+    `build_solution_trusted` skips the Rust-side re-validate).  Cell clues are
+    copied by `solution_to_board` itself.
+    """
+    vertex_at = {(v.row, v.col): v for v in board.vertices()}
+    for v in puzzle.vertices:
+        if v.watchtower is not None:
+            vdst = vertex_at.get((v.row, v.col))
+            if vdst is not None:
+                vdst.watchtower = v.watchtower
+    edge_at = {frozenset(((e.r1, e.c1), (e.r2, e.c2))): e for e in board.edges()}
+    for e in puzzle.edges:
+        edst = edge_at.get(frozenset(((e.r1, e.c1), (e.r2, e.c2))))
+        if edst is not None:
+            edst.is_boundary = e.is_boundary
+            edst.constraint = e.constraint
+    board.outer_boundaries = list(puzzle.outer_boundaries)
+
+
 def solution_to_board(puzzle: Puzzle, solution: Any) -> Board:
     """Rebuild a Board carrying the puzzle's clues and the solution's regions.
 
@@ -90,6 +115,7 @@ def solution_to_board(puzzle: Puzzle, solution: Any) -> Board:
         dst.compass = c.compass
         dst.fence_pattern = c.fence_pattern
         dst.blocked = c.blocked
+    _carry_clues(puzzle, board)
     assigned = 0
     src = getattr(solution, "board", None)
     if src is not None:

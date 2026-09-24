@@ -141,6 +141,13 @@ impl<'a> Solver<'a> {
         if self.rose_bits_all == 0 || self.curr_comp_id.is_empty() {
             return Ok(false);
         }
+        // Stale-component guard: earlier propagators (watchtower Pass A /
+        // wdegree forces, growth-edge cuts) write edges after the round's
+        // build_components — the chokepoint BFS then under-reaches from stale
+        // `comp_cells` and false-forces Uncut (1135 (6,4)-(7,4) case).  This
+        // was the "wdegree forces kill 1135/1392/1137" mystery mechanism: the
+        // forces only widened the staleness window (more mid-round writes).
+        self.build_components()?;
 
         // Quick check: if no growing components have rose symbols, skip.
         let num_comp = self.curr_comp_sz.len();
@@ -254,6 +261,8 @@ impl<'a> Solver<'a> {
         if self.rose_bits_all == 0 || self.curr_comp_id.is_empty() {
             return Ok(false);
         }
+        // Same stale-component guard as `propagate_rose_separation`.
+        self.build_components()?;
         let growing_list = std::mem::take(&mut self.prop.growing_list);
         for &ci in &growing_list {
             let mut comp_rose: u8 = 0;

@@ -1085,6 +1085,17 @@ multi_rem 测试墙钟 15s→6.3s；compass 子集 112/129、pp 子集 170/171 �
 - 口径 **1199 → 1202，冲 1200 里程碑达成**。`cargo test` 63+8、`pytest` 292、
   complexity_gate 全过。
 
+### 2026-09-24（续9） · 1200 里程碑：合入 main（PR#83）+ 整理一次代码
+
+PR#83 合入（compass-part → FreeRem 全程 35 提交，口径 1177 → 1202）。
+**里程碑整理**：rsolver 编译警告 23 → **0**（无行为变化，豁免基准）——死
+代码删除（`deepest`/`total_bits`/watchtower_ok 死计数、backtrack 穷尽 match
+的死 `_` 臂）、无用 mut/变量前缀、`solve_cardinal_partition` WIP 期
+`#[allow(dead_code)]`、`propagate_area_bounds` 降 `pub(crate)`、
+`polyomino::enumerate_free_polyominoes` 备用生成器标注、aog `L` 变量名
+C++ 移植豁免。`cargo test` 64+8 全过。新基线 **1202**，下一标准
+**1222**（baseline+20）。
+
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：
 1. **本文件**：第一部分（进度快照）与第二部分（变更记录）各追加一条。

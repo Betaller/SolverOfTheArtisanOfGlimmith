@@ -330,7 +330,7 @@ fn derive_region_count(puzzle: &Puzzle, total: usize) -> Option<usize> {
     let mut found: Option<usize> = None;
     // Accept a derived count; disagreeing derivations make the puzzle
     // unsolvable, so bail instead of guessing.
-    let mut accept = |m: usize, found: &mut Option<usize>| -> bool {
+    let accept = |m: usize, found: &mut Option<usize>| -> bool {
         if m < 2 {
             return true;
         }

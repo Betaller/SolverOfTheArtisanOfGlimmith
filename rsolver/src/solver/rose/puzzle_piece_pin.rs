@@ -639,27 +639,20 @@ pub(crate) fn watchtower_facts(puzzle: &Puzzle) -> Vec<(Vec<usize>, usize)> {
 /// assignment cannot be completed.
 fn watchtower_ok(facts: &[(Vec<usize>, usize)], current: &[PinnedPlacement]) -> bool {
     for (cells, k) in facts {
-        let mut d = 0usize;
         let mut u = 0usize;
         for &idx in cells {
             let mut placed = false;
-            for (ri, p) in current.iter().enumerate() {
+            for p in current.iter() {
                 if p.cells.contains(idx) {
-                    // Distinctness: two cells of one region share the id.
-                    // Count unique ids lazily via a tiny scan.
-                    let _ = ri;
                     placed = true;
                     break;
                 }
             }
-            if placed {
-                d += 1; // overcount fixed below
-            } else {
+            if !placed {
                 u += 1;
             }
         }
-        // Recount `d` as distinct region ids properly (cells ≤ 4).
-        d = 0;
+        // Count `d` as distinct placed region ids (cells ≤ 4).
         let mut seen: Vec<usize> = Vec::new();
         for &idx in cells {
             for (ri, p) in current.iter().enumerate() {
@@ -671,7 +664,7 @@ fn watchtower_ok(facts: &[(Vec<usize>, usize)], current: &[PinnedPlacement]) -> 
                 }
             }
         }
-        d = seen.len();
+        let d = seen.len();
         let lo = if u > 0 { d + 1 } else { d };
         let hi = d + u;
         if *k < lo || *k > hi {
@@ -2235,7 +2228,7 @@ fn collect_size_orders(
     let mut diff: Vec<(u32, u32, usize)> = Vec::new();
     let mut lo = vec![1usize; n_units];
     let mut hi = vec![usize::MAX; n_units];
-    let mut edge = |a: usize,
+    let edge = |a: usize,
                     b: usize,
                     reversed: bool,
                     ord: &mut Vec<(u32, u32)>,
@@ -2270,7 +2263,7 @@ fn collect_size_orders(
         }
         Some(())
     };
-    let mut diff_edge = |a: usize,
+    let diff_edge = |a: usize,
                          b: usize,
                          v: usize,
                          diff: &mut Vec<(u32, u32)>,
@@ -2340,7 +2333,7 @@ fn collect_size_orders(
 #[allow(clippy::type_complexity)]
 fn build_free_units(
     free_cells: &[usize],
-    free_index: &std::collections::HashMap<usize, u32>,
+    _free_index: &std::collections::HashMap<usize, u32>,
     same: &[(u32, u32)],
     split_pairs: &[(u32, u32)],
     puzzle: &Puzzle,
@@ -2531,6 +2524,8 @@ pub(crate) fn solve_range_partition(
 /// apart by the same-type must-split pairs and completed one type at a time
 /// (`rose_step`).  The ring frame chain collapses the rim into a single unit
 /// (`ring_frame_runs`).  No pins — the whole board is the residue.
+/// WIP: routing not wired yet (see `rose/mod.rs`) — exercised by tests only.
+#[allow(dead_code)]
 pub(crate) fn solve_cardinal_partition(
     puzzle: &Puzzle,
     symbol_types: &[String],
@@ -2552,7 +2547,6 @@ pub(crate) fn solve_cardinal_partition(
             }
         }
     }
-    let pin_of: Vec<Option<usize>> = vec![None; n];
     let mut free_index: std::collections::HashMap<usize, u32> =
         std::collections::HashMap::new();
     let mut free_cells: Vec<usize> = Vec::new();
@@ -2588,7 +2582,7 @@ pub(crate) fn solve_cardinal_partition(
             }
         }
     }
-    let (mut unit_cells, unit_of_cell, unit_adj, mut split) =
+    let (unit_cells, unit_of_cell, unit_adj, split) =
         match build_free_units(&free_cells, &free_index, &same, &split_pairs, puzzle, w) {
             Some(v) => v,
             None => {
@@ -2629,8 +2623,6 @@ pub(crate) fn solve_cardinal_partition(
     let facts: Vec<WtUnitFact> = Vec::new();
     let facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); unit_cells.len()];
     let pinned: Vec<PinnedPlacement> = Vec::new();
-    let _ = &mut unit_cells;
-    let _ = &mut split;
     let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(8_000);
     let leaf_deadline = if slice < deadline { slice } else { deadline };
     let mut search = FreeRem {
@@ -2656,7 +2648,6 @@ pub(crate) fn solve_cardinal_partition(
         nodes: 0,
     };
     let out = search.search();
-    let deepest = 0usize;
     out
 }
 

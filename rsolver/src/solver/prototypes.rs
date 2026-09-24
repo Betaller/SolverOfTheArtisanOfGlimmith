@@ -10,7 +10,7 @@ use crate::types::*;
 
 /// Full Bellman-Ford propagation on area-constraint graph.
 /// Default on; set `BF_PROPAGATE=0` to disable.
-pub fn propagate_area_bounds(
+pub(crate) fn propagate_area_bounds(
     cell_to_region: &[Option<usize>],
     region_shapes: &[Vec<[usize; 2]>],
     frontier: &Vec<std::collections::BTreeMap<(usize, usize), usize>>,

@@ -907,10 +907,6 @@ fn try_combos(
     None
 }
 
-fn total_bits(h: usize, w: usize) -> usize {
-    h * w
-}
-
 /// Recursive exact cover with MRV seed selection.  Port of
 /// `region_match._match_regions_mrv`.
 #[allow(clippy::too_many_arguments)]

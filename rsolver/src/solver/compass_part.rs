@@ -525,7 +525,7 @@ impl Model {
         let mut blocked = vec![[0; DIRS]; self.clue_pos.len()];
         for &j in unplaced {
             let (cr, cc) = (self.clue_pos[j] / self.w, self.clue_pos[j] % self.w);
-            let mut bump = |idx: usize, blocked: &mut Vec<[usize; DIRS]>| {
+            let bump = |idx: usize, blocked: &mut Vec<[usize; DIRS]>| {
                 let (r, c) = (idx / self.w, idx % self.w);
                 for d in 0..DIRS {
                     if in_halfplane(cr, cc, r, c, d) {
@@ -745,7 +745,6 @@ fn reserved_mask(
     forced: &[Vec<usize>],
     i: usize,
 ) -> Vec<bool> {
-    let n = model.h * model.w;
     let mut reserved = st.taken.clone();
     for &j in unplaced {
         if j != i {

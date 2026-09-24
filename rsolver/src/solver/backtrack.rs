@@ -165,7 +165,6 @@ fn collect_edge_constraints(puzzle: &Puzzle) -> Vec<EdgeAreaConstraint> {
                             value: ec.value,
                         });
                     }
-                    _ => {}
                 }
             }
         }
@@ -185,7 +184,6 @@ fn collect_edge_constraints(puzzle: &Puzzle) -> Vec<EdgeAreaConstraint> {
                             value: ec.value,
                         });
                     }
-                    _ => {}
                 }
             }
         }
@@ -335,7 +333,6 @@ fn check_edge_area_mid_search(state: &BacktrackState) -> bool {
                     }
                 }
             }
-            _ => {}
         }
     }
     true

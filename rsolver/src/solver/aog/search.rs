@@ -65,6 +65,7 @@ fn filter_size_diff_value(mk: &mut [bool], lower: i32, upper: i32, neighbor_size
 // Every other function in the crate is at or below the threshold, so the gate
 // still blocks new complexity everywhere else.
 #[allow(clippy::cognitive_complexity)]
+#[allow(non_snake_case)] // mirrors the C++ reference's `L` place-level state
 fn place_non_predifined_shape(
     index: u32,
     x: i32,

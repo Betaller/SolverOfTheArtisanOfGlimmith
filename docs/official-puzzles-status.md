@@ -68,6 +68,7 @@
 | 2026-09-24 | **独立验证器 watchtower 空转修复**（正确性，`_carry_clues`） | `results/bench/20260924_wt-recheck.jsonl`（49 题 aog-PASS 复核片段） | `benchmark_rust_solver.py --dir <49 watchtower aog-PASS> --timeout 40 -j 6` | **1195 口径不变**（49/49 复核 **0 夹带**） | 0（正确性加固） | **Router 复验网关的 watchtower 检查曾空转**：`solution_to_board` 只搬单元格线索，重建 Board 的顶点 `watchtower=None` → `_check_watchtower` 对全 None 顶点恒 True；叠加 aog `build_solution_trusted` 跳过 Rust 复验，watchtower 题错解可借道（手搓 Board 的单测共享 Vertex 对象，天然掩盖）。修复＝`_carry_clues` 搬顶点/边/外框线索（architecture.md §4.5）；新增 3 用例含 0994 真实回归（大区在桥格 (0,0) 拆分曾骗过复验，实为 WT(5,4)=2 见 3 区）。**存量 49 道 aog-PASS watchtower 题重解重验全过——0 夹带**，口径维持 1195。`pytest` 292、`cargo test` 53+8、complexity_gate 全过。 |
 | 2026-09-24 | **pp-pin 多余数余数**（doc 07，0994 破簇） | 0994/1215/0224/0976 直跑 + puzzle_piece 子集基准 | 直跑 `rsolver` + `cargo test --release` + `benchmark_rust_solver.py --rules puzzle_piece` | **1196 口径**（1195 + 0994） | **+1**（0994） | pp-pin 叶子原只支持「余数=单区」；新增望塔驱动的 `solve_multi_remainder`（`FreeRem`）：望塔基数→must_same/must_split 成对强制（UF 合成单元）+ compass_label 范式搜索核（域过滤∪SPAWN + fixpoint 潜在连通/WT 界 + MRV + 快照回滚）。两个实现要点：值域必须含全部既有标签（邻接受限 join 漏真解）、单例强制必须逐个+重算（涌现标签下批量强制＝每单元铸一标签判死根节点）。v1 门控＝需望塔事实（1435 mixed 驱动类暂不接，防 1215 类错叶子磨预算）。**0994 ~2.8s via pp-pin 破簇（+1）**；1215/0224/0976 零回归。`cargo test` 55+8、`pytest` 292、complexity_gate 全过（solve_multi_remainder/combine_plain 认知复杂度 23/22 拆函数后 ≤20）。 |
 | 2026-09-24 | **compass+solitary 余数**（doc 07 修订2，1093 破簇） | 1093 直跑 + compass/puzzle_piece 子集 | 直跑 `rsolver` + `cargo test --release` + `benchmark_rust_solver.py --rules compass/puzzle_piece` | **1197 口径**（1196 + 1093） | **+1**（1093） | `solitary` 钉死自由区数=自由线索格数 ⇒ 自由标签有身份，委托 `compass_label::solve_labeling`（`Model::build_excluding` 预钉格不可填）。**顺带修复预绘墙语义洞**（doc 13 §6.5）：墙=must-differ 而非仅连通断开（1093 (3,1)-(4,1) 绕行同标签骗过 joinable），`Model.wall_pairs`+域过滤；错钉叶子无解证明可达 4.4s ⇒ 每尝试 100ms 切片。**1093 全解 via pp-pin（+1）**；官方钉隔离 0.01s、官方放置枚举 6/6；pp 子集 169/171、compass 子集 112/129（0 真回归）。`cargo test` 58+8、`pytest` 292、complexity_gate 全过。 |
+| 2026-09-24 | **inequality 余数尺寸窗**（doc 07 修订3，0899 破簇） | 0899 直跑 + pp 子集 | 直跑 `rsolver` + `cargo test --release` + `benchmark_rust_solver.py --rules puzzle_piece` | **1198 口径**（1198） | **+1**（0899） | `solve_multi_remainder` 驱动门扩 inequality（有向面积序）：`collect_size_orders` 静态界（pin 侧→单元标签 lo/hi；双 pin 违序根判死；自由对=序+must-differ）+ **可达性上界**（标签可长到的最大格数=围袋大小——错钉组合的口袋与界冲突在根 fixpoint 判死，0899 的 2.7M 预钉组合走 µs 级根判死）+ 序对窗检查。**0899 全解 via pp-pin（+1）**；官方钉隔离 0.06s。`cargo test` 60+8、`pytest` 292、complexity_gate 全过。 |
 
 ---
 
@@ -1000,6 +1001,22 @@ watchtower 组合，基线即如此）。下一步需要范式级工作（doc 20
   噪声翻正 + 1093 新进，**0 真回归**——wall 域过滤声音）。
 - 口径 **1196 → 1197**。冲 1200 剩 +3：0683/1258（+2）、0975a（+1）或
   0899/1435 多余数扩展。
+
+### 2026-09-24（续4） · inequality 余数尺寸窗（doc 07 修订3，0899 破簇 +1 → 1198）
+
+0899（puzzle_piece+inequality：8 图案锚 + 8 面积序墙，官方 17 区大量单格）的
+驱动约束是**有向面积序**（`size(a)<size(b)`）。给 `solve_multi_remainder` 补尺寸窗
+推导（`collect_size_orders` + `sizes_ok` + `label_reach` 可达性上界）：
+
+- 静态界：墙钉死侧给另一侧单元标签 `hi=pin-1`/`lo=pin+1`；双钉违序⇒预钉组合根
+  判死；自由对=标签对序（同为 must-differ——没有标签满足 `size(L)<size(L)`）。
+- **可达性上界**是错钉根判死的关键：标签最大可长格数＝围袋（钉块几何留下的
+  可招募桥格可达数）——口袋与界冲突在根 fixpoint 即死，0899 的 2.7M 预钉组合
+  走 µs 级路径，正解叶子靠围袋单格强制 + 尺寸闭包直落。
+- 双标签窗序检查 `max(lo_b, lo_a+1) > hi_b ⇒ 死`。
+- 实测：**0899 全解 via pp-pin（+1）**；官方钉隔离 0.06s；pp 子集 170/171
+  （仅剩 1435 mixed 类）。`cargo test` 60+8、`pytest` 292、complexity_gate 全过。
+- 口径 **1197 → 1198**。冲 1200 剩 +2：0683/1258（+2）或 0975a/1435（+1×2）。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

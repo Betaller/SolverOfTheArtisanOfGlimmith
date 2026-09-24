@@ -399,3 +399,18 @@ pieces 解出。
   25s 150 万叶子压到 33ms；
 - 同类锚检查（不同形状类不可共享区域）实测会丢 0976 的干净解路径，正确性本就由
   `validate::check_puzzle_piece` 兜底，故不设（见源码注释）。
+
+**2026-09-24 修订3（inequality 余数：尺寸窗推导，0899 破簇 +1）**：
+`solve_multi_remainder` 的驱动门扩到 inequality（有向面积序 `size(a)<size(b)`，
+`value==1` 翻转——对齐 `validate::edge_constraint_ok`）。核心是**尺寸窗推导**
+（`collect_size_orders` + `sizes_ok`）：
+
+- 静态界：墙一侧钉死（pin 尺寸已知）⇒ 另一侧单元的标签得 `hi = pin-1` 或
+  `lo = pin+1`；两侧钉死且违序 ⇒ 预钉组合根判死；两侧自由 ⇒ 单元对序
+  （同时是 must-differ——没有标签满足 `size(L)<size(L)`）。
+- **可达性上界**（`label_reach` 的 extent）：标签能长到的最大格数＝其当前格
+  ＋可招募桥格的可达数——被钉块围出的口袋即硬帽。错钉组合的口袋与界冲突
+  在**根 fixpoint 判死**（0899 的 2.7M 预钉组合，错叶全走 µs 级根判死路径；
+  正解叶子靠围袋单格强制 + 尺寸闭包直接落出）。
+- 两标签都已放置时的序对窗检查：`max(lo_b, lo_a+1) > hi_b` ⇒ 死。
+- 实测：**0899 全解 via pp-pin（+1）**；官方钉隔离 0.06s。

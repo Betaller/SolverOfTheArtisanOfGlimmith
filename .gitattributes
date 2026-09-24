@@ -62,3 +62,7 @@ results/bench/20260924_6578647_pp-compass-rem.txt filter=lfs diff=lfs merge=lfs 
 results/bench/20260924_6578647_pp-compass-rem-pp.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_6578647_pp-compass-rem-compass.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_6578647_pp-compass-rem-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-0d89c19-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_0d89c19_ineq-sizewin.txt filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_0d89c19_ineq-sizewin.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20260924_0d89c19_ineq-sizewin-note.txt filter=lfs diff=lfs merge=lfs -text

@@ -730,6 +730,13 @@ fn finish_leaf(
     if has_remainder {
         if let Some(regions) = solve_multi_remainder(puzzle, current, n, deadline) {
             *found = Some(regions);
+            return;
+        }
+        // compass+solitary remainder (1093 class): solitary pins the free
+        // region count to the free clue cells, so the free partition is a
+        // `compass_label` cell-labeling problem on the unpinned cells.
+        if let Some(regions) = solve_compass_remainder(puzzle, current, n, deadline) {
+            *found = Some(regions);
         }
     }
 }
@@ -1437,6 +1444,58 @@ impl<'a> FreeRem<'a> {
 /// connected regions under the watchtower cardinalities — the multi-remainder
 /// counterpart of the single-remainder leaf (0976 class).  0994 (pattern
 /// regions + 1 big wrap + 4 WT-forced singletons) lives here.
+/// compass+solitary free partition (1093 class): `solitary` makes every free
+/// region exactly one compass clue's region, so the free labeling has fixed
+/// identified labels — delegate to `compass_label::solve_labeling` on a model
+/// that treats the pinned cells as non-fillable (they are other regions: they
+/// neither join a label nor count toward any half-plane).
+fn solve_compass_remainder(
+    puzzle: &Puzzle,
+    pinned: &[PinnedPlacement],
+    n: usize,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let has = |t: &str| puzzle.rules.iter().any(|r| r.ctype == t);
+    if !(has("compass") && has("solitary")) {
+        return None;
+    }
+    let mut excluded: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for p in pinned {
+        for idx in p.cells.iter() {
+            excluded.insert(idx);
+        }
+    }
+    let model = crate::solver::compass_part::Model::build_excluding(puzzle, Some(&excluded))?;
+    // Per-attempt slice: wrong pin leaves can demand multi-second unsat proofs
+    // (1093: two 4.4 s walks ate the whole module budget and starved the true
+    // leaf); the true leaf's labeling solves in ~10 ms, so 100 ms is a wide
+    // margin while capping the damage per wrong leaf.
+    let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(100);
+    let leaf_deadline = if slice < deadline { slice } else { deadline };
+    let free_lab = crate::solver::compass_label::solve_labeling(&model, leaf_deadline)?;
+    let h = puzzle.height;
+    let w = puzzle.width;
+    let mut region_of: Vec<Option<usize>> = vec![None; n];
+    for (ri, p) in pinned.iter().enumerate() {
+        for idx in p.cells.iter() {
+            region_of[idx] = Some(ri);
+        }
+    }
+    let base = pinned.len();
+    for (idx, lab) in free_lab.iter().enumerate() {
+        if let Some(j) = lab {
+            region_of[idx] = Some(base + j);
+        }
+    }
+    let regions = super::build_regions(&region_of, h, w);
+    if crate::solver::validate::validate(puzzle, &regions) {
+        Some(regions)
+    } else {
+
+        None
+    }
+}
+
 fn solve_multi_remainder(
     puzzle: &Puzzle,
     pinned: &[PinnedPlacement],
@@ -1664,5 +1723,102 @@ mod multi_rem_tests {
         .expect("parse");
         let out = solve_puzzle_piece_standalone(&p, 30_000);
         assert!(out.is_solved(), "0994 expected solved, got {:?}", out);
+    }
+
+    /// Diagnostic: the official pattern placements must survive enumeration.
+    #[test]
+    fn official_placements_enumerated_1093() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/6-compass-main/1093.json"
+        ))
+        .expect("parse");
+        let ans: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../puzzles/official/Zone3-answer/6-compass-main/1093.json"
+        ))
+        .expect("parse answer");
+        let w = p.width;
+        let anchors = enumerate_pin_candidates(&p, &[]).expect("anchors");
+        for region in ans["regions"].as_array().unwrap() {
+            let cells: Vec<(usize, usize)> = region
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| (c[0].as_u64().unwrap() as usize, c[1].as_u64().unwrap() as usize))
+                .collect();
+            let Some(&(ar, ac)) = cells
+                .iter()
+                .find(|&&(r, c)| p.cells[r][c].shape_pattern.is_some())
+            else {
+                continue;
+            };
+            let mut set = CellSet::new(p.height * w);
+            for &(r, c) in &cells {
+                set.insert(r * w + c);
+            }
+            let found = anchors.iter().any(|a| {
+                a.anchor == ar * w + ac
+                    && a.placements.iter().any(|pl| same_set(&pl.cells, &set))
+            });
+            assert!(found, "official region at ({},{}) must be enumerated", ar, ac);
+        }
+    }
+
+    /// Isolation anchor for the compass remainder path.
+    #[test]
+    fn compass_remainder_official_pins_1093() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/6-compass-main/1093.json"
+        ))
+        .expect("parse");
+        let ans: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../puzzles/official/Zone3-answer/6-compass-main/1093.json"
+        ))
+        .expect("parse answer");
+        let w = p.width;
+        let mut pinned: Vec<PinnedPlacement> = Vec::new();
+        for region in ans["regions"].as_array().unwrap() {
+            let cells: Vec<(usize, usize)> = region
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| {
+                    (
+                        c[0].as_u64().unwrap() as usize,
+                        c[1].as_u64().unwrap() as usize,
+                    )
+                })
+                .collect();
+            let anchor = cells
+                .iter()
+                .copied()
+                .find(|&(r, c)| p.cells[r][c].shape_pattern.is_some());
+            if let Some((ar, ac)) = anchor {
+                let mut set = CellSet::new(p.height * w);
+                for &(r, c) in &cells {
+                    set.insert(r * w + c);
+                }
+                pinned.push(PinnedPlacement {
+                    anchor: ar * w + ac,
+                    cells: set,
+                });
+            }
+        }
+        assert_eq!(pinned.len(), 6, "1093 has 6 pattern regions");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(25);
+        let out = solve_compass_remainder(&p, &pinned, p.height * w, deadline);
+        assert!(out.is_some(), "compass remainder with official pins must solve");
+    }
+
+    /// End-to-end: 1093 (`puzzle_piece + compass + solitary`) — solitary
+    /// pins the free region count to the 7 compass clue cells, so the free
+    /// partition delegates to `compass_label`.
+    #[test]
+    fn solves_compass_remainder_1093() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/6-compass-main/1093.json"
+        ))
+        .expect("parse");
+        let out = solve_puzzle_piece_standalone(&p, 30_000);
+        assert!(out.is_solved(), "1093 expected solved, got {:?}", out);
     }
 }

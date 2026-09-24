@@ -364,6 +364,21 @@ rose 不适用、edge_csp 排除 `puzzle_piece`、pieces 的 DLX 没有"大无�
 - 实测：**0994 全解 ~2.8s via pp-pin**（官方预钉隔离测试 0.02s）；1215/0224/0976
   零回归。
 
+**2026-09-24 修订2（compass+solitary 余数 `solve_compass_remainder`，1093 破簇 +1）**：
+`solitary` 把自由区域数钉死为自由线索格数（1093：6 图案区 + 7 罗盘区）——自由
+划分的标签**有身份**（= 罗盘格），直接委托 `compass_label::solve_labeling`
+（`Model::build_excluding` 把预钉格当不可填：不进标签、不计半平面）。
+两个配套修复：
+
+1. **预绘墙 = must-differ**（compass_label 域过滤补丁，见 doc 13）：模型原把预绘墙
+   当「连通断开」，但墙两侧可绕行连通 ⇒ 同标签仍合法——1093 的 `(3,1)-(4,1)`
+   即被跨墙同区骗过直到 `validate` 兜底。`Model.wall_pairs` + `base_domains`
+   域过滤强制异标签。
+2. **每尝试 100ms 切片**：错钉叶子的无解证明可达 4.4s（1093 两个就把 30s 预算
+   吃光、真叶子饿死在外）；真叶子标记解 ~10ms，100ms 是 10× 余量。
+- 实测：**1093 全解 via pp-pin（+1）**；官方钉隔离 0.01s、官方放置枚举回归测试
+  锁定枚举面。
+
 
 ## 2026-09-22 修订（预算饿死修复 + 锚点覆盖式 pp-pin + 枚举 deadline）
 

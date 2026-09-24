@@ -142,10 +142,26 @@ pub(crate) struct Model {
     /// Per clue/dir: free cells in the half-plane minus other clues' homes
     /// (the pool `R_j ∩ hp_d` can draw from at the root).
     hp_all: Vec<[usize; DIRS]>,
+    /// Free-free pre-cut pairs: a pre-drawn wall forces **different regions**
+    /// (not merely "unlinked for connectivity") — two cells across one may
+    /// still be connected around it, so the labeling search needs the pair as
+    /// a must-differ constraint (1093's `(3,1)-(4,1)`).
+    pub(crate) wall_pairs: Vec<(usize, usize)>,
 }
 
 impl Model {
     pub(crate) fn build(puzzle: &Puzzle) -> Option<Model> {
+        Self::build_excluding(puzzle, None)
+    }
+
+    /// Like `build`, but `excluded` cells (already-owned by pre-pinned pattern
+    /// regions in the pp-pin remainder hand-off) are treated as non-fillable:
+    /// they belong to other regions, so they can neither join a compass label
+    /// nor count toward any half-plane total.
+    pub(crate) fn build_excluding(
+        puzzle: &Puzzle,
+        excluded: Option<&std::collections::HashSet<usize>>,
+    ) -> Option<Model> {
         let (h, w) = (puzzle.height, puzzle.width);
         let n = h * w;
         let mut free = vec![false; n];
@@ -154,7 +170,7 @@ impl Model {
         for row in &puzzle.cells {
             for c in row {
                 let idx = c.row * w + c.col;
-                if c.blocked {
+                if c.blocked || excluded.map_or(false, |e| e.contains(&idx)) {
                     continue;
                 }
                 free[idx] = true;
@@ -195,6 +211,7 @@ impl Model {
             free,
             total_fillable,
             hp_all: Vec::new(),
+            wall_pairs: Vec::new(),
         };
         // An empty half-plane (blocked/board edge) is effectively 0 even when
         // the clue leaves it unspecified — pin it so the completion arithmetic
@@ -206,12 +223,41 @@ impl Model {
                 }
             }
         }
+        model.wall_pairs = model.precompute_wall_pairs();
         model.hp_all = model.precompute_hp_all();
         let (lo, hi) = model.area_windows();
         model.lo = lo;
         model.hi = hi;
         model.order = model.placement_order();
         Some(model)
+    }
+
+    /// Free-free adjacent pairs separated by a pre-drawn wall.
+    fn precompute_wall_pairs(&self) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        for x in 0..self.h * self.w {
+            if !self.free[x] {
+                continue;
+            }
+            let (r, c) = (x / self.w, x % self.w);
+            for (nr, nc) in [
+                (r as i64 + 1, c as i64),
+                (r as i64, c as i64 + 1),
+            ] {
+                if nr < 0 || nc < 0 || nr >= self.h as i64 || nc >= self.w as i64 {
+                    continue;
+                }
+                let (nr, nc) = (nr as usize, nc as usize);
+                let y = nr * self.w + nc;
+                if !self.free[y] {
+                    continue;
+                }
+                if !self.nbrs[x].contains(&y) {
+                    out.push((x, y));
+                }
+            }
+        }
+        out
     }
 
     /// Area window per clue.  Lower: `1 + max(N+S, E+W)` (axis pairs are

@@ -356,6 +356,15 @@ impl Search<'_> {
                 self.dom[x] |= 1u128 << j;
             }
         }
+        // A pre-drawn wall forces different regions even when the two sides
+        // stay connected around it — drop the wall-neighbour's label.
+        for &(a, b) in &m.wall_pairs {
+            if st.lab[a] >= 0 && st.lab[b] < 0 {
+                self.dom[b] &= !(1u128 << st.lab[a]);
+            } else if st.lab[b] >= 0 && st.lab[a] < 0 {
+                self.dom[a] &= !(1u128 << st.lab[b]);
+            }
+        }
     }
 
     /// Per-label count of domain-carrying unassigned cells in each of the 8

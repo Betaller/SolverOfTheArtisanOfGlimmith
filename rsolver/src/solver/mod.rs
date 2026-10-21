@@ -232,6 +232,10 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // full budget on "no size constraint" ones — give it a short budget, then
     // hand the rest to the rose solver.
     let rose_capable = is_rose_capable(puzzle);
+    // Non-rose puzzles give aog the whole unit budget; 2× since 2026-10-21 —
+    // several endgame-class puzzles need 35-60 s of aog (1146: solved at
+    // ~34 s with a 60 s unit, timed out at 30 s).  Rose-capable puzzles keep
+    // the short 20 s rein (aog shape-library-explodes there; rose owns them).
     let aog_budget = if rose_capable {
         AOG_ROSE_BUDGET_MS.min(timeout_ms)
     } else {
@@ -241,8 +245,10 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         // The aog search is bounded by its deadline thanks to the hot-loop
         // checks (search.rs Fix B/C), so it stops at `timeout_ms` instead of
         // burning the whole subprocess budget; pieces/backtrack still get their
-        // own full unit budget afterwards.
-        timeout_ms
+        // own full unit budget afterwards.  2× since 2026-10-21: several
+        // endgame-class puzzles need 35-60 s of aog (1146: solved at ~34 s
+        // with a 60 s unit, timed out at 30 s).
+        timeout_ms.saturating_mul(2)
     };
     // Diagnostic: `SKIP_AOG=1` bypasses the aog/rose phases so a single
     // downstream solver can be exercised in isolation (mirrors `AOG_ONLY`).
@@ -348,9 +354,10 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         // edge_csp is the last real search standing for a large class of
         // puzzles (aog+rose routinely exhaust before it); under `-j 6` bench
         // contention its 1.0× unit budget is the binding constraint (1406:
-        // 26 s solo, 0/6 at parallel load).  1.5× stays well inside the
-        // Python wall allowance (RUST_PARTS × timeout).
-        let ec_budget = timeout_ms + timeout_ms / 2;
+        // 26 s solo, 0/6 at parallel load → 1.5× fixed that one; 0932 needs
+        // ~48 s, 1141 ~80 s).  3× keeps the chain sum inside the Python wall
+        // allowance (RUST_PARTS × timeout + slack = 216 s at timeout 30).
+        let ec_budget = timeout_ms.saturating_mul(3);
         let ec_deadline = Instant::now() + std::time::Duration::from_millis(ec_budget);
         let ec_start = Instant::now();
         let outcome = edge_csp::solve_edge_csp(puzzle, &start, ec_budget);

@@ -5108,6 +5108,73 @@ fn attempt_pairwise_ok(
     true
 }
 
+/// Evaluate one (residue, permutation) assignment: seeds, tail, cost, and
+/// the pairwise feasibility screen.  `None` = dead (empty candidate list).
+#[allow(clippy::too_many_arguments)]
+fn build_one_attempt(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    anchor_cells: &[usize],
+    others: &[usize],
+    perm: &[usize],
+    res_seed: usize,
+    res_sz: usize,
+    defer_cap: usize,
+    sym_of: &std::collections::HashMap<usize, usize>,
+    n_types: usize,
+    seed_cell: &std::collections::HashSet<usize>,
+    cache: &mut std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    deadline: crate::clock::Instant,
+) -> Option<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> {
+    let m = anchor_cells.len();
+    let mut cost = 1usize;
+    let mut seeds: Vec<(usize, usize)> = vec![(0, 0); m];
+    seeds[res_seed] = (anchor_cells[res_seed], res_sz);
+    let mut tail: Option<(usize, usize)> = None;
+    for (j, &part) in perm.iter().enumerate() {
+        let si = others[j];
+        seeds[si] = (anchor_cells[si], part);
+        if part > defer_cap {
+            tail = Some((si, part));
+            cost = cost.saturating_mul(8);
+        } else {
+            let key = (si, part);
+            if !cache.contains_key(&key) {
+                let cands = gen_cover_cands(
+                    puzzle,
+                    w,
+                    h,
+                    n,
+                    anchor_cells[si],
+                    part,
+                    seed_cell,
+                    deadline,
+                    Some((sym_of, n_types)),
+                );
+                if cands.is_empty() {
+                    return None;
+                }
+                cache.insert(key, cands);
+            }
+            let cl = cache[&key].len();
+            if cl == 0 {
+                return None;
+            }
+            cost = cost.saturating_mul(cl.max(1));
+        }
+    }
+    let small: Vec<(usize, usize)> = (0..m)
+        .filter(|&i| i != res_seed && Some((i, seeds[i].1)) != tail)
+        .map(|i| (i, seeds[i].1))
+        .collect();
+    if !attempt_pairwise_ok(cache, &seeds, &small, false) {
+        return None;
+    }
+    Some((cost, res_seed, seeds, tail))
+}
+
 /// Build the (multiset, assignment) attempt list with cost ordering.
 #[allow(clippy::too_many_arguments)]
 fn build_cover_attempts(
@@ -5126,7 +5193,14 @@ fn build_cover_attempts(
     const DEFER_CAP: usize = 10;
     const ATTEMPT_CAP: usize = 4000;
     let m = anchor_cells.len();
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!(
+            "rose_cover: build enter deadline_remaining={:?}",
+            deadline.saturating_duration_since(crate::clock::Instant::now())
+        );
+    }
     let mut attempts: Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> = Vec::new();
+    let (mut ok_kills, mut pair_kills, mut kept) = (0usize, 0usize, 0usize);
     for parts in multisets.iter() {
         if crate::clock::Instant::now() >= deadline {
             break;
@@ -5140,6 +5214,9 @@ fn build_cover_attempts(
                 (rest, None)
             };
         for res_seed in 0..m {
+            if crate::clock::Instant::now() >= deadline {
+                break;
+            }
             let others: Vec<usize> = (0..m).filter(|&i| i != res_seed).collect();
             let mut slots: Vec<usize> = place_parts.clone();
             if let Some(tp) = tail_part {
@@ -5150,57 +5227,42 @@ fn build_cover_attempts(
                 if crate::clock::Instant::now() >= deadline || attempts.len() >= ATTEMPT_CAP {
                     break;
                 }
-                let mut cost = 1usize;
-                let mut seeds: Vec<(usize, usize)> = vec![(0, 0); m];
-                seeds[res_seed] = (anchor_cells[res_seed], res_sz);
-                let mut tail: Option<(usize, usize)> = None;
-                let mut ok = true;
-                for (j, &part) in perm.iter().enumerate() {
-                    let si = others[j];
-                    seeds[si] = (anchor_cells[si], part);
-                    if part > DEFER_CAP {
-                        tail = Some((si, part));
-                        cost = cost.saturating_mul(8);
-                    } else {
-                        let key = (si, part);
-                        if !cache.contains_key(&key) {
-                            let cands = gen_cover_cands(
-                                puzzle,
-                                w,
-                                h,
-                                n,
-                                anchor_cells[si],
-                                part,
-                                seed_cell,
-                                deadline,
-                                Some((sym_of, n_types)),
-                            );
-                            if cands.is_empty() {
-                                ok = false;
-                            }
-                            cache.insert(key, cands);
-                        }
-                        let cl = cache[&key].len();
-                        if cl == 0 {
-                            ok = false;
-                        }
-                        cost = cost.saturating_mul(cl.max(1));
+                if let Some(built) = build_one_attempt(
+                    puzzle,
+                    w,
+                    h,
+                    n,
+                    anchor_cells,
+                    &others,
+                    &perm,
+                    res_seed,
+                    res_sz,
+                    DEFER_CAP,
+                    sym_of,
+                    n_types,
+                    seed_cell,
+                    cache,
+                    deadline,
+                ) {
+                    if std::env::var("COVER_DEBUG").is_ok() {
+                        kept += 1;
                     }
-                }
-                if ok {
-                    let small: Vec<(usize, usize)> = (0..m)
-                        .filter(|&i| i != res_seed && Some((i, seeds[i].1)) != tail)
-                        .map(|i| (i, seeds[i].1))
-                        .collect();
-                    if !attempt_pairwise_ok(cache, &seeds, &small, false) {
-                        continue;
-                    }
-                    attempts.push((cost, res_seed, seeds, tail));
+                    attempts.push(built);
+                } else if std::env::var("COVER_DEBUG").is_ok() {
+                    ok_kills += 1;
                 }
             }
         }
     }
     attempts.sort_by_key(|(c, _, _, _)| *c);
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!(
+            "rose_cover: build done ok_kills={ok_kills} pair_kills={pair_kills} kept={kept}"
+        );
+        for (k, v) in cache.iter().take(16) {
+            eprintln!("rose_cover: cache {:?} len={}", k, v.len());
+        }
+    }
     attempts
 }
 
@@ -5226,7 +5288,18 @@ pub(crate) fn solve_rose_cover(
     if m < 2 || m > 12 {
         return None;
     }
-    let (sym_of, n_types) = rose_symbol_map(puzzle, h, w)?;
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("rose_cover: enter m={m} min={min_sz} max={max_sz}");
+    }
+    let (sym_of, n_types) = match rose_symbol_map(puzzle, h, w) {
+        Some(v) => v,
+        None => {
+            if std::env::var("COVER_DEBUG").is_ok() {
+                eprintln!("rose_cover: symbol map empty");
+            }
+            return None;
+        }
+    };
     let mut total = 0usize;
     for idx in 0..n {
         let (r, c) = (idx / w, idx % w);
@@ -5235,43 +5308,53 @@ pub(crate) fn solve_rose_cover(
         }
     }
     let shape_limited = puzzle.rules.iter().any(|r| r.ctype == "different");
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("rose_cover: total={total} n_types={n_types} shape_limited={shape_limited}");
+    }
     let multisets = size_multisets(total, m, min_sz, max_sz, 2000, shape_limited);
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("rose_cover: {} multisets", multisets.len());
+    }
     if multisets.is_empty() {
         return None;
     }
     let seed_cell: std::collections::HashSet<usize> = anchor_cells.iter().copied().collect();
     let mut cache: std::collections::HashMap<(usize, usize), Vec<CoverCand>> = Default::default();
-    // full-cover places EVERY region by candidates; its size bound is the
-    // largest part across the all-small multisets (larger parts belong to the
-    // deferred-residue class and only add noise candidates here).
-    let all_small_max = multisets
+    // The all-small space gets its own bounded enumeration (the wide
+    // lexicographic cap 2000 cuts off before balanced parts): when empty the
+    // board is not an all-small or mixed cover instance (0833) and running
+    // the attempts burn would starve region_match.
+    let small_multisets = size_multisets(total, m, min_sz, DEFER_CAP, 2000, shape_limited);
+    let all_small_max = small_multisets
         .iter()
-        .filter(|p| p.last().copied().unwrap_or(usize::MAX) <= DEFER_CAP)
         .map(|p| p.last().copied().unwrap_or(0))
         .max();
-    // Without an all-small multiset the board is not an all-small or mixed
-    // cover instance (0833: every multiset has a >10 part on a 10-region
-    // board) — running the attempts burn would starve region_match.
     if all_small_max.is_none() {
         return None;
     }
     let diff_mode = puzzle.rules.iter().any(|r| r.ctype == "differentiation");
-    if let Some(full_bound) = all_small_max {
-        if let Some(regions) = full_cover_pass(
-            puzzle,
-            w,
-            h,
-            n,
-            anchor_cells,
-            min_sz,
-            full_bound,
-            &sym_of,
-            n_types,
-            &seed_cell,
-            &mut cache,
-            deadline,
-        ) {
-            return Some(regions);
+    // Full-cover whenever an all-small space exists (0317/0325 — the truth
+    // lives there even when the wide space is mixed).  0289/0804 mixed-class
+    // boards pay the pass then fall to the assignment attempts; 0833-class
+    // boards are gated out upstream by the avg check in `try_rose_cover`.
+    if !small_multisets.is_empty() {
+        if let Some(full_bound) = all_small_max {
+            if let Some(regions) = full_cover_pass(
+                puzzle,
+                w,
+                h,
+                n,
+                anchor_cells,
+                min_sz,
+                full_bound,
+                &sym_of,
+                n_types,
+                &seed_cell,
+                &mut cache,
+                deadline,
+            ) {
+                return Some(regions);
+            }
         }
     }
     let attempts = build_cover_attempts(

@@ -1157,9 +1157,10 @@ struct FreeRem<'a> {
 
 const MAX_FREE_NODES: usize = 2_000_000;
 
-/// Death-attribution counters (test builds only): keyed by (check,
-/// assigned/16).  The 0929-class endgame diagnosis tool — where a search
-/// dies tells which propagation is missing.
+// Death-attribution counters (test builds only): keyed by (check,
+// assigned/16).  The 0929-class endgame diagnosis tool — where a search
+// dies tells which propagation is missing.  (Plain comments: a doc comment
+// on a macro invocation triggers unused_doc_comments.)
 #[cfg(test)]
 thread_local! {
     static DIES: std::cell::RefCell<std::collections::HashMap<(&'static str, usize), usize>> =
@@ -2164,6 +2165,188 @@ fn relax_size_windows(
     }
 }
 
+/// `area` rule number clues: a numbered cell's region has size exactly `N`
+/// (`constraints::check_rule_area`).  Injects exact per-unit windows.  When
+/// the numbered units carry **pairwise distinct** values (⇒ distinct regions)
+/// and the values sum to the whole board, the sum identity leaves no room for
+/// further regions — returns the label-count cap (`0262` class: 4 corner
+/// numbers 14/15/18/17 sum to 64 = board).  Contradictory windows surface
+/// through the regular window checks.
+fn inject_number_clues(
+    puzzle: &Puzzle,
+    free_cells: &[usize],
+    unit_of_cell: &[u32],
+    lo: &mut [usize],
+    hi: &mut [usize],
+    total: usize,
+    w: usize,
+) -> Option<(usize, Vec<(u32, usize)>)> {
+    let mut vals: Vec<(u32, usize)> = Vec::new();
+    for (i, &idx) in free_cells.iter().enumerate() {
+        let (r, c) = (idx / w, idx % w);
+        if let Some(n) = puzzle.cells[r][c].number {
+            let u = unit_of_cell[i] as usize;
+            let n = n.max(1) as usize;
+            if lo[u] < n {
+                lo[u] = n;
+            }
+            if hi[u] > n {
+                hi[u] = n;
+            }
+            if !vals.iter().any(|(x, _)| *x == u as u32) {
+                vals.push((u as u32, n));
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut sum = 0usize;
+    let mut distinct = true;
+    for &(_, n) in &vals {
+        if !seen.insert(n) {
+            distinct = false;
+        }
+        sum += n;
+    }
+    if distinct && !vals.is_empty() && sum == total {
+        Some((vals.len(), vals))
+    } else {
+        None
+    }
+}
+
+/// Hall-interval pinning for strict ord chains over a **known distinct region
+/// size set** V (the number-clue lock of `inject_number_clues`: distinct
+/// `area` numbers summing to the board ⇒ every unit joins one of those
+/// regions, so every label size ∈ V).
+///
+/// A chain `u1 → … → uc` (sizes strictly increasing along the edges) must
+/// embed as an order-preserving injection into sorted V.  The i-th member
+/// (0-based, source = smallest) can therefore only take
+/// `sorted_v[i ..= i + k − c]` — exact windows when `c == k` (0262: two
+/// 4-chains over {14,15,17,18} each pin uniquely to 14<15<17<18).  Sound
+/// even when several chains alias into the same regions (values may repeat
+/// across chains; the interval bound is per-chain).
+///
+/// Chains touching a fixed number unit are skipped (their pinning is already
+/// reflected in the windows by `inject_number_clues` + `relax_size_windows`).
+fn chain_value_pins(
+    ord: &[(u32, u32)],
+    lo: &mut [usize],
+    hi: &mut [usize],
+    values: &[(u32, usize)],
+) {
+    let mut v: Vec<usize> = values.iter().map(|&(_, s)| s).collect();
+    v.sort_unstable();
+    v.dedup();
+    let k = v.len();
+    if k == 0 {
+        return;
+    }
+    let fixed: std::collections::HashSet<u32> = values.iter().map(|&(u, _)| u).collect();
+    let n = lo.len();
+    // Undirected adjacency restricted to non-fixed ord units.
+    let mut adj: Vec<Vec<u32>> = vec![Vec::new(); n];
+    let mut touched = vec![false; n];
+    for &(a, b) in ord {
+        if fixed.contains(&a) || fixed.contains(&b) {
+            continue;
+        }
+        adj[a as usize].push(b);
+        adj[b as usize].push(a);
+        touched[a as usize] = true;
+        touched[b as usize] = true;
+    }
+    let mut seen = vec![false; n];
+    for s in 0..n {
+        if !touched[s] || seen[s] {
+            continue;
+        }
+        // Weakly-connected comp via undirected DFS.
+        let mut comp: Vec<usize> = Vec::new();
+        let mut stack = vec![s];
+        seen[s] = true;
+        while let Some(u) = stack.pop() {
+            comp.push(u);
+            for &wv in &adj[u] {
+                if !seen[wv as usize] {
+                    seen[wv as usize] = true;
+                    stack.push(wv as usize);
+                }
+            }
+        }
+        // A path comp: |E| = |V|−1 and undirected degree ≤ 2.
+        let edges: usize = comp.iter().map(|&u| adj[u].len()).sum::<usize>() / 2;
+        let path = edges + 1 == comp.len() && comp.iter().all(|&u| adj[u].len() <= 2);
+        if !path {
+            continue;
+        }
+        let c = comp.len();
+        if c > k {
+            continue; // needs more distinct sizes than V offers — infeasible, leave to search
+        }
+        orient_and_pin_comp(&comp, ord, &fixed, &v, k, &touched, lo, hi);
+    }
+}
+
+/// Orient one undirected path comp through the ord digraph (consistent
+/// chains only: unique indegree-0 endpoint = smallest member, no branching
+/// out-edges) and narrow each member's window to its Hall interval in the
+/// sorted value set `v` (member i gets `v[i ..= i + k − c]`).
+fn orient_and_pin_comp(
+    comp: &[usize],
+    ord: &[(u32, u32)],
+    fixed: &std::collections::HashSet<u32>,
+    v: &[usize],
+    k: usize,
+    touched: &[bool],
+    lo: &mut [usize],
+    hi: &mut [usize],
+) {
+    let n = lo.len();
+    let c = comp.len();
+    let mut indeg = vec![0usize; n];
+    let mut follow: Vec<Option<u32>> = vec![None; n];
+    let mut multi_out = false;
+    for &(a, b) in ord {
+        if fixed.contains(&a) || fixed.contains(&b) || !touched[a as usize] {
+            continue;
+        }
+        indeg[b as usize] += 1;
+        if follow[a as usize].is_some() {
+            multi_out = true;
+        }
+        follow[a as usize] = Some(b);
+    }
+    if multi_out {
+        return;
+    }
+    let sources: Vec<usize> = comp.iter().copied().filter(|&u| indeg[u] == 0).collect();
+    if sources.len() != 1 {
+        return;
+    }
+    let mut cur = sources[0] as u32;
+    let mut walked = 0usize;
+    for i in 0..c {
+        let lo_v = v[i];
+        let hi_v = v[i + k - c];
+        let u = cur as usize;
+        if lo[u] < lo_v {
+            lo[u] = lo_v;
+        }
+        if hi[u] > hi_v {
+            hi[u] = hi_v;
+        }
+        walked += 1;
+        match follow[cur as usize] {
+            Some(nx) => cur = nx,
+            None => break,
+        }
+    }
+    if walked != c {
+        return; // orientation did not span the comp — leave untouched
+    }
+}
+
 /// Enumerate exact per-unit size cases for a **connected** ord/diff
 /// constraint graph (0929 class).  The sufficiency probe (tmp_diag_0929b)
 /// showed the search collapses to ~20 nodes once every unit's label size is
@@ -2628,8 +2811,13 @@ fn merge_case_windows(
 /// Per-run deadline: 800 ms per size case (the true case converges in
 /// ~0.5 s; wrong cases die shallow), full residual for the plain run.
 fn run_deadline(is_case: bool, module_deadline: crate::clock::Instant) -> crate::clock::Instant {
+    // `RANGE_CASE_MS` diagnostic override (default 800).
+    let case_ms: u64 = std::env::var("RANGE_CASE_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(800);
     let budget = if is_case {
-        std::time::Duration::from_millis(800)
+        std::time::Duration::from_millis(case_ms)
     } else {
         std::time::Duration::from_secs(12)
     };
@@ -2645,20 +2833,15 @@ fn run_deadline(is_case: bool, module_deadline: crate::clock::Instant) -> crate:
 /// (untouched units keep `(0, 0)` = base windows) with the case's own label
 /// count as the spawn ceiling, then the plain un-hinted run last (the
 /// residual budget fallback).
-fn range_windows_runs(
-    ord: &[(u32, u32)],
-    diff: &[(u32, u32, usize)],
-    sz_lo: &[usize],
-    sz_hi: &[usize],
-    total: usize,
-    g: usize,
+fn windows_runs_from_cases(
+    cases: &[(Vec<(usize, usize)>, usize)],
+    n_units: usize,
     max_labels: usize,
 ) -> Vec<(Vec<usize>, Vec<usize>, usize)> {
-    let cases = enum_size_cases(ord, diff, sz_lo, sz_hi, total, g, max_labels);
     let mut runs: Vec<(Vec<usize>, Vec<usize>, usize)> = Vec::with_capacity(cases.len() + 1);
-    for (win, n_lbl) in &cases {
-        let mut lo = vec![0usize; sz_lo.len()];
-        let mut hi = vec![0usize; sz_hi.len()];
+    for (win, n_lbl) in cases {
+        let mut lo = vec![0usize; n_units];
+        let mut hi = vec![0usize; n_units];
         for (u, &(a, b)) in win.iter().enumerate() {
             if a != 0 || b != 0 {
                 lo[u] = a;
@@ -2668,8 +2851,287 @@ fn range_windows_runs(
         // Sentinel 0 = keep base window at run time.
         runs.push((lo, hi, *n_lbl));
     }
-    runs.push((vec![0usize; sz_lo.len()], vec![0usize; sz_hi.len()], max_labels));
+    runs.push((vec![0usize; n_units], vec![0usize; n_units], max_labels));
     runs
+}
+
+/// Value-assignment cases under the number-clue lock (0262 class): the
+/// region-size multiset V is fully known (distinct `area` numbers summing to
+/// the board) and every ord/diff-constraint unit joins one of the number
+/// regions, so each unit's size ∈ V.  Strict chains over V collapse (a
+/// c=|V| chain has a unique order-preserving assignment — already pinned by
+/// `chain_value_pins`); the residue is small (0262: two 2-chains ⇒ 6×6=36
+/// cases).  Pre-drawn-wall / must-split pairs force distinct values (values
+/// are distinct per region).  Each case pins the constraint units' windows
+/// exactly; number units keep their injected windows.
+///
+/// Sorted by anchor distance (unit's first cell → its value's number-cell,
+/// Manhattan): a region's cells tend to sit near its number clue, so the
+/// true assignment leads.  Ordering only — never a filter.
+fn enum_number_cases(
+    ord: &[(u32, u32)],
+    diff: &[(u32, u32, usize)],
+    n_units: usize,
+    num_vals: &[(u32, usize)],
+    split: &std::collections::HashSet<(u32, u32)>,
+    sz_lo: &[usize],
+    sz_hi: &[usize],
+    unit_cells: &[Vec<usize>],
+    unit_adj: &[Vec<u32>],
+    w: usize,
+    num_anchors: &[(usize, usize, usize)], // (value, r, c)
+) -> Vec<(Vec<(usize, usize)>, usize)> {
+    const CASE_CAP: usize = 256;
+    let mut v: Vec<usize> = num_vals.iter().map(|&(_, s)| s).collect();
+    v.sort_unstable();
+    v.dedup();
+    if v.is_empty() {
+        return Vec::new();
+    }
+    let fixed: std::collections::HashMap<u32, usize> = num_vals.iter().copied().collect();
+    let mut adj: Vec<Vec<(u32, u8, usize)>> = vec![Vec::new(); n_units];
+    let mut touched = vec![false; n_units];
+    for &(a, b) in ord {
+        // kind 0: my < their.
+        adj[a as usize].push((b, 0, 0));
+        adj[b as usize].push((a, 0, 1));
+        touched[a as usize] = true;
+        touched[b as usize] = true;
+    }
+    for &(a, b, gap) in diff {
+        adj[a as usize].push((b, 1, gap));
+        adj[b as usize].push((a, 1, gap));
+        touched[a as usize] = true;
+        touched[b as usize] = true;
+    }
+    for &(a, b) in split {
+        adj[a as usize].push((b, 2, 0));
+        adj[b as usize].push((a, 2, 0));
+        touched[a as usize] = true;
+        touched[b as usize] = true;
+    }
+    // DFS over the non-fixed constraint units; each tries every value of V
+    // that survives its unit window and the pairwise checks.  Components are
+    // explored jointly (cross-component aliasing is legal: equal values may
+    // repeat across comps) — the cartesian product stays tiny because V is
+    // small and chains are pre-pinned.
+    let members: Vec<u32> = (0..n_units as u32)
+        .filter(|&u| touched[u as usize] && !fixed.contains_key(&u))
+        .collect();
+    if members.is_empty() {
+        return Vec::new();
+    }
+    // Most-constrained first: units with the tightest window lead.
+    let mut order = members.clone();
+    order.sort_by_key(|&u| sz_hi[u as usize] - sz_lo[u as usize]);
+    let mut cases: Vec<(Vec<(usize, usize)>, usize)> = Vec::new();
+    let mut assign: std::collections::HashMap<u32, usize> = Default::default();
+    enum_value_dfs(
+        &order,
+        0,
+        &adj,
+        &fixed,
+        &v,
+        sz_lo,
+        sz_hi,
+        &mut assign,
+        &mut cases,
+        CASE_CAP,
+    );
+    let dist_of = |val: usize, u: u32| -> usize {
+        let (tr, tc) = match num_anchors.iter().find(|(x, _, _)| *x == val) {
+            Some(&(_, r, c)) => (r, c),
+            None => return 0,
+        };
+        let cell = unit_cells[u as usize][0];
+        let (r, c) = (cell / w, cell % w);
+        r.abs_diff(tr) + c.abs_diff(tc)
+    };
+    // Primary key: adjacency cohesion DESC — adjacent non-wall units sharing
+    // a value lie in the same region, and the true assignment maximises the
+    // merges it forces (0262: true case scores 2, all others ≤ 1).  Secondary:
+    // anchor distance ASC (cells tend to sit near their region's number).
+    let val_of = |win: &[(usize, usize)], u: u32| -> Option<usize> {
+        let (a, b) = win[u as usize];
+        if a != 0 || b != 0 {
+            Some(a)
+        } else {
+            fixed.get(&u).copied()
+        }
+    };
+    let score = |win: &[(usize, usize)]| -> usize {
+        let mut s = 0usize;
+        for u in 0..n_units as u32 {
+            let Some(vu) = val_of(win, u) else { continue };
+            for &nb in &unit_adj[u as usize] {
+                if nb <= u {
+                    continue;
+                }
+                if split.contains(&canon_pair(u, nb)) {
+                    continue;
+                }
+                if val_of(win, nb) == Some(vu) {
+                    s += 1;
+                }
+            }
+        }
+        s
+    };
+    cases.sort_by_cached_key(|(win, _)| {
+        let dist: usize = win
+            .iter()
+            .enumerate()
+            .filter(|(_, &(a, b))| a != 0 || b != 0)
+            .map(|(u, &(a, _))| dist_of(a, u as u32))
+            .sum();
+        (std::cmp::Reverse(score(win)), dist)
+    });
+    cases
+}
+
+/// DFS for `enum_number_cases`.  kind 0 = ord (val 0: my < their, val 1:
+/// their < my), kind 1 = gap |a−b| = val, kind 2 = must-split (values differ).
+fn enum_value_dfs(
+    order: &[u32],
+    k: usize,
+    adj: &[Vec<(u32, u8, usize)>],
+    fixed: &std::collections::HashMap<u32, usize>,
+    values: &[usize],
+    sz_lo: &[usize],
+    sz_hi: &[usize],
+    assign: &mut std::collections::HashMap<u32, usize>,
+    cases: &mut Vec<(Vec<(usize, usize)>, usize)>,
+    cap: usize,
+) {
+    if cases.len() >= cap {
+        return;
+    }
+    if k == order.len() {
+        let mut win = vec![(0usize, 0usize); sz_lo.len()];
+        for (u, s) in assign.iter() {
+            win[*u as usize] = (*s, *s);
+        }
+        cases.push((win, fixed.len() + assign.len()));
+        return;
+    }
+    let u = order[k];
+    for &s in values {
+        if s < sz_lo[u as usize] || s > sz_hi[u as usize] {
+            continue;
+        }
+        let mut ok = true;
+        for &(v, kind, val) in &adj[u as usize] {
+            let t = match assign.get(&v) {
+                Some(&t) => t,
+                None => match fixed.get(&v) {
+                    Some(&t) => t,
+                    None => continue,
+                },
+            };
+            let fits = match kind {
+                0 => {
+                    if val == 0 {
+                        s < t
+                    } else {
+                        t < s
+                    }
+                }
+                1 => s.abs_diff(t) == val,
+                _ => s != t,
+            };
+            if !fits {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            assign.insert(u, s);
+            enum_value_dfs(order, k + 1, adj, fixed, values, sz_lo, sz_hi, assign, cases, cap);
+            assign.remove(&u);
+        }
+    }
+}
+
+/// Choose the case-window source: number-locked puzzles enumerate value
+/// assignments (0262 class); otherwise the connected-graph size tuples
+/// (0929 class); `RANGE_CASES=0` skips straight to the plain run.
+fn select_case_runs(
+    puzzle: &Puzzle,
+    ord: &[(u32, u32)],
+    diff: &[(u32, u32, usize)],
+    sz_lo: &[usize],
+    sz_hi: &[usize],
+    total: usize,
+    g: usize,
+    max_labels: usize,
+    num_lock: Option<(&[(u32, usize)], &std::collections::HashSet<(u32, u32)>)>,
+    unit_cells: &[Vec<usize>],
+    unit_adj: &[Vec<u32>],
+    w: usize,
+) -> Vec<(Vec<usize>, Vec<usize>, usize)> {
+    if std::env::var("RANGE_CASES").map(|v| v == "0").unwrap_or(false) {
+        return windows_runs_from_cases(&[], sz_lo.len(), max_labels);
+    }
+    if let Some((num_vals, split)) = num_lock {
+        let num_anchors: Vec<(usize, usize, usize)> = num_vals
+            .iter()
+            .map(|&(u, val)| {
+                let cell = unit_cells[u as usize][0];
+                (val, cell / w, cell % w)
+            })
+            .collect();
+        let _ = puzzle;
+        let cases = enum_number_cases(
+            ord,
+            diff,
+            sz_lo.len(),
+            num_vals,
+            split,
+            sz_lo,
+            sz_hi,
+            unit_cells,
+            unit_adj,
+            w,
+            &num_anchors,
+        );
+        windows_runs_from_cases(&cases, sz_lo.len(), max_labels)
+    } else {
+        let cases = enum_size_cases(ord, diff, sz_lo, sz_hi, total, g, max_labels);
+        windows_runs_from_cases(&cases, sz_lo.len(), max_labels)
+    }
+}
+
+/// Build the per-unit watchtower fact records (slots resolved through the
+/// pin/free index map) plus the per-unit fact-id lists.
+fn build_wt_unit_facts(
+    facts_raw: &[(Vec<usize>, usize)],
+    pin_of: &[Option<usize>],
+    free_index: &std::collections::HashMap<usize, u32>,
+    unit_of_cell: &[u32],
+    n_units: usize,
+) -> (Vec<WtUnitFact>, Vec<Vec<usize>>) {
+    let mut facts: Vec<WtUnitFact> = Vec::new();
+    let mut facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); n_units];
+    for (cells, value) in facts_raw {
+        let mut slots = Vec::new();
+        for &idx in cells {
+            match pin_of[idx] {
+                Some(p) => slots.push(WtSlot::Pin(p)),
+                None => {
+                    let u = unit_of_cell[free_index[&idx] as usize];
+                    slots.push(WtSlot::Unit(u));
+                    if !facts_of_unit[u as usize].contains(&(facts.len())) {
+                        facts_of_unit[u as usize].push(facts.len());
+                    }
+                }
+            }
+        }
+        facts.push(WtUnitFact {
+            slots,
+            value: *value,
+        });
+    }
+    (facts, facts_of_unit)
 }
 
 pub(crate) fn solve_range_partition(
@@ -2715,6 +3177,21 @@ pub(crate) fn solve_range_partition(
         collect_size_orders(puzzle, w, &pinned, &pin_of, &free_index, &unit_of_cell)?;
     let total = free_cells.len();
     let mut max_labels = if lo >= 1 { total / lo } else { 0 };
+    // `area` number clues pin exact region sizes (0262 class: distinct-valued
+    // numbers summing to the board also lock the region count).  Under that
+    // lock every label size is known to lie in the number value set, so strict
+    // ord chains admit Hall-interval pinning (`chain_value_pins`) and the
+    // residual constraint units enumerate value assignments
+    // (`enum_number_cases`).
+    let num_lock =
+        inject_number_clues(puzzle, &free_cells, &unit_of_cell, &mut ext_lo, &mut ext_hi, total, w);
+    if let Some((cap, ref num_vals)) = num_lock {
+        if cap < max_labels {
+            max_labels = cap;
+        }
+        chain_value_pins(&ord, &mut ext_lo, &mut ext_hi, num_vals);
+    }
+    relax_size_windows(&ord, &diff, &mut ext_lo, &mut ext_hi);
     // Distinct-size chain deduction (0152 class): a directed ord chain of c
     // units forces c distinct sizes summing to ≥ c·g+c(c−1)/2 — when that
     // floor saturates `total` every size is pinned exactly and the label
@@ -2732,45 +3209,85 @@ pub(crate) fn solve_range_partition(
     let unit_types: Vec<u64> = vec![0u64; unit_cells.len()];
     let sz_lo: Vec<usize> = (0..unit_cells.len()).map(|i| lo.max(ext_lo[i])).collect();
     let sz_hi: Vec<usize> = (0..unit_cells.len()).map(|i| hi.min(ext_hi[i])).collect();
-    let mut facts: Vec<WtUnitFact> = Vec::new();
-    let mut facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); unit_cells.len()];
-    for (cells, value) in &facts_raw {
-        let mut slots = Vec::new();
-        for &idx in cells {
-            match pin_of[idx] {
-                Some(p) => slots.push(WtSlot::Pin(p)),
-                None => {
-                    let u = unit_of_cell[free_index[&idx] as usize];
-                    slots.push(WtSlot::Unit(u));
-                    if !facts_of_unit[u as usize].contains(&(facts.len())) {
-                        facts_of_unit[u as usize].push(facts.len());
-                    }
-                }
-            }
-        }
-        facts.push(WtUnitFact {
-            slots,
-            value: *value,
-        });
-    }
+    let (facts, facts_of_unit) =
+        build_wt_unit_facts(&facts_raw, &pin_of, &free_index, &unit_of_cell, unit_cells.len());
     // Bounded slice: the range/inequality/difference gate fires on many FAILs
     // whose searches never converge — without the cap range-part burns the
     // full unit budget per puzzle and starves the later modules (1146 at
     // -j 6).  1351 solves in <5 s, so 12 s is a wide margin.
-    let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(12_000);
+    // `RANGE_SLICE_MS` diagnostic override (default 12_000).
+    let slice_ms: u64 = std::env::var("RANGE_SLICE_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(12_000);
+    let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(slice_ms);
     let module_deadline = if slice < deadline { slice } else { deadline };
-    // Size cases first (0929 class): the true case converges in ~20 nodes and
-    // wrong cases die at the root, so a tiny per-case slice bounds the tail;
-    // the un-hinted plain run keeps the residual budget (0270 class).
-    // `RANGE_CASES=0` diagnostic switch: skip the size-case runs (measure
-    // the plain path alone).
-    let mut runs = if std::env::var("RANGE_CASES").map(|v| v == "0").unwrap_or(false) {
-        range_windows_runs(&[], &[], &sz_lo, &sz_hi, total, lo, max_labels)
-    } else {
-        range_windows_runs(&ord, &diff, &sz_lo, &sz_hi, total, lo, max_labels)
-    };
+    // Size/value cases first (0929 size-tuple class / 0262 number-value
+    // class): the true case converges in ~20 nodes and wrong cases die at
+    // the root, so a tiny per-case slice bounds the tail; the un-hinted
+    // plain run keeps the residual budget (0270 class).
+    let mut runs = select_case_runs(
+        puzzle,
+        &ord,
+        &diff,
+        &sz_lo,
+        &sz_hi,
+        total,
+        lo,
+        max_labels,
+        num_lock.as_ref().map(|(_, vals)| (vals.as_slice(), &split)),
+        &unit_cells,
+        &unit_adj,
+        w,
+    );
+    run_range_searches(
+        puzzle,
+        &pinned,
+        w,
+        &unit_cells,
+        &unit_adj,
+        &split,
+        &facts,
+        &facts_of_unit,
+        &ord,
+        &diff,
+        &sz_lo,
+        &sz_hi,
+        &unit_types,
+        runs,
+        module_deadline,
+        num_lock.is_some(),
+    )
+}
+
+/// Drive the FreeRem windowed runs: exact-window case runs first (sliced),
+/// the plain un-hinted run last with the residual deadline.
+fn run_range_searches(
+    puzzle: &Puzzle,
+    pinned: &[PinnedPlacement],
+    w: usize,
+    unit_cells: &Vec<Vec<usize>>,
+    unit_adj: &Vec<Vec<u32>>,
+    split: &std::collections::HashSet<(u32, u32)>,
+    facts: &Vec<WtUnitFact>,
+    facts_of_unit: &Vec<Vec<usize>>,
+    ord: &Vec<(u32, u32)>,
+    diff: &Vec<(u32, u32, usize)>,
+    sz_lo: &Vec<usize>,
+    sz_hi: &Vec<usize>,
+    unit_types: &Vec<u64>,
+    mut runs: Vec<(Vec<usize>, Vec<usize>, usize)>,
+    module_deadline: crate::clock::Instant,
+    number_locked: bool,
+) -> Option<Vec<crate::types::RegionInfo>> {
     let n_cases = runs.len().saturating_sub(1);
-    let case_deadline = {
+    // Under the number lock the case set is complete (every solution lies in
+    // some case), so cases get the whole module budget — no plain reserve.
+    // Size-tuple cases (0929 class) may miss aliasings, so they keep the 6 s
+    // cap and leave the plain fallback its reserve (0206 class).
+    let case_deadline = if number_locked {
+        module_deadline
+    } else {
         let t = crate::clock::Instant::now() + std::time::Duration::from_millis(6_000);
         if t < module_deadline {
             t
@@ -2786,21 +3303,21 @@ pub(crate) fn solve_range_partition(
         if crate::clock::Instant::now() >= module_deadline {
             break;
         }
-        let (slo, shi) = merge_case_windows(&case_lo, &case_hi, &sz_lo, &sz_hi);
+        let (slo, shi) = merge_case_windows(&case_lo, &case_hi, sz_lo, sz_hi);
         let mut search = FreeRem {
             puzzle,
-            pinned: &pinned,
+            pinned,
             w,
-            unit_cells: &unit_cells,
-            unit_adj: &unit_adj,
-            split: &split,
-            facts: &facts,
-            facts_of_unit: &facts_of_unit,
-            ord: &ord,
-            diff: &diff,
+            unit_cells,
+            unit_adj,
+            split,
+            facts,
+            facts_of_unit,
+            ord,
+            diff,
             sz_lo: &slo,
             sz_hi: &shi,
-            unit_types: &unit_types,
+            unit_types,
             n_types: 0,
             max_labels: case_max,
             lab_of: vec![None; unit_cells.len()],
@@ -3444,6 +3961,64 @@ mod multi_rem_tests {
         let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
         let out = solve_range_partition(&p, p.height * p.width, deadline);
         assert!(out.is_some(), "0770 range partition must solve");
+    }
+
+    /// Hall-interval pinning sanity (0262 comps A/D shape): a 4-chain over
+    /// |V|=4 pins exactly; a 2-chain narrows to its interval; V-shapes pin
+    /// nothing (not a total order).
+    #[test]
+    fn chain_value_pins_exact_on_full_chains() {
+        // ord pairs are (smaller, larger); number units 10..13 hold V.
+        let ord = vec![(0u32, 1), (1, 2), (2, 3), (4, 5), (5, 6), (6, 7), (8, 9)];
+        let mut lo = vec![1usize; 10];
+        let mut hi = vec![64usize; 10];
+        let values = vec![(10u32, 14usize), (11, 15), (12, 17), (13, 18)];
+        chain_value_pins(&ord, &mut lo, &mut hi, &values);
+        assert_eq!((lo[0], hi[0]), (14, 14), "chain A member 0");
+        assert_eq!((lo[1], hi[1]), (15, 15), "chain A member 1");
+        assert_eq!((lo[2], hi[2]), (17, 17), "chain A member 2");
+        assert_eq!((lo[3], hi[3]), (18, 18), "chain A member 3");
+        assert_eq!((lo[8], hi[8]), (14, 17), "2-chain smaller end");
+        assert_eq!((lo[9], hi[9]), (15, 18), "2-chain larger end");
+        // V-shape (0<2, 1<2): two sources, not a chain — untouched.
+        let ord_v = vec![(0u32, 2), (1, 2)];
+        let mut lo2 = vec![1usize; 10];
+        let mut hi2 = vec![64usize; 10];
+        chain_value_pins(&ord_v, &mut lo2, &mut hi2, &values);
+        assert_eq!((lo2[0], hi2[0]), (1, 64), "V-shape must not pin");
+        assert_eq!((lo2[2], hi2[2]), (1, 64), "V-shape must not pin");
+    }
+
+    /// 0262 death-attribution dump.
+    #[test]
+    #[ignore]
+    fn tmp_diag_0262() {
+        dies_reset();
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/5-inequality/0262.json"
+        ))
+        .expect("parse");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(300);
+        let out = solve_range_partition(&p, p.height * p.width, deadline);
+        eprintln!("tmp_diag_0262 solved={}", out.is_some());
+        let mut rows: Vec<_> = dies_snapshot().into_iter().collect();
+        rows.sort_by_key(|(k, _)| *k);
+        for ((tag, bucket), n) in rows {
+            eprintln!("die {tag:12} assigned~{:<3} x{}", bucket * 16, n);
+        }
+    }
+
+    /// 0262 (area+inequality, 8×8): number clues 14/15/18/17 pin the four
+    /// region sizes and the sum identity locks the region count to 4.
+    #[test]
+    fn solves_range_partition_0262() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/5-inequality/0262.json"
+        ))
+        .expect("parse");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+        let out = solve_range_partition(&p, p.height * p.width, deadline);
+        assert!(out.is_some(), "0262 number-clue lock must solve");
     }
 
     /// Death-attribution dump for the 0929-class endgame gap.

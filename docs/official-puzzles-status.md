@@ -74,6 +74,7 @@
 | 2026-09-24 | **size-constraint 分区**（doc 07 修订5，1351 破簇） | 1351 直跑 + range FAIL 群探针 | 直跑 `rsolver` + `cargo test --release` | **1199 口径**（1198 + 1351） | **+1**（1351） | `solve_range_partition`（range/precise/inequality/difference 无锚分区）：尺寸窗+spawn 帽+望塔 facts+`relax_size_windows` 序/差值传递窗松弛。**1351 全链 4.8s via range-part**（35 格 3 区，aog/edge_csp 双扑空的引擎缺口）；顺带修 must-same 误插 split bug。高标签/伴生题未解（FreeRem 末段共同短板）。`cargo test` 62+8、`pytest` 292、complexity_gate 全过。 |
 | 2026-09-24 | **FreeRem 末段收敛三件套**（doc 07 修订6，0152/0270/0206 破簇） | range 三子集基准 `20260924_<sha>_endgame.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 30 -j 6` ×3 子集（155 题） | **1202 口径**（1199 + 0152 + 0270 + 0206） | **+3**（0152/0270/0206） | 互异链和钉死（0152 的 8 元序链和=36 饱和 ⇒ 尺寸恰 1..8，隔离 0.03s）+ 窗口交合并检查 + k 标签走廊强制（0270 49 格 13 区 0.4s；0206 伴生题同获救）。子集 145/155，10 FAIL 全部在 65620bb 全量基线中本就 FAIL（0 真回归）。`cap_other` 较大侧窗误杀由 0899 官方钉隔离测试当场抓住。0929/0289/0770 仍跟踪中。`cargo test` 63+8、`pytest` 292、complexity_gate 全过。**冲 1200 里程碑达成。** |
 | 2026-09-24 | **尺寸情形枚举**（doc 07 修订7，0929 破簇） | range 三子集基准 `20260924_<sha>_size-case.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 30 -j 6` ×3 子集（155 题） | **1203 口径**（1202 + 0929） | **+1**（0929） | `enum_size_cases`：约束图连通时 DFS 枚举差值链存活尺寸元组（区间窗看不见的析取偏移集），每情形精确窗+标签数帽独立搜索，plain 保底。充分性探针先行（官方尺寸直喂 20 节点秒解）。SAC-lite 与约束度引导序两方案证伪回退（后者曾把 0206 拖到 >12s；正确形态=窗口宽升序）。子集 146/155、0 真回归。`cargo test` 65+8、`pytest` 292、complexity_gate 全过。 |
+| 2026-10-21 | **number 锁三件套**（doc 07 修订8，0262 破簇） | range 三子集基准 `20261021_<sha>_number-lock.{txt,jsonl}` | `benchmark_rust_solver.py --timeout 30 -j 6` ×3 子集（155 题） | **1204 口径**（1203 + 0262） | **+1**（0262） | `area` 数字=区域精确大小：互异+和恒等 ⇒ 区域数锁 + 尺寸值集 V 已知。三件套：`inject_number_clues`（number 窗+锁）、`chain_value_pins`（Hall 区间钉死：4 元链 over 4 值唯一指派）、`enum_number_cases`（残余链值指派枚举 + 邻接凝聚排序）。充分性探针：真情形 527 节点/119ms 秒解（原排 28/36，邻接凝聚排序后 case 0）。子集 147/155、0 真回归。`cargo test` 67+8、`pytest` 304、complexity_gate 全过。 |
 
 ---
 
@@ -1118,6 +1119,36 @@ FreeRem 尺寸域的最后一块：区间窗对差值链的**析取偏移集**�
   0289/0770（multiset/基数域）、0975a（基数引擎末段）、0683/1258（象限基数
   收尾）、0262/0586/0839/0912/0928/0930d/1407a（断连约束图 → 多组件笛卡尔
   情形是下一步）。
+
+### 2026-10-21（续11） · number 锁三件套（doc 07 修订8，0262 破簇 +1 → 1204，冲 1220 开局）
+
+`area` 规则的格上数字 = 所在区域**精确大小**（`check_rule_area` 读 `c.number`，
+Rust `Cell.number` 早已解析但 FreeRem 从未消费）。0262（8×8，area+inequality）
+四角 14/15/18/17 互异且和=64=盘面 ⇒ **区域数锁 4 + 尺寸值集 V 已知**。
+按充分性探针先行：
+
+1. **`inject_number_clues`**：number 格钉单元精确窗；互异+和恒等 ⇒
+   `max_labels=|V|` 并把值集传给下游。
+2. **`chain_value_pins`（Hall 区间）**：严格序链保序嵌入有序值集，第 i 元
+   取 `v[i..=i+k−c]`，`c==k` 唯一——0262 两条 4 元链各自钉死 14<15<17<18。
+   纯传播不够（joinable 死亡 24k 不动）；首轮探针根判死是**链定向反了**
+   （把最大元钉上最小值区间）——从 indeg-0 最小元起步。
+3. **`enum_number_cases`**：残余 2 元链值指派枚举（6×6=36 情形；must-split
+   ⇒ 异值）。**排序=邻接凝聚优先**（相邻无墙单元同值=同区合并；真情形
+   2 分唯一最高 → case 0），次键锚距升序（旧主键把真情形排到 28/36）。
+   number 锁下情形集完备 ⇒ 吃满模块预算，plain 仅兜底。
+
+充分性探针（`RANGE_SLICE_MS`/`RANGE_CASE_MS` 诊断旋钮 + per-run 打点）：
+真情形 **527 节点/119ms** 秒解；28 个错情形全为 UNSAT 游走（3s 不收敛，
+错钉不可满足证明昂贵）——portfolio 靠排序不靠切片。
+- 子集基准 147/155：**0262 via range-part 新解**（全链 30.4s——aog 先烧
+  预算、range-part 末段 0.12s 解出），0152/0270/0206/0929/1351/0899
+  保持，余 8 FAIL 对照基线本就 FAIL——**0 真回归**。
+- 口径 **1203 → 1204**。`cargo test` 67+8、`pytest` 304、complexity_gate
+  全过（热核拆 3 处保 cognitive ≤20）。
+- 冲 1220 剩 +16：0586（number 非互异，multiset 版）、0839（cardinal 宿主
+  + 差值别名枚举）、0912/0928/0930d/1407a（大图断连簇）、0289/0770
+  （multiset/基数域）、0975a、0683/1258。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

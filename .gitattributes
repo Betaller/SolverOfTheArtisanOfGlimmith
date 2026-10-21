@@ -84,3 +84,7 @@ results/bin/rsolver-83f03fe-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_83f03fe_size-case.txt filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_83f03fe_size-case.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20260924_83f03fe_size-case-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-ce08056-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20261021_ce08056_number-lock.txt filter=lfs diff=lfs merge=lfs -text
+results/bench/20261021_ce08056_number-lock.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20261021_ce08056_number-lock-note.txt filter=lfs diff=lfs merge=lfs -text

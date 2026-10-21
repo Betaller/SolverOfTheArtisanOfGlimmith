@@ -92,3 +92,7 @@ results/bin/rsolver-8d4f2cb-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20261021_8d4f2cb_alias-gap.txt filter=lfs diff=lfs merge=lfs -text
 results/bench/20261021_8d4f2cb_alias-gap.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20261021_8d4f2cb_alias-gap-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-b351dd9-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20261021_b351dd9_numpin.txt filter=lfs diff=lfs merge=lfs -text
+results/bench/20261021_b351dd9_numpin.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20261021_b351dd9_numpin-note.txt filter=lfs diff=lfs merge=lfs -text

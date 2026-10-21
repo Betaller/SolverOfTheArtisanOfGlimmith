@@ -5074,7 +5074,7 @@ fn run_cover_attempts(
 #[allow(clippy::too_many_arguments)]
 fn attempt_pairwise_ok(
     cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
-    seeds: &[(usize, usize)],
+    _seeds: &[(usize, usize)],
     small: &[(usize, usize)], // (region idx, size)
     diff_mode: bool,
 ) -> bool {
@@ -5108,39 +5108,46 @@ fn attempt_pairwise_ok(
     true
 }
 
-/// Evaluate one (residue, permutation) assignment: seeds, tail, cost, and
-/// the pairwise feasibility screen.  `None` = dead (empty candidate list).
+/// Availability-guided size DFS: assign each non-residue region a size from
+/// its **hostable** set (exact-size candidates exist), pruning by partial
+/// sum; the residue absorbs the rest.  Replaces the multiset × permutation
+/// product whose lexicographic cap never reached large-residue families
+/// (0289/0804).  With `shape_limited` the per-size region counts stay
+/// within the free-polyomino inventory.  Collects (cost, res_seed, seeds,
+/// tail) attempts sorted by candidate-list product.
 #[allow(clippy::too_many_arguments)]
-fn build_one_attempt(
+fn enumerate_assignments(
     puzzle: &Puzzle,
     w: usize,
     h: usize,
     n: usize,
     anchor_cells: &[usize],
-    others: &[usize],
-    perm: &[usize],
-    res_seed: usize,
-    res_sz: usize,
-    defer_cap: usize,
     sym_of: &std::collections::HashMap<usize, usize>,
     n_types: usize,
     seed_cell: &std::collections::HashSet<usize>,
     cache: &mut std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    min_sz: usize,
+    defer_cap: usize,
+    shape_limited: bool,
     deadline: crate::clock::Instant,
-) -> Option<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> {
+) -> Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> {
+    const FREE_POLY: [usize; 9] = [0, 1, 1, 2, 5, 12, 35, 108, 369];
+    const ATTEMPT_CAP: usize = 6000;
     let m = anchor_cells.len();
-    let mut cost = 1usize;
-    let mut seeds: Vec<(usize, usize)> = vec![(0, 0); m];
-    seeds[res_seed] = (anchor_cells[res_seed], res_sz);
-    let mut tail: Option<(usize, usize)> = None;
-    for (j, &part) in perm.iter().enumerate() {
-        let si = others[j];
-        seeds[si] = (anchor_cells[si], part);
-        if part > defer_cap {
-            tail = Some((si, part));
-            cost = cost.saturating_mul(8);
-        } else {
-            let key = (si, part);
+    let mut total = 0usize;
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if !puzzle.cells[r][c].blocked {
+            total += 1;
+        }
+    }
+    let mut out: Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> = Vec::new();
+    // Hostable sizes per region.
+    let mut hostable: Vec<Vec<usize>> = Vec::new();
+    for si in 0..m {
+        let mut sizes: Vec<usize> = Vec::new();
+        for sz in min_sz..=defer_cap {
+            let key = (si, sz);
             if !cache.contains_key(&key) {
                 let cands = gen_cover_cands(
                     puzzle,
@@ -5148,123 +5155,170 @@ fn build_one_attempt(
                     h,
                     n,
                     anchor_cells[si],
-                    part,
+                    sz,
                     seed_cell,
                     deadline,
                     Some((sym_of, n_types)),
                 );
-                if cands.is_empty() {
-                    return None;
-                }
+                let empty = cands.is_empty();
                 cache.insert(key, cands);
+                if empty {
+                    continue;
+                }
+            } else if cache[&key].is_empty() {
+                continue;
             }
-            let cl = cache[&key].len();
-            if cl == 0 {
-                return None;
-            }
-            cost = cost.saturating_mul(cl.max(1));
+            sizes.push(sz);
         }
+        hostable.push(sizes);
     }
-    let small: Vec<(usize, usize)> = (0..m)
-        .filter(|&i| i != res_seed && Some((i, seeds[i].1)) != tail)
-        .map(|i| (i, seeds[i].1))
-        .collect();
-    if !attempt_pairwise_ok(cache, &seeds, &small, false) {
-        return None;
-    }
-    Some((cost, res_seed, seeds, tail))
-}
-
-/// Build the (multiset, assignment) attempt list with cost ordering.
-#[allow(clippy::too_many_arguments)]
-fn build_cover_attempts(
-    puzzle: &Puzzle,
-    w: usize,
-    h: usize,
-    n: usize,
-    anchor_cells: &[usize],
-    multisets: &[Vec<usize>],
-    sym_of: &std::collections::HashMap<usize, usize>,
-    n_types: usize,
-    seed_cell: &std::collections::HashSet<usize>,
-    cache: &mut std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
-    deadline: crate::clock::Instant,
-) -> Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> {
-    const DEFER_CAP: usize = 10;
-    const ATTEMPT_CAP: usize = 4000;
-    let m = anchor_cells.len();
-    if std::env::var("COVER_DEBUG").is_ok() {
-        eprintln!(
-            "rose_cover: build enter deadline_remaining={:?}",
-            deadline.saturating_duration_since(crate::clock::Instant::now())
-        );
-    }
-    let mut attempts: Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> = Vec::new();
-    let (mut ok_kills, mut pair_kills, mut kept) = (0usize, 0usize, 0usize);
-    for parts in multisets.iter() {
-        if crate::clock::Instant::now() >= deadline {
+    // DFS over residues: for each residue seed, assign sizes to the others.
+    for res_seed in 0..m {
+        if crate::clock::Instant::now() >= deadline || out.len() >= ATTEMPT_CAP {
             break;
         }
-        let res_sz = parts[m - 1];
-        let rest: Vec<usize> = parts[..m - 1].to_vec();
-        let (place_parts, tail_part): (Vec<usize>, Option<usize>) =
-            if rest.last().copied().unwrap_or(0) > DEFER_CAP {
-                (rest[..m - 2].to_vec(), Some(rest[m - 2]))
-            } else {
-                (rest, None)
-            };
-        for res_seed in 0..m {
-            if crate::clock::Instant::now() >= deadline {
-                break;
-            }
-            let others: Vec<usize> = (0..m).filter(|&i| i != res_seed).collect();
-            let mut slots: Vec<usize> = place_parts.clone();
-            if let Some(tp) = tail_part {
-                slots.push(tp);
-            }
-            slots.sort_unstable();
-            for perm in multiset_perms(&slots) {
-                if crate::clock::Instant::now() >= deadline || attempts.len() >= ATTEMPT_CAP {
-                    break;
-                }
-                if let Some(built) = build_one_attempt(
-                    puzzle,
-                    w,
-                    h,
-                    n,
-                    anchor_cells,
-                    &others,
-                    &perm,
-                    res_seed,
-                    res_sz,
-                    DEFER_CAP,
-                    sym_of,
-                    n_types,
-                    seed_cell,
-                    cache,
-                    deadline,
-                ) {
-                    if std::env::var("COVER_DEBUG").is_ok() {
-                        kept += 1;
-                    }
-                    attempts.push(built);
-                } else if std::env::var("COVER_DEBUG").is_ok() {
-                    ok_kills += 1;
-                }
-            }
-        }
+        let mut order: Vec<usize> = (0..m).filter(|&i| i != res_seed).collect();
+        // most-constrained seeds first (fewest hostable sizes)
+        order.sort_by_key(|&i| hostable[i].len());
+        let mut cur: Vec<usize> = vec![0; m];
+        let mut used_count: Vec<usize> = vec![0; 9]; // per-size region counts (shape cap)
+        let mut sum = 0usize;
+        let mut evals = 0usize;
+        assign_dfs(
+            &order,
+            0,
+            &hostable,
+            &mut cur,
+            &mut used_count,
+            &mut sum,
+            total,
+            m,
+            anchor_cells,
+            res_seed,
+            defer_cap,
+            shape_limited,
+            &mut out,
+            cache,
+            deadline,
+            &mut evals,
+        );
     }
-    attempts.sort_by_key(|(c, _, _, _)| *c);
+    out.sort_by_key(|(c, _, _, _)| *c);
     if std::env::var("COVER_DEBUG").is_ok() {
         eprintln!(
-            "rose_cover: build done ok_kills={ok_kills} pair_kills={pair_kills} kept={kept}"
+            "rose_cover: assign hostable={:?} attempts={} evals_sum={}",
+            hostable.iter().map(|v| v.len()).collect::<Vec<_>>(),
+            out.len(),
+            EVALS_DBG.with(|e| e.get())
         );
-        for (k, v) in cache.iter().take(16) {
-            eprintln!("rose_cover: cache {:?} len={}", k, v.len());
+    }
+    out
+}
+
+#[cfg(test)]
+thread_local! {
+    static EVALS_DBG: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[cfg(not(test))]
+thread_local! {
+    static EVALS_DBG: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[allow(clippy::too_many_arguments)]
+fn assign_dfs(
+    order: &[usize],
+    k: usize,
+    hostable: &[Vec<usize>],
+    cur: &mut [usize],
+    used_count: &mut [usize],
+    sum: &mut usize,
+    total: usize,
+    m: usize,
+    anchor_cells: &[usize],
+    res_seed: usize,
+    defer_cap: usize,
+    shape_limited: bool,
+    out: &mut Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)>,
+    cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    deadline: crate::clock::Instant,
+    evals: &mut usize,
+) {
+    if out.len() >= 6000 || crate::clock::Instant::now() >= deadline {
+        return;
+    }
+    if k == order.len() {
+        let res_sz = total.saturating_sub(*sum);
+        if res_sz < 1 {
+            return;
+        }
+        *evals += 1;
+        EVALS_DBG.with(|e| e.set(e.get() + 1));
+        // assemble the attempt: seeds + tail + cost
+        let mut cost = 1usize;
+        let mut seeds: Vec<(usize, usize)> = vec![(0, 0); m];
+        seeds[res_seed] = (anchor_cells[res_seed], res_sz);
+        let mut tail: Option<(usize, usize)> = None;
+        for &i in order {
+            let sz = cur[i];
+            seeds[i] = (anchor_cells[i], sz);
+            if sz > defer_cap {
+                tail = Some((i, sz));
+                cost = cost.saturating_mul(8);
+            } else {
+                let cl = cache.get(&(i, sz)).map(|v| v.len()).unwrap_or(0);
+                if cl == 0 {
+                    return;
+                }
+                cost = cost.saturating_mul(cl.max(1));
+            }
+        }
+        let small: Vec<(usize, usize)> = (0..m)
+            .filter(|&i| i != res_seed && Some((i, seeds[i].1)) != tail)
+            .map(|i| (i, seeds[i].1))
+            .collect();
+        if attempt_pairwise_ok(cache, &seeds, &small, false) {
+            out.push((cost, res_seed, seeds, tail));
+        }
+        return;
+    }
+    let i = order[k];
+    for &sz in &hostable[i] {
+        if *sum + sz + (order.len() - k - 1) > total.saturating_sub(1) {
+            continue; // not enough room for the rest at min 1
+        }
+        if shape_limited && sz < used_count.len() {
+            if used_count[sz] >= [0, 1, 1, 2, 5, 12, 35, 108, 369][sz] {
+                continue;
+            }
+            used_count[sz] += 1;
+        }
+        cur[i] = sz;
+        *sum += sz;
+        assign_dfs(
+            order,
+            k + 1,
+            hostable,
+            cur,
+            used_count,
+            sum,
+            total,
+            m,
+            anchor_cells,
+            res_seed,
+            defer_cap,
+            shape_limited,
+            out,
+            cache,
+            deadline,
+            evals,
+        );
+        *sum -= sz;
+        if shape_limited && sz < used_count.len() {
+            used_count[sz] -= 1;
         }
     }
-    attempts
 }
+
 
 /// Rose multiset cover (0289 class): range min + rose cardinality bound the
 /// size family (m parts >= g summing to total) and the symbol cells anchor
@@ -5339,6 +5393,13 @@ pub(crate) fn solve_rose_cover(
     // boards are gated out upstream by the avg check in `try_rose_cover`.
     if !small_multisets.is_empty() {
         if let Some(full_bound) = all_small_max {
+            // Split the cover budget: full-cover gets the first half, the
+            // assignment DFS the second (a full-cover burn must not zero the
+            // attempts channel's deadline).
+            let mid = crate::clock::Instant::now()
+                + deadline
+                    .saturating_duration_since(crate::clock::Instant::now())
+                    / 2;
             if let Some(regions) = full_cover_pass(
                 puzzle,
                 w,
@@ -5351,23 +5412,25 @@ pub(crate) fn solve_rose_cover(
                 n_types,
                 &seed_cell,
                 &mut cache,
-                deadline,
+                mid,
             ) {
                 return Some(regions);
             }
         }
     }
-    let attempts = build_cover_attempts(
+    let attempts = enumerate_assignments(
         puzzle,
         w,
         h,
         n,
         anchor_cells,
-        &multisets,
         &sym_of,
         n_types,
         &seed_cell,
         &mut cache,
+        min_sz,
+        DEFER_CAP,
+        shape_limited,
         deadline,
     );
     if std::env::var("COVER_DEBUG").is_ok() {

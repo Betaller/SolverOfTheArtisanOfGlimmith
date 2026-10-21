@@ -5067,6 +5067,47 @@ fn run_cover_attempts(
     None
 }
 
+/// Pairwise feasibility among the small regions of one assignment: for
+/// every pair, some candidate pair must be disjoint (and non-touching under
+/// `differentiation`).  Kills most wrong assignments in microseconds before
+/// the cover DFS (0289: 105k attempts of which almost all conflict early).
+#[allow(clippy::too_many_arguments)]
+fn attempt_pairwise_ok(
+    cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    seeds: &[(usize, usize)],
+    small: &[(usize, usize)], // (region idx, size)
+    diff_mode: bool,
+) -> bool {
+    for ai in 0..small.len() {
+        for bj in (ai + 1)..small.len() {
+            let (ia, sa) = small[ai];
+            let (ib, sb) = small[bj];
+            let la = cache.get(&(ia, sa)).map(|v| v.as_slice()).unwrap_or(&[]);
+            let lb = cache.get(&(ib, sb)).map(|v| v.as_slice()).unwrap_or(&[]);
+            if la.is_empty() || lb.is_empty() {
+                return false;
+            }
+            let mut ok = false;
+            'outer: for ca in la {
+                for cb in lb {
+                    if mask_and(&ca.mask, &cb.mask) {
+                        continue;
+                    }
+                    if diff_mode && sa == sb && (mask_and(&ca.touch, &cb.mask) || mask_and(&cb.touch, &ca.mask)) {
+                        continue;
+                    }
+                    ok = true;
+                    break 'outer;
+                }
+            }
+            if !ok {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Build the (multiset, assignment) attempt list with cost ordering.
 #[allow(clippy::too_many_arguments)]
 fn build_cover_attempts(
@@ -5147,6 +5188,13 @@ fn build_cover_attempts(
                     }
                 }
                 if ok {
+                    let small: Vec<(usize, usize)> = (0..m)
+                        .filter(|&i| i != res_seed && Some((i, seeds[i].1)) != tail)
+                        .map(|i| (i, seeds[i].1))
+                        .collect();
+                    if !attempt_pairwise_ok(cache, &seeds, &small, false) {
+                        continue;
+                    }
                     attempts.push((cost, res_seed, seeds, tail));
                 }
             }
@@ -5201,6 +5249,12 @@ pub(crate) fn solve_rose_cover(
         .filter(|p| p.last().copied().unwrap_or(usize::MAX) <= DEFER_CAP)
         .map(|p| p.last().copied().unwrap_or(0))
         .max();
+    // Without an all-small multiset the board is not an all-small or mixed
+    // cover instance (0833: every multiset has a >10 part on a 10-region
+    // board) — running the attempts burn would starve region_match.
+    if all_small_max.is_none() {
+        return None;
+    }
     let diff_mode = puzzle.rules.iter().any(|r| r.ctype == "differentiation");
     if let Some(full_bound) = all_small_max {
         if let Some(regions) = full_cover_pass(

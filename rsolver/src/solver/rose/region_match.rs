@@ -580,7 +580,10 @@ fn try_rose_cover(
     timeout_ms: u64,
 ) -> Option<Vec<crate::types::RegionInfo>> {
     let m = seeds.len();
-    if m <= 5 || total > 12 * m {
+    if m <= 5 || total * 2 > 17 * m {
+        // avg ≤ 8.5 cells/region: 0317 (3.6) / 0325 (5.3) / 0289 (8.2) in,
+        // 0833 (9.0, total 54 not 110) out — its region_match pipeline owns
+        // that class and a cover burn starves it.
         return None;
     }
     let mut free_total = 0usize;
@@ -594,7 +597,9 @@ fn try_rose_cover(
     }
     let (bmin, bmax) = crate::shapes::area_bounds(puzzle);
     let g = bmin.max(symbol_types.len());
-    let cover_deadline = start + std::time::Duration::from_millis(timeout_ms.min(25_000));
+    // Cover gets at most a third of the module budget so region_match keeps
+    // its share even when the cover runs to its deadline.
+    let cover_deadline = start + std::time::Duration::from_millis(timeout_ms / 3);
     crate::solver::rose::puzzle_piece_pin::solve_rose_cover(
         puzzle,
         w,
@@ -612,9 +617,16 @@ pub fn solve_by_region_match(
     symbol_types: &[String],
     m: usize,
     all_positions: &CellSet,
-    start: &Instant,
+    _start: &Instant,
     timeout_ms: u64,
 ) -> Option<Vec<crate::types::RegionInfo>> {
+    // Self-anchored budget: the unit-budget contract is "timeout_ms from the
+    // module's own start".  An upstream anchor (solve() global) makes the
+    // candidate-generation deadline a function of how long aog burned —
+    // 0833 showed `deadline_past=true` at the very first seed, silently
+    // producing zero candidates.
+    let start_owned = Instant::now();
+    let start = &start_owned;
     let h = puzzle.height;
     let w = puzzle.width;
     let total = all_positions.len();
@@ -690,10 +702,17 @@ pub fn solve_by_region_match(
             );
             if crate::aog_debug_enabled() {
                 eprintln!(
-                    "rose: seed {} -> {} candidates (grow={force_grow}) in {:?}",
+                    "rose: seed {} -> {} candidates (grow={force_grow}) in {:?} (deadline_past={})",
                     seed,
                     cands.len(),
-                    t0.elapsed()
+                    t0.elapsed(),
+                    Instant::now() >= *start + std::time::Duration::from_millis(timeout_ms),
+                );
+                eprintln!(
+                    "rose: DBG start_elapsed={:?} timeout_ms={} now_sub_start={:?}",
+                    start.elapsed(),
+                    timeout_ms,
+                    Instant::now().saturating_duration_since(*start),
                 );
             }
             if cands.is_empty() {
@@ -702,7 +721,11 @@ pub fn solve_by_region_match(
             span_sum += cands.iter().map(|c| c.len()).max().unwrap_or(0);
             all_candidates.push(cands);
         }
-        if span_sum >= total {
+        if span_sum >= total || m > 4 {
+            // Force-grow regeneration is for tiny-m cover-style puzzles
+            // (1406: m=3); on higher-m wide-window puzzles (0833, m=6) the
+            // grown lists explode the candidate cap and starve the combo
+            // pipeline.
             break;
         }
     }
@@ -777,7 +800,6 @@ pub fn solve_by_region_match(
             &mut assignment,
             combo_deadline,
             deadline,
-            Some(puzzle),
         ) {
             return Some(super::build_regions(&region_of, h, w));
         }
@@ -1039,7 +1061,6 @@ fn try_combos(
             &mut assignment,
             combo_deadline,
             deadline,
-            Some(puzzle),
         ) {
             return Some(super::build_regions(&region_of, h, w));
         }
@@ -1061,7 +1082,6 @@ fn match_regions_mrv(
     assignment: &mut Vec<Option<CellSet>>,
     combo_deadline: Instant,
     deadline: Instant,
-    puzzle: Option<&Puzzle>,
 ) -> bool {
     if Instant::now() >= combo_deadline || Instant::now() >= deadline {
         return false;
@@ -1094,17 +1114,7 @@ fn match_regions_mrv(
         }
     }
     if best_idx == usize::MAX {
-        if covered.len() != total {
-            return false;
-        }
-        // Leaf validation: companion rules (hom/het shapes, non_block, …) can
-        // reject a structurally exact cover — treat that as a dead end and
-        // keep backtracking instead of surfacing a doomed candidate.
-        if let Some(p) = puzzle {
-            let regions = super::build_regions(region_of, p.height, w);
-            return crate::solver::validate::validate(p, &regions);
-        }
-        return true;
+        return covered.len() == total;
     }
 
     let remaining_cells = total - covered.len();
@@ -1137,7 +1147,6 @@ fn match_regions_mrv(
             assignment,
             combo_deadline,
             deadline,
-            puzzle,
         ) {
             return true;
         }

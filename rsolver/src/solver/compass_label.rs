@@ -1183,6 +1183,36 @@ mod tests {
         );
     }
 
+    /// Probe: the labeling engine on 1080 (compass + differentiation +
+    /// solitary) — excluded by `is_applicable`'s exact-two-rules gate today.
+    /// `cargo test -p rsolver -- --ignored probe_labeling_1080 --nocapture`
+    #[test]
+    #[ignore]
+    fn probe_labeling_1080() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../puzzles/official/Zone3/6-compass-main/1080.json"
+        ))
+        .expect("parse");
+        let model = Model::build(&p).expect("model");
+        let deadline = Instant::now() + std::time::Duration::from_secs(60);
+        let t0 = Instant::now();
+        let out = solve_labeling(&model, deadline);
+        eprintln!(
+            "probe_labeling_1080: solved={} in {:?}",
+            out.is_some(),
+            t0.elapsed()
+        );
+        if let Some(region_of) = out {
+            let mapped: Vec<Option<usize>> = region_of
+                .into_iter()
+                .map(|l| l.map(|x| x as usize))
+                .collect();
+            let regions = crate::solver::rose::build_regions(&mapped, p.height, p.width);
+            let ok = crate::solver::validate::validate(&p, &regions);
+            eprintln!("probe_labeling_1080: validate={ok}");
+        }
+    }
+
     #[test]
     fn guided_search_0683() {
         guided_run(

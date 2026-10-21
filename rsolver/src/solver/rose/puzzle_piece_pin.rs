@@ -5250,6 +5250,36 @@ mod multi_rem_tests {
         std::env::remove_var("RANGE_FORCE");
     }
 
+    /// Cardinal host with wt facts on 1406 (rose P1/P2/P3 ×3 + watchtower).
+    /// `cargo test -- --ignored tmp_diag_cardinal_1406 --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_cardinal_1406() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/7-zone3-mixed/1406.json"
+        ))
+        .expect("parse");
+        let mut types: Vec<String> = Vec::new();
+        for row in &p.cells {
+            for c in row {
+                if let Some(sym) = &c.symbol {
+                    if !types.contains(sym) {
+                        types.push(sym.clone());
+                    }
+                }
+            }
+        }
+        types.sort();
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(60);
+        let t0 = crate::clock::Instant::now();
+        let out = solve_cardinal_partition(&p, &types, p.height * p.width, deadline);
+        eprintln!(
+            "tmp_diag_cardinal_1406: types={types:?} solved={} in {:?}",
+            out.is_some(),
+            t0.elapsed()
+        );
+    }
+
     /// Walk the 0308 official placement through the cover-search checks to
     /// prove the pruning never rejects the truth.
     /// `cargo test -- --ignored tmp_diag_0308_guided --nocapture`

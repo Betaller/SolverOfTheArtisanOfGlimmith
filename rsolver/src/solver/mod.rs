@@ -345,9 +345,15 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     //    Returns a `build_solution`-validated result (non-trusted: the router's
     //    `validate::validate` gate re-checks it), so a wrong answer can't pass.
     if edge_csp::is_edge_csp_capable(puzzle) {
-        let ec_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        // edge_csp is the last real search standing for a large class of
+        // puzzles (aog+rose routinely exhaust before it); under `-j 6` bench
+        // contention its 1.0× unit budget is the binding constraint (1406:
+        // 26 s solo, 0/6 at parallel load).  1.5× stays well inside the
+        // Python wall allowance (RUST_PARTS × timeout).
+        let ec_budget = timeout_ms + timeout_ms / 2;
+        let ec_deadline = Instant::now() + std::time::Duration::from_millis(ec_budget);
         let ec_start = Instant::now();
-        let outcome = edge_csp::solve_edge_csp(puzzle, &start, timeout_ms);
+        let outcome = edge_csp::solve_edge_csp(puzzle, &start, ec_budget);
         let elapsed = ec_start.elapsed().as_millis() as u64;
         match outcome {
             ModuleOutcome::Solved(regions) => {

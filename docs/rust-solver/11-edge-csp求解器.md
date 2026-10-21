@@ -407,3 +407,12 @@ edge_csp 解出**；0685 并行翻负但串行 20s SOLVED（噪声）。
   `M2_SKIP=vparity2`（诊断门 `EDGE_CSP_SKIP=vparity2`）可关。
 - 根调试：`EDGE_CSP_DEBUG` 现在入口处也打 `root unknown=…`（1249 根传播
   180 边只锁 1——边宿主无锚点的直接证据，正解落到 same-tiling 的格标搜索核）。
+
+
+## 预算 1.5×（2026-10-21）
+
+链内 edge_csp 预算从 `timeout_ms` 提到 `1.5×timeout_ms`：aog/rose 对
+edge_csp 适配题常规耗尽，edge_csp 是最后一道真搜索；其 1.0× 预算在 -j6
+基准争抢下是绑定约束（1406：rose P1/P2/P3+watchtower，solo 26s 解、
+并行 0/6 失败；1.5× 后并行 6/6 稳定解）。仍在 Python 侧 RUST_PARTS×
+墙钟之内，只影响 edge_csp 实跑时长，不影响其它模块预算。

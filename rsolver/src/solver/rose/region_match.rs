@@ -74,6 +74,27 @@ pub const WINDOW_GROW_LIMIT: usize = 8;
 /// caller and threaded down so the M1 early-stop (below) can tell a
 /// "complete but too small to be usable" candidate from a genuinely finished
 /// one.
+/// True when the set's cells exactly fill their axis-aligned bounding box
+/// (the `non_block` rule forbids such regions).
+fn set_is_rectangle(set: &CellSet, w: usize) -> bool {
+    let cells: Vec<usize> = set.iter().collect();
+    if cells.is_empty() {
+        return false;
+    }
+    let mut min_r = usize::MAX;
+    let mut max_r = 0usize;
+    let mut min_c = usize::MAX;
+    let mut max_c = 0usize;
+    for &x in &cells {
+        let (r, c) = (x / w, x % w);
+        min_r = min_r.min(r);
+        max_r = max_r.max(r);
+        min_c = min_c.min(c);
+        max_c = max_c.max(c);
+    }
+    (max_r - min_r + 1) * (max_c - min_c + 1) == cells.len()
+}
+
 pub fn generate_all_candidates(
     puzzle: &Puzzle,
     seed: usize,
@@ -84,6 +105,7 @@ pub fn generate_all_candidates(
     start: &Instant,
     timeout_ms: u64,
     size_window: (usize, usize),
+    force_grow: bool,
 ) -> Vec<CellSet> {
     let h = puzzle.height;
     let w = puzzle.width;
@@ -95,6 +117,9 @@ pub fn generate_all_candidates(
     } else {
         0
     };
+    // `non_block` (no-rectangles): a rectangular candidate can never appear
+    // in a valid solution — drop it at collection (0838 class).
+    let no_rect = puzzle.rules.iter().any(|r| r.ctype == "non_block");
 
     let mut visited: HashSet<CellSet> = HashSet::new();
     let mut results: Vec<CellSet> = Vec::new();
@@ -147,7 +172,9 @@ pub fn generate_all_candidates(
         let (useful_min, useful_max) = size_window;
         let complete_multi = is_multi && syms == all_required;
         if complete_multi || !is_multi {
-            results.push(current.clone());
+            if !(no_rect && set_is_rectangle(&current, w)) {
+                results.push(current.clone());
+            }
         }
         if current.len() >= useful_max || current.len() >= MAX_CANDIDATE_CELLS {
             continue;
@@ -158,7 +185,7 @@ pub fn generate_all_candidates(
         // constraint is loose, minimal sets are already usable, and expanding
         // everything is what made 0833 (10×11, window [1,105]) blow up — keep
         // the original M1 stop there.
-        let grow_through = useful_max.saturating_sub(useful_min) <= WINDOW_GROW_LIMIT;
+        let grow_through = force_grow || useful_max.saturating_sub(useful_min) <= WINDOW_GROW_LIMIT;
         if complete_multi && !grow_through && current.len() >= useful_min {
             continue;
         }
@@ -499,7 +526,13 @@ fn try_complement_cover(
     // Cheap size pre-filter: a full `validate` per candidate is the expensive
     // part (600ms over 20000 complements on 1137), and most complements can be
     // rejected by the puzzle's own area bounds first.
-    let (min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
+    let (mut min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
+    // Rule-aware minimum region size: `non_block` forbids rectangular
+    // regions, and 1×1 / dominoes / I-trominoes are all rectangles — only
+    // L-trominoes and larger non-rect shapes qualify (0838 class).
+    if puzzle.rules.iter().any(|r| r.ctype == "non_block") {
+        min_sz = min_sz.max(3);
+    }
     let total = all_positions.len();
     for a in cands0 {
         if a.len() >= all_positions.len() {
@@ -563,7 +596,13 @@ pub fn solve_by_region_match(
     // Size window for an exact cover of `total` cells into `m` regions — see
     // `generate_all_candidates`.  Computed before the area filter because the
     // filter's `min_sz`/`max_sz` are what define it.
-    let (min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
+    let (mut min_sz, max_sz) = crate::shapes::area_bounds(puzzle);
+    // Rule-aware minimum region size: `non_block` forbids rectangular
+    // regions, and 1×1 / dominoes / I-trominoes are all rectangles — only
+    // L-trominoes and larger non-rect shapes qualify (0838 class).
+    if puzzle.rules.iter().any(|r| r.ctype == "non_block") {
+        min_sz = min_sz.max(3);
+    }
     let useful_min = total
         .saturating_sub(m.saturating_sub(1).saturating_mul(max_sz))
         .max(min_sz);
@@ -576,23 +615,48 @@ pub fn solve_by_region_match(
         eprintln!("rose: size window [{}, {}] (min={} max={} total={} m={})", useful_min, useful_max, min_sz, max_sz, total, m);
     }
 
-    // Generate candidates per seed (single-symbol path).
+    // Generate candidates per seed.  Two passes: the M1 early-stop keeps only
+    // minimal symbol spans, which cannot cover `total` whenever the spans sum
+    // short — the true cover then needs grown regions (1406: 3 regions of
+    // ~18 cells, spans only reach ~10).  Detect the shortfall and regenerate
+    // with grow-through; puzzles whose spans already cover (0833 class) are
+    // left on the cheap pass.
     let mut all_candidates: Vec<Vec<CellSet>> = Vec::new();
-    for &seed in &seeds {
-        let t0 = Instant::now();
-        let cands = generate_all_candidates(puzzle, seed, all_positions, pre, &symbol_of, symbol_types, start, timeout_ms, (useful_min, useful_max));
-        if crate::aog_debug_enabled() {
-            eprintln!(
-                "rose: seed {} -> {} candidates in {:?}",
+    for pass in 0..2 {
+        all_candidates.clear();
+        let force_grow = pass == 1;
+        let mut span_sum = 0usize;
+        for &seed in &seeds {
+            let t0 = Instant::now();
+            let cands = generate_all_candidates(
+                puzzle,
                 seed,
-                cands.len(),
-                t0.elapsed()
+                all_positions,
+                pre,
+                &symbol_of,
+                symbol_types,
+                start,
+                timeout_ms,
+                (useful_min, useful_max),
+                force_grow,
             );
+            if crate::aog_debug_enabled() {
+                eprintln!(
+                    "rose: seed {} -> {} candidates (grow={force_grow}) in {:?}",
+                    seed,
+                    cands.len(),
+                    t0.elapsed()
+                );
+            }
+            if cands.is_empty() {
+                return None;
+            }
+            span_sum += cands.iter().map(|c| c.len()).max().unwrap_or(0);
+            all_candidates.push(cands);
         }
-        if cands.is_empty() {
-            return None;
+        if span_sum >= total {
+            break;
         }
-        all_candidates.push(cands);
     }
     if crate::aog_debug_enabled() {
         eprintln!(
@@ -645,6 +709,32 @@ pub fn solve_by_region_match(
         cands.sort_by_key(|c| c.len());
     }
 
+    // Size-free exact cover for high-m classes (0838: 14 single-type
+    // regions on 49 cells — the size-multiset enumeration is C(total, m) and
+    // truncates at MAX_COMBOS long before the true multiset).  Same MRV over
+    // the un-sliced per-seed lists; the starvation prune still applies.
+    if m > 6 {
+        let mut region_of: Vec<Option<usize>> = vec![None; h * w];
+        let mut assignment: Vec<Option<CellSet>> = vec![None; m];
+        let covered = CellSet::new(h * w);
+        let combo_deadline = Instant::now() + std::time::Duration::from_millis(5_000);
+        if match_regions_mrv(
+            &all_candidates,
+            all_positions,
+            total,
+            w,
+            &mut region_of,
+            pre,
+            covered,
+            &mut assignment,
+            combo_deadline,
+            deadline,
+            Some(puzzle),
+        ) {
+            return Some(super::build_regions(&region_of, h, w));
+        }
+    }
+
     // Sizes and by-size lookup.
     let (seed_size_sets, candidates_by_size) = build_size_index(&all_candidates);
     if crate::aog_debug_enabled() {
@@ -681,7 +771,7 @@ pub fn solve_by_region_match(
         );
     }
 
-    try_combos(&combos, &candidates_by_size, all_positions, total, h, w, pre, m, deadline)
+    try_combos(&combos, &candidates_by_size, all_positions, total, h, w, pre, m, deadline, puzzle)
 }
 
 /// Pick the most-constrained symbol type (fewest cells in `all_positions`).
@@ -866,6 +956,7 @@ fn try_combos(
     pre: &PreBoundaries,
     m: usize,
     deadline: Instant,
+    puzzle: &Puzzle,
 ) -> Option<Vec<crate::types::RegionInfo>> {
     let mut region_of: Vec<Option<usize>> = vec![None; h * w];
     for combo in combos {
@@ -900,6 +991,7 @@ fn try_combos(
             &mut assignment,
             combo_deadline,
             deadline,
+            Some(puzzle),
         ) {
             return Some(super::build_regions(&region_of, h, w));
         }
@@ -921,6 +1013,7 @@ fn match_regions_mrv(
     assignment: &mut Vec<Option<CellSet>>,
     combo_deadline: Instant,
     deadline: Instant,
+    puzzle: Option<&Puzzle>,
 ) -> bool {
     if Instant::now() >= combo_deadline || Instant::now() >= deadline {
         return false;
@@ -953,7 +1046,17 @@ fn match_regions_mrv(
         }
     }
     if best_idx == usize::MAX {
-        return covered.len() == total;
+        if covered.len() != total {
+            return false;
+        }
+        // Leaf validation: companion rules (hom/het shapes, non_block, …) can
+        // reject a structurally exact cover — treat that as a dead end and
+        // keep backtracking instead of surfacing a doomed candidate.
+        if let Some(p) = puzzle {
+            let regions = super::build_regions(region_of, p.height, w);
+            return crate::solver::validate::validate(p, &regions);
+        }
+        return true;
     }
 
     let remaining_cells = total - covered.len();
@@ -986,6 +1089,7 @@ fn match_regions_mrv(
             assignment,
             combo_deadline,
             deadline,
+            puzzle,
         ) {
             return true;
         }
@@ -1012,6 +1116,27 @@ mod tests {
 
     /// On a tiny grid the BFS exhausts naturally without approaching either cap.
     /// Guards against a regression where the bail-out `break` is placed before
+    /// 1406 (rose P1/P2/P3 ×3 + watchtower) tracker: solo the chain solves
+    /// it via edge_csp at ~26 s, but under `-j 6` bench contention the 30 s
+    /// edge_csp budget is exhausted first (0/6 at parallel load) — not a
+    /// stable口径 solve yet.  rose region_match needs grown-region
+    /// candidates (two-pass force-grow) plus a cover search over the
+    /// size-truncated lists to win it inside the early chain.
+    #[test]
+    #[ignore = "contention-sensitive edge_csp solve; rose cover search incomplete"]
+    fn solves_official_1406() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/7-zone3-mixed/1406.json"
+        ))
+        .expect("parse");
+        let start = Instant::now();
+        let out = crate::solver::rose::solve_rose(&p, &start, 60_000);
+        assert!(
+            matches!(out, crate::solver::ModuleOutcome::Solved(_)),
+            "1406 must solve via rose leaf-validated matching"
+        );
+    }
+
     /// `results.push` (emptying the output) or the loop structure is broken.
     #[test]
     fn generate_all_candidates_terminates_on_small_grid() {
@@ -1046,7 +1171,7 @@ mod tests {
         let symbol_types = vec!["A".to_string()];
         let mut symbol_of = HashMap::new();
         symbol_of.insert(0usize, 0usize);
-        let cands = generate_all_candidates(&puzzle, 0, &all_positions, &pre, &symbol_of, &symbol_types, &crate::clock::Instant::now(), 1_000, (1, 100));
+        let cands = generate_all_candidates(&puzzle, 0, &all_positions, &pre, &symbol_of, &symbol_types, &crate::clock::Instant::now(), 1_000, (1, 100), false);
         assert!(!cands.is_empty(), "must return at least the singleton region");
         assert!(cands.iter().all(|c| c.contains(0)), "every candidate contains the seed");
         assert!(cands.len() <= CANDIDATE_CAP);

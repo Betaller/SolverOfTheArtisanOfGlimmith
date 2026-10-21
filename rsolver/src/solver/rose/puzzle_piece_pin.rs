@@ -1237,6 +1237,87 @@ impl<'a> FreeRem<'a> {
         }
     }
 
+    /// `differentiation` (same-size-no-touch): adjacent regions must differ
+    /// in size.  Two adjacent labels whose windows are **both exact and
+    /// equal** can never separate legally, so any placement that would touch
+    /// them is dead now (0308: fourteen size-5 regions must be scattered).
+    /// Unexact windows stay permissive — the leaf validator still rejects
+    /// late coincidences (false-negative only).
+    fn diff_no_touch(&self) -> bool {
+        self.puzzle
+            .rules
+            .iter()
+            .any(|r| r.ctype == "differentiation")
+    }
+
+    /// Would placing `u` into label `l` (or spawning a fresh label when
+    /// `l == None`) put it adjacent to a different label with an exactly
+    /// equal size window?
+    fn diff_adj_conflict(&self, u: u32, l: Option<u32>) -> bool {
+        if !self.diff_no_touch() {
+            return false;
+        }
+        let mine = match l {
+            Some(ll) => self.win_cache.get(ll as usize).copied(),
+            None => {
+                let (lo, hi) = (self.sz_lo[u as usize], self.sz_hi[u as usize]);
+                if lo == hi {
+                    Some((lo, hi))
+                } else {
+                    None
+                }
+            }
+        };
+        let Some((mlo, mhi)) = mine else {
+            return false;
+        };
+        if mlo != mhi {
+            return false;
+        }
+        for &v in &self.unit_adj[u as usize] {
+            let Some(m) = self.lab_of[v as usize] else { continue };
+            if Some(m) == l {
+                continue;
+            }
+            if let Some((olo, ohi)) = self.win_cache.get(m as usize).copied() {
+                if olo == ohi && olo == mlo {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Global sweep: any adjacent unit pair in different labels with exactly
+    /// equal size windows is a `differentiation` violation already present
+    /// in the assignment (catches direct force paths).
+    fn diff_ok(&self) -> bool {
+        if !self.diff_no_touch() {
+            return true;
+        }
+        for u in 0..self.lab_of.len() as u32 {
+            let Some(l) = self.lab_of[u as usize] else { continue };
+            let Some((mlo, mhi)) = self.win_cache.get(l as usize).copied() else {
+                continue;
+            };
+            if mlo != mhi {
+                continue;
+            }
+            for &v in &self.unit_adj[u as usize] {
+                let Some(m) = self.lab_of[v as usize] else { continue };
+                if m == l {
+                    continue;
+                }
+                if let Some((olo, ohi)) = self.win_cache.get(m as usize).copied() {
+                    if olo == ohi && olo == mlo {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
 
     /// Propagate to a fixpoint.  `None` = contradiction (dead node).
     ///
@@ -1267,6 +1348,11 @@ impl<'a> FreeRem<'a> {
                     return None;
                 }
             };
+            if !self.diff_ok() {
+                #[cfg(test)]
+                die_note("diff", a);
+                return None;
+            }
             match self.rose_step() {
                 RoseStep::Dead => {
                     #[cfg(test)]
@@ -1339,10 +1425,15 @@ impl<'a> FreeRem<'a> {
             if lo > hi {
                 continue;
             }
+            if self.diff_adj_conflict(u, Some(l as u32)) {
+                continue;
+            }
             out.push(Some(l as u32));
         }
         if self.max_labels == 0 || self.lab_units.len() < self.max_labels {
-            out.push(None);
+            if !self.diff_adj_conflict(u, None) {
+                out.push(None);
+            }
         }
         out
     }
@@ -2182,6 +2273,8 @@ fn inject_number_clues(
     w: usize,
 ) -> Option<(usize, Vec<(u32, usize)>)> {
     let mut vals: Vec<(u32, usize)> = Vec::new();
+    let mut all_sum = 0usize;
+    let mut per_value: std::collections::HashMap<usize, usize> = Default::default();
     for (i, &idx) in free_cells.iter().enumerate() {
         let (r, c) = (idx / w, idx % w);
         if let Some(n) = puzzle.cells[r][c].number {
@@ -2193,22 +2286,38 @@ fn inject_number_clues(
             if hi[u] > n {
                 hi[u] = n;
             }
+            *per_value.entry(n).or_insert(0) += 1;
+            all_sum += n;
             if !vals.iter().any(|(x, _)| *x == u as u32) {
                 vals.push((u as u32, n));
+            } else {
+                // Two number cells collapsed into one must-same unit: they
+                // would share a region, so a per-clue lock is unsatisfiable.
+                let prev = vals.iter().find(|(x, _)| *x == u as u32).unwrap().1;
+                if prev != n {
+                    return None;
+                }
             }
         }
     }
-    let mut seen = std::collections::HashSet::new();
-    let mut sum = 0usize;
-    let mut distinct = true;
-    for &(_, n) in &vals {
-        if !seen.insert(n) {
-            distinct = false;
-        }
-        sum += n;
+    if vals.is_empty() {
+        return None;
     }
-    if distinct && !vals.is_empty() && sum == total {
+    // Sum-lock v2 (two forms; `check_area` = number == region size):
+    //  * **all-sum**: Σ over number cells == total  ⇒ every clue owns its
+    //    own region (Σ v·r_v = total ≤ Σ v·c_v = all-sum, equality iff
+    //    r_v = c_v ∀v) — region count = clue-cell count (0308: 14×5+84).
+    //  * **distinct-sum**: Σ over distinct values == total ⇒ r_v = 1 ∀v
+    //    (any r_v > 1 overshoots) — region count = distinct value count
+    //    (0262: 14+15+17+18; 1138: 60+61 with 26 clue cells).
+    let distinct_sum: usize = per_value.keys().sum();
+    if all_sum == total {
+        if per_value.values().sum::<usize>() != vals.len() {
+            return None; // clue cells merged into shared units — contradicts
+        }
         Some((vals.len(), vals))
+    } else if distinct_sum == total {
+        Some((per_value.len(), vals))
     } else {
         None
     }
@@ -3524,9 +3633,703 @@ pub(crate) fn solve_range_partition(
     deadline: crate::clock::Instant,
 ) -> Option<Vec<crate::types::RegionInfo>> {
     let has = |t: &str| puzzle.rules.iter().any(|r| r.ctype == t);
-    if !(has("range") || has("precise") || has("inequality") || has("difference")) {
+    // `RANGE_FORCE=1` diagnostic override: probe the number-clue machinery
+    // on puzzles outside the rule gate (0171/0308/0742: area + differentiation
+    // / hom-hetero without range/precise/inequality/difference).
+    let force = std::env::var("RANGE_FORCE").map(|v| v == "1").unwrap_or(false);
+    if !force && !(has("range") || has("precise") || has("inequality") || has("difference")) {
         return None;
     }
+    // `RANGE_SLICE_MS` diagnostic override (default 12_000).
+    let slice_ms: u64 = std::env::var("RANGE_SLICE_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(12_000);
+    solve_range_core(puzzle, n, deadline, slice_ms)
+}
+
+/// Sum-locked number pre-pass (0308/1138 class): `check_area` pins each
+/// number cell's region size, and either sum identity (all-sum or
+/// distinct-sum — see `inject_number_clues`) locks the region count.  Runs
+/// the range-part FreeRem pipeline with a short slice (the true case
+/// collapses in ms when the lock is the key, as 0262/0929 probes showed).
+pub(crate) fn solve_number_pin(
+    puzzle: &Puzzle,
+    n: usize,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    if !number_sum_lock(puzzle, puzzle.width, n) {
+        return None;
+    }
+    // All-sum form (every clue owns its own region): seeded exact-size cover
+    // first — FreeRem's emergent-label DFS wanders on the many-small-region
+    // shape (0308: fourteen size-5 islands + one residue).  The cover gets a
+    // bounded slice so the FreeRem fallback keeps its budget (0262 solves in
+    // ~160 ms there — a runaway cover must not starve it).
+    let cover_deadline = {
+        let t = crate::clock::Instant::now() + std::time::Duration::from_millis(30_000);
+        if t < deadline {
+            t
+        } else {
+            deadline
+        }
+    };
+    if let Some(regions) = solve_number_cover(puzzle, puzzle.width, n, cover_deadline) {
+        return Some(regions);
+    }
+    solve_range_core(puzzle, n, deadline, 3_000)
+}
+
+/// Wall between two 4-adjacent cells (pre-drawn boundary ⇒ must-differ).
+fn wall_between(puzzle: &Puzzle, w: usize, a: usize, b: usize) -> bool {
+    let (r1, c1) = (a / w, a % w);
+    let (r2, c2) = (b / w, b % w);
+    if r1 == r2 {
+        let cmin = if c1 < c2 { c1 } else { c2 };
+        puzzle.h_edges[r1][cmin].is_boundary
+    } else {
+        let rmin = if r1 < r2 { r1 } else { r2 };
+        puzzle.v_edges[rmin][c1].is_boundary
+    }
+}
+
+/// Number-seed collection: (cell, size) for every clue cell; the caller
+/// checks the all-sum identity.
+fn collect_number_seeds(puzzle: &Puzzle, w: usize, n: usize) -> (Vec<(usize, usize)>, usize, usize) {
+    let mut seeds: Vec<(usize, usize)> = Vec::new();
+    let mut all_sum = 0usize;
+    let mut free = 0usize;
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if puzzle.cells[r][c].blocked {
+            continue;
+        }
+        free += 1;
+        if let Some(v) = puzzle.cells[r][c].number {
+            let v = v.max(1) as usize;
+            seeds.push((idx, v));
+            all_sum += v;
+        }
+    }
+    (seeds, all_sum, free)
+}
+
+/// Bitset cell mask (3×u64 covers up to 192 cells) for cover candidates.
+type Mask = [u64; 3];
+
+fn mask_of(cells: &[usize], n: usize) -> Mask {
+    let mut m = [0u64; 3];
+    for &x in cells {
+        let _ = n;
+        m[x / 64] |= 1u64 << (x % 64);
+    }
+    m
+}
+
+fn mask_and(a: &Mask, b: &Mask) -> bool {
+    (a[0] & b[0]) != 0 || (a[1] & b[1]) != 0 || (a[2] & b[2]) != 0
+}
+
+/// One-cell dilation (4-neighbourhood) of a cell mask.
+fn dilate(m: &Mask, w: usize, h: usize, n: usize) -> Mask {
+    let mut out = [0u64; 3];
+    for x in 0..n {
+        if m[x / 64] & (1u64 << (x % 64)) == 0 {
+            continue;
+        }
+        let (r, c) = (x / w, x % w);
+        for (nr, nc) in [
+            (r as i64 - 1, c as i64),
+            (r as i64 + 1, c as i64),
+            (r as i64, c as i64 - 1),
+            (r as i64, c as i64 + 1),
+        ] {
+            if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
+                continue;
+            }
+            let y = (nr as usize) * w + nc as usize;
+            out[y / 64] |= 1u64 << (y % 64);
+        }
+    }
+    out
+}
+
+/// Candidate = cells + placement mask + dilated touch mask.
+struct CoverCand {
+    cells: Vec<usize>,
+    mask: Mask,
+    touch: Mask,
+}
+
+/// Candidate compatibility: disjoint from placed, and (under
+/// `differentiation`) non-touching equal-size placed regions.  Mask-based
+/// (the per-cell `contains` version capped node rate at ~3k/s).
+fn cand_fits(
+    seeds: &[(usize, usize)],
+    order: &[usize],
+    placed: &[(usize, Mask)],
+    diff_mode: bool,
+    k: usize,
+    cand: &CoverCand,
+) -> bool {
+    let my = seeds[order[k]].1;
+    for (ri, pm) in placed.iter() {
+        if mask_and(&cand.mask, pm) {
+            return false;
+        }
+        if diff_mode && seeds[*ri].1 == my && mask_and(&cand.touch, pm) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Residue potential-connectivity after adding `cand` (BFS — called only
+/// for candidates that survive the mask checks).
+fn res_roomy(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    placed: &[(usize, Mask)],
+    res_cell: usize,
+    res_size: usize,
+    cand: &CoverCand,
+) -> bool {
+    let mut used = [0u64; 3];
+    for (_, pm) in placed.iter() {
+        used[0] |= pm[0];
+        used[1] |= pm[1];
+        used[2] |= pm[2];
+    }
+    used[0] |= cand.mask[0];
+    used[1] |= cand.mask[1];
+    used[2] |= cand.mask[2];
+    if used[res_cell / 64] & (1u64 << (res_cell % 64)) != 0 {
+        return false;
+    }
+    let mut seen = [0u64; 3];
+    let mut stack = vec![res_cell];
+    seen[res_cell / 64] |= 1u64 << (res_cell % 64);
+    let mut cnt = 0usize;
+    while let Some(x) = stack.pop() {
+        cnt += 1;
+        if cnt >= res_size {
+            return true;
+        }
+        let (r, c) = (x / w, x % w);
+        for (nr, nc) in [
+            (r as i64 - 1, c as i64),
+            (r as i64 + 1, c as i64),
+            (r as i64, c as i64 - 1),
+            (r as i64, c as i64 + 1),
+        ] {
+            if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
+                continue;
+            }
+            let y = (nr as usize) * w + nc as usize;
+            if seen[y / 64] & (1u64 << (y % 64)) != 0 {
+                continue;
+            }
+            if used[y / 64] & (1u64 << (y % 64)) != 0 {
+                continue;
+            }
+            if puzzle.cells[nr as usize][nc as usize].blocked {
+                continue;
+            }
+            if wall_between(puzzle, w, x, y) {
+                continue;
+            }
+            seen[y / 64] |= 1u64 << (y % 64);
+            stack.push(y);
+        }
+    }
+    cnt >= res_size
+}
+
+/// Connected exact-size candidates for one seed (no other seeds, no wall
+/// crossings); mask + dilated touch mask stored up front.
+fn gen_cover_cands(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    cell: usize,
+    size: usize,
+    seed_cell: &std::collections::HashSet<usize>,
+    deadline: crate::clock::Instant,
+) -> Vec<CoverCand> {
+    const CAND_CAP: usize = 20_000;
+    let mut out: Vec<CoverCand> = Vec::new();
+    let mut seen: std::collections::HashSet<Vec<usize>> = Default::default();
+    let mut stack: Vec<Vec<usize>> = vec![vec![cell]];
+    while let Some(cur) = stack.pop() {
+        if crate::clock::Instant::now() >= deadline || out.len() >= CAND_CAP {
+            break;
+        }
+        if cur.len() == size {
+            let mask = mask_of(&cur, n);
+            let touch = dilate(&mask, w, h, n);
+            out.push(CoverCand {
+                cells: cur,
+                mask,
+                touch,
+            });
+            continue;
+        }
+        let mut frontier: std::collections::BTreeSet<usize> = Default::default();
+        for &x in &cur {
+            let (r, c) = (x / w, x % w);
+            for (nr, nc) in [
+                (r as i64 - 1, c as i64),
+                (r as i64 + 1, c as i64),
+                (r as i64, c as i64 - 1),
+                (r as i64, c as i64 + 1),
+            ] {
+                if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
+                    continue;
+                }
+                let y = (nr as usize) * w + nc as usize;
+                if puzzle.cells[nr as usize][nc as usize].blocked || cur.contains(&y) {
+                    continue;
+                }
+                if y != cell && seed_cell.contains(&y) {
+                    continue;
+                }
+                if wall_between(puzzle, w, x, y) {
+                    continue;
+                }
+                frontier.insert(y);
+            }
+        }
+        for y in frontier {
+            let mut nxt = cur.clone();
+            nxt.push(y);
+            nxt.sort_unstable();
+            if seen.insert(nxt.clone()) {
+                stack.push(nxt);
+            }
+        }
+    }
+    out
+}
+
+/// All-sum number cover (0308 class): every number cell owns its own region
+/// of exact size (see `inject_number_clues`), sizes sum to the board.  Pick
+/// the largest region as residue, enumerate connected placements for the
+/// rest (never eating other seeds, never crossing pre-drawn walls), and
+/// check the leftover is the residue region.  `differentiation` forbids
+/// equal-size regions from touching.  False-negative only — every accepted
+/// answer passes the full validator.  The placement search is MAC (arc-
+/// consistency cascade) over candidate sets; the guided-walk diagnostic
+/// (`tmp_diag_0308_guided`) proves the pruning never rejects the official
+/// placement.
+fn solve_number_cover(
+    puzzle: &Puzzle,
+    w: usize,
+    n: usize,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let h = puzzle.height;
+    let (seeds, all_sum, free) = collect_number_seeds(puzzle, w, n);
+    if seeds.is_empty() || all_sum != free {
+        return None;
+    }
+    let diff_mode = puzzle
+        .rules
+        .iter()
+        .any(|r| r.ctype == "differentiation");
+    // Only the small-island shape: large non-residue regions generate
+    // candidate explosions (0262/1183) where FreeRem's fallback is better.
+    let max_size = seeds.iter().map(|&(_, v)| v).max().unwrap_or(0);
+    if seeds
+        .iter()
+        .any(|&(_, v)| v != max_size && v > 8)
+    {
+        return None;
+    }
+    // Residue = largest region (its placement is the leftover by construction).
+    let res_i = seeds
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, &(_, v))| v)
+        .map(|(i, _)| i)
+        .unwrap();
+    let (res_cell, res_size) = seeds[res_i];
+    let seed_cell: std::collections::HashSet<usize> = seeds.iter().map(|&(c, _)| c).collect();
+    let mut cands: Vec<Vec<CoverCand>> = Vec::new();
+    let mut order: Vec<usize> = Vec::new();
+    for (i, &(cell, size)) in seeds.iter().enumerate() {
+        if i == res_i {
+            continue;
+        }
+        order.push(i);
+        let out = gen_cover_cands(puzzle, w, h, n, cell, size, &seed_cell, deadline);
+        if std::env::var("COVER_DEBUG").is_ok() {
+            eprintln!("cover: region {i} size {size} cands {}", out.len());
+        }
+        if out.is_empty() {
+            return None;
+        }
+        cands.push(out);
+    }
+    let mut remaining: Vec<usize> = (0..order.len()).collect();
+    let mut placed: Vec<(usize, Mask)> = Vec::new();
+    let mut active: Vec<Vec<bool>> = cands.iter().map(|v| vec![true; v.len()]).collect();
+    let mut nodes = 0usize;
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("cover: total cands {:?}", cands.iter().map(|v| v.len()).collect::<Vec<_>>());
+    }
+    if !cover_dfs(
+        puzzle,
+        w,
+        h,
+        n,
+        &mut remaining,
+        &order,
+        &cands,
+        &seeds,
+        res_cell,
+        res_size,
+        diff_mode,
+        &mut placed,
+        &mut active,
+        &mut nodes,
+        deadline,
+    ) {
+        if std::env::var("COVER_DEBUG").is_ok() {
+            eprintln!("cover: FAIL nodes={nodes}");
+        }
+        return None;
+    }
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("cover: SOLVED nodes={nodes}");
+    }
+    // Build regions from placed masks + residue.
+    let mut region_of: Vec<Option<usize>> = vec![None; n];
+    for (ri, pm) in placed.iter() {
+        for x in 0..n {
+            if pm[x / 64] & (1u64 << (x % 64)) != 0 {
+                region_of[x] = Some(*ri);
+            }
+        }
+    }
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if puzzle.cells[r][c].blocked {
+            continue;
+        }
+        if region_of[idx].is_none() {
+            region_of[idx] = Some(res_i);
+        }
+    }
+    let regions = super::build_regions(&region_of, h, w);
+    if crate::solver::validate::validate(puzzle, &regions) {
+        Some(regions)
+    } else {
+        if std::env::var("COVER_DEBUG").is_ok() {
+            let sizes: Vec<usize> = regions.iter().map(|r| r.cells.len()).collect();
+            eprintln!("cover: leaf REJECTED sizes={sizes:?}");
+            for reg in &regions {
+                let nums: Vec<(usize, usize, i64)> = reg
+                    .cells
+                    .iter()
+                    .filter_map(|&[r, c]| {
+                        puzzle.cells[r][c].number.map(|v| (r, c, v))
+                    })
+                    .collect();
+                eprintln!(
+                    "  region id={} len={} numbers={nums:?}",
+                    reg.region_id,
+                    reg.cells.len()
+                );
+            }
+        }
+        None
+    }
+}
+
+/// Pairwise compatibility under the current placement (disjoint; under
+/// `differentiation`, non-touching equal-size placed regions).
+fn compat(
+    seeds: &[(usize, usize)],
+    order: &[usize],
+    placed: &[(usize, Mask)],
+    diff_mode: bool,
+    k: usize,
+    cand: &CoverCand,
+) -> bool {
+    cand_fits(seeds, order, placed, diff_mode, k, cand)
+}
+
+/// MAC propagation: deactivate every candidate conflicting with the current
+/// placement; singleton domains cascade as implicit placements.  Returns
+/// the implied placements (including the seed choice) or None on dead end.
+#[allow(clippy::too_many_arguments)]
+fn mac_propagate(
+    w: usize,
+    h: usize,
+    n: usize,
+    puzzle: &Puzzle,
+    remaining: &mut Vec<usize>,
+    order: &[usize],
+    cands: &[Vec<CoverCand>],
+    seeds: &[(usize, usize)],
+    active: &mut Vec<Vec<bool>>,
+    placed: &mut Vec<(usize, Mask)>,
+    res_cell: usize,
+    res_size: usize,
+    diff_mode: bool,
+) -> Option<()> {
+    let mut implied: Vec<usize> = Vec::new();
+    loop {
+        let mut again = false;
+        for &j in remaining.iter() {
+            let mut cnt = 0usize;
+            let mut only: Option<usize> = None;
+            for (ci, c) in cands[j].iter().enumerate() {
+                if !active[j][ci] {
+                    continue;
+                }
+                if !compat(seeds, order, placed, diff_mode, j, c) {
+                    active[j][ci] = false;
+                    continue;
+                }
+                cnt += 1;
+                only = Some(ci);
+            }
+            if cnt == 0 {
+                return None;
+            }
+            if cnt == 1 {
+                let ci = only.unwrap();
+                if !res_roomy(puzzle, w, h, n, placed, res_cell, res_size, &cands[j][ci]) {
+                    active[j][ci] = false;
+                    return None;
+                }
+                placed.push((order[j], cands[j][ci].mask));
+                implied.push(j);
+                again = true;
+            }
+        }
+        for &j in implied.iter() {
+            remaining.retain(|&x| x != j);
+        }
+        implied.clear();
+        if !again {
+            break;
+        }
+    }
+    Some(())
+}
+
+/// Depth-first placement with dynamic MRV + MAC (arc-consistency cascade).
+#[allow(clippy::too_many_arguments)]
+fn cover_dfs(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    remaining: &mut Vec<usize>,
+    order: &[usize],
+    cands: &[Vec<CoverCand>],
+    seeds: &[(usize, usize)],
+    res_cell: usize,
+    res_size: usize,
+    diff_mode: bool,
+    placed: &mut Vec<(usize, Mask)>,
+    active: &mut Vec<Vec<bool>>,
+    nodes: &mut usize,
+    deadline: crate::clock::Instant,
+) -> bool {
+    const NODE_CAP: usize = 20_000_000;
+    if *nodes >= NODE_CAP || crate::clock::Instant::now() >= deadline {
+        return false;
+    }
+    *nodes += 1;
+    // Base propagation at every node (root included).
+    let rem_snapshot = remaining.clone();
+    let placed_snapshot = placed.len();
+    let active_snapshot = active.clone();
+    if mac_propagate(
+        w, h, n, puzzle, remaining, order, cands, seeds, active, placed,
+        res_cell, res_size, diff_mode,
+    )
+    .is_none()
+    {
+        return false;
+    }
+    let result = (|| {
+        if remaining.is_empty() {
+            return residue_ok(puzzle, w, h, n, placed, seeds, res_cell, res_size, diff_mode);
+        }
+        // Dynamic MRV over active candidates.
+        let mut best: Option<(usize, usize)> = None;
+        for &k in remaining.iter() {
+            let cnt = (0..cands[k].len()).filter(|&ci| active[k][ci]).count();
+            if cnt == 0 {
+                return false;
+            }
+            if best.map(|(_, b)| cnt < b).unwrap_or(true) {
+                best = Some((k, cnt));
+            }
+        }
+        let (k, _) = best.unwrap();
+        for ci in 0..cands[k].len() {
+            if crate::clock::Instant::now() >= deadline {
+                break;
+            }
+            if !active[k][ci] {
+                continue;
+            }
+            if !compat(seeds, order, placed, diff_mode, k, &cands[k][ci]) {
+                continue;
+            }
+            if !res_roomy(puzzle, w, h, n, placed, res_cell, res_size, &cands[k][ci]) {
+                continue;
+            }
+            let mut rem2 = remaining.clone();
+            rem2.retain(|&x| x != k);
+            let mut placed2 = placed.clone();
+            placed2.push((order[k], cands[k][ci].mask));
+            let mut active2 = active.clone();
+            active2[k][ci] = true; // keep chosen visible for compat of others
+            if cover_dfs(
+                puzzle, w, h, n, &mut rem2, order, cands, seeds, res_cell, res_size,
+                diff_mode, &mut placed2, &mut active2, nodes, deadline,
+            ) {
+                *placed = placed2;
+                *remaining = rem2;
+                return true;
+            }
+        }
+        false
+    })();
+    if !result {
+        *remaining = rem_snapshot;
+        placed.truncate(placed_snapshot);
+        *active = active_snapshot;
+    }
+    result
+}
+
+/// Residue checks at the leaf: exact size (implied by the sum identity),
+/// seed in, 4-connected without wall crossings, and (under
+/// `differentiation`) no adjacency to equal-size placed regions.
+fn residue_ok(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    placed: &[(usize, Mask)],
+    seeds: &[(usize, usize)],
+    res_cell: usize,
+    res_size: usize,
+    diff_mode: bool,
+) -> bool {
+    let mut used = [0u64; 3];
+    for (_, pm) in placed.iter() {
+        used[0] |= pm[0];
+        used[1] |= pm[1];
+        used[2] |= pm[2];
+    }
+    if used[res_cell / 64] & (1u64 << (res_cell % 64)) != 0 {
+        return false;
+    }
+    let mut rest: Vec<usize> = Vec::new();
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if puzzle.cells[r][c].blocked {
+            continue;
+        }
+        if used[idx / 64] & (1u64 << (idx % 64)) == 0 {
+            rest.push(idx);
+        }
+    }
+    if rest.len() != res_size {
+        return false;
+    }
+    let mut seen = [0u64; 3];
+    let mut stack = vec![res_cell];
+    seen[res_cell / 64] |= 1u64 << (res_cell % 64);
+    let mut cnt = 0usize;
+    while let Some(x) = stack.pop() {
+        cnt += 1;
+        let (r, c) = (x / w, x % w);
+        for (nr, nc) in [
+            (r as i64 - 1, c as i64),
+            (r as i64 + 1, c as i64),
+            (r as i64, c as i64 - 1),
+            (r as i64, c as i64 + 1),
+        ] {
+            if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
+                continue;
+            }
+            let y = (nr as usize) * w + nc as usize;
+            if seen[y / 64] & (1u64 << (y % 64)) != 0 {
+                continue;
+            }
+            if used[y / 64] & (1u64 << (y % 64)) != 0 {
+                continue;
+            }
+            if puzzle.cells[nr as usize][nc as usize].blocked {
+                continue;
+            }
+            if wall_between(puzzle, w, x, y) {
+                continue;
+            }
+            seen[y / 64] |= 1u64 << (y % 64);
+            stack.push(y);
+        }
+    }
+    if cnt != res_size {
+        return false;
+    }
+    if diff_mode {
+        let res_mask = mask_of(&rest, n);
+        for (ri, pm) in placed.iter() {
+            if seeds[*ri].1 != res_size {
+                continue;
+            }
+            let touch = dilate(pm, w, h, n);
+            if mask_and(&touch, &res_mask) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Cheap sum-lock detector (no side effects): true when the number cells
+/// satisfy either `inject_number_clues` lock form.
+fn number_sum_lock(puzzle: &Puzzle, w: usize, n: usize) -> bool {
+    let mut all_sum = 0usize;
+    let mut per_value: std::collections::HashSet<usize> = Default::default();
+    let mut distinct_sum = 0usize;
+    let mut free = 0usize;
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if puzzle.cells[r][c].blocked {
+            continue;
+        }
+        free += 1;
+        if let Some(v) = puzzle.cells[r][c].number {
+            let v = v.max(1) as usize;
+            all_sum += v;
+            if per_value.insert(v) {
+                distinct_sum += v;
+            }
+        }
+    }
+    free > 0 && (all_sum == free || distinct_sum == free)
+}
+
+fn solve_range_core(
+    puzzle: &Puzzle,
+    n: usize,
+    deadline: crate::clock::Instant,
+    slice_ms: u64,
+) -> Option<Vec<crate::types::RegionInfo>> {
     let w = puzzle.width;
     let pin_of: Vec<Option<usize>> = vec![None; n];
     let mut free_index: std::collections::HashMap<usize, u32> =
@@ -3618,11 +4421,6 @@ pub(crate) fn solve_range_partition(
     // whose searches never converge — without the cap range-part burns the
     // full unit budget per puzzle and starves the later modules (1146 at
     // -j 6).  1351 solves in <5 s, so 12 s is a wide margin.
-    // `RANGE_SLICE_MS` diagnostic override (default 12_000).
-    let slice_ms: u64 = std::env::var("RANGE_SLICE_MS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(12_000);
     let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(slice_ms);
     let module_deadline = if slice < deadline { slice } else { deadline };
     // Size/value cases first (0929 size-tuple class / 0262 number-value
@@ -3752,7 +4550,7 @@ pub(crate) fn solve_cardinal_partition(
     deadline: crate::clock::Instant,
 ) -> Option<Vec<crate::types::RegionInfo>> {
     let w = puzzle.width;
-    if symbol_types.len() < 2 {
+    if symbol_types.is_empty() {
         return None;
     }
     // Per-cell symbol type index.
@@ -3801,6 +4599,19 @@ pub(crate) fn solve_cardinal_partition(
             }
         }
     }
+    // Watchtower cardinalities ride along (1406 class: rose + watchtower) —
+    // pairwise must-same/split from the vertex counts feed the UF like every
+    // other FreeRem host.
+    let pin_of: Vec<Option<usize>> = vec![None; n];
+    let facts_raw = watchtower_facts(puzzle);
+    let (wt_same, wt_split) = match wt_free_relations(&facts_raw, &pin_of, &free_index) {
+        Some(v) => v,
+        None => return None,
+    };
+    let mut same = same;
+    same.extend(wt_same);
+    let mut split_pairs = split_pairs;
+    split_pairs.extend(wt_split);
     let (unit_cells, unit_of_cell, unit_adj, split) =
         match build_free_units(&free_cells, &free_index, &same, &split_pairs, puzzle, w) {
             Some(v) => v,
@@ -3839,8 +4650,8 @@ pub(crate) fn solve_cardinal_partition(
     let (alo, ahi) = crate::shapes::area_bounds(puzzle);
     let sz_lo: Vec<usize> = vec![alo; unit_cells.len()];
     let sz_hi: Vec<usize> = vec![ahi; unit_cells.len()];
-    let facts: Vec<WtUnitFact> = Vec::new();
-    let facts_of_unit: Vec<Vec<usize>> = vec![Vec::new(); unit_cells.len()];
+    let (facts, facts_of_unit) =
+        build_wt_unit_facts(&facts_raw, &pin_of, &free_index, &unit_of_cell, unit_cells.len());
     let pinned: Vec<PinnedPlacement> = Vec::new();
     let slice = crate::clock::Instant::now() + std::time::Duration::from_millis(8_000);
     let leaf_deadline = if slice < deadline { slice } else { deadline };
@@ -4410,6 +5221,174 @@ mod multi_rem_tests {
         rows.sort_by_key(|(k, _)| *k);
         for ((tag, bucket), n) in rows {
             eprintln!("die {tag:12} assigned~{:<3} x{}", bucket * 16, n);
+        }
+    }
+
+    /// Gate-gap probe: 0171/0308/0742 carry `area` numbers but no
+    /// range/precise/inequality/difference rule, so range-part never runs.
+    /// `RANGE_FORCE=1` bypasses the gate and measures the number machinery.
+    /// `cargo test -- --ignored tmp_diag_area_gate --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_area_gate() {
+        std::env::set_var("RANGE_FORCE", "1");
+        for (tag, src) in [
+            ("0171", include_str!("../../../../puzzles/official/Zone2/6-same-size-no-touch/0171.json")),
+            ("0308", include_str!("../../../../puzzles/official/Zone2/10-zone2-mixed/0308.json")),
+            ("0742", include_str!("../../../../puzzles/official/Zone2/1-area-numbers/0742.json")),
+        ] {
+            let p = crate::io::parse_puzzle(src).expect("parse");
+            let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+            let t0 = crate::clock::Instant::now();
+            let out = solve_range_partition(&p, p.height * p.width, deadline);
+            eprintln!(
+                "tmp_diag_area_gate {tag}: solved={} in {:?}",
+                out.is_some(),
+                t0.elapsed()
+            );
+        }
+        std::env::remove_var("RANGE_FORCE");
+    }
+
+    /// Walk the 0308 official placement through the cover-search checks to
+    /// prove the pruning never rejects the truth.
+    /// `cargo test -- --ignored tmp_diag_0308_guided --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_0308_guided() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone2/10-zone2-mixed/0308.json"
+        ))
+        .expect("parse");
+        let ans: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../puzzles/official/Zone2-answer/10-zone2-mixed/0308.json"
+        ))
+        .expect("answer");
+        let h = p.height;
+        let w = p.width;
+        let n = h * w;
+        // answer regions as masks (skip the 84-residue = largest)
+        let mut regs: Vec<(Mask, usize, (usize, usize))> = Vec::new(); // (mask, size, seed)
+        let mut seed_of: std::collections::HashMap<(usize, usize), i64> = Default::default();
+        for row in &p.cells {
+            for c in row {
+                if let Some(v) = c.number {
+                    seed_of.insert((c.row, c.col), v);
+                }
+            }
+        }
+        for region in ans["regions"].as_array().unwrap() {
+            let mut cells: Vec<usize> = Vec::new();
+            let mut seed = (0usize, 0usize);
+            for cell in region.as_array().unwrap() {
+                let (r, c) = (
+                    cell[0].as_u64().unwrap() as usize,
+                    cell[1].as_u64().unwrap() as usize,
+                );
+                cells.push(r * w + c);
+                if let Some(&v) = seed_of.get(&(r, c)) {
+                    seed = (r * w + c, v as usize);
+                }
+            }
+            let mask = mask_of(&cells, n);
+            regs.push((mask, cells.len(), seed));
+        }
+        let res_i = regs
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &(_, sz, _))| sz)
+            .map(|(i, _)| i)
+            .unwrap();
+        let mut placed: Vec<(usize, Mask)> = Vec::new();
+        for (i, (mask, sz, seed)) in regs.iter().enumerate() {
+            if i == res_i {
+                continue;
+            }
+            let cand = CoverCand {
+                cells: Vec::new(),
+                mask: *mask,
+                touch: dilate(mask, w, h, n),
+            };
+            let mut seeds_vec = vec![(0usize, 0usize); regs.len()];
+            seeds_vec[i] = *seed;
+            let order = [i];
+            let fits = cand_fits(&seeds_vec, &order, &placed, true, 0, &cand);
+            let roomy = res_roomy(&p, w, h, n, &placed, regs[res_i].2 .0, regs[res_i].1, &cand);
+            eprintln!(
+                "guided region {i} size={sz} fits={fits} roomy={roomy}"
+            );
+            if !fits || !roomy {
+                panic!("truth rejected at region {i}");
+            }
+            placed.push((i, *mask));
+        }
+        eprintln!("guided walk OK");
+    }
+
+    /// Cardinal-host probe on the rose-family FAILs (single-type rose now
+    /// allowed: 0317 class).
+    /// `cargo test -- --ignored tmp_diag_cardinal --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_cardinal() {
+        for (tag, src) in [
+            ("1406", include_str!("../../../../puzzles/official/Zone3/7-zone3-mixed/1406.json")),
+            ("1067", include_str!("../../../../puzzles/official/Zone3/6-compass-main/1067.json")),
+            ("1402", include_str!("../../../../puzzles/official/Zone3/6-compass-main/1402.json")),
+            ("0804", include_str!("../../../../puzzles/official/Zone1/7-slash-pack/0804.json")),
+            ("0317", include_str!("../../../../puzzles/official/Zone2/4-all-regions-different/0317.json")),
+        ] {
+            let p = crate::io::parse_puzzle(src).expect("parse");
+            let mut types: Vec<String> = Vec::new();
+            for row in &p.cells {
+                for c in row {
+                    if let Some(sym) = &c.symbol {
+                        if !types.contains(sym) {
+                            types.push(sym.clone());
+                        }
+                    }
+                }
+            }
+            types.sort();
+            let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(15);
+            let t0 = crate::clock::Instant::now();
+            let out = solve_cardinal_partition(&p, &types, p.height * p.width, deadline);
+            eprintln!(
+                "tmp_diag_cardinal {tag}: types={:?} solved={} in {:?}",
+                types,
+                out.is_some(),
+                t0.elapsed()
+            );
+        }
+    }
+
+    /// Sum-lock v2 probe: `solve_number_pin` on the all-sum / distinct-sum
+    /// classes outside the range-part rule gate.
+    /// `cargo test -- --ignored tmp_diag_number_pin --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_number_pin() {
+        for (tag, src) in [
+            ("0308-30s", include_str!("../../../../puzzles/official/Zone2/10-zone2-mixed/0308.json")),
+            ("1138", include_str!("../../../../puzzles/official/Zone3/8-endgame/1138.json")),
+            ("1183", include_str!("../../../../puzzles/official/Zone2/1-area-numbers/1183.json")),
+            ("0262", include_str!("../../../../puzzles/official/Zone3/5-inequality/0262.json")),
+        ] {
+            let p = crate::io::parse_puzzle(src).expect("parse");
+            let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(60);
+            let t0 = crate::clock::Instant::now();
+            dies_reset();
+            let out = solve_number_pin(&p, p.height * p.width, deadline);
+            eprintln!(
+                "tmp_diag_number_pin {tag}: solved={} in {:?}",
+                out.is_some(),
+                t0.elapsed()
+            );
+            let mut rows: Vec<_> = dies_snapshot().into_iter().collect();
+            rows.sort_by_key(|(k, _)| *k);
+            for ((tag2, bucket), n) in rows {
+                eprintln!("die {tag2:12} assigned~{:<3} x{}", bucket * 16, n);
+            }
         }
     }
 

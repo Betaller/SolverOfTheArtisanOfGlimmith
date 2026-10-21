@@ -1183,6 +1183,23 @@ mod tests {
         );
     }
 
+    /// 0325 (different + rose 3 types ×12, 10×10): full-cover Algorithm X
+    /// with the all-small size bound (the truth's max part 7; including the
+    /// deferred-class sizes 8-10 as candidates explodes the tree).
+    #[test]
+    fn solves_official_0325() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone2/4-all-regions-different/0325.json"
+        ))
+        .expect("parse");
+        let start = Instant::now();
+        let out = crate::solver::rose::solve_rose(&p, &start, 60_000);
+        assert!(
+            matches!(out, crate::solver::ModuleOutcome::Solved(_)),
+            "0325 must solve via rose cover"
+        );
+    }
+
     /// 1406 (rose P1/P2/P3 ×3 + watchtower) tracker: solo the chain solves
     /// it via edge_csp at ~26 s, but under `-j 6` bench contention the 30 s
     /// edge_csp budget is exhausted first (0/6 at parallel load) — not a

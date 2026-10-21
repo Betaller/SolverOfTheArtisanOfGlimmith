@@ -4908,6 +4908,9 @@ fn full_cover_pass(
             }
             list.extend(cache[&key].iter().cloned());
         }
+        if std::env::var("COVER_DEBUG").is_ok() {
+            eprintln!("rose_cover: full list[{i}] len={}", list.len());
+        }
         if list.is_empty() {
             return None;
         }
@@ -5190,30 +5193,32 @@ pub(crate) fn solve_rose_cover(
     }
     let seed_cell: std::collections::HashSet<usize> = anchor_cells.iter().copied().collect();
     let mut cache: std::collections::HashMap<(usize, usize), Vec<CoverCand>> = Default::default();
-    // full-cover places EVERY region by candidates, so the bound must cover
-    // the largest part too (0317: residue part 6 is a placed region here).
-    let full_bound = multisets
+    // full-cover places EVERY region by candidates; its size bound is the
+    // largest part across the all-small multisets (larger parts belong to the
+    // deferred-residue class and only add noise candidates here).
+    let all_small_max = multisets
         .iter()
+        .filter(|p| p.last().copied().unwrap_or(usize::MAX) <= DEFER_CAP)
         .map(|p| p.last().copied().unwrap_or(0))
-        .max()
-        .unwrap_or(DEFER_CAP)
-        .min(DEFER_CAP);
+        .max();
     let diff_mode = puzzle.rules.iter().any(|r| r.ctype == "differentiation");
-    if let Some(regions) = full_cover_pass(
-        puzzle,
-        w,
-        h,
-        n,
-        anchor_cells,
-        min_sz,
-        full_bound,
-        &sym_of,
-        n_types,
-        &seed_cell,
-        &mut cache,
-        deadline,
-    ) {
-        return Some(regions);
+    if let Some(full_bound) = all_small_max {
+        if let Some(regions) = full_cover_pass(
+            puzzle,
+            w,
+            h,
+            n,
+            anchor_cells,
+            min_sz,
+            full_bound,
+            &sym_of,
+            n_types,
+            &seed_cell,
+            &mut cache,
+            deadline,
+        ) {
+            return Some(regions);
+        }
     }
     let attempts = build_cover_attempts(
         puzzle,

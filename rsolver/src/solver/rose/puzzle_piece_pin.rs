@@ -3052,6 +3052,369 @@ fn enum_value_dfs(
     }
 }
 
+/// Region count from rose cardinality: each symbol type appears `m` times
+/// and every region holds exactly one of each type ⇒ exactly `m` regions.
+/// The rarest type's cells are the region anchors (one per region).  `None`
+/// when the puzzle has no rose symbols or the per-type counts disagree.
+fn rose_region_count(puzzle: &Puzzle, w: usize) -> Option<(usize, Vec<usize>)> {
+    use std::collections::HashMap;
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    let mut cells_by_type: HashMap<&str, Vec<usize>> = HashMap::new();
+    for r in 0..puzzle.height {
+        for c in 0..w {
+            if puzzle.cells[r][c].blocked {
+                continue;
+            }
+            if let Some(sym) = puzzle.cells[r][c].symbol.as_deref() {
+                *counts.entry(sym).or_insert(0) += 1;
+                cells_by_type.entry(sym).or_default().push(r * w + c);
+            }
+        }
+    }
+    if counts.is_empty() {
+        return None;
+    }
+    let m = *counts.values().next()?;
+    if m == 0 || m > 8 || !counts.values().all(|&c| c == m) {
+        return None;
+    }
+    let mut cells: Vec<usize> = cells_by_type.values().min_by_key(|v| v.len())?.clone();
+    cells.sort_unstable();
+    Some((m, cells))
+}
+
+/// Alias-aware multi-component cases (0839 class): the gap/ord constraint
+/// graph is **disconnected at unit level** (wall ends alias into a shared
+/// region set), so `enum_size_cases` skips it.  With the region count `m`
+/// known (rose cardinality) enumerate (unit → region) aliasings — wall /
+/// must-split endpoints must land in different regions, ord endpoints
+/// always differ (no size satisfies `s < s`) — then a joint size-tuple DFS
+/// satisfying the region-level gap/ord constraints and the sum identity.
+/// Each case pins every constraint unit and every region anchor to its
+/// region's exact size; `0839` (3 gap walls over 3 seeded regions) is the
+/// prototype.  Returns `(per-unit exact windows, m)` cases.
+fn enum_alias_gap_cases(
+    ord: &[(u32, u32)],
+    diff: &[(u32, u32, usize)],
+    n_units: usize,
+    anchor_units: &[u32],
+    split: &std::collections::HashSet<(u32, u32)>,
+    m: usize,
+    total: usize,
+    unit_cells: &[Vec<usize>],
+    unit_adj: &[Vec<u32>],
+    w: usize,
+) -> Vec<(Vec<(usize, usize)>, usize)> {
+    const CASE_CAP: usize = 256;
+    if m == 0 || anchor_units.len() != m {
+        return Vec::new();
+    }
+    let mut touched = vec![false; n_units];
+    for &(a, b) in ord {
+        touched[a as usize] = true;
+        touched[b as usize] = true;
+    }
+    for &(a, b, _) in diff {
+        touched[a as usize] = true;
+        touched[b as usize] = true;
+    }
+    let fixed: std::collections::HashMap<u32, usize> = anchor_units
+        .iter()
+        .enumerate()
+        .map(|(k, &u)| (u, k))
+        .collect();
+    let members: Vec<u32> = (0..n_units as u32)
+        .filter(|&u| touched[u as usize] && !fixed.contains_key(&u))
+        .collect();
+    if members.is_empty() {
+        return Vec::new();
+    }
+    // Precomputed constraint adjacency: every kind 0 (split) / kind 1 (ord)
+    // / kind 2 with gap > 0 pair means the two units lie in different
+    // regions (no size satisfies `s < s` or `|a−b| = v > 0` within one
+    // region); kind 2 with gap 0 allows a merge.
+    let mut adj: Vec<Vec<(u32, u8, usize)>> = vec![Vec::new(); n_units];
+    for &(a, b) in split {
+        adj[a as usize].push((b, 0, 0));
+        adj[b as usize].push((a, 0, 0));
+    }
+    for &(a, b) in ord {
+        // kind 1 val 0 = size(a) < size(b); the reverse edge carries val 1.
+        adj[a as usize].push((b, 1, 0));
+        adj[b as usize].push((a, 1, 1));
+    }
+    for &(a, b, v) in diff {
+        adj[a as usize].push((b, 2, v));
+        adj[b as usize].push((a, 2, v));
+    }
+    let mut cases: Vec<(Vec<(usize, usize)>, usize)> = Vec::new();
+    let mut region_of: std::collections::HashMap<u32, usize> = Default::default();
+    alias_dfs(
+        &members,
+        0,
+        m,
+        &adj,
+        &fixed,
+        total,
+        &mut region_of,
+        &mut cases,
+        n_units,
+        CASE_CAP,
+    );
+    // Ordering: adjacency cohesion DESC (adjacent non-wall units sharing a
+    // region), then anchor distance ASC (unit near its region's seed).
+    let anchor_cell = |reg: usize| -> (usize, usize) {
+        let cell = unit_cells[anchor_units[reg] as usize][0];
+        (cell / w, cell % w)
+    };
+    let val_of_reg = |win: &[(usize, usize)], u: u32| -> Option<usize> {
+        let (a, b) = win[u as usize];
+        if a != 0 || b != 0 {
+            Some(a)
+        } else {
+            None
+        }
+    };
+    cases.sort_by_cached_key(|(win, _)| {
+        let mut cohesion = 0usize;
+        for u in 0..n_units as u32 {
+            let Some(vu) = val_of_reg(win, u) else { continue };
+            for &nb in &unit_adj[u as usize] {
+                if nb <= u || split.contains(&canon_pair(u, nb)) {
+                    continue;
+                }
+                if val_of_reg(win, nb) == Some(vu) {
+                    cohesion += 1;
+                }
+            }
+        }
+        let dist: usize = win
+            .iter()
+            .enumerate()
+            .filter(|(_, &(a, b))| a != 0 || b != 0)
+            .map(|(u, &(a, _))| {
+                // distance from unit u's first cell to a's region anchor:
+                // recover the region by matching the window value to a
+                // region size — values may repeat across regions, so use
+                // the region-indexed anchor via the pinned window only
+                // when unique; else 0.
+                let cell = unit_cells[u][0];
+                let (r, c) = (cell / w, cell % w);
+                let mut best = usize::MAX;
+                for k in 0..anchor_units.len() {
+                    if win[anchor_units[k] as usize].0 == a {
+                        let (ar, ac) = anchor_cell(k);
+                        best = best.min(r.abs_diff(ar) + c.abs_diff(ac));
+                    }
+                }
+                if best == usize::MAX {
+                    0
+                } else {
+                    best
+                }
+            })
+            .sum();
+        (std::cmp::Reverse(cohesion), dist)
+    });
+    cases
+}
+
+/// DFS over (unit → region) aliasings; each complete aliasing runs the
+/// region-size tuple DFS and emits exact-window cases.  Constraint pairs
+/// (split / ord / gap>0) forbid a shared region; `kind 2, val 0` gap pairs
+/// are the only merge-friendly edges.
+fn alias_dfs(
+    members: &[u32],
+    k: usize,
+    m: usize,
+    adj: &[Vec<(u32, u8, usize)>],
+    fixed: &std::collections::HashMap<u32, usize>,
+    total: usize,
+    region_of: &mut std::collections::HashMap<u32, usize>,
+    cases: &mut Vec<(Vec<(usize, usize)>, usize)>,
+    n_units: usize,
+    cap: usize,
+) {
+    if cases.len() >= cap {
+        return;
+    }
+    if k == members.len() {
+        emit_size_cases(adj, fixed, region_of, m, total, cases, n_units, cap);
+        return;
+    }
+    let u = members[k];
+    'vals: for reg in 0..m {
+        for &(v, kind, val) in &adj[u as usize] {
+            if kind == 2 && val == 0 {
+                continue;
+            }
+            let other = match region_of.get(&v) {
+                Some(&r) => r,
+                None => match fixed.get(&v) {
+                    Some(&r) => r,
+                    None => continue,
+                },
+            };
+            if other == reg {
+                continue 'vals;
+            }
+        }
+        region_of.insert(u, reg);
+        alias_dfs(members, k + 1, m, adj, fixed, total, region_of, cases, n_units, cap);
+        region_of.remove(&u);
+    }
+}
+
+/// Size-tuple DFS for one complete aliasing: region sizes ≥ 1 summing to
+/// `total`, satisfying the region-level ord/gap constraints.  Emits one
+/// exact-window case per surviving tuple.
+fn emit_size_cases(
+    adj: &[Vec<(u32, u8, usize)>],
+    fixed: &std::collections::HashMap<u32, usize>,
+    region_of: &std::collections::HashMap<u32, usize>,
+    m: usize,
+    total: usize,
+    cases: &mut Vec<(Vec<(usize, usize)>, usize)>,
+    n_units: usize,
+    cap: usize,
+) {
+    let reg_of = |u: u32| -> usize {
+        *region_of
+            .get(&u)
+            .or_else(|| fixed.get(&u))
+            .expect("aliasing complete")
+    };
+    let mut r_ord: Vec<(usize, usize)> = Vec::new();
+    let mut r_diff: Vec<(usize, usize, usize)> = Vec::new();
+    // Dedup key is (pair, kind): one wall can carry BOTH a split entry and a
+    // gap/ord entry, and dropping the second would lose its constraint.
+    let mut seen_pairs: std::collections::HashSet<((u32, u32), u8)> = Default::default();
+    for u in 0..adj.len() as u32 {
+        for &(v, kind, val) in &adj[u as usize] {
+            if !seen_pairs.insert((canon_pair(u, v), kind)) {
+                continue;
+            }
+            let (ra, rb) = (reg_of(u), reg_of(v));
+            match kind {
+                0 => {
+                    if ra == rb {
+                        return;
+                    }
+                }
+                1 => {
+                    if ra == rb {
+                        return;
+                    }
+                    // val 0 = size(u) < size(v); val 1 = size(v) < size(u).
+                    let p = if val == 0 { (ra, rb) } else { (rb, ra) };
+                    if !r_ord.contains(&p) {
+                        r_ord.push(p);
+                    }
+                }
+                _ => {
+                    if ra == rb {
+                        if val == 0 {
+                            continue;
+                        }
+                        return;
+                    }
+                    let q = if ra < rb { (ra, rb) } else { (rb, ra) };
+                    if !r_diff.iter().any(|&(x, y, t)| (x, y) == q && t == val) {
+                        r_diff.push((q.0, q.1, val));
+                    }
+                }
+            }
+        }
+    }
+    // Size DFS over regions 0..m−1; the last region closes the sum.
+    let mut sizes = vec![0usize; m];
+    size_dfs(
+        0,
+        m,
+        total,
+        &r_ord,
+        &r_diff,
+        &mut sizes,
+        cases,
+        n_units,
+        fixed,
+        region_of,
+        cap,
+    );
+}
+
+fn size_dfs(
+    k: usize,
+    m: usize,
+    total: usize,
+    r_ord: &[(usize, usize)],
+    r_diff: &[(usize, usize, usize)],
+    sizes: &mut [usize],
+    cases: &mut Vec<(Vec<(usize, usize)>, usize)>,
+    n_units: usize,
+    fixed: &std::collections::HashMap<u32, usize>,
+    region_of: &std::collections::HashMap<u32, usize>,
+    cap: usize,
+) {
+    if cases.len() >= cap {
+        return;
+    }
+    if k == m {
+        if sizes.iter().sum::<usize>() != total {
+            return;
+        }
+        let mut win = vec![(0usize, 0usize); n_units];
+        for (&u, &reg) in region_of.iter().chain(fixed.iter()) {
+            win[u as usize] = (sizes[reg], sizes[reg]);
+        }
+        cases.push((win, m));
+        return;
+    }
+    let remaining_regions = m - k;
+    let assigned: usize = sizes[..k].iter().sum();
+    let max_here = total - assigned - (remaining_regions - 1);
+    for s in 1..=max_here {
+        let mut ok = true;
+        for &(a, b) in r_ord {
+            if a == k && b < k && s <= sizes[b] {
+                ok = false;
+            }
+            if b == k && a < k && sizes[a] >= s {
+                ok = false;
+            }
+        }
+        for &(a, b, v) in r_diff {
+            let other = if a == k {
+                sizes[b]
+            } else if b == k {
+                sizes[a]
+            } else {
+                continue;
+            };
+            if (if a == k { b } else { a }) < k && s.abs_diff(other) != v {
+                ok = false;
+            }
+        }
+        if ok {
+            sizes[k] = s;
+            size_dfs(
+                k + 1,
+                m,
+                total,
+                r_ord,
+                r_diff,
+                sizes,
+                cases,
+                n_units,
+                fixed,
+                region_of,
+                cap,
+            );
+            sizes[k] = 0;
+        }
+    }
+}
+
 /// Choose the case-window source: number-locked puzzles enumerate value
 /// assignments (0262 class); otherwise the connected-graph size tuples
 /// (0929 class); `RANGE_CASES=0` skips straight to the plain run.
@@ -3065,6 +3428,8 @@ fn select_case_runs(
     g: usize,
     max_labels: usize,
     num_lock: Option<(&[(u32, usize)], &std::collections::HashSet<(u32, u32)>)>,
+    rose_lock: Option<(usize, &Vec<u32>)>,
+    split: &std::collections::HashSet<(u32, u32)>,
     unit_cells: &[Vec<usize>],
     unit_adj: &[Vec<u32>],
     w: usize,
@@ -3096,7 +3461,26 @@ fn select_case_runs(
         );
         windows_runs_from_cases(&cases, sz_lo.len(), max_labels)
     } else {
-        let cases = enum_size_cases(ord, diff, sz_lo, sz_hi, total, g, max_labels);
+        let mut cases = enum_size_cases(ord, diff, sz_lo, sz_hi, total, g, max_labels);
+        // Disconnected gap/ord graphs (0839 class): wall ends alias into a
+        // shared seeded region set — enumerate aliasings jointly with the
+        // region size tuples instead.
+        if cases.is_empty() {
+            if let Some((m, anchors)) = rose_lock {
+                cases = enum_alias_gap_cases(
+                    ord,
+                    diff,
+                    sz_lo.len(),
+                    anchors,
+                    split,
+                    m,
+                    total,
+                    unit_cells,
+                    unit_adj,
+                    w,
+                );
+            }
+        }
         windows_runs_from_cases(&cases, sz_lo.len(), max_labels)
     }
 }
@@ -3191,6 +3575,25 @@ pub(crate) fn solve_range_partition(
         }
         chain_value_pins(&ord, &mut ext_lo, &mut ext_hi, num_vals);
     }
+    // Rose cardinality (0839 class): m regions, one per symbol occurrence —
+    // the symbol cells anchor region identities for the aliasing cases.
+    let rose_lock: Option<(usize, Vec<u32>)> =
+        rose_region_count(puzzle, w).and_then(|(m, cells)| {
+            let mut anchors: Vec<u32> = cells
+                .iter()
+                .map(|&idx| unit_of_cell[free_index[&idx] as usize])
+                .collect();
+            anchors.sort_unstable();
+            anchors.dedup();
+            if anchors.len() == m {
+                if m < max_labels {
+                    max_labels = m;
+                }
+                Some((m, anchors))
+            } else {
+                None
+            }
+        });
     relax_size_windows(&ord, &diff, &mut ext_lo, &mut ext_hi);
     // Distinct-size chain deduction (0152 class): a directed ord chain of c
     // units forces c distinct sizes summing to ≥ c·g+c(c−1)/2 — when that
@@ -3226,7 +3629,7 @@ pub(crate) fn solve_range_partition(
     // class): the true case converges in ~20 nodes and wrong cases die at
     // the root, so a tiny per-case slice bounds the tail; the un-hinted
     // plain run keeps the residual budget (0270 class).
-    let mut runs = select_case_runs(
+    let runs = select_case_runs(
         puzzle,
         &ord,
         &diff,
@@ -3236,6 +3639,8 @@ pub(crate) fn solve_range_partition(
         lo,
         max_labels,
         num_lock.as_ref().map(|(_, vals)| (vals.as_slice(), &split)),
+        rose_lock.as_ref().map(|(m, anchors)| (*m, anchors)),
+        &split,
         &unit_cells,
         &unit_adj,
         w,
@@ -4006,6 +4411,20 @@ mod multi_rem_tests {
         for ((tag, bucket), n) in rows {
             eprintln!("die {tag:12} assigned~{:<3} x{}", bucket * 16, n);
         }
+    }
+
+    /// 0839 (difference + rose P1×3, 5×7): three gap walls alias into the
+    /// three seeded regions — the disconnected constraint graph needs the
+    /// alias-aware case enumeration.
+    #[test]
+    fn solves_range_partition_0839() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone3/4-difference/0839.json"
+        ))
+        .expect("parse");
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+        let out = solve_range_partition(&p, p.height * p.width, deadline);
+        assert!(out.is_some(), "0839 alias-gap cases must solve");
     }
 
     /// 0262 (area+inequality, 8×8): number clues 14/15/18/17 pin the four

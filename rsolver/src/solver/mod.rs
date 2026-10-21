@@ -602,7 +602,10 @@ fn is_rose_capable(puzzle: &Puzzle) -> bool {
     if crate::shapes::rose_symbol_types(puzzle).len() > 64 {
         return false;
     }
-    !puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "different")
+    // 2026-10-22: the same/different exclusion is lifted — the matching
+    // search now validates at the leaf and continues on rejection (doc 07
+    // 修订11), so shape-identity companions are safe to search around.
+    true
 }
 
 /// Cap on aog's budget when the puzzle is rose-capable, so the rose solver gets

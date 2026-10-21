@@ -566,6 +566,46 @@ fn try_complement_cover(
     None
 }
 
+/// Rose multiset cover gate: high-m small-average pin-free boards only (on
+/// big-average rose puzzles like 0833 the candidate generation is expensive
+/// and region_match's own pipeline already wins).
+fn try_rose_cover(
+    puzzle: &Puzzle,
+    symbol_types: &[String],
+    seeds: &[usize],
+    w: usize,
+    h: usize,
+    total: usize,
+    start: Instant,
+    timeout_ms: u64,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let m = seeds.len();
+    if m <= 5 || total > 12 * m {
+        return None;
+    }
+    let mut free_total = 0usize;
+    for idx in 0..h * w {
+        if !puzzle.cells[idx / w][idx % w].blocked {
+            free_total += 1;
+        }
+    }
+    if free_total != total {
+        return None;
+    }
+    let (bmin, bmax) = crate::shapes::area_bounds(puzzle);
+    let g = bmin.max(symbol_types.len());
+    let cover_deadline = start + std::time::Duration::from_millis(timeout_ms.min(25_000));
+    crate::solver::rose::puzzle_piece_pin::solve_rose_cover(
+        puzzle,
+        w,
+        h * w,
+        seeds,
+        g,
+        bmax.min(total),
+        cover_deadline,
+    )
+}
+
 pub fn solve_by_region_match(
     puzzle: &Puzzle,
     pre: &PreBoundaries,
@@ -587,6 +627,14 @@ pub fn solve_by_region_match(
     seeds.sort_unstable();
     if seeds.len() != m {
         return None;
+    }
+
+    // Rose multiset cover (0289/0317 class) before the candidate/combo
+    // pipeline — see `try_rose_cover`.
+    if let Some(regions) =
+        try_rose_cover(puzzle, symbol_types, &seeds, w, h, total, *start, timeout_ms)
+    {
+        return Some(regions);
     }
 
     // All symbol cells in `all_positions` (for reachability).  Pre-pinned
@@ -1116,6 +1164,25 @@ mod tests {
 
     /// On a tiny grid the BFS exhausts naturally without approaching either cap.
     /// Guards against a regression where the bail-out `break` is placed before
+    /// 0317 (different + single-type rose, 8×5, 11 regions): the shape
+    /// inventory (free-polyomino bounds per size class) collapses the size
+    /// multisets to 2, and Algorithm X with in-search distinct-shape pruning
+    /// covers the rest in milliseconds.  Locked after the same/different
+    /// rose-capable exclusion was lifted (leaf-validate-continue).
+    #[test]
+    fn solves_official_0317() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone2/4-all-regions-different/0317.json"
+        ))
+        .expect("parse");
+        let start = Instant::now();
+        let out = crate::solver::rose::solve_rose(&p, &start, 60_000);
+        assert!(
+            matches!(out, crate::solver::ModuleOutcome::Solved(_)),
+            "0317 must solve via rose cover"
+        );
+    }
+
     /// 1406 (rose P1/P2/P3 ×3 + watchtower) tracker: solo the chain solves
     /// it via edge_csp at ~26 s, but under `-j 6` bench contention the 30 s
     /// edge_csp budget is exhausted first (0/6 at parallel load) — not a

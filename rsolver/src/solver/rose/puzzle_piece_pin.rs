@@ -3726,6 +3726,17 @@ fn mask_of(cells: &[usize], n: usize) -> Mask {
     m
 }
 
+/// Stamp placed (region, mask) pairs into a region_of vector.
+fn mask_assign(placed: &[(usize, Mask)], region_of: &mut [Option<usize>], n: usize) {
+    for (ri, pm) in placed.iter() {
+        for x in 0..n {
+            if pm[x / 64] & (1u64 << (x % 64)) != 0 {
+                region_of[x] = Some(*ri);
+            }
+        }
+    }
+}
+
 fn mask_and(a: &Mask, b: &Mask) -> bool {
     (a[0] & b[0]) != 0 || (a[1] & b[1]) != 0 || (a[2] & b[2]) != 0
 }
@@ -3755,6 +3766,7 @@ fn dilate(m: &Mask, w: usize, h: usize, n: usize) -> Mask {
 }
 
 /// Candidate = cells + placement mask + dilated touch mask.
+#[derive(Clone)]
 struct CoverCand {
     cells: Vec<usize>,
     mask: Mask,
@@ -3796,6 +3808,11 @@ fn res_roomy(
     res_size: usize,
     cand: &CoverCand,
 ) -> bool {
+    let _ = n;
+    if res_size == 0 {
+        // full-cover mode: no residue region to protect
+        return true;
+    }
     let mut used = [0u64; 3];
     for (_, pm) in placed.iter() {
         used[0] |= pm[0];
@@ -3858,6 +3875,7 @@ fn gen_cover_cands(
     size: usize,
     seed_cell: &std::collections::HashSet<usize>,
     deadline: crate::clock::Instant,
+    sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
 ) -> Vec<CoverCand> {
     const CAND_CAP: usize = 20_000;
     let mut out: Vec<CoverCand> = Vec::new();
@@ -3868,6 +3886,26 @@ fn gen_cover_cands(
             break;
         }
         if cur.len() == size {
+            if let Some((sym_of, n_types)) = sym {
+                // Rose regions hold exactly one cell of each symbol type.
+                let mut counts = vec![0usize; n_types];
+                let mut ok = true;
+                for &x in &cur {
+                    match sym_of.get(&x) {
+                        Some(&t) => {
+                            counts[t] += 1;
+                            if counts[t] > 1 {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                if !ok || counts.iter().any(|&c| c != 1) {
+                    continue;
+                }
+            }
             let mask = mask_of(&cur, n);
             let touch = dilate(&mask, w, h, n);
             out.push(CoverCand {
@@ -3895,6 +3933,14 @@ fn gen_cover_cands(
                 }
                 if y != cell && seed_cell.contains(&y) {
                     continue;
+                }
+                if let Some((sym_of, _)) = sym {
+                    // Rose: at most one cell per symbol type in a region.
+                    if let Some(&t) = sym_of.get(&y) {
+                        if cur.iter().any(|&x| sym_of.get(&x) == Some(&t)) {
+                            continue;
+                        }
+                    }
                 }
                 if wall_between(puzzle, w, x, y) {
                     continue;
@@ -3964,7 +4010,7 @@ fn solve_number_cover(
             continue;
         }
         order.push(i);
-        let out = gen_cover_cands(puzzle, w, h, n, cell, size, &seed_cell, deadline);
+        let out = gen_cover_cands(puzzle, w, h, n, cell, size, &seed_cell, deadline, None);
         if std::env::var("COVER_DEBUG").is_ok() {
             eprintln!("cover: region {i} size {size} cands {}", out.len());
         }
@@ -3996,6 +4042,9 @@ fn solve_number_cover(
         &mut active,
         &mut nodes,
         deadline,
+        None,
+        None,
+        false,
     ) {
         if std::env::var("COVER_DEBUG").is_ok() {
             eprintln!("cover: FAIL nodes={nodes}");
@@ -4085,6 +4134,12 @@ fn mac_propagate(
     loop {
         let mut again = false;
         for &j in remaining.iter() {
+            // A region forced earlier in this pass is already in `placed` —
+            // its own candidates now conflict with its placed mask; skipping
+            // it is required for completeness (self-conflict node death).
+            if placed.iter().any(|&(ri, _)| ri == order[j]) {
+                continue;
+            }
             let mut cnt = 0usize;
             let mut only: Option<usize> = None;
             for (ci, c) in cands[j].iter().enumerate() {
@@ -4123,7 +4178,341 @@ fn mac_propagate(
     Some(())
 }
 
+/// Compact dihedral-normalized shape key for small regions (the `different`
+/// distinct-shape constraint pushed into the cover search).
+fn shape_key_small(cells: &[usize], w: usize) -> u64 {
+    let pts: Vec<(i64, i64)> = cells
+        .iter()
+        .map(|&x| ((x / w) as i64, (x % w) as i64))
+        .collect();
+    let mut best: Option<Vec<(i64, i64)>> = None;
+    for flip in 0..2 {
+        for rot in 0..4 {
+            let mut t: Vec<(i64, i64)> = pts
+                .iter()
+                .map(|&(r, c)| {
+                    let (mut r, mut c) = (r, c);
+                    if flip == 1 {
+                        c = -c;
+                    }
+                    for _ in 0..rot {
+                        let (nr, nc) = (-c, r);
+                        r = nr;
+                        c = nc;
+                    }
+                    (r, c)
+                })
+                .collect();
+            let min_r = t.iter().map(|p| p.0).min().unwrap_or(0);
+            let min_c = t.iter().map(|p| p.1).min().unwrap_or(0);
+            for p in t.iter_mut() {
+                p.0 -= min_r;
+                p.1 -= min_c;
+            }
+            t.sort_unstable();
+            if best.as_ref().map(|b| t < *b).unwrap_or(true) {
+                best = Some(t);
+            }
+        }
+    }
+    let mut hsh: u64 = 0xcbf2_9ce4_8422_2325;
+    for (r, c) in best.unwrap_or_default() {
+        hsh ^= (r as u64 & 0xffff) | ((c as u64 & 0xffff) << 16);
+        hsh = hsh.wrapping_mul(0x100_0000_01b3);
+    }
+    hsh
+}
+
+/// Algorithm X (cell-first exact cover) for the all-small full-cover class
+/// (0317): each region picks exactly one candidate; the union covers every
+/// free cell exactly once.  Branching on the most-constrained *cell* (the
+/// classic Knuth ordering) collapses the 252-candidate space in
+/// milliseconds where region-first MRV wanders through millions of nodes.
+#[allow(clippy::too_many_arguments)]
+fn exact_cover_x(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    cands: &[Vec<CoverCand>],
+    sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+    distinct_shapes: bool,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<(usize, Mask)>> {
+    let m = cands.len();
+    // Precompute per-cell option lists: cell -> Vec<(region, cand index)>.
+    let mut by_cell: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
+    for (ri, list) in cands.iter().enumerate() {
+        for (ci, cand) in list.iter().enumerate() {
+            for x in 0..n {
+                if cand.mask[x / 64] & (1u64 << (x % 64)) != 0 {
+                    by_cell[x].push((ri, ci));
+                }
+            }
+        }
+    }
+    let mut free_cells: Vec<usize> = Vec::new();
+    for x in 0..n {
+        let (r, c) = (x / w, x % w);
+        if !puzzle.cells[r][c].blocked {
+            free_cells.push(x);
+        }
+    }
+    let mut nodes = 0usize;
+    let mut placed: Vec<Option<(usize, Mask)>> = vec![None; m];
+    let mut used = [0u64; 3];
+    fn search(
+        puzzle: &Puzzle,
+        w: usize,
+        h: usize,
+        n: usize,
+        cands: &[Vec<CoverCand>],
+        by_cell: &[Vec<(usize, usize)>],
+        free_cells: &[usize],
+        sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+        placed: &mut Vec<Option<(usize, Mask)>>,
+        used: &mut [u64; 3],
+        nodes: &mut usize,
+        distinct_shapes: bool,
+        seen_keys: &mut std::collections::HashSet<u64>,
+        deadline: crate::clock::Instant,
+    ) -> bool {
+        if *nodes > 2_000_000 || crate::clock::Instant::now() >= deadline {
+            return false;
+        }
+        *nodes += 1;
+        // Most-constrained uncovered free cell.
+        let mut best: Option<(usize, Vec<(usize, usize)>)> = None;
+        for &x in free_cells {
+            if used[x / 64] & (1u64 << (x % 64)) != 0 {
+                continue;
+            }
+            let mut options: Vec<(usize, usize)> = Vec::new();
+            for &(ri, ci) in &by_cell[x] {
+                if placed[ri].is_some() {
+                    continue;
+                }
+                let cand = &cands[ri][ci];
+                if (cand.mask[0] & used[0]) == 0
+                    && (cand.mask[1] & used[1]) == 0
+                    && (cand.mask[2] & used[2]) == 0
+                {
+                    options.push((ri, ci));
+                }
+            }
+            if options.is_empty() {
+                return false; // uncovered cell with no option — dead
+            }
+            match &best {
+                Some((_, b)) if b.len() <= options.len() => {}
+                _ => best = Some((x, options)),
+            }
+        }
+        let Some((_, options)) = best else {
+            // every free cell covered; all regions assigned — leaf-validate
+            // (companion rules like `different` reject structurally fine
+            // covers) and keep backtracking on failure.
+            if !placed.iter().all(|p| p.is_some()) {
+                return false;
+            }
+            let mut region_of: Vec<Option<usize>> = vec![None; n];
+            for entry in placed.iter() {
+                if let Some((ri, mask)) = entry {
+                    for x in 0..n {
+                        if mask[x / 64] & (1u64 << (x % 64)) != 0 {
+                            region_of[x] = Some(*ri);
+                        }
+                    }
+                }
+            }
+            let regions = super::build_regions(&region_of, h, w);
+            return crate::solver::validate::validate(puzzle, &regions);
+        };
+        for (ri, ci) in options {
+            let cand = &cands[ri][ci];
+            let key = if distinct_shapes {
+                Some(shape_key_small(&cand.cells, w))
+            } else {
+                None
+            };
+            if let Some(k) = key {
+                if seen_keys.contains(&k) {
+                    continue; // `different`: shapes must all be distinct
+                }
+            }
+            placed[ri] = Some((ri, cand.mask));
+            if let Some(k) = key {
+                seen_keys.insert(k);
+            }
+            used[0] |= cand.mask[0];
+            used[1] |= cand.mask[1];
+            used[2] |= cand.mask[2];
+            if search(
+                puzzle, w, h, n, cands, by_cell, free_cells, sym, placed, used, nodes,
+                distinct_shapes, seen_keys, deadline,
+            ) {
+                return true;
+            }
+            used[0] &= !cand.mask[0];
+            used[1] &= !cand.mask[1];
+            used[2] &= !cand.mask[2];
+            if let Some(k) = key {
+                seen_keys.remove(&k);
+            }
+            placed[ri] = None;
+        }
+        false
+    }
+    let mut seen_keys: std::collections::HashSet<u64> = Default::default();
+    if search(
+        puzzle, w, h, n, cands, &by_cell, &free_cells, sym, &mut placed, &mut used, &mut nodes,
+        distinct_shapes, &mut seen_keys, deadline,
+    ) {
+        let out: Vec<(usize, Mask)> = placed
+            .into_iter()
+            .map(|p| p.expect("assigned"))
+            .collect();
+        Some(out)
+    } else {
+        None
+    }
+}
+
+/// Tail with a deferred second-large region (0289 class): enumerate the
+/// second-large region's exact-size sets within the leftover (a small
+/// leftover BFS beats the 136k full-board pre-generation) and return the
+/// first whose rest passes the residue checks.
+/// Growth frontier for the deferred-tail BFS: unused, unblocked, non-seed
+/// cells that keep the type budget (at most one cell per symbol type).
+#[allow(clippy::too_many_arguments)]
+fn tail_frontier(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    cur: &[usize],
+    used: &[u64; 3],
+    tail_seed: usize,
+    res_cell: usize,
+    seed_cell: &std::collections::HashSet<usize>,
+    sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+) -> std::collections::BTreeSet<usize> {
+    let mut frontier: std::collections::BTreeSet<usize> = Default::default();
+    for &x in cur {
+        let (r, c) = (x / w, x % w);
+        for (nr, nc) in [
+            (r as i64 - 1, c as i64),
+            (r as i64 + 1, c as i64),
+            (r as i64, c as i64 - 1),
+            (r as i64, c as i64 + 1),
+        ] {
+            if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
+                continue;
+            }
+            let y = (nr as usize) * w + nc as usize;
+            if puzzle.cells[nr as usize][nc as usize].blocked || cur.contains(&y) {
+                continue;
+            }
+            if used[y / 64] & (1u64 << (y % 64)) != 0 {
+                continue;
+            }
+            if y == res_cell || (y != tail_seed && seed_cell.contains(&y)) {
+                continue;
+            }
+            if wall_between(puzzle, w, x, y) {
+                continue;
+            }
+            if let Some((sym_of, _)) = sym {
+                if let Some(&t) = sym_of.get(&y) {
+                    if cur.iter().any(|&x2| sym_of.get(&x2) == Some(&t)) {
+                        continue;
+                    }
+                }
+            }
+            frontier.insert(y);
+        }
+    }
+    frontier
+}
+
+#[allow(clippy::too_many_arguments)]
+fn find_tail_set(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    placed: &[(usize, Mask)],
+    seeds: &[(usize, usize)],
+    tail_ri: usize,
+    tail_sz: usize,
+    res_cell: usize,
+    res_size: usize,
+    diff_mode: bool,
+    sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+    deadline: crate::clock::Instant,
+) -> Option<Mask> {
+    let tail_seed = seeds[tail_ri].0;
+    let mut used = [0u64; 3];
+    for (_, pm) in placed.iter() {
+        used[0] |= pm[0];
+        used[1] |= pm[1];
+        used[2] |= pm[2];
+    }
+    if used[tail_seed / 64] & (1u64 << (tail_seed % 64)) != 0 {
+        return None;
+    }
+    let mut seen: std::collections::HashSet<Vec<usize>> = Default::default();
+    let mut stack: Vec<Vec<usize>> = vec![vec![tail_seed]];
+    seen.insert(vec![tail_seed]);
+    let seed_cell: std::collections::HashSet<usize> = seeds.iter().map(|&(c, _)| c).collect();
+    let mut tried = 0usize;
+    while let Some(cur) = stack.pop() {
+        if crate::clock::Instant::now() >= deadline || tried > 80_000 {
+            return None;
+        }
+        if cur.len() == tail_sz {
+            tried += 1;
+            if let Some((sym_of, n_types)) = sym {
+                let mut counts = vec![0usize; n_types];
+                let mut ok = true;
+                for &x in &cur {
+                    if let Some(&t) = sym_of.get(&x) {
+                        counts[t] += 1;
+                        if counts[t] > 1 {
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                if !ok || counts.iter().any(|&c| c != 1) {
+                    continue;
+                }
+            }
+            let mask = mask_of(&cur, n);
+            let mut placed2 = placed.to_vec();
+            placed2.push((tail_ri, mask));
+            if residue_ok(puzzle, w, h, n, &placed2, seeds, res_cell, res_size, diff_mode, sym) {
+                return Some(mask);
+            }
+            continue;
+        }
+        let frontier = tail_frontier(
+            puzzle, w, h, &cur, &used, tail_seed, res_cell, &seed_cell, sym,
+        );
+        for y in frontier {
+            let mut nxt = cur.clone();
+            nxt.push(y);
+            nxt.sort_unstable();
+            if seen.insert(nxt.clone()) {
+                stack.push(nxt);
+            }
+        }
+    }
+    None
+}
+
 /// Depth-first placement with dynamic MRV + MAC (arc-consistency cascade).
+/// `tail = Some((region idx, size))` defers a second-large region to
+/// `tail_two_large` at the leaf; `None` means the residue alone closes.
 #[allow(clippy::too_many_arguments)]
 fn cover_dfs(
     puzzle: &Puzzle,
@@ -4141,6 +4530,9 @@ fn cover_dfs(
     active: &mut Vec<Vec<bool>>,
     nodes: &mut usize,
     deadline: crate::clock::Instant,
+    sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+    tail: Option<(usize, usize)>,
+    full_cover: bool,
 ) -> bool {
     const NODE_CAP: usize = 20_000_000;
     if *nodes >= NODE_CAP || crate::clock::Instant::now() >= deadline {
@@ -4161,7 +4553,34 @@ fn cover_dfs(
     }
     let result = (|| {
         if remaining.is_empty() {
-            return residue_ok(puzzle, w, h, n, placed, seeds, res_cell, res_size, diff_mode);
+            if full_cover {
+                // Every region is placed; the partition must cover all free
+                // cells exactly.
+                let mut used = [0u64; 3];
+                for (_, pm) in placed.iter() {
+                    used[0] |= pm[0];
+                    used[1] |= pm[1];
+                    used[2] |= pm[2];
+                }
+                for idx in 0..n {
+                    let (r, c) = (idx / w, idx % w);
+                    if puzzle.cells[r][c].blocked {
+                        continue;
+                    }
+                    if used[idx / 64] & (1u64 << (idx % 64)) == 0 {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return match tail {
+                None => residue_ok(puzzle, w, h, n, placed, seeds, res_cell, res_size, diff_mode, sym),
+                Some((ri2, sz2)) => find_tail_set(
+                    puzzle, w, h, n, placed, seeds, ri2, sz2, res_cell, res_size,
+                    diff_mode, sym, deadline,
+                )
+                .is_some(),
+            };
         }
         // Dynamic MRV over active candidates.
         let mut best: Option<(usize, usize)> = None;
@@ -4196,7 +4615,7 @@ fn cover_dfs(
             active2[k][ci] = true; // keep chosen visible for compat of others
             if cover_dfs(
                 puzzle, w, h, n, &mut rem2, order, cands, seeds, res_cell, res_size,
-                diff_mode, &mut placed2, &mut active2, nodes, deadline,
+                diff_mode, &mut placed2, &mut active2, nodes, deadline, sym, tail, full_cover,
             ) {
                 *placed = placed2;
                 *remaining = rem2;
@@ -4213,48 +4632,27 @@ fn cover_dfs(
     result
 }
 
-/// Residue checks at the leaf: exact size (implied by the sum identity),
-/// seed in, 4-connected without wall crossings, and (under
-/// `differentiation`) no adjacency to equal-size placed regions.
-fn residue_ok(
+
+
+/// Count cells reachable from `start` through unused, unblocked cells
+/// without wall crossings (capped at `cap`).
+fn reachable_count(
     puzzle: &Puzzle,
     w: usize,
     h: usize,
-    n: usize,
-    placed: &[(usize, Mask)],
-    seeds: &[(usize, usize)],
-    res_cell: usize,
-    res_size: usize,
-    diff_mode: bool,
-) -> bool {
-    let mut used = [0u64; 3];
-    for (_, pm) in placed.iter() {
-        used[0] |= pm[0];
-        used[1] |= pm[1];
-        used[2] |= pm[2];
-    }
-    if used[res_cell / 64] & (1u64 << (res_cell % 64)) != 0 {
-        return false;
-    }
-    let mut rest: Vec<usize> = Vec::new();
-    for idx in 0..n {
-        let (r, c) = (idx / w, idx % w);
-        if puzzle.cells[r][c].blocked {
-            continue;
-        }
-        if used[idx / 64] & (1u64 << (idx % 64)) == 0 {
-            rest.push(idx);
-        }
-    }
-    if rest.len() != res_size {
-        return false;
-    }
+    used: &[u64; 3],
+    start: usize,
+    cap: usize,
+) -> usize {
     let mut seen = [0u64; 3];
-    let mut stack = vec![res_cell];
-    seen[res_cell / 64] |= 1u64 << (res_cell % 64);
+    let mut stack = vec![start];
+    seen[start / 64] |= 1u64 << (start % 64);
     let mut cnt = 0usize;
     while let Some(x) = stack.pop() {
         cnt += 1;
+        if cnt >= cap {
+            return cnt;
+        }
         let (r, c) = (x / w, x % w);
         for (nr, nc) in [
             (r as i64 - 1, c as i64),
@@ -4282,8 +4680,59 @@ fn residue_ok(
             stack.push(y);
         }
     }
-    if cnt != res_size {
+    cnt
+}
+
+/// Residue checks at the leaf: exact size (implied by the sum identity),
+/// seed in, 4-connected without wall crossings, and (under
+/// `differentiation`) no adjacency to equal-size placed regions.
+fn residue_ok(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    placed: &[(usize, Mask)],
+    seeds: &[(usize, usize)],
+    res_cell: usize,
+    res_size: usize,
+    diff_mode: bool,
+    sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+) -> bool {
+    let mut used = [0u64; 3];
+    for (_, pm) in placed.iter() {
+        used[0] |= pm[0];
+        used[1] |= pm[1];
+        used[2] |= pm[2];
+    }
+    if used[res_cell / 64] & (1u64 << (res_cell % 64)) != 0 {
         return false;
+    }
+    let mut rest: Vec<usize> = Vec::new();
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if puzzle.cells[r][c].blocked {
+            continue;
+        }
+        if used[idx / 64] & (1u64 << (idx % 64)) == 0 {
+            rest.push(idx);
+        }
+    }
+    if rest.len() != res_size {
+        return false;
+    }
+    if reachable_count(puzzle, w, h, &used, res_cell, res_size + 1) != res_size {
+        return false;
+    }
+    if let Some((sym_of, n_types)) = sym {
+        let mut counts = vec![0usize; n_types];
+        for &x in &rest {
+            if let Some(&t) = sym_of.get(&x) {
+                counts[t] += 1;
+            }
+        }
+        if counts.iter().any(|&c| c != 1) {
+            return false;
+        }
     }
     if diff_mode {
         let res_mask = mask_of(&rest, n);
@@ -4298,6 +4747,506 @@ fn residue_ok(
         }
     }
     true
+}
+
+/// Non-decreasing partitions of `total` into exactly `m` parts within
+/// `[lo, hi]` (size multisets), capped and lexicographic.  With
+/// `shape_limited` (the `different` rule — every region shape distinct),
+/// the count of size-k regions is bounded by the number of free polyominoes
+/// of size k (1, 1, 2, 5, 12, 35, 108, 369, …), which collapses the
+/// partition space (0317: [1,2,3,3,4x5,5,6] is one of a handful).
+fn size_multisets(
+    total: usize,
+    m: usize,
+    lo: usize,
+    hi: usize,
+    cap: usize,
+    shape_limited: bool,
+) -> Vec<Vec<usize>> {
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    const FREE_POLY: [usize; 9] = [0, 1, 1, 2, 5, 12, 35, 108, 369];
+    fn rec(
+        rem: usize,
+        parts: usize,
+        lo: usize,
+        hi: usize,
+        cur: &mut Vec<usize>,
+        out: &mut Vec<Vec<usize>>,
+        cap: usize,
+        shape_limited: bool,
+    ) {
+        if out.len() >= cap {
+            return;
+        }
+        if parts == 0 {
+            if rem == 0 {
+                out.push(cur.clone());
+            }
+            return;
+        }
+        let min_here = lo.max(rem.saturating_sub(hi * (parts - 1)));
+        let max_here = hi.min(rem.saturating_sub(lo * (parts - 1)));
+        let start = cur.last().copied().unwrap_or(lo).max(min_here);
+        for v in start..=max_here {
+            if shape_limited && v < FREE_POLY.len() {
+                let used = cur.iter().filter(|&&x| x == v).count();
+                if used >= FREE_POLY[v] {
+                    continue;
+                }
+            }
+            cur.push(v);
+            rec(rem - v, parts - 1, lo, hi, cur, out, cap, shape_limited);
+            cur.pop();
+        }
+    }
+    rec(total, m, lo, hi, &mut Vec::new(), &mut out, cap, shape_limited);
+    out
+}
+
+/// Distinct multiset permutations of `parts` (non-decreasing input).
+fn multiset_perms(parts: &[usize]) -> Vec<Vec<usize>> {
+    fn rec(parts: &[usize], used: &mut [bool], cur: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+        if cur.len() == parts.len() {
+            out.push(cur.clone());
+            return;
+        }
+        let mut prev: Option<usize> = None;
+        for i in 0..parts.len() {
+            if used[i] || prev == Some(parts[i]) {
+                continue;
+            }
+            prev = Some(parts[i]);
+            used[i] = true;
+            cur.push(parts[i]);
+            rec(parts, used, cur, out);
+            cur.pop();
+            used[i] = false;
+        }
+    }
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    rec(
+        parts,
+        &mut vec![false; parts.len()],
+        &mut Vec::new(),
+        &mut out,
+    );
+    out
+}
+
+/// Symbol map (cell -> type index) over non-blocked cells; None when the
+/// puzzle carries no symbols.
+fn rose_symbol_map(
+    puzzle: &Puzzle,
+    h: usize,
+    w: usize,
+) -> Option<(std::collections::HashMap<usize, usize>, usize)> {
+    let mut sym_of: std::collections::HashMap<usize, usize> = Default::default();
+    let mut type_names: Vec<&str> = Vec::new();
+    for r in 0..h {
+        for c in 0..w {
+            if puzzle.cells[r][c].blocked {
+                continue;
+            }
+            if let Some(sym) = puzzle.cells[r][c].symbol.as_deref() {
+                let t = match type_names.iter().position(|&x| x == sym) {
+                    Some(i) => i,
+                    None => {
+                        type_names.push(sym);
+                        type_names.len() - 1
+                    }
+                };
+                sym_of.insert(r * w + c, t);
+            }
+        }
+    }
+    if type_names.is_empty() {
+        None
+    } else {
+        let n_types = type_names.len();
+        Some((sym_of, n_types))
+    }
+}
+
+/// Full-cover pass (all-small class, 0317): every region's candidates are
+/// generated symbol-filtered up to `full_bound`; Algorithm X (cell-first)
+/// with the `different` distinct-shape constraint inside the search enforces
+/// the size assignment itself — no multiset enumeration needed.
+#[allow(clippy::too_many_arguments)]
+fn full_cover_pass(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    anchor_cells: &[usize],
+    min_sz: usize,
+    full_bound: usize,
+    sym_of: &std::collections::HashMap<usize, usize>,
+    n_types: usize,
+    seed_cell: &std::collections::HashSet<usize>,
+    cache: &mut std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let m = anchor_cells.len();
+    let mut cands: Vec<Vec<CoverCand>> = Vec::new();
+    for i in 0..m {
+        let mut list: Vec<CoverCand> = Vec::new();
+        for sz in min_sz..=full_bound {
+            let key = (i, sz);
+            if !cache.contains_key(&key) {
+                let cs = gen_cover_cands(
+                    puzzle,
+                    w,
+                    h,
+                    n,
+                    anchor_cells[i],
+                    sz,
+                    seed_cell,
+                    deadline,
+                    Some((sym_of, n_types)),
+                );
+                cache.insert(key, cs);
+            }
+            list.extend(cache[&key].iter().cloned());
+        }
+        if list.is_empty() {
+            return None;
+        }
+        cands.push(list);
+    }
+    let pass_deadline = {
+        let t = crate::clock::Instant::now() + std::time::Duration::from_millis(15_000);
+        if t < deadline {
+            t
+        } else {
+            deadline
+        }
+    };
+    let placed = exact_cover_x(
+        puzzle,
+        w,
+        h,
+        n,
+        &cands,
+        Some((sym_of, n_types)),
+        puzzle.rules.iter().any(|r| r.ctype == "different"),
+        pass_deadline,
+    )?;
+    let mut region_of: Vec<Option<usize>> = vec![None; n];
+    mask_assign(&placed, &mut region_of, n);
+    let regions = super::build_regions(&region_of, h, w);
+    if crate::solver::validate::validate(puzzle, &regions) {
+        Some(regions)
+    } else {
+        None
+    }
+}
+
+/// Multiset attempt runner: small regions pre-generated (exact-size,
+/// symbol-filtered), the second-largest deferred to the leftover BFS tail,
+/// the largest as residue.
+#[allow(clippy::too_many_arguments)]
+fn run_cover_attempts(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    attempts: &[(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)],
+    cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    sym_of: &std::collections::HashMap<usize, usize>,
+    n_types: usize,
+    diff_mode: bool,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    const RUN_CAP: usize = 3000;
+    for (run_i, (_cost, res_seed, seeds, tail)) in attempts.iter().enumerate() {
+        if crate::clock::Instant::now() >= deadline || run_i >= RUN_CAP {
+            break;
+        }
+        let res_cell = seeds[*res_seed].0;
+        let res_size = seeds[*res_seed].1;
+        let mut order: Vec<usize> = Vec::new();
+        let mut cands: Vec<Vec<CoverCand>> = Vec::new();
+        let mut skip = false;
+        for (i, &(_, sz)) in seeds.iter().enumerate() {
+            if i == *res_seed {
+                continue;
+            }
+            if Some((i, sz)) == *tail {
+                continue; // deferred to the tail, not placed by the DFS
+            }
+            match cache.get(&(i, sz)) {
+                Some(list) if !list.is_empty() => {
+                    order.push(i);
+                    cands.push(list.to_vec());
+                }
+                _ => {
+                    skip = true;
+                    break;
+                }
+            }
+        }
+        if skip {
+            continue;
+        }
+        let mut remaining: Vec<usize> = (0..order.len()).collect();
+        let mut placed: Vec<(usize, Mask)> = Vec::new();
+        let mut active: Vec<Vec<bool>> = cands.iter().map(|v| vec![true; v.len()]).collect();
+        let mut nodes = 0usize;
+        let attempt_deadline = {
+            let t = crate::clock::Instant::now() + std::time::Duration::from_millis(400);
+            if t < deadline {
+                t
+            } else {
+                deadline
+            }
+        };
+        if cover_dfs(
+            puzzle,
+            w,
+            h,
+            n,
+            &mut remaining,
+            &order,
+            &cands,
+            seeds,
+            res_cell,
+            res_size,
+            diff_mode,
+            &mut placed,
+            &mut active,
+            &mut nodes,
+            attempt_deadline,
+            Some((sym_of, n_types)),
+            *tail,
+            false,
+        ) {
+            let mut region_of: Vec<Option<usize>> = vec![None; n];
+            mask_assign(&placed, &mut region_of, n);
+            if let Some((ti, tsz)) = tail {
+                let captured = find_tail_set(
+                    puzzle,
+                    w,
+                    h,
+                    n,
+                    &placed,
+                    seeds,
+                    *ti,
+                    *tsz,
+                    res_cell,
+                    res_size,
+                    diff_mode,
+                    Some((sym_of, n_types)),
+                    deadline,
+                );
+                if let Some(tmask) = captured {
+                    for x in 0..n {
+                        if tmask[x / 64] & (1u64 << (x % 64)) != 0 {
+                            region_of[x] = Some(*ti);
+                        }
+                    }
+                }
+            }
+            for idx in 0..n {
+                let (r, c) = (idx / w, idx % w);
+                if puzzle.cells[r][c].blocked {
+                    continue;
+                }
+                if region_of[idx].is_none() {
+                    region_of[idx] = Some(*res_seed);
+                }
+            }
+            let regions = super::build_regions(&region_of, h, w);
+            if crate::solver::validate::validate(puzzle, &regions) {
+                return Some(regions);
+            }
+        }
+    }
+    None
+}
+
+/// Build the (multiset, assignment) attempt list with cost ordering.
+#[allow(clippy::too_many_arguments)]
+fn build_cover_attempts(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    anchor_cells: &[usize],
+    multisets: &[Vec<usize>],
+    sym_of: &std::collections::HashMap<usize, usize>,
+    n_types: usize,
+    seed_cell: &std::collections::HashSet<usize>,
+    cache: &mut std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    deadline: crate::clock::Instant,
+) -> Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> {
+    const DEFER_CAP: usize = 10;
+    const ATTEMPT_CAP: usize = 4000;
+    let m = anchor_cells.len();
+    let mut attempts: Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> = Vec::new();
+    for parts in multisets.iter() {
+        if crate::clock::Instant::now() >= deadline {
+            break;
+        }
+        let res_sz = parts[m - 1];
+        let rest: Vec<usize> = parts[..m - 1].to_vec();
+        let (place_parts, tail_part): (Vec<usize>, Option<usize>) =
+            if rest.last().copied().unwrap_or(0) > DEFER_CAP {
+                (rest[..m - 2].to_vec(), Some(rest[m - 2]))
+            } else {
+                (rest, None)
+            };
+        for res_seed in 0..m {
+            let others: Vec<usize> = (0..m).filter(|&i| i != res_seed).collect();
+            let mut slots: Vec<usize> = place_parts.clone();
+            if let Some(tp) = tail_part {
+                slots.push(tp);
+            }
+            slots.sort_unstable();
+            for perm in multiset_perms(&slots) {
+                if crate::clock::Instant::now() >= deadline || attempts.len() >= ATTEMPT_CAP {
+                    break;
+                }
+                let mut cost = 1usize;
+                let mut seeds: Vec<(usize, usize)> = vec![(0, 0); m];
+                seeds[res_seed] = (anchor_cells[res_seed], res_sz);
+                let mut tail: Option<(usize, usize)> = None;
+                let mut ok = true;
+                for (j, &part) in perm.iter().enumerate() {
+                    let si = others[j];
+                    seeds[si] = (anchor_cells[si], part);
+                    if part > DEFER_CAP {
+                        tail = Some((si, part));
+                        cost = cost.saturating_mul(8);
+                    } else {
+                        let key = (si, part);
+                        if !cache.contains_key(&key) {
+                            let cands = gen_cover_cands(
+                                puzzle,
+                                w,
+                                h,
+                                n,
+                                anchor_cells[si],
+                                part,
+                                seed_cell,
+                                deadline,
+                                Some((sym_of, n_types)),
+                            );
+                            if cands.is_empty() {
+                                ok = false;
+                            }
+                            cache.insert(key, cands);
+                        }
+                        let cl = cache[&key].len();
+                        if cl == 0 {
+                            ok = false;
+                        }
+                        cost = cost.saturating_mul(cl.max(1));
+                    }
+                }
+                if ok {
+                    attempts.push((cost, res_seed, seeds, tail));
+                }
+            }
+        }
+    }
+    attempts.sort_by_key(|(c, _, _, _)| *c);
+    attempts
+}
+
+/// Rose multiset cover (0289 class): range min + rose cardinality bound the
+/// size family (m parts >= g summing to total) and the symbol cells anchor
+/// each region.  Tries the full-cover Algorithm X pass first (all-small
+/// class), then the multiset/assignment attempts with the second-largest
+/// deferred to the leftover BFS tail.  False-negative only - leaves pass the
+/// full validator.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn solve_rose_cover(
+    puzzle: &Puzzle,
+    w: usize,
+    n: usize,
+    anchor_cells: &[usize],
+    min_sz: usize,
+    max_sz: usize,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    const DEFER_CAP: usize = 10;
+    let h = puzzle.height;
+    let m = anchor_cells.len();
+    if m < 2 || m > 12 {
+        return None;
+    }
+    let (sym_of, n_types) = rose_symbol_map(puzzle, h, w)?;
+    let mut total = 0usize;
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if !puzzle.cells[r][c].blocked {
+            total += 1;
+        }
+    }
+    let shape_limited = puzzle.rules.iter().any(|r| r.ctype == "different");
+    let multisets = size_multisets(total, m, min_sz, max_sz, 2000, shape_limited);
+    if multisets.is_empty() {
+        return None;
+    }
+    let seed_cell: std::collections::HashSet<usize> = anchor_cells.iter().copied().collect();
+    let mut cache: std::collections::HashMap<(usize, usize), Vec<CoverCand>> = Default::default();
+    // full-cover places EVERY region by candidates, so the bound must cover
+    // the largest part too (0317: residue part 6 is a placed region here).
+    let full_bound = multisets
+        .iter()
+        .map(|p| p.last().copied().unwrap_or(0))
+        .max()
+        .unwrap_or(DEFER_CAP)
+        .min(DEFER_CAP);
+    let diff_mode = puzzle.rules.iter().any(|r| r.ctype == "differentiation");
+    if let Some(regions) = full_cover_pass(
+        puzzle,
+        w,
+        h,
+        n,
+        anchor_cells,
+        min_sz,
+        full_bound,
+        &sym_of,
+        n_types,
+        &seed_cell,
+        &mut cache,
+        deadline,
+    ) {
+        return Some(regions);
+    }
+    let attempts = build_cover_attempts(
+        puzzle,
+        w,
+        h,
+        n,
+        anchor_cells,
+        &multisets,
+        &sym_of,
+        n_types,
+        &seed_cell,
+        &mut cache,
+        deadline,
+    );
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!(
+            "rose_cover: {} multisets {} attempts",
+            multisets.len(),
+            attempts.len()
+        );
+    }
+    run_cover_attempts(
+        puzzle,
+        w,
+        h,
+        n,
+        &attempts,
+        &cache,
+        &sym_of,
+        n_types,
+        diff_mode,
+        deadline,
+    )
 }
 
 /// Cheap sum-lock detector (no side effects): true when the number cells
@@ -5248,6 +6197,77 @@ mod multi_rem_tests {
             );
         }
         std::env::remove_var("RANGE_FORCE");
+    }
+
+    /// Completeness bisect for the full-cover search: candidate lists hold
+    /// ONLY the official regions — if this fails the search control flow is
+    /// broken; if it succeeds the issue is value ordering.
+    /// `cargo test -- --ignored tmp_diag_0317_truth --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_0317_truth() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone2/4-all-regions-different/0317.json"
+        ))
+        .expect("parse");
+        let ans: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../puzzles/official/Zone2-answer/4-all-regions-different/0317.json"
+        ))
+        .expect("ans");
+        let w = p.width;
+        let h = p.height;
+        let n = h * w;
+        let mut sym_of: std::collections::HashMap<usize, usize> = Default::default();
+        let mut anchors: Vec<usize> = Vec::new();
+        for r in 0..h {
+            for c in 0..w {
+                if p.cells[r][c].symbol.is_some() {
+                    sym_of.insert(r * w + c, 0);
+                    anchors.push(r * w + c);
+                }
+            }
+        }
+        anchors.sort_unstable();
+        let m = anchors.len();
+        let mut regs: Vec<(usize, Mask)> = Vec::new();
+        for region in ans["regions"].as_array().unwrap() {
+            let mut cells: Vec<usize> = Vec::new();
+            let mut seed = 0usize;
+            for cell in region.as_array().unwrap() {
+                let (r, c) = (
+                    cell[0].as_u64().unwrap() as usize,
+                    cell[1].as_u64().unwrap() as usize,
+                );
+                cells.push(r * w + c);
+                if p.cells[r][c].symbol.is_some() {
+                    seed = r * w + c;
+                }
+            }
+            regs.push((seed, mask_of(&cells, n)));
+        }
+        // order regions by anchor index
+        regs.sort_by_key(|(sd, _)| anchors.iter().position(|&a| a == *sd).unwrap());
+        let seeds: Vec<(usize, usize)> = regs.iter().map(|&(sd, _)| (sd, 0)).collect();
+        let mut cands: Vec<Vec<CoverCand>> = Vec::new();
+        for (i, (sd, mask)) in regs.iter().enumerate() {
+            cands.push(vec![CoverCand {
+                cells: Vec::new(),
+                mask: *mask,
+                touch: dilate(mask, w, h, n),
+            }]);
+            let _ = (sd, i);
+        }
+        let mut remaining: Vec<usize> = (0..m).collect();
+        let mut placed: Vec<(usize, Mask)> = Vec::new();
+        let mut active: Vec<Vec<bool>> = cands.iter().map(|v| vec![true; v.len()]).collect();
+        let mut nodes = 0usize;
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(5);
+        let out = cover_dfs(
+            &p, w, h, n, &mut remaining, &(0..m).collect::<Vec<_>>(), &cands, &seeds,
+            0, 0, false, &mut placed, &mut active, &mut nodes, deadline,
+            Some((&sym_of, 1)), None, true,
+        );
+        eprintln!("tmp_diag_0317_truth: solved={out} nodes={nodes}");
     }
 
     /// Cardinal host with wt facts on 1406 (rose P1/P2/P3 ×3 + watchtower).

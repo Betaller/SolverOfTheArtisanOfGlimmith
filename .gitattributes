@@ -88,3 +88,7 @@ results/bin/rsolver-ce08056-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20261021_ce08056_number-lock.txt filter=lfs diff=lfs merge=lfs -text
 results/bench/20261021_ce08056_number-lock.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20261021_ce08056_number-lock-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-8d4f2cb-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20261021_8d4f2cb_alias-gap.txt filter=lfs diff=lfs merge=lfs -text
+results/bench/20261021_8d4f2cb_alias-gap.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20261021_8d4f2cb_alias-gap-note.txt filter=lfs diff=lfs merge=lfs -text

@@ -3877,7 +3877,7 @@ fn gen_cover_cands(
     deadline: crate::clock::Instant,
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
 ) -> Vec<CoverCand> {
-    const CAND_CAP: usize = 20_000;
+    const CAND_CAP: usize = 4_000;
     let mut out: Vec<CoverCand> = Vec::new();
     let mut seen: std::collections::HashSet<Vec<usize>> = Default::default();
     let mut stack: Vec<Vec<usize>> = vec![vec![cell]];
@@ -4803,36 +4803,6 @@ fn size_multisets(
     out
 }
 
-/// Distinct multiset permutations of `parts` (non-decreasing input).
-fn multiset_perms(parts: &[usize]) -> Vec<Vec<usize>> {
-    fn rec(parts: &[usize], used: &mut [bool], cur: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
-        if cur.len() == parts.len() {
-            out.push(cur.clone());
-            return;
-        }
-        let mut prev: Option<usize> = None;
-        for i in 0..parts.len() {
-            if used[i] || prev == Some(parts[i]) {
-                continue;
-            }
-            prev = Some(parts[i]);
-            used[i] = true;
-            cur.push(parts[i]);
-            rec(parts, used, cur, out);
-            cur.pop();
-            used[i] = false;
-        }
-    }
-    let mut out: Vec<Vec<usize>> = Vec::new();
-    rec(
-        parts,
-        &mut vec![false; parts.len()],
-        &mut Vec::new(),
-        &mut out,
-    );
-    out
-}
-
 /// Symbol map (cell -> type index) over non-blocked cells; None when the
 /// puzzle carries no symbols.
 fn rose_symbol_map(
@@ -4916,6 +4886,13 @@ fn full_cover_pass(
         }
         cands.push(list);
     }
+    // Algorithm X is hopeless over giant lists (0289: 35k-row size-10
+    // spaces) — leave those boards to the assignment attempts; the cache
+    // keeps whatever was generated.
+    let rows: usize = cands.iter().map(|v| v.len()).sum();
+    if rows > 30_000 || cands.iter().any(|v| v.len() > 8_000) {
+        return None;
+    }
     let pass_deadline = {
         let t = crate::clock::Instant::now() + std::time::Duration::from_millis(15_000);
         if t < deadline {
@@ -4944,6 +4921,116 @@ fn full_cover_pass(
     }
 }
 
+/// Per-attempt candidate lists: the placed regions' cached lists filtered
+/// to candidates whose rose partner survives the size matching's allowed
+/// edges.  `None` when any placed list is empty after filtering.
+#[allow(clippy::too_many_arguments)]
+fn assemble_attempt_lists(
+    seeds: &[(usize, usize)],
+    res_seed: usize,
+    tail: Option<(usize, usize)>,
+    cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    allowed: &Option<Vec<Vec<usize>>>,
+    ptype: Option<usize>,
+    partner_col: &std::collections::HashMap<usize, usize>,
+    sym_of: &std::collections::HashMap<usize, usize>,
+) -> Option<(Vec<usize>, Vec<Vec<CoverCand>>)> {
+    let mut order: Vec<usize> = Vec::new();
+    let mut cands: Vec<Vec<CoverCand>> = Vec::new();
+    for (i, &(_, sz)) in seeds.iter().enumerate() {
+        if i == res_seed || Some((i, sz)) == tail {
+            continue;
+        }
+        let list = cache.get(&(i, sz)).filter(|l| !l.is_empty())?;
+        let v: Vec<CoverCand> = match (allowed, ptype) {
+            (Some(allw), Some(pt)) => list
+                .iter()
+                .filter(|c| {
+                    c.cells.iter().any(|&x| {
+                        if sym_of.get(&x).copied() != Some(pt) {
+                            return false;
+                        }
+                        match partner_col.get(&x) {
+                            Some(&col) => allw[i].contains(&col),
+                            None => true,
+                        }
+                    })
+                })
+                .cloned()
+                .collect(),
+            _ => list.to_vec(),
+        };
+        if v.is_empty() {
+            return None;
+        }
+        order.push(i);
+        cands.push(v);
+    }
+    Some((order, cands))
+}
+
+/// Close one successful cover attempt: stamp placed regions, capture the
+/// deferred tail via leftover BFS, give the rest to the residue, validate.
+#[allow(clippy::too_many_arguments)]
+fn close_attempt(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    placed: &[(usize, Mask)],
+    seeds: &[(usize, usize)],
+    res_seed: usize,
+    tail: Option<(usize, usize)>,
+    res_cell: usize,
+    res_size: usize,
+    diff_mode: bool,
+    sym_of: &std::collections::HashMap<usize, usize>,
+    n_types: usize,
+    deadline: crate::clock::Instant,
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let mut region_of: Vec<Option<usize>> = vec![None; n];
+    mask_assign(placed, &mut region_of, n);
+    if let Some((ti, tsz)) = tail {
+        let captured = find_tail_set(
+            puzzle,
+            w,
+            h,
+            n,
+            placed,
+            seeds,
+            ti,
+            tsz,
+            res_cell,
+            res_size,
+            diff_mode,
+            Some((sym_of, n_types)),
+            deadline,
+        );
+        if let Some(tmask) = captured {
+            for x in 0..n {
+                if tmask[x / 64] & (1u64 << (x % 64)) != 0 {
+                    region_of[x] = Some(ti);
+                }
+            }
+        }
+    }
+    for idx in 0..n {
+        let (r, c) = (idx / w, idx % w);
+        if puzzle.cells[r][c].blocked {
+            continue;
+        }
+        if region_of[idx].is_none() {
+            region_of[idx] = Some(res_seed);
+        }
+    }
+    let regions = super::build_regions(&region_of, h, w);
+    if crate::solver::validate::validate(puzzle, &regions) {
+        Some(regions)
+    } else {
+        None
+    }
+}
+
 /// Multiset attempt runner: small regions pre-generated (exact-size,
 /// symbol-filtered), the second-largest deferred to the leftover BFS tail,
 /// the largest as residue.
@@ -4953,56 +5040,68 @@ fn run_cover_attempts(
     w: usize,
     h: usize,
     n: usize,
-    attempts: &[(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)],
+    attempts: &[((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)],
     cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
     sym_of: &std::collections::HashMap<usize, usize>,
     n_types: usize,
     diff_mode: bool,
     deadline: crate::clock::Instant,
+    pair: Option<&PairLb>,
 ) -> Option<Vec<crate::types::RegionInfo>> {
     const RUN_CAP: usize = 3000;
+    // Partner type (rose pairing filter) — every kept candidate must carry
+    // a partner the size matching can still assign to this anchor.
+    let ptype = pair.and_then(|(_, pcells)| pcells.first().and_then(|&c| sym_of.get(&c).copied()));
+    let partner_col: std::collections::HashMap<usize, usize> = match pair {
+        Some((_, pcells)) => pcells.iter().enumerate().map(|(j, &c)| (c, j)).collect(),
+        None => Default::default(),
+    };
     for (run_i, (_cost, res_seed, seeds, tail)) in attempts.iter().enumerate() {
         if crate::clock::Instant::now() >= deadline || run_i >= RUN_CAP {
+            if std::env::var("COVER_DEBUG").is_ok() {
+                eprintln!("rose_cover: runner stopped at {run_i}");
+            }
             break;
         }
         let res_cell = seeds[*res_seed].0;
         let res_size = seeds[*res_seed].1;
-        let mut order: Vec<usize> = Vec::new();
-        let mut cands: Vec<Vec<CoverCand>> = Vec::new();
-        let mut skip = false;
-        for (i, &(_, sz)) in seeds.iter().enumerate() {
-            if i == *res_seed {
-                continue;
-            }
-            if Some((i, sz)) == *tail {
-                continue; // deferred to the tail, not placed by the DFS
-            }
-            match cache.get(&(i, sz)) {
-                Some(list) if !list.is_empty() => {
-                    order.push(i);
-                    cands.push(list.to_vec());
-                }
-                _ => {
-                    skip = true;
-                    break;
-                }
-            }
-        }
-        if skip {
-            continue;
-        }
+        let sizes_full: Vec<usize> = seeds.iter().map(|&(_, sz)| sz).collect();
+        let allowed = pair.map(|(lb, _)| pair_allowed(lb, &sizes_full));
+        let (order, cands) = match assemble_attempt_lists(
+            seeds,
+            *res_seed,
+            *tail,
+            cache,
+            &allowed,
+            ptype,
+            &partner_col,
+            sym_of,
+        ) {
+            Some(v) => v,
+            None => continue,
+        };
         let mut remaining: Vec<usize> = (0..order.len()).collect();
         let mut placed: Vec<(usize, Mask)> = Vec::new();
         let mut active: Vec<Vec<bool>> = cands.iter().map(|v| vec![true; v.len()]).collect();
         let mut nodes = 0usize;
         let attempt_deadline = {
-            let t = crate::clock::Instant::now() + std::time::Duration::from_millis(400);
+            // Short slice + volume: a solvable attempt lands in ~12ms
+            // (0289) / ~0.4ms (0804); wandering unsat proofs must not eat
+            // the queue.
+            let t = crate::clock::Instant::now() + std::time::Duration::from_millis(50);
             if t < deadline {
                 t
             } else {
                 deadline
             }
         };
+        if std::env::var("COVER_DEBUG").is_ok() && run_i < 20 {
+            eprintln!(
+                "rose_cover: run[{run_i}] sizes={:?} lists={:?} tail={tail:?}",
+                seeds.iter().map(|&(_, s)| s).collect::<Vec<_>>(),
+                cands.iter().map(|v| v.len()).collect::<Vec<_>>()
+            );
+        }
         if cover_dfs(
             puzzle,
             w,
@@ -5023,43 +5122,22 @@ fn run_cover_attempts(
             *tail,
             false,
         ) {
-            let mut region_of: Vec<Option<usize>> = vec![None; n];
-            mask_assign(&placed, &mut region_of, n);
-            if let Some((ti, tsz)) = tail {
-                let captured = find_tail_set(
-                    puzzle,
-                    w,
-                    h,
-                    n,
-                    &placed,
-                    seeds,
-                    *ti,
-                    *tsz,
-                    res_cell,
-                    res_size,
-                    diff_mode,
-                    Some((sym_of, n_types)),
-                    deadline,
-                );
-                if let Some(tmask) = captured {
-                    for x in 0..n {
-                        if tmask[x / 64] & (1u64 << (x % 64)) != 0 {
-                            region_of[x] = Some(*ti);
-                        }
-                    }
-                }
-            }
-            for idx in 0..n {
-                let (r, c) = (idx / w, idx % w);
-                if puzzle.cells[r][c].blocked {
-                    continue;
-                }
-                if region_of[idx].is_none() {
-                    region_of[idx] = Some(*res_seed);
-                }
-            }
-            let regions = super::build_regions(&region_of, h, w);
-            if crate::solver::validate::validate(puzzle, &regions) {
+            if let Some(regions) = close_attempt(
+                puzzle,
+                w,
+                h,
+                n,
+                &placed,
+                seeds,
+                *res_seed,
+                *tail,
+                res_cell,
+                res_size,
+                diff_mode,
+                sym_of,
+                n_types,
+                deadline,
+            ) {
                 return Some(regions);
             }
         }
@@ -5108,13 +5186,502 @@ fn attempt_pairwise_ok(
     true
 }
 
+/// (anchors × partners size lower-bound matrix, partner cells in column
+/// order) for the rose one-of-each-type pairing.
+type PairLb = (Vec<Vec<usize>>, Vec<usize>);
+
+/// Shortest path (in cells) of any rose region containing both `a` and `b`:
+/// every other symbol cell is excluded (one of each type per region), as
+/// are walls and blocked cells.  `usize::MAX` when the pair can never share
+/// a region.  This is a size lower bound for the anchor↔partner pairing.
+fn pair_lb(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    a: usize,
+    b: usize,
+    sym_of: &std::collections::HashMap<usize, usize>,
+) -> usize {
+    use std::collections::{HashMap, VecDeque};
+    let mut dist: HashMap<usize, usize> = Default::default();
+    let mut q: VecDeque<usize> = Default::default();
+    dist.insert(a, 0usize);
+    q.push_back(a);
+    while let Some(x) = q.pop_front() {
+        let d = dist[&x];
+        let (r, c) = (x / w, x % w);
+        for (nr, nc) in [
+            (r as i64 - 1, c as i64),
+            (r as i64 + 1, c as i64),
+            (r as i64, c as i64 - 1),
+            (r as i64, c as i64 + 1),
+        ] {
+            if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
+                continue;
+            }
+            let y = (nr as usize) * w + nc as usize;
+            if dist.contains_key(&y)
+                || puzzle.cells[nr as usize][nc as usize].blocked
+                || wall_between(puzzle, w, x, y)
+            {
+                continue;
+            }
+            if y != a && y != b && sym_of.contains_key(&y) {
+                continue;
+            }
+            if y == b {
+                return d + 2;
+            }
+            dist.insert(y, d + 1);
+            q.push_back(y);
+        }
+    }
+    usize::MAX
+}
+
+/// Anchors × partner-type lower bounds plus partner cells in column order.
+/// The partner type is the smallest symbol type other than the anchors'
+/// type; the counts must match (rose: one of each type per region).
+fn pair_lb_matrix(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    anchor_cells: &[usize],
+    sym_of: &std::collections::HashMap<usize, usize>,
+) -> Option<PairLb> {
+    let m = anchor_cells.len();
+    let anchor_type = *sym_of.get(&anchor_cells[0])?;
+    let partner_type = sym_of
+        .values()
+        .copied()
+        .filter(|&t| t != anchor_type)
+        .min()?;
+    let mut partner_cells: Vec<usize> = sym_of
+        .iter()
+        .filter(|(_, &t)| t == partner_type)
+        .map(|(&c, _)| c)
+        .collect();
+    partner_cells.sort_unstable();
+    if partner_cells.len() != m {
+        return None;
+    }
+    let mut lb = Vec::with_capacity(m);
+    for &a in anchor_cells {
+        let row: Vec<usize> = partner_cells
+            .iter()
+            .map(|&b| pair_lb(puzzle, w, h, a, b, sym_of))
+            .collect();
+        lb.push(row);
+    }
+    Some((lb, partner_cells))
+}
+
+/// Kuhn augmenting path on the lb graph under `bounds` (edge (i, j) exists
+/// iff `lb[i][j] <= bounds[i]`).
+fn pair_augment(
+    lb: &[Vec<usize>],
+    bounds: &[usize],
+    i: usize,
+    seen: &mut [bool],
+    match_r: &mut [usize],
+) -> bool {
+    for j in 0..lb[i].len() {
+        if lb[i][j] > bounds[i] || seen[j] {
+            continue;
+        }
+        seen[j] = true;
+        if match_r[j] == usize::MAX || pair_augment(lb, bounds, match_r[j], seen, match_r) {
+            match_r[j] = i;
+            return true;
+        }
+    }
+    false
+}
+
+/// Perfect matching under per-anchor size bounds — a rose partition must
+/// give every anchor a distinct partner its region can reach within its
+/// size.  Kills whole size families in microseconds (0289: all-5s dies on
+/// the (6,5) partner's lower bound 7).
+fn pair_match_ok(lb: &[Vec<usize>], bounds: &[usize]) -> bool {
+    let m = lb.len();
+    if m == 0 {
+        return true;
+    }
+    let p = lb[0].len();
+    if p < m {
+        return false;
+    }
+    let mut match_r = vec![usize::MAX; p];
+    let mut seen = vec![false; p];
+    for i in 0..m {
+        for s in seen.iter_mut() {
+            *s = false;
+        }
+        if !pair_augment(lb, bounds, i, &mut seen, &mut match_r) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Allowed partner columns per anchor: `j` is allowed for `i` iff some
+/// perfect matching uses (i, j) under `bounds`.
+fn pair_allowed(lb: &[Vec<usize>], bounds: &[usize]) -> Vec<Vec<usize>> {
+    let m = lb.len();
+    let p = lb.first().map(|r| r.len()).unwrap_or(0);
+    let mut out: Vec<Vec<usize>> = vec![Vec::new(); m];
+    for i in 0..m {
+        for j in 0..p {
+            if lb[i][j] > bounds[i] {
+                continue;
+            }
+            let mut match_r = vec![usize::MAX; p];
+            match_r[j] = i;
+            let mut ok = true;
+            for i2 in 0..m {
+                if i2 == i {
+                    continue;
+                }
+                let mut seen = vec![false; p];
+                seen[j] = true;
+                if !pair_augment(lb, bounds, i2, &mut seen, &mut match_r) {
+                    ok = false;
+                    break;
+                }
+            }
+            if ok {
+                out[i].push(j);
+            }
+        }
+    }
+    out
+}
+
+/// Bottleneck pairing excess: min over perfect matchings of
+/// max_i(size_i - lb[i][pi(i)]).  A tight value (0-2) means some pairing
+/// fits the sizes almost exactly — the truth's shape; wild tail/residue
+/// sizes price high here and sort last.
+fn pair_min_max_excess(lb: &[Vec<usize>], sizes: &[usize]) -> (usize, Vec<usize>) {
+    let m = lb.len();
+    if m == 0 {
+        return (0, Vec::new());
+    }
+    let p = lb[0].len();
+    // Edge set at threshold thr: hosts within size and within excess thr.
+    let mut lb2: Vec<Vec<usize>> = vec![vec![usize::MAX; p]; m];
+    let zero = vec![0usize; m];
+    let mut match_r = vec![usize::MAX; p];
+    let mut seen = vec![false; p];
+    let matching_at = |thr: usize,
+                       lb2: &mut Vec<Vec<usize>>,
+                       match_r: &mut Vec<usize>,
+                       seen: &mut [bool]|
+     -> Option<Vec<usize>> {
+        for i in 0..m {
+            for j in 0..p {
+                lb2[i][j] = if lb[i][j] <= sizes[i] && sizes[i] - lb[i][j] <= thr {
+                    0
+                } else {
+                    usize::MAX
+                };
+            }
+        }
+        for mm in match_r.iter_mut() {
+            *mm = usize::MAX;
+        }
+        for i in 0..m {
+            for s in seen.iter_mut() {
+                *s = false;
+            }
+            if !pair_augment(lb2, &zero, i, seen, match_r) {
+                return None;
+            }
+        }
+        let mut out = vec![usize::MAX; m];
+        for j in 0..p {
+            if match_r[j] != usize::MAX {
+                out[match_r[j]] = j;
+            }
+        }
+        Some(out)
+    };
+    let mut hi = 0usize;
+    for i in 0..m {
+        for j in 0..p {
+            if lb[i][j] <= sizes[i] {
+                hi = hi.max(sizes[i] - lb[i][j]);
+            }
+        }
+    }
+    if matching_at(hi, &mut lb2, &mut match_r, &mut seen).is_none() {
+        return (usize::MAX, vec![usize::MAX; m]); // no matching at all
+    }
+    let mut lo = 0usize;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if matching_at(mid, &mut lb2, &mut match_r, &mut seen).is_some() {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    let pi = matching_at(lo, &mut lb2, &mut match_r, &mut seen).unwrap();
+    let mut excess = vec![usize::MAX; m];
+    for i in 0..m {
+        if pi[i] != usize::MAX {
+            excess[i] = sizes[i] - lb[i][pi[i]];
+        }
+    }
+    (lo, excess)
+}
+
+/// Per-anchor region-size ceiling: the connected component of the board
+/// minus the other anchors (walls and blocked cells excluded) — the region
+/// may grow freely otherwise, so this bounds residue/tail sizes.
+fn reach_upper(puzzle: &Puzzle, w: usize, h: usize, anchor_cells: &[usize]) -> Vec<usize> {
+    use std::collections::{HashSet, VecDeque};
+    let anchors: HashSet<usize> = anchor_cells.iter().copied().collect();
+    let mut out = Vec::with_capacity(anchor_cells.len());
+    for &a in anchor_cells {
+        let mut seen: HashSet<usize> = Default::default();
+        let mut q: VecDeque<usize> = Default::default();
+        seen.insert(a);
+        q.push_back(a);
+        while let Some(x) = q.pop_front() {
+            let (r, c) = (x / w, x % w);
+            for (nr, nc) in [
+                (r as i64 - 1, c as i64),
+                (r as i64 + 1, c as i64),
+                (r as i64, c as i64 - 1),
+                (r as i64, c as i64 + 1),
+            ] {
+                if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
+                    continue;
+                }
+                let y = (nr as usize) * w + nc as usize;
+                if seen.contains(&y)
+                    || puzzle.cells[nr as usize][nc as usize].blocked
+                    || (y != a && anchors.contains(&y))
+                    || wall_between(puzzle, w, x, y)
+                {
+                    continue;
+                }
+                seen.insert(y);
+                q.push_back(y);
+            }
+        }
+        out.push(seen.len());
+    }
+    out
+}
+
+/// Matching-led size enumeration: every perfect matching of the lb graph
+/// fixes each region's floor `max(lb, min_sz)`; distribute the remaining
+/// slack (per-region cap) to reach the board total.  Both cover truths live
+/// at slack <= 2 per region (0289: +2/+2/+0/+0/+2/+0, 0804: one +2), so this
+/// pass emits the tight families in milliseconds where the size DFS reaches
+/// them only deep in its order.
+#[allow(clippy::too_many_arguments)]
+fn enum_pair_slacks(
+    lb: &[Vec<usize>],
+    m: usize,
+    total: usize,
+    min_sz: usize,
+    anchor_cells: &[usize],
+    cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    defer_cap: usize,
+    out: &mut Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)>,
+    deadline: crate::clock::Instant,
+) {
+    const SMAX: usize = 2;
+    const SLACK_CAP: usize = 50_000;
+    let p = lb[0].len();
+    let mut pi: Vec<usize> = vec![usize::MAX; m];
+    let mut used = 0u64;
+    let mut slack_left = 0usize;
+    let mut base: Vec<usize> = vec![0; m];
+    // recursive matching enumeration with inline slack distribution
+    fn rec(
+        i: usize,
+        m: usize,
+        p: usize,
+        lb: &[Vec<usize>],
+        pi: &mut Vec<usize>,
+        used: &mut u64,
+        base: &mut Vec<usize>,
+        slack_left: &mut usize,
+        total: usize,
+        min_sz: usize,
+        anchor_cells: &[usize],
+        cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+        defer_cap: usize,
+        out: &mut Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)>,
+        deadline: crate::clock::Instant,
+    ) {
+        if out.len() >= SLACK_CAP || crate::clock::Instant::now() >= deadline {
+            return;
+        }
+        if i == m {
+            if std::env::var("COVER_DEBUG").is_ok() {
+                eprintln!("rose_cover: slack-matching pi={pi:?}");
+            }
+            // base floors and remaining slack for this matching
+            let mut bsum = 0usize;
+            for k in 0..m {
+                base[k] = lb[k][pi[k]].max(min_sz);
+                bsum += base[k];
+            }
+            if bsum > total {
+                return;
+            }
+            *slack_left = total - bsum;
+            emit_slacks(
+                0,
+                m,
+                base,
+                *slack_left,
+                min_sz,
+                anchor_cells,
+                cache,
+                defer_cap,
+                lb,
+                pi,
+                out,
+                deadline,
+            );
+            return;
+        }
+        for j in 0..p {
+            if (*used >> j) & 1 == 1 || lb[i][j] == usize::MAX {
+                continue;
+            }
+            *used |= 1 << j;
+            pi[i] = j;
+            rec(
+                i + 1,
+                m,
+                p,
+                lb,
+                pi,
+                used,
+                base,
+                slack_left,
+                total,
+                min_sz,
+                anchor_cells,
+                cache,
+                defer_cap,
+                out,
+                deadline,
+            );
+            *used &= !(1 << j);
+        }
+    }
+    fn emit_slacks(
+        k: usize,
+        m: usize,
+        base: &[usize],
+        slack: usize,
+        min_sz: usize,
+        anchor_cells: &[usize],
+        cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+        defer_cap: usize,
+        lb: &[Vec<usize>],
+        pi: &[usize],
+        out: &mut Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)>,
+        deadline: crate::clock::Instant,
+    ) {
+        if out.len() >= SLACK_CAP || crate::clock::Instant::now() >= deadline {
+            return;
+        }
+        if k == m {
+            if slack != 0 {
+                return;
+            }
+            // sizes = base[..]; residue = a max region (normalization)
+            let mut sizes: Vec<usize> = base.to_vec();
+            let res_seed = sizes
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, &s)| s)
+                .map(|(i, _)| i)
+                .unwrap();
+            let mut tail: Option<(usize, usize)> = None;
+            let mut ok = true;
+            let mut cost = 1usize;
+            let mut seeds: Vec<(usize, usize)> = vec![(0, 0); m];
+            for i in 0..m {
+                seeds[i] = (anchor_cells[i], sizes[i]);
+                if i == res_seed {
+                    continue;
+                }
+                if sizes[i] > defer_cap {
+                    if tail.is_some() {
+                        ok = false; // machinery places one deferred tail
+                        break;
+                    }
+                    tail = Some((i, sizes[i]));
+                    cost = cost.saturating_mul(8);
+                } else {
+                    let cl = cache.get(&(i, sizes[i])).map(|v| v.len()).unwrap_or(0);
+                    if cl == 0 {
+                        ok = false;
+                        break;
+                    }
+                    cost = cost.saturating_mul(cl.max(1));
+                }
+            }
+            if !ok {
+                return;
+            }
+            let small: Vec<(usize, usize)> = (0..m)
+                .filter(|&i| i != res_seed && Some((i, sizes[i])) != tail)
+                .map(|i| (i, sizes[i]))
+                .collect();
+            if !attempt_pairwise_ok(cache, &seeds, &small, false) {
+                return;
+            }
+            // key: floor/lb-tight count, bottleneck excess, cost
+            let (max_ex, ex_vec) = pair_min_max_excess(lb, &sizes);
+            let at_min = sizes.iter().filter(|&&s| s == min_sz).count();
+            let at_lb = ex_vec.iter().filter(|&&e| e == 0).count();
+            let tight = at_min.max(at_lb);
+            out.push(((usize::MAX - tight, max_ex, cost), res_seed, seeds, tail));
+            return;
+        }
+        for add in 0..=SMAX.min(slack) {
+            let mut b2 = base.to_vec();
+            b2[k] += add;
+            emit_slacks(
+                k + 1,
+                m,
+                &b2,
+                slack - add,
+                min_sz,
+                anchor_cells,
+                cache,
+                defer_cap,
+                lb,
+                pi,
+                out,
+                deadline,
+            );
+        }
+    }
+    rec(
+        0, m, p, lb, &mut pi, &mut used, &mut base, &mut slack_left, total, min_sz, anchor_cells,
+        cache, defer_cap, out, deadline,
+    );
+}
+
 /// Availability-guided size DFS: assign each non-residue region a size from
 /// its **hostable** set (exact-size candidates exist), pruning by partial
-/// sum; the residue absorbs the rest.  Replaces the multiset × permutation
-/// product whose lexicographic cap never reached large-residue families
-/// (0289/0804).  With `shape_limited` the per-size region counts stay
-/// within the free-polyomino inventory.  Collects (cost, res_seed, seeds,
-/// tail) attempts sorted by candidate-list product.
+/// sum; the residue absorbs the rest.  One deferred tail slot per attempt
+/// covers the second-large region (0289: truth `[5,5,5,7,12,15]` needs the
+/// size-12 region past the candidate cap).  Rose pairings add a matching
+/// feasibility prune: every anchor must host a distinct partner within its
+/// size (all-5s dies on the (6,5) partner's lower bound).  Collects
+/// (cost, res_seed, seeds, tail) attempts sorted by filtered candidate cost.
 #[allow(clippy::too_many_arguments)]
 fn enumerate_assignments(
     puzzle: &Puzzle,
@@ -5130,9 +5697,10 @@ fn enumerate_assignments(
     defer_cap: usize,
     shape_limited: bool,
     deadline: crate::clock::Instant,
-) -> Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> {
-    const FREE_POLY: [usize; 9] = [0, 1, 1, 2, 5, 12, 35, 108, 369];
-    const ATTEMPT_CAP: usize = 6000;
+    pair: Option<&PairLb>,
+    reach: &[usize],
+) -> Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)> {
+    const ATTEMPT_CAP: usize = 50_000;
     let m = anchor_cells.len();
     let mut total = 0usize;
     for idx in 0..n {
@@ -5141,7 +5709,7 @@ fn enumerate_assignments(
             total += 1;
         }
     }
-    let mut out: Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)> = Vec::new();
+    let mut out: Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)> = Vec::new();
     // Hostable sizes per region.
     let mut hostable: Vec<Vec<usize>> = Vec::new();
     for si in 0..m {
@@ -5184,6 +5752,7 @@ fn enumerate_assignments(
         let mut used_count: Vec<usize> = vec![0; 9]; // per-size region counts (shape cap)
         let mut sum = 0usize;
         let mut evals = 0usize;
+        let mut tail_used = false;
         assign_dfs(
             &order,
             0,
@@ -5201,16 +5770,36 @@ fn enumerate_assignments(
             cache,
             deadline,
             &mut evals,
+            min_sz,
+            reach,
+            pair,
+            &mut tail_used,
         );
     }
     out.sort_by_key(|(c, _, _, _)| *c);
     if std::env::var("COVER_DEBUG").is_ok() {
+        let with_tail = out.iter().filter(|(_, _, _, t)| t.is_some()).count();
+        let mut hist = std::collections::BTreeMap::new();
+        let mut hist_min = std::collections::BTreeMap::new();
+        for ((nm, ex, _), _, _, _) in out.iter() {
+            *hist.entry(*ex).or_insert(0usize) += 1;
+            *hist_min.entry(usize::MAX - nm).or_insert(0usize) += 1;
+        }
         eprintln!(
-            "rose_cover: assign hostable={:?} attempts={} evals_sum={}",
+            "rose_cover: assign hostable={:?} attempts={} with_tail={} evals_sum={} excess_hist={:?} at_min_hist={:?}",
             hostable.iter().map(|v| v.len()).collect::<Vec<_>>(),
             out.len(),
-            EVALS_DBG.with(|e| e.get())
+            with_tail,
+            EVALS_DBG.with(|e| e.get()),
+            hist,
+            hist_min
         );
+        for (ci, (cost, rs, seeds, tail)) in out.iter().take(8).enumerate() {
+            let sizes: Vec<usize> = seeds.iter().map(|&(_, s)| s).collect();
+            eprintln!(
+                "rose_cover: top[{ci}] key={cost:?} res_seed={rs} sizes={sizes:?} tail={tail:?}"
+            );
+        }
     }
     out
 }
@@ -5222,6 +5811,75 @@ thread_local! {
 #[cfg(not(test))]
 thread_local! {
     static EVALS_DBG: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Leaf assembly for the size DFS: residue check, residue-is-max
+/// normalization, pairing match, cost, pairwise screen, push.
+#[allow(clippy::too_many_arguments)]
+fn emit_attempt_leaf(
+    cur: &[usize],
+    m: usize,
+    anchor_cells: &[usize],
+    res_seed: usize,
+    total: usize,
+    min_sz: usize,
+    cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    pair: Option<&PairLb>,
+    out: &mut Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)>,
+    order: &[usize],
+    defer_cap: usize,
+) {
+    let res_sz = total.saturating_sub(cur.iter().sum::<usize>());
+    if res_sz < min_sz {
+        return;
+    }
+    let mut bounds: Vec<usize> = vec![0; m];
+    for i in 0..m {
+        bounds[i] = if i == res_seed { res_sz } else { cur[i] };
+    }
+    // Normalization: the residue is a largest region.  Every size multiset
+    // has a decomposition with its maximum as the leftover, so dropping
+    // residue-smaller-than-tail/placed decompositions (the cheap noisy
+    // family) keeps solutions reachable.
+    if (0..m).any(|i| i != res_seed && cur[i] > res_sz) {
+        return;
+    }
+    if let Some((lb, _)) = pair {
+        if !pair_match_ok(lb, &bounds) {
+            return;
+        }
+    }
+    // assemble the attempt: seeds + tail + raw list cost
+    let mut cost = 1usize;
+    let mut seeds: Vec<(usize, usize)> = vec![(0, 0); m];
+    seeds[res_seed] = (anchor_cells[res_seed], res_sz);
+    let mut tail: Option<(usize, usize)> = None;
+    for &i in order {
+        let sz = cur[i];
+        seeds[i] = (anchor_cells[i], sz);
+        if sz > defer_cap {
+            tail = Some((i, sz));
+            cost = cost.saturating_mul(8);
+        } else {
+            let cl = cache.get(&(i, sz)).map(|v| v.len()).unwrap_or(0);
+            if cl == 0 {
+                return;
+            }
+            cost = cost.saturating_mul(cl.max(1));
+        }
+    }
+    let small: Vec<(usize, usize)> = (0..m)
+        .filter(|&i| i != res_seed && Some((i, seeds[i].1)) != tail)
+        .map(|i| (i, seeds[i].1))
+        .collect();
+    if attempt_pairwise_ok(cache, &seeds, &small, false) {
+        let (max_ex, _) = pair
+            .map(|(lb, _)| pair_min_max_excess(lb, &bounds))
+            .unwrap_or((0, Vec::new()));
+        // Floor islands (0289's three size-5s) lead the DFS list order.
+        let at_min = bounds.iter().filter(|&&s| s == min_sz).count();
+        out.push(((usize::MAX - at_min, max_ex, cost), res_seed, seeds, tail));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5238,53 +5896,67 @@ fn assign_dfs(
     res_seed: usize,
     defer_cap: usize,
     shape_limited: bool,
-    out: &mut Vec<(usize, usize, Vec<(usize, usize)>, Option<(usize, usize)>)>,
+    out: &mut Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)>,
     cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
     deadline: crate::clock::Instant,
     evals: &mut usize,
+    min_sz: usize,
+    reach: &[usize],
+    pair: Option<&PairLb>,
+    tail_used: &mut bool,
 ) {
-    if out.len() >= 6000 || crate::clock::Instant::now() >= deadline {
+    if out.len() >= 50_000 || crate::clock::Instant::now() >= deadline {
         return;
     }
     if k == order.len() {
-        let res_sz = total.saturating_sub(*sum);
-        if res_sz < 1 {
-            return;
-        }
+        emit_attempt_leaf(
+            cur,
+            m,
+            anchor_cells,
+            res_seed,
+            total,
+            min_sz,
+            cache,
+            pair,
+            out,
+            order,
+            defer_cap,
+        );
         *evals += 1;
         EVALS_DBG.with(|e| e.set(e.get() + 1));
-        // assemble the attempt: seeds + tail + cost
-        let mut cost = 1usize;
-        let mut seeds: Vec<(usize, usize)> = vec![(0, 0); m];
-        seeds[res_seed] = (anchor_cells[res_seed], res_sz);
-        let mut tail: Option<(usize, usize)> = None;
-        for &i in order {
-            let sz = cur[i];
-            seeds[i] = (anchor_cells[i], sz);
-            if sz > defer_cap {
-                tail = Some((i, sz));
-                cost = cost.saturating_mul(8);
+        return;
+    }
+    // Partial pairing feasibility: assigned regions carry their exact
+    // size; unassigned ones are capped by the placement machinery (hostable
+    // list sizes, or one deferred tail within the residue>=tail half-bound);
+    // the residue keeps its reach ceiling.  If no injective partner
+    // assignment survives, the whole subtree is dead.
+    if let Some((lb, _)) = pair {
+        let rest_min = (order.len() - k) * min_sz;
+        let half = total.saturating_sub(*sum + rest_min) / 2;
+        let ub = if *tail_used {
+            defer_cap
+        } else {
+            defer_cap.max(half)
+        };
+        let mut bounds: Vec<usize> = Vec::with_capacity(m);
+        for i in 0..m {
+            if i != res_seed && order[..k].contains(&i) {
+                bounds.push(cur[i]);
+            } else if i == res_seed {
+                bounds.push(reach[i]);
             } else {
-                let cl = cache.get(&(i, sz)).map(|v| v.len()).unwrap_or(0);
-                if cl == 0 {
-                    return;
-                }
-                cost = cost.saturating_mul(cl.max(1));
+                bounds.push(ub.min(reach[i]));
             }
         }
-        let small: Vec<(usize, usize)> = (0..m)
-            .filter(|&i| i != res_seed && Some((i, seeds[i].1)) != tail)
-            .map(|i| (i, seeds[i].1))
-            .collect();
-        if attempt_pairwise_ok(cache, &seeds, &small, false) {
-            out.push((cost, res_seed, seeds, tail));
+        if !pair_match_ok(lb, &bounds) {
+            return;
         }
-        return;
     }
     let i = order[k];
     for &sz in &hostable[i] {
-        if *sum + sz + (order.len() - k - 1) > total.saturating_sub(1) {
-            continue; // not enough room for the rest at min 1
+        if *sum + sz + (order.len() - k) * min_sz > total {
+            continue; // not enough room for the rest + residue at min_sz
         }
         if shape_limited && sz < used_count.len() {
             if used_count[sz] >= [0, 1, 1, 2, 5, 12, 35, 108, 369][sz] {
@@ -5311,10 +5983,57 @@ fn assign_dfs(
             cache,
             deadline,
             evals,
+            min_sz,
+            reach,
+            pair,
+            tail_used,
         );
         *sum -= sz;
         if shape_limited && sz < used_count.len() {
             used_count[sz] -= 1;
+        }
+    }
+    // One deferred tail size per attempt: no candidates are generated (the
+    // runner's leftover BFS closes it), so only the reach ceiling bounds it.
+    if !*tail_used {
+        // Normalization keeps residue >= every other region, so the tail
+        // cannot exceed half of what remains after the placed prefix.
+        let rest_min = (order.len() - k - 1) * min_sz;
+        let half = total.saturating_sub(*sum + rest_min) / 2;
+        let tail_hi = reach[i]
+            .min(total.saturating_sub((m - 1) * min_sz))
+            .min(half);
+        for sz in (defer_cap + 1)..=tail_hi {
+            if *sum + sz + (order.len() - k) * min_sz > total {
+                continue;
+            }
+            *tail_used = true;
+            cur[i] = sz;
+            *sum += sz;
+            assign_dfs(
+                order,
+                k + 1,
+                hostable,
+                cur,
+                used_count,
+                sum,
+                total,
+                m,
+                anchor_cells,
+                res_seed,
+                defer_cap,
+                shape_limited,
+                out,
+                cache,
+                deadline,
+                evals,
+                min_sz,
+                reach,
+                pair,
+                tail_used,
+            );
+            *sum -= sz;
+            *tail_used = false;
         }
     }
 }
@@ -5373,6 +6092,9 @@ pub(crate) fn solve_rose_cover(
         return None;
     }
     let seed_cell: std::collections::HashSet<usize> = anchor_cells.iter().copied().collect();
+    let t_enter = crate::clock::Instant::now();
+    let pair = pair_lb_matrix(puzzle, w, h, anchor_cells, &sym_of);
+    let reach = reach_upper(puzzle, w, h, anchor_cells);
     let mut cache: std::collections::HashMap<(usize, usize), Vec<CoverCand>> = Default::default();
     // The all-small space gets its own bounded enumeration (the wide
     // lexicographic cap 2000 cuts off before balanced parts): when empty the
@@ -5418,6 +6140,24 @@ pub(crate) fn solve_rose_cover(
             }
         }
     }
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("rose_cover: phase full-cover+gen {:?}", t_enter.elapsed());
+    }
+    let t_enum = crate::clock::Instant::now();
+    // The assignment enumeration must never starve the runner: give it at
+    // most a third of the remaining cover budget (0804's m=9 tree walked
+    // straight into the deadline and the runner started at zero).
+    let enum_deadline = {
+        let now = crate::clock::Instant::now();
+        let third = now + deadline.saturating_duration_since(now) / 3;
+        let halfsec = now + std::time::Duration::from_millis(500);
+        let t = if third < halfsec { third } else { halfsec };
+        if t < deadline {
+            t
+        } else {
+            deadline
+        }
+    };
     let attempts = enumerate_assignments(
         puzzle,
         w,
@@ -5431,7 +6171,9 @@ pub(crate) fn solve_rose_cover(
         min_sz,
         DEFER_CAP,
         shape_limited,
-        deadline,
+        enum_deadline,
+        pair.as_ref(),
+        &reach,
     );
     if std::env::var("COVER_DEBUG").is_ok() {
         eprintln!(
@@ -5440,6 +6182,56 @@ pub(crate) fn solve_rose_cover(
             attempts.len()
         );
     }
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("rose_cover: phase enum {:?}", t_enum.elapsed());
+    }
+    // Phase A: matching-led tight families (0804 class — the truth sits at
+    // pairing-lb+slack<=2 which the size DFS never reaches in budget).
+    let mut slack_attempts: Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)> =
+        Vec::new();
+    if let Some((lb, _)) = pair.as_ref() {
+        enum_pair_slacks(
+            lb,
+            anchor_cells.len(),
+            total,
+            min_sz,
+            anchor_cells,
+            &cache,
+            DEFER_CAP,
+            &mut slack_attempts,
+            deadline,
+        );
+    }
+    slack_attempts.sort_by_key(|(c, _, _, _)| *c);
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("rose_cover: slack_attempts={}", slack_attempts.len());
+    }
+    let mid = {
+        let now = crate::clock::Instant::now();
+        let t = now + deadline.saturating_duration_since(now) / 2;
+        if t < deadline {
+            t
+        } else {
+            deadline
+        }
+    };
+    if let Some(regions) = run_cover_attempts(
+        puzzle,
+        w,
+        h,
+        n,
+        &slack_attempts,
+        &cache,
+        &sym_of,
+        n_types,
+        diff_mode,
+        mid,
+        pair.as_ref(),
+    ) {
+        return Some(regions);
+    }
+    // Phase B: size-DFS families (0289 class — floor islands with big
+    // residue/tail that the matching-led slack cap misses).
     run_cover_attempts(
         puzzle,
         w,
@@ -5451,6 +6243,7 @@ pub(crate) fn solve_rose_cover(
         n_types,
         diff_mode,
         deadline,
+        pair.as_ref(),
     )
 }
 
@@ -6473,6 +7266,233 @@ mod multi_rem_tests {
             Some((&sym_of, 1)), None, true,
         );
         eprintln!("tmp_diag_0317_truth: solved={out} nodes={nodes}");
+    }
+
+    /// Feed the 0289 official size assignment straight into the attempt
+    /// runner: if this solves quickly the gap is ordering; if not, the
+    /// cover value order is the gap.
+    /// `cargo test -- --ignored tmp_diag_0289_truth --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_0289_truth() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone2/5-minmax/0289.json"
+        ))
+        .expect("parse");
+        let ans: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../puzzles/official/Zone2-answer/5-minmax/0289.json"
+        ))
+        .expect("ans");
+        let w = p.width;
+        let h = p.height;
+        let n = h * w;
+        let mut sym_of: std::collections::HashMap<usize, usize> = Default::default();
+        for r in 0..h {
+            for c in 0..w {
+                if let Some(s) = p.cells[r][c].symbol.as_deref() {
+                    sym_of.insert(r * w + c, if s == "P1" { 0 } else { 1 });
+                }
+            }
+        }
+        let mut anchors: Vec<usize> = sym_of
+            .iter()
+            .filter(|(_, &t)| t == 0)
+            .map(|(&x, _)| x)
+            .collect();
+        anchors.sort_unstable();
+        let m = anchors.len();
+        // truth sizes per anchor
+        let mut size_of: std::collections::HashMap<usize, usize> = Default::default();
+        for region in ans["regions"].as_array().unwrap() {
+            let cells = region.as_array().unwrap();
+            let mut anchor_hit = None;
+            for cell in cells {
+                let (r, c) = (
+                    cell[0].as_u64().unwrap() as usize,
+                    cell[1].as_u64().unwrap() as usize,
+                );
+                let x = r * w + c;
+                if anchors.contains(&x) {
+                    anchor_hit = Some(x);
+                }
+            }
+            size_of.insert(anchor_hit.unwrap(), cells.len());
+        }
+        let sizes: Vec<usize> = anchors.iter().map(|&a| size_of[&a]).collect();
+        eprintln!("tmp_diag_0289_truth: anchors={anchors:?} sizes={sizes:?}");
+        // residue = largest, tail = second-largest when above the cap
+        let res_pos = sizes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &s)| s)
+            .map(|(i, _)| i)
+            .unwrap();
+        let mut tail: Option<(usize, usize)> = None;
+        for (i, &s) in sizes.iter().enumerate() {
+            if i != res_pos && s > 10 {
+                tail = Some((i, s));
+            }
+        }
+        let seeds: Vec<(usize, usize)> = anchors
+            .iter()
+            .zip(sizes.iter())
+            .map(|(&a, &s)| (a, s))
+            .collect();
+        let seed_cell: std::collections::HashSet<usize> = anchors.iter().copied().collect();
+        let pair = pair_lb_matrix(&p, w, h, &anchors, &sym_of);
+        eprintln!("tmp_diag_0289_truth: pair_some={} tail={tail:?}", pair.is_some());
+        let mut cache: std::collections::HashMap<(usize, usize), Vec<CoverCand>> = Default::default();
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
+        for (i, &a) in anchors.iter().enumerate() {
+            if Some((i, sizes[i])) == tail || i == res_pos {
+                continue;
+            }
+            let list = gen_cover_cands(
+                &p,
+                w,
+                h,
+                n,
+                a,
+                sizes[i],
+                &seed_cell,
+                deadline,
+                Some((&sym_of, 2)),
+            );
+            eprintln!("tmp_diag_0289_truth: list[{i}] size={} len={}", sizes[i], list.len());
+            cache.insert((i, sizes[i]), list);
+        }
+        let attempts: Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)> =
+            vec![((0, 0, 0), res_pos, seeds, tail)];
+        let t0 = crate::clock::Instant::now();
+        let out = run_cover_attempts(
+            &p,
+            w,
+            h,
+            n,
+            &attempts,
+            &cache,
+            &sym_of,
+            2,
+            false,
+            deadline,
+            pair.as_ref(),
+        );
+        eprintln!(
+            "tmp_diag_0289_truth: solved={} in {:?}",
+            out.is_some(),
+            t0.elapsed()
+        );
+    }
+
+    /// Feed the 0804 official size assignment into the attempt runner.
+    /// `cargo test -- --ignored tmp_diag_0804_truth --nocapture`
+    #[test]
+    #[ignore]
+    fn tmp_diag_0804_truth() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone1/7-slash-pack/0804.json"
+        ))
+        .expect("parse");
+        let ans: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../puzzles/official/Zone1-answer/7-slash-pack/0804.json"
+        ))
+        .expect("ans");
+        let w = p.width;
+        let h = p.height;
+        let n = h * w;
+        let mut sym_of: std::collections::HashMap<usize, usize> = Default::default();
+        for r in 0..h {
+            for c in 0..w {
+                if let Some(s) = p.cells[r][c].symbol.as_deref() {
+                    sym_of.insert(r * w + c, if s == "P1" { 0 } else { 1 });
+                }
+            }
+        }
+        let mut anchors: Vec<usize> = sym_of
+            .iter()
+            .filter(|(_, &t)| t == 0)
+            .map(|(&x, _)| x)
+            .collect();
+        anchors.sort_unstable();
+        let mut size_of: std::collections::HashMap<usize, usize> = Default::default();
+        for region in ans["regions"].as_array().unwrap() {
+            let cells = region.as_array().unwrap();
+            let mut anchor_hit = None;
+            for cell in cells {
+                let (r, c) = (
+                    cell[0].as_u64().unwrap() as usize,
+                    cell[1].as_u64().unwrap() as usize,
+                );
+                let x = r * w + c;
+                if anchors.contains(&x) {
+                    anchor_hit = Some(x);
+                }
+            }
+            size_of.insert(anchor_hit.unwrap(), cells.len());
+        }
+        let sizes: Vec<usize> = anchors.iter().map(|&a| size_of[&a]).collect();
+        eprintln!("tmp_diag_0804_truth: anchors={anchors:?} sizes={sizes:?}");
+        let res_pos = sizes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &s)| s)
+            .map(|(i, _)| i)
+            .unwrap();
+        let seeds: Vec<(usize, usize)> = anchors
+            .iter()
+            .zip(sizes.iter())
+            .map(|(&a, &s)| (a, s))
+            .collect();
+        let seed_cell: std::collections::HashSet<usize> = anchors.iter().copied().collect();
+        let pair = pair_lb_matrix(&p, w, h, &anchors, &sym_of);
+        eprintln!("tmp_diag_0804_truth: pair_some={} res_pos={res_pos}", pair.is_some());
+        let mut cache: std::collections::HashMap<(usize, usize), Vec<CoverCand>> = Default::default();
+        let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(60);
+        for (i, &a) in anchors.iter().enumerate() {
+            if i == res_pos {
+                continue;
+            }
+            let t0 = crate::clock::Instant::now();
+            let list = gen_cover_cands(
+                &p,
+                w,
+                h,
+                n,
+                a,
+                sizes[i],
+                &seed_cell,
+                deadline,
+                Some((&sym_of, 2)),
+            );
+            eprintln!(
+                "tmp_diag_0804_truth: list[{i}] size={} len={} gen={:?}",
+                sizes[i],
+                list.len(),
+                t0.elapsed()
+            );
+            cache.insert((i, sizes[i]), list);
+        }
+        let attempts: Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)> =
+            vec![((0, 0, 0), res_pos, seeds, None)];
+        let t0 = crate::clock::Instant::now();
+        let out = run_cover_attempts(
+            &p,
+            w,
+            h,
+            n,
+            &attempts,
+            &cache,
+            &sym_of,
+            2,
+            false,
+            deadline,
+            pair.as_ref(),
+        );
+        eprintln!(
+            "tmp_diag_0804_truth: solved={} in {:?}",
+            out.is_some(),
+            t0.elapsed()
+        );
     }
 
     /// Cardinal host with wt facts on 1406 (rose P1/P2/P3 ×3 + watchtower).

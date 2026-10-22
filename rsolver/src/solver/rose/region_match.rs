@@ -1192,6 +1192,40 @@ mod tests {
         );
     }
 
+    /// 0289 (range min=5 + rose 2 types, 7×7): cover with a deferred tail
+    /// (truth [15,12,7,5,5,5]) + pairing-lb matching prune; the truth
+    /// attempt solves in ~12ms once the size DFS generates it.
+    #[test]
+    fn solves_official_0289() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone2/5-minmax/0289.json"
+        ))
+        .expect("parse");
+        let start = Instant::now();
+        let out = crate::solver::rose::solve_rose(&p, &start, 60_000);
+        assert!(
+            matches!(out, crate::solver::ModuleOutcome::Solved(_)),
+            "0289 must solve via rose cover"
+        );
+    }
+
+    /// 0804 (rose 2 types ×9, 8×8): matching-led slack enumeration (the
+    /// truth is pairing-lb tight — eight exact-distance regions + one
+    /// slack-2 blob); the size DFS never reaches it in budget.
+    #[test]
+    fn solves_official_0804() {
+        let p = crate::io::parse_puzzle(include_str!(
+            "../../../../puzzles/official/Zone1/7-slash-pack/0804.json"
+        ))
+        .expect("parse");
+        let start = Instant::now();
+        let out = crate::solver::rose::solve_rose(&p, &start, 60_000);
+        assert!(
+            matches!(out, crate::solver::ModuleOutcome::Solved(_)),
+            "0804 must solve via rose cover"
+        );
+    }
+
     /// 0325 (different + rose 3 types ×12, 10×10): full-cover Algorithm X
     /// with the all-small size bound (the truth's max part 7; including the
     /// deferred-class sizes 8-10 as candidates explodes the tree).

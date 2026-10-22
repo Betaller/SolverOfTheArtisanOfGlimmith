@@ -104,3 +104,7 @@ results/bin/rsolver-a63a3e4-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
 results/bench/20261022_a63a3e4_rose-cover.txt filter=lfs diff=lfs merge=lfs -text
 results/bench/20261022_a63a3e4_rose-cover.jsonl filter=lfs diff=lfs merge=lfs -text
 results/bench/20261022_a63a3e4_rose-cover-note.txt filter=lfs diff=lfs merge=lfs -text
+results/bin/rsolver-804b694-linux-x86_64 filter=lfs diff=lfs merge=lfs -text
+results/bench/20261022_804b694_rose-pairing.txt filter=lfs diff=lfs merge=lfs -text
+results/bench/20261022_804b694_rose-pairing.jsonl filter=lfs diff=lfs merge=lfs -text
+results/bench/20261022_804b694_rose-pairing-note.txt filter=lfs diff=lfs merge=lfs -text

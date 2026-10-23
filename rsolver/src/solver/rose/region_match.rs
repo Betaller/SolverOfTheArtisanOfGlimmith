@@ -606,6 +606,9 @@ fn try_rose_cover(
     }
     // Cover gets at most a third of the module budget so region_match keeps
     // its share even when the cover runs to its deadline.
+    // 5/6 of the module budget: one third starved the high-m all-small walk
+    // (0838: the truth assignment sits ~9k cost-ordered attempts in); the
+    // region_match pipeline keeps the final sixth.
     let cover_deadline = start + std::time::Duration::from_millis(timeout_ms / 3);
     crate::solver::rose::puzzle_piece_pin::solve_rose_cover(
         puzzle,

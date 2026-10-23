@@ -596,7 +596,14 @@ fn try_rose_cover(
         return None;
     }
     let (bmin, bmax) = crate::shapes::area_bounds(puzzle);
-    let g = bmin.max(symbol_types.len());
+    let mut g = bmin.max(symbol_types.len());
+    // Rule-aware minimum region size (same floor as `try_complement_cover`):
+    // `non_block` forbids rectangular regions, and 1×1 / dominoes / I-trominoes
+    // are all rectangles — without the floor the size-multiset enumeration for
+    // 0838 (m=14) explodes to its 2000-cap and the cover never converges.
+    if puzzle.rules.iter().any(|r| r.ctype == "non_block") {
+        g = g.max(3);
+    }
     // Cover gets at most a third of the module budget so region_match keeps
     // its share even when the cover runs to its deadline.
     let cover_deadline = start + std::time::Duration::from_millis(timeout_ms / 3);

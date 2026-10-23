@@ -346,3 +346,59 @@ pub fn solve_json_line(line: &str, timeout_ms: u64) -> Solution {
 pub fn solution_to_json_text(sol: &Solution) -> String {
     serde_json::to_string(&solution_to_json(sol)).unwrap()
 }
+
+/// Diagnostic: validate an externally supplied region assignment against a
+/// puzzle without solving anything (`rsolver --check-solution <regions.json>`).
+///
+/// Accepts either region-list form:
+///   * official answer form — `{"regions": [[[r,c],...], ...]}`
+///   * solver output form — `{"regions": [{"region_id": i, "cells": [[r,c],...]}]}`
+///
+/// Returns `Ok(())` when the full independent validator accepts the
+/// assignment, or `Err(check_name)` naming the first rejecting gate — exactly
+/// the split `validate::validate_reason` produces (`assign` / `connectivity` /
+/// `pre-boundary` / a rule `ctype`).
+pub fn check_regions_json(puzzle_input: &str, regions_input: &str) -> Result<(), String> {
+    let puzzle = parse_puzzle(puzzle_input)?;
+    let value: serde_json::Value =
+        serde_json::from_str(regions_input).map_err(|e| format!("bad regions JSON: {e}"))?;
+    let arr = value
+        .get("regions")
+        .and_then(|r| r.as_array())
+        .ok_or_else(|| "regions JSON has no `regions` array".to_string())?;
+    let (h, w) = (puzzle.height, puzzle.width);
+    let mut region_of: Vec<Option<usize>> = vec![None; h * w];
+    for (i, entry) in arr.iter().enumerate() {
+        let (rid, cells_v) = if let Some(obj) = entry.as_object() {
+            let rid = obj
+                .get("region_id")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(i as u64) as usize;
+            let cells = obj
+                .get("cells")
+                .and_then(|x| x.as_array())
+                .ok_or_else(|| format!("region {i} missing cells"))?;
+            (rid, cells)
+        } else if let Some(cells) = entry.as_array() {
+            (i, cells)
+        } else {
+            return Err(format!("region entry {i} is neither object nor cell list"));
+        };
+        for cell in cells_v {
+            let pair = cell
+                .as_array()
+                .ok_or_else(|| format!("region {rid} cell is not [r,c]"))?;
+            let r = pair.first().and_then(|x| x.as_u64()).unwrap_or(u64::MAX) as usize;
+            let c = pair.get(1).and_then(|x| x.as_u64()).unwrap_or(u64::MAX) as usize;
+            if r >= h || c >= w {
+                return Err(format!("cell ({r},{c}) outside grid {h}x{w}"));
+            }
+            if region_of[r * w + c].is_some() {
+                return Err(format!("cell ({r},{c}) assigned to two regions"));
+            }
+            region_of[r * w + c] = Some(rid);
+        }
+    }
+    let regions = crate::solver::rose::build_regions(&region_of, h, w);
+    crate::solver::validate::validate_reason(&puzzle, &regions).map_err(|e| e.to_string())
+}

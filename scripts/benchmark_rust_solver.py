@@ -775,11 +775,20 @@ def _run_executor(
 
 
 def _timeout_failures(state: _RunState) -> list[PuzzleResult]:
-    return [
-        r
-        for r in state.failed
-        if r.error and ("timeout" in r.error.lower() or "timed out" in r.error.lower())
-    ]
+    # Retryable = the harness saw a wall timeout OR some solver module hit its
+    # own deadline.  The latter used to be missed: under -j load a stretched
+    # aog times out internally, later modules exhaust, and the record reads
+    # "No solution found" — which the old error-string filter never matched,
+    # so load-sensitive borderline puzzles (0325/0586/0932 class) never got
+    # their 2×-timeout recovery pass.
+    out = []
+    for r in state.failed:
+        if r.error and ("timeout" in r.error.lower() or "timed out" in r.error.lower()):
+            out.append(r)
+            continue
+        if any(a.get("status") == "timeout" for a in r.attempts or []):
+            out.append(r)
+    return out
 
 
 def _handle_retry_result(

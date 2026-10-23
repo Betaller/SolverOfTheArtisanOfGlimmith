@@ -75,7 +75,10 @@ pub fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<
         Some(regions)
     } else {
         if std::env::var("VALIDATE_DEBUG").is_ok() {
-            eprintln!("accept_if_valid: REJECTED {} regions", regions.len());
+            let reason = crate::solver::validate::validate_reason(puzzle, &regions)
+                .err()
+                .unwrap_or("?");
+            eprintln!("accept_if_valid: REJECTED {} regions ({reason})", regions.len());
             for r in regions.iter().take(20) {
                 let mut syms = Vec::new();
                 for cell in &r.cells {

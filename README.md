@@ -88,7 +88,9 @@ RustSolver
 ### Rust 求解器（`rsolver/`）
 
 子进程协议：谜题 JSON → stdin，题解 JSON → stdout（`rsolver --batch` 支持多行输入逐行输出，
-`RustSolver.solve_batch` 复用一个子进程批量求解）。内部按顺序尝试多个算法，先出答案者胜：
+`RustSolver.solve_batch` 复用一个子进程批量求解）。诊断入口：`rsolver --check-solution
+<regions.json> [puzzle.json]` 对外部区域指派做纯校验并打印 `OK` / `REJECTED <check>`
+（regions.json 接受官方答案 `{"regions":[[[r,c],…],…]}` 或求解器输出形态）。内部按顺序尝试多个算法，先出答案者胜：
 
 ```
 ⓪ same-tiling（同形铺砌专用：等距轨道 CSP / 横截生长 / 小形状 DLX）

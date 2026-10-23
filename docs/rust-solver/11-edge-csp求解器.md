@@ -418,3 +418,28 @@ edge_csp 适配题常规耗尽，edge_csp 是最后一道真搜索；其 1.0× �
 ~80s——1.5× 只救了 1406，3× 把三道全部覆盖（并行负载复测 5/6 稳定，
 0932 半稳）。配套 aog 非 rose 题 2×（1146 经 aog ~34s 解出）。链内总预算
 192s 仍在 Python 侧 RUST_PARTS×+20% 墙钟（216s @ timeout 30）之内。
+
+
+## 不等式收窄「钉死-重建回滚」空转修复（2026-10-23）
+
+**症状**：0586（area+hom+het+inequality）在 `EDGE_CSP_DEBUG` 下根 `propagate()`
+永不收敛——`propagate pass=2,801,101 unknown=59 changed=12`，unknown 恒定、
+零状态变化，直到 deadline。根传播到不了不动点 ⇒ `solve()` 直接 `return None`，
+搜索根本没起步（`root unknown=` 打印都不出现）。
+
+**根因**（典型「陈旧组件快照」bug 类的反面）：`narrow_inequality_bounds`
+把不等式链收窄写进 `curr_min_area/curr_max_area`，`min==max` 时再钉
+`curr_target_area` 并报 `progress=true`；但 `step!` 宏见 progress 就
+`build_components()` 重建组件，而重建把三张表**全部清回线索默认值**——
+收窄成果被回滚，下一轮原样再推再钉再报，永动。
+
+**修法**：把不等式收窄**折进 `build_components`**（`ineq_pairs` 抽出为共用
+推导），重建后收窄自动恢复，随后 `propagate_inequality_clues` 再跑时 target
+已钉过 → `curr_target_area[ci].is_none()` 为假 → 不再假报 progress。
+0586 根传播即刻收敛（unknown 56/71），**1133（difference+inequality+range）
+经 edge_csp 13s 解出（+1）**。
+
+**诊断工具沉淀**：`propagate` 循环在 `EDGE_CSP_DEBUG` 下每 1000 趟打
+`pass/unknown/changed`，deadline 处打总趟数——「恒定 unknown + 高 pass 数」
+就是假进展死循环的指纹；`EDGE_CSP_SKIP=area` 二分定位到 area 家族后再用
+子开关（areatgt/areachk）收窄到 `narrow_inequality_bounds`。

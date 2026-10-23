@@ -2497,23 +2497,89 @@ fn enum_size_cases(
     if members.is_empty() {
         return Vec::new();
     }
-    let mut seen = vec![false; n];
-    let mut stack = vec![members[0] as usize];
-    seen[members[0] as usize] = true;
-    let mut comp = 0usize;
-    while let Some(u) = stack.pop() {
-        comp += 1;
-        for &(v, _, _) in &adj[u] {
-            if !seen[v as usize] {
-                seen[v as usize] = true;
-                stack.push(v as usize);
+    // Component labelling over the constraint graph.
+    let mut comp_of = vec![usize::MAX; n];
+    let mut comps: Vec<Vec<u32>> = Vec::new();
+    for &m0 in &members {
+        if comp_of[m0 as usize] != usize::MAX {
+            continue;
+        }
+        let cid = comps.len();
+        let mut comp = Vec::new();
+        let mut stack = vec![m0 as usize];
+        comp_of[m0 as usize] = cid;
+        while let Some(u) = stack.pop() {
+            comp.push(u as u32);
+            for &(v, _, _) in &adj[u] {
+                if comp_of[v as usize] == usize::MAX {
+                    comp_of[v as usize] = cid;
+                    stack.push(v as usize);
+                }
             }
         }
+        comps.push(comp);
     }
-    if comp != members.len() {
-        return Vec::new(); // disconnected — leave to the plain search
+    if comps.len() > 1 {
+        // Multi-component product (0912/0928/0930d/1407a class): each
+        // component's units are pairwise unconstrained across components, so
+        // enumerate per component and take the cartesian product, applying the
+        // residual account (`rest = total − Σ sizes`, `rest == 0 || rest >= g`)
+        // once over the merged assignment.  Previously this class was skipped
+        // outright ("cartesian explosion") and the plain FreeRem run wandered;
+        // the cases are window hints (the fallback run always follows), so a
+        // wrong hint costs ordering only.
+        let mut merged: Vec<(Vec<(usize, usize)>, usize, usize)> =
+            vec![(vec![(0usize, 0usize); n], 0usize, 0usize)];
+        for comp in &comps {
+            let mut order_c = comp.clone();
+            order_c.sort_by_key(|&u| std::cmp::Reverse(adj[u as usize].len()));
+            let mut comp_cases: Vec<(Vec<(usize, usize)>, usize, usize)> = Vec::new();
+            enum_comp_raw(
+                &order_c,
+                0,
+                &adj,
+                sz_lo,
+                sz_hi,
+                total,
+                &mut Default::default(),
+                &mut comp_cases,
+                CASE_CAP,
+            );
+            if comp_cases.is_empty() {
+                return Vec::new();
+            }
+            let mut next: Vec<(Vec<(usize, usize)>, usize, usize)> = Vec::new();
+            'outer: for (mwin, msum, mna) in &merged {
+                for (cwin, csum, cna) in &comp_cases {
+                    let mut win = mwin.clone();
+                    for (u, &ab) in cwin.iter().enumerate() {
+                        if ab != (0usize, 0usize) {
+                            win[u] = ab;
+                        }
+                    }
+                    next.push((win, msum + csum, mna + cna));
+                    if next.len() >= CASE_CAP * 4 {
+                        break 'outer;
+                    }
+                }
+            }
+            merged = next;
+        }
+        let mut cases: Vec<(Vec<(usize, usize)>, usize)> = Vec::new();
+        for (win, sum, na) in merged {
+            let rest = total.saturating_sub(sum);
+            let n_lbl = na + if rest > 0 { 1 } else { 0 };
+            if sum <= total && n_lbl <= max_labels && (rest == 0 || rest >= g) {
+                cases.push((win, n_lbl));
+            }
+        }
+        cases.sort_by_key(|(win, _)| {
+            std::cmp::Reverse(win.iter().map(|&(a, _)| a).sum::<usize>())
+        });
+        cases.truncate(CASE_CAP);
+        return cases;
     }
-    // Highest-degree first keeps the DFS pruned early.
+    // Single component: highest-degree first keeps the DFS pruned early.
     let mut order = members.clone();
     order.sort_by_key(|&u| std::cmp::Reverse(adj[u as usize].len()));
     let mut cases: Vec<(Vec<(usize, usize)>, usize)> = Vec::new();
@@ -2571,26 +2637,7 @@ fn enum_comp_dfs(
     }
     let u = order[k];
     for s in sz_lo[u as usize]..=sz_hi[u as usize].min(total) {
-        let mut ok = true;
-        for &(v, kind, val) in &adj[u as usize] {
-            if let Some(&t) = assign.get(&v) {
-                // kind 0 + val 0 = my < their; kind 0 + val 1 = their < my.
-                let fits = if kind == 0 {
-                    if val == 0 {
-                        s < t
-                    } else {
-                        t < s
-                    }
-                } else {
-                    s.abs_diff(t) == val
-                };
-                if !fits {
-                    ok = false;
-                    break;
-                }
-            }
-        }
-        if ok {
+        if size_edge_ok(u, s, adj, assign) {
             assign.insert(u, s);
             enum_comp_dfs(
                 order, k + 1, adj, sz_lo, sz_hi, total, g, max_labels, assign, cases, cap,
@@ -2598,6 +2645,75 @@ fn enum_comp_dfs(
             assign.remove(&u);
         }
     }
+}
+
+/// One component's raw size assignments for the multi-component product in
+/// `enum_size_cases` (0912 class).  The residual account (`rest = total − Σ
+/// sizes`, `rest == 0 || rest >= g`) and the label count are global facts, so
+/// per-component leaves only report `(window, sum, n_units)` and the product
+/// applies the account once over the merged assignment.
+fn enum_comp_raw(
+    order: &[u32],
+    k: usize,
+    adj: &[Vec<(u32, u8, usize)>],
+    sz_lo: &[usize],
+    sz_hi: &[usize],
+    total: usize,
+    assign: &mut std::collections::HashMap<u32, usize>,
+    cases: &mut Vec<(Vec<(usize, usize)>, usize, usize)>,
+    cap: usize,
+) {
+    if cases.len() >= cap {
+        return;
+    }
+    if k == order.len() {
+        let sum: usize = assign.values().sum();
+        if sum > total {
+            return;
+        }
+        let mut win = vec![(0usize, 0usize); sz_lo.len()];
+        for (u, s) in assign.iter() {
+            win[*u as usize] = (*s, *s);
+        }
+        cases.push((win, sum, assign.len()));
+        return;
+    }
+    let u = order[k];
+    for s in sz_lo[u as usize]..=sz_hi[u as usize].min(total) {
+        if size_edge_ok(u, s, adj, assign) {
+            assign.insert(u, s);
+            enum_comp_raw(order, k + 1, adj, sz_lo, sz_hi, total, assign, cases, cap);
+            assign.remove(&u);
+        }
+    }
+}
+
+/// Shared feasibility test of one unit's size against its already-assigned
+/// constraint neighbours (`ord` kind 0: strict order; `diff` kind 1: |a−b|).
+fn size_edge_ok(
+    u: u32,
+    s: usize,
+    adj: &[Vec<(u32, u8, usize)>],
+    assign: &std::collections::HashMap<u32, usize>,
+) -> bool {
+    for &(v, kind, val) in &adj[u as usize] {
+        if let Some(&t) = assign.get(&v) {
+            // kind 0 + val 0 = my < their; kind 0 + val 1 = their < my.
+            let fits = if kind == 0 {
+                if val == 0 {
+                    s < t
+                } else {
+                    t < s
+                }
+            } else {
+                s.abs_diff(t) == val
+            };
+            if !fits {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// Distinct-size chain deduction over the unit-ord digraph (0152 class).
@@ -3667,7 +3783,14 @@ pub(crate) fn solve_number_pin(
     // bounded slice so the FreeRem fallback keeps its budget (0262 solves in
     // ~160 ms there — a runaway cover must not starve it).
     let cover_deadline = {
-        let t = crate::clock::Instant::now() + std::time::Duration::from_millis(30_000);
+        // Cover slice: 30 s by default (the FreeRem fallback keeps its own
+        // budget; a runaway cover must not starve it).  `COVER_TIME_CAP_MS`
+        // raises/lowers the slice for research runs.
+        let cap: u64 = std::env::var("COVER_TIME_CAP_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30_000);
+        let t = crate::clock::Instant::now() + std::time::Duration::from_millis(cap);
         if t < deadline {
             t
         } else {
@@ -3741,6 +3864,26 @@ fn mask_and(a: &Mask, b: &Mask) -> bool {
     (a[0] & b[0]) != 0 || (a[1] & b[1]) != 0 || (a[2] & b[2]) != 0
 }
 
+/// Cover-search depth histogram (COVER_DEBUG only, zeroed per solve call via
+/// `cover_depth_hist_reset`).  Where the tree grows tells value-order work
+/// which levels to target.
+thread_local! {
+    static COVER_DEPTH_HIST: std::cell::RefCell<[usize; 32]> =
+        std::cell::RefCell::new([0; 32]);
+    /// COVER_TRUTH diagnostic: official assignment's region masks, so the
+    /// value-order can report where the truth candidate ranks.
+    static COVER_TRUTH_MASKS: std::cell::RefCell<Vec<Mask>> =
+        std::cell::RefCell::new(Vec::new());
+}
+
+fn cover_depth_hist_reset() {
+    COVER_DEPTH_HIST.with(|h| *h.borrow_mut() = [0; 32]);
+}
+
+fn cover_depth_hist_snapshot() -> [usize; 32] {
+    COVER_DEPTH_HIST.with(|h| *h.borrow())
+}
+
 /// One-cell dilation (4-neighbourhood) of a cell mask.
 fn dilate(m: &Mask, w: usize, h: usize, n: usize) -> Mask {
     let mut out = [0u64; 3];
@@ -3773,6 +3916,19 @@ struct CoverCand {
     touch: Mask,
 }
 
+/// Reorder `list` in place so position `i` gets the item formerly at `perm[i]`.
+fn reorder(list: &mut Vec<CoverCand>, perm: &[usize]) {
+    let mut out: Vec<CoverCand> = Vec::with_capacity(list.len());
+    for &ci in perm {
+        out.push(CoverCand {
+            cells: std::mem::take(&mut list[ci].cells),
+            mask: list[ci].mask,
+            touch: list[ci].touch,
+        });
+    }
+    *list = out;
+}
+
 /// Candidate compatibility: disjoint from placed, and (under
 /// `differentiation`) non-touching equal-size placed regions.  Mask-based
 /// (the per-cell `contains` version capped node rate at ~3k/s).
@@ -3798,6 +3954,593 @@ fn cand_fits(
 
 /// Residue potential-connectivity after adding `cand` (BFS — called only
 /// for candidates that survive the mask checks).
+/// Unreachable-pocket exact-fill check (`res_size > 0` only).
+///
+/// The residue must be one connected region containing `res_cell`, so a free
+/// cell that cannot reach `res_cell` (through free cells, never crossing
+/// pre-drawn walls) can never belong to the residue: every such pocket must be
+/// filled *exactly* by the remaining islands seeded inside it.  A pocket whose
+/// cell count differs from the sum of its remaining seeds' sizes is a dead
+/// branch — one BFS per node, sound, and the structural prune the 0308 cover
+/// search was missing (2.5M nodes without converging: the tree only died at
+/// the leaf residue check, long after every mis-sized pocket was sealed).
+
+/// COVER_TRUTH + COVER_DEBUG diagnostic (extracted from solve_number_cover
+/// for complexity): walk the official assignment one placement at a time,
+/// mirroring the search MRV + probe scoring, and report the truth
+/// candidate rank at each level.
+#[allow(clippy::too_many_arguments)]
+
+/// COVER_ORDER static value ordering (extracted from solve_number_cover for
+/// complexity): `truth` (diagnostic, COVER_TRUTH first), `rare`/`mcv`/`wall`
+/// heuristic orders.  Generation order for anything else.
+#[allow(clippy::too_many_arguments)]
+
+/// COVER_ORDER=truth (diagnostic): move the COVER_TRUTH official candidates
+/// to the front of each region list so a sound search solves in ~15 nodes.
+fn cover_order_truth_first(w: usize, h: usize, n: usize, order: &[usize], seeds: &[(usize, usize)], cands: &mut Vec<Vec<CoverCand>>) {
+    let _ = h;
+
+            // Diagnostic: force the COVER_TRUTH official assignment to the
+            // front of each region's candidate list.  A sound search + complete
+            // candidates must then solve in milliseconds; a still-failing
+            // search means a prune is unsound (kills the truth path).
+            if let Ok(truth_path) = std::env::var("COVER_TRUTH") {
+                if let Ok(text) = std::fs::read_to_string(&truth_path) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(arr) = v.get("regions").and_then(|r| r.as_array()) {
+                            let mut truth_masks: Vec<Mask> = Vec::new();
+                            for reg in arr {
+                                let mut cells: Vec<usize> = Vec::new();
+                                if let Some(list) = reg.as_array() {
+                                    for cell in list {
+                                        if let Some(pair) = cell.as_array() {
+                                            let r = pair.first().and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                                            let c = pair.get(1).and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                                            cells.push(r * w + c);
+                                        }
+                                    }
+                                }
+                                truth_masks.push(mask_of(&cells, n));
+                            }
+                            for (j, &k) in order.iter().enumerate() {
+                                let (cell, _size) = seeds[k];
+                                if let Some(ti) = truth_masks
+                                    .iter()
+                                    .position(|m| m[cell / 64] & (1u64 << (cell % 64)) != 0)
+                                {
+                                    let pos = cands[j].iter().position(|c| c.mask == truth_masks[ti]);
+                                    if let Some(pos) = pos {
+                                        let cand = cands[j].remove(pos);
+                                        cands[j].insert(0, cand);
+                                    } else {
+                                        eprintln!("cover-order-truth: seed {k} truth cand MISSING");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+}
+
+fn apply_cover_static_order(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    order: &[usize],
+    cands: &mut Vec<Vec<CoverCand>>,
+    seeds: &[(usize, usize)],
+) {
+    let _ = (h, seeds);
+    if let Ok(mode) = std::env::var("COVER_ORDER") {
+        if mode == "truth" {
+            cover_order_truth_first(w, h, n, order, seeds, cands);
+        } else if mode == "rare" || mode == "mcv" || mode == "wall" {
+            cover_order_heuristic(&mode, puzzle, w, h, n, cands);
+            if std::env::var("COVER_DEBUG").is_ok() {
+                eprintln!("cover: ordered by {mode}");
+            }
+        }
+    }
+    cover_truth_membership_report(puzzle, w, h, n, order, cands, seeds);
+}
+
+
+/// COVER_ORDER=probe / probe-lcv dynamic value ordering (extracted from
+/// `cover_dfs` for complexity): score every viable candidate by the surviving
+/// candidate mass of the child state (post-MAC + pocket), then order by it
+/// (`probe` = MCV, `probe-lcv` = LCV).  Dead children never recurse at all.
+#[allow(clippy::too_many_arguments)]
+fn probe_order_cover_candidates(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    k: usize,
+    remaining: &[usize],
+    order: &[usize],
+    cands: &[Vec<CoverCand>],
+    seeds: &[(usize, usize)],
+    viable: &[usize],
+    active: &[Vec<bool>],
+    res_cell: usize,
+    res_size: usize,
+    diff_mode: bool,
+    placed: &[(usize, Mask)],
+    deadline: crate::clock::Instant,
+) -> Vec<usize> {
+    if !std::env::var("COVER_ORDER")
+        .map(|v| v == "probe" || v == "probe-lcv")
+        .unwrap_or(false)
+    {
+        return viable.to_vec();
+    }
+    // `probe` = dynamic MCV (lowest surviving mass first);
+    // `probe-lcv` = dynamic LCV (highest mass first).
+    let lcv = std::env::var("COVER_ORDER")
+        .map(|v| v == "probe-lcv")
+        .unwrap_or(false);
+    let mut scored: Vec<(u64, usize)> = Vec::with_capacity(viable.len());
+    for &ci in viable {
+        if crate::clock::Instant::now() >= deadline {
+            break;
+        }
+        let mut rem2: Vec<usize> = remaining.to_vec();
+        rem2.retain(|&x| x != k);
+        let mut placed2 = placed.to_vec();
+        placed2.push((order[k], cands[k][ci].mask));
+        let mut active2 = active.to_vec();
+        active2[k][ci] = true;
+        if mac_propagate(
+            w, h, n, puzzle, &mut rem2, order, cands, seeds, &mut active2, &mut placed2,
+            res_cell, res_size, diff_mode,
+        )
+        .is_none()
+            || !pocket_ok(puzzle, w, h, n, &placed2, &rem2, order, seeds, res_cell, res_size)
+        {
+            continue; // dead child — skip entirely
+        }
+        let mass: u64 = rem2
+            .iter()
+            .map(|&x| (0..cands[x].len()).filter(|&c| active2[x][c]).count() as u64)
+            .sum();
+        scored.push((mass, ci));
+    }
+    if lcv {
+        scored.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    } else {
+        scored.sort_unstable();
+    }
+    scored.into_iter().map(|(_, ci)| ci).collect()
+}
+
+/// Count candidates of *other* region lists whose mask overlaps `mask`.
+fn count_mask_conflicts(k: usize, mask: &Mask, cands: &[Vec<CoverCand>]) -> i64 {
+    let mut conflicts = 0i64;
+    for (k2, list2) in cands.iter().enumerate() {
+        if k2 == k {
+            continue;
+        }
+        for c2 in list2 {
+            if mask_and(mask, &c2.mask) {
+                conflicts += 1;
+            }
+        }
+    }
+    conflicts
+}
+
+/// COVER_ORDER=rare/mcv/wall static heuristic orderings.
+fn cover_order_heuristic(
+    mode: &str,
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    cands: &mut Vec<Vec<CoverCand>>,
+) {
+    if mode == "rare" {
+        let mut owners = vec![0u32; n];
+        for list in cands.iter() {
+            for c in list {
+                for &x in &c.cells {
+                    owners[x] += 1;
+                }
+            }
+        }
+        let mut keyed: Vec<(u64, usize)> = Vec::new();
+        for list in cands.iter_mut() {
+            keyed.clear();
+            for (ci, c) in list.iter().enumerate() {
+                let s: u64 = c.cells.iter().map(|&x| owners[x] as u64).sum();
+                keyed.push((s, ci));
+            }
+            keyed.sort_by_key(|&(s, ci)| (s, ci));
+            let perm: Vec<usize> = keyed.iter().map(|&(_, ci)| ci).collect();
+            reorder(list, &perm);
+        }
+    } else if mode == "mcv" {
+        let mut keyed: Vec<(i64, usize)> = Vec::new();
+        for k in 0..cands.len() {
+            keyed.clear();
+            for (ci, c) in cands[k].iter().enumerate() {
+                keyed.push((-count_mask_conflicts(k, &c.mask, cands), ci));
+            }
+            keyed.sort_by_key(|&t| t);
+            let perm: Vec<usize> = keyed.iter().map(|&(_, ci)| ci).collect();
+            reorder(&mut cands[k], &perm);
+        }
+    } else if mode == "wall" {
+        let mut keyed: Vec<(i64, usize)> = Vec::new();
+        for list in cands.iter_mut() {
+            keyed.clear();
+            for (ci, c) in list.iter().enumerate() {
+                let mut walls = 0i64;
+                for &x in &c.cells {
+                    let (r, col) = (x / w, x % w);
+                    if r > 0 && puzzle.v_edges[r - 1][col].is_boundary {
+                        walls += 1;
+                    }
+                    if r + 1 < h && puzzle.v_edges[r][col].is_boundary {
+                        walls += 1;
+                    }
+                    if col > 0 && puzzle.h_edges[r][col - 1].is_boundary {
+                        walls += 1;
+                    }
+                    if col + 1 < w && puzzle.h_edges[r][col].is_boundary {
+                        walls += 1;
+                    }
+                }
+                keyed.push((-walls, ci));
+            }
+            keyed.sort_by_key(|&t| t);
+            let perm: Vec<usize> = keyed.iter().map(|&(_, ci)| ci).collect();
+            reorder(list, &perm);
+        }
+    }
+}
+
+/// COVER_TRUTH membership + heuristic-rank report for the number cover.
+/// Missing members mean the candidate generator is incomplete (fix
+/// generation); complete membership with a failing search is an ordering
+/// problem (fix value order).  Also stashes the truth masks for
+/// `cover_truth_rank_walk`.
+fn cover_truth_membership_report(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    order: &[usize],
+    cands: &[Vec<CoverCand>],
+    seeds: &[(usize, usize)],
+) {
+    let Ok(truth_path) = std::env::var("COVER_TRUTH") else {
+        return;
+    };
+    let Ok(text) = std::fs::read_to_string(&truth_path) else {
+        return;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return;
+    };
+    let Some(arr) = v.get("regions").and_then(|r| r.as_array()) else {
+        return;
+    };
+    let mut truth_masks: Vec<Mask> = Vec::new();
+    for reg in arr {
+        let mut cells: Vec<usize> = Vec::new();
+        if let Some(list) = reg.as_array() {
+            for cell in list {
+                if let Some(pair) = cell.as_array() {
+                    let r = pair.first().and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                    let c = pair.get(1).and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                    cells.push(r * w + c);
+                }
+            }
+        }
+        truth_masks.push(mask_of(&cells, n));
+    }
+    COVER_TRUTH_MASKS.with(|m| *m.borrow_mut() = truth_masks.clone());
+    for (j, &k) in order.iter().enumerate() {
+        let (cell, _size) = seeds[k];
+        let hit = truth_masks
+            .iter()
+            .position(|m| m[cell / 64] & (1u64 << (cell % 64)) != 0);
+        match hit {
+            None => eprintln!("cover-truth: seed {k} cell {cell}: no truth region"),
+            Some(ti) => {
+                let found = cands[j].iter().position(|c| c.mask == truth_masks[ti]);
+                let tpos = found.unwrap_or(usize::MAX);
+                let wall_of = |c: &CoverCand| -> i64 {
+                    let mut walls = 0i64;
+                    for &x in &c.cells {
+                        let (r, col) = (x / w, x % w);
+                        if r > 0 && puzzle.v_edges[r - 1][col].is_boundary {
+                            walls += 1;
+                        }
+                        if r + 1 < h && puzzle.v_edges[r][col].is_boundary {
+                            walls += 1;
+                        }
+                        if col > 0 && puzzle.h_edges[r][col - 1].is_boundary {
+                            walls += 1;
+                        }
+                        if col + 1 < w && puzzle.h_edges[r][col].is_boundary {
+                            walls += 1;
+                        }
+                    }
+                    walls
+                };
+                let mut owners = vec![0u32; n];
+                for list in cands.iter() {
+                    for c in list {
+                        for &x in &c.cells {
+                            owners[x] += 1;
+                        }
+                    }
+                }
+                let rare_of = |c: &CoverCand| -> u64 {
+                    c.cells.iter().map(|&x| owners[x] as u64).sum()
+                };
+                if found.is_some() {
+                    let tc = &cands[j][tpos];
+                    let wv = wall_of(tc);
+                    let rv = rare_of(tc);
+                    let w_rank = cands[j].iter().filter(|c| wall_of(c) > wv).count();
+                    let r_rank = cands[j].iter().filter(|c| rare_of(c) < rv).count();
+                    eprintln!(
+                        "cover-truth: seed {k} cell {cell}: idx={tpos}/{} wall={wv} (rank {w_rank}) rare={rv} (rank {r_rank})",
+                        cands[j].len()
+                    );
+                } else {
+                    eprintln!("cover-truth: seed {k} cell {cell}: MISSING from cands");
+                }
+            }
+        }
+    }
+}
+
+fn cover_truth_rank_walk(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    order: &[usize],
+    cands: &[Vec<CoverCand>],
+    seeds: &[(usize, usize)],
+    res_cell: usize,
+    res_size: usize,
+    diff_mode: bool,
+) {
+    // COVER_TRUTH + COVER_DEBUG: walk the official assignment one placement at
+    // a time, mirroring the search's MRV + probe scoring, and report the truth
+    // candidate's rank at each level.  Answers "is the mass heuristic ranking
+    // the truth first?" without drowning in per-node prints.
+    if std::env::var("COVER_TRUTH").is_ok() && std::env::var("COVER_DEBUG").is_ok() {
+        let tms = COVER_TRUTH_MASKS.with(|m| m.borrow().clone());
+        if !tms.is_empty() {
+            let mut placed_t: Vec<(usize, Mask)> = Vec::new();
+            let mut active_t: Vec<Vec<bool>> = cands.iter().map(|v| vec![true; v.len()]).collect();
+            let mut rem_t: Vec<usize> = (0..order.len()).collect();
+            while !rem_t.is_empty() {
+                // Same MRV as the search.
+                let mut best: Option<(usize, usize)> = None;
+                for &j in rem_t.iter() {
+                    let cnt = (0..cands[j].len()).filter(|&ci| active_t[j][ci]).count();
+                    if best.map(|(_, b)| cnt < b).unwrap_or(true) {
+                        best = Some((j, cnt));
+                    }
+                }
+                let (k, _) = best.unwrap();
+                let (kcell, _) = seeds[order[k]];
+                let ti = tms
+                    .iter()
+                    .position(|m| m[kcell / 64] & (1u64 << (kcell % 64)) != 0);
+                // Score siblings exactly like the probe block.
+                let mut scored: Vec<(u64, usize)> = Vec::new();
+                for ci in 0..cands[k].len() {
+                    if !active_t[k][ci] {
+                        continue;
+                    }
+                    if !compat(&seeds, &order, &placed_t, diff_mode, k, &cands[k][ci]) {
+                        continue;
+                    }
+                    if !res_roomy(puzzle, w, h, n, &placed_t, res_cell, res_size, &cands[k][ci]) {
+                        continue;
+                    }
+                    let mut rem2 = rem_t.clone();
+                    rem2.retain(|&x| x != k);
+                    let mut placed2 = placed_t.clone();
+                    placed2.push((order[k], cands[k][ci].mask));
+                    let mut active2 = active_t.clone();
+                    active2[k][ci] = true;
+                    if mac_propagate(
+                        w, h, n, puzzle, &mut rem2, &order, &cands, &seeds, &mut active2,
+                        &mut placed2, res_cell, res_size, diff_mode,
+                    )
+                    .is_none()
+                        || !pocket_ok(puzzle, w, h, n, &placed2, &rem2, &order, &seeds, res_cell, res_size)
+                    {
+                        continue;
+                    }
+                    let mass: u64 = rem2
+                        .iter()
+                        .map(|&x| (0..cands[x].len()).filter(|&c| active2[x][c]).count() as u64)
+                        .sum();
+                    scored.push((mass, ci));
+                }
+                scored.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1))); // LCV
+                let tmask = ti.map(|t| tms[t]);
+                let rank = tmask.and_then(|tm| {
+                    scored.iter().position(|&(_, ci)| cands[k][ci].mask == tm)
+                });
+                eprintln!(
+                    "cover-rank: depth={} region={} truth-rank={:?}/{} best-mass={:?} truth-mass={:?}",
+                    order.len() - rem_t.len(),
+                    k,
+                    rank,
+                    scored.len(),
+                    scored.first().map(|&(m, _)| m),
+                    rank.map(|r| scored[r].0),
+                );
+                if rem_t.len() >= 12 {
+                    for (ri, &(_, ci)) in scored.iter().take(3).enumerate() {
+                        let cells: Vec<(usize, usize)> = cands[k][ci]
+                            .cells
+                            .iter()
+                            .map(|&x| (x / w, x % w))
+                            .collect();
+                        eprintln!("cover-rank:   sibling{ri} cells={cells:?}");
+                    }
+                    if let Some(ti) = ti {
+                        let cells: Vec<(usize, usize)> = (0..n)
+                            .filter(|&x| tms[ti][x / 64] & (1u64 << (x % 64)) != 0)
+                            .map(|x| (x / w, x % w))
+                            .collect();
+                        eprintln!("cover-rank:   TRUTH cells={cells:?}");
+                    }
+                }
+                // Advance along the truth path.
+                let Some(ti) = ti else { break };
+                let Some(pos) = scored.iter().position(|&(_, ci)| cands[k][ci].mask == tms[ti])
+                else {
+                    break;
+                };
+                let ci = scored[pos].1;
+                placed_t.push((order[k], cands[k][ci].mask));
+                rem_t.retain(|&x| x != k);
+                for c in 0..cands[k].len() {
+                    if c != ci && !compat(&seeds, &order, &placed_t, diff_mode, k, &cands[k][c]) {
+                        active_t[k][c] = false;
+                    }
+                }
+                let mut active2 = active_t.clone();
+                if mac_propagate(
+                    w, h, n, puzzle, &mut rem_t, &order, &cands, &seeds, &mut active2,
+                    &mut placed_t, res_cell, res_size, diff_mode,
+                )
+                .is_none()
+                {
+                    eprintln!("cover-rank: truth path DIED in mac at depth {}", placed_t.len());
+                    break;
+                }
+                active_t = active2;
+            }
+        }
+    }
+}
+
+fn pocket_ok(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    placed: &[(usize, Mask)],
+    remaining: &[usize],
+    order: &[usize],
+    seeds: &[(usize, usize)],
+    res_cell: usize,
+    res_size: usize,
+) -> bool {
+    if res_size == 0 {
+        return true;
+    }
+    let mut used = [0u64; 3];
+    for (_, pm) in placed.iter() {
+        used[0] |= pm[0];
+        used[1] |= pm[1];
+        used[2] |= pm[2];
+    }
+    if used[res_cell / 64] & (1u64 << (res_cell % 64)) != 0 {
+        return false;
+    }
+    let free = |x: usize| -> bool {
+        used[x / 64] & (1u64 << (x % 64)) == 0 && !puzzle.cells[x / w][x % w].blocked
+    };
+    let neigh = |x: usize, out: &mut Vec<usize>| {
+        out.clear();
+        let (r, c) = (x / w, x % w);
+        for (nr, nc) in [
+            (r as i64 - 1, c as i64),
+            (r as i64 + 1, c as i64),
+            (r as i64, c as i64 - 1),
+            (r as i64, c as i64 + 1),
+        ] {
+            if nr < 0 || nr >= h as i64 || nc < 0 || nc >= w as i64 {
+                continue;
+            }
+            let y = (nr as usize) * w + nc as usize;
+            if free(y) && !wall_between(puzzle, w, x, y) {
+                out.push(y);
+            }
+        }
+    };
+    // label: 0 unvisited-free, 1 reachable-from-res_cell, 2 pocket
+    let mut lab = vec![0u8; n];
+    let mut nb = Vec::with_capacity(4);
+    let mut stack = vec![res_cell];
+    lab[res_cell] = 1;
+    let mut r_cells = 0usize;
+    let mut r_need = 0usize;
+    while let Some(x) = stack.pop() {
+        r_cells += 1;
+        for &j in remaining {
+            let (sc, sz) = seeds[order[j]];
+            if sc == x {
+                r_need += sz;
+            }
+        }
+        neigh(x, &mut nb);
+        for &y in &nb {
+            if lab[y] == 0 {
+                lab[y] = 1;
+                stack.push(y);
+            }
+        }
+    }
+    // Exact account over R (the `res_cell` component): every R cell ends up
+    // either in the residue (`res_size` cells) or in a still-unplaced island
+    // seeded inside R (`r_need` cells), and island cells are chosen from free
+    // cells only — so `|R| == res_size + r_need` must hold at *every* node of
+    // a solution prefix, not just at the leaf.  This is the sharp mid-search
+    // prune: the 0308 tree dies at depth 7-8 on `|R|` overshoot long before
+    // the leaf residue check.
+    if r_cells != res_size + r_need {
+        return false;
+    }
+    for x in 0..n {
+        if lab[x] != 0 || !free(x) {
+            continue;
+        }
+        // New pocket: count cells and the island area its own seeds demand.
+        let mut cells = 0usize;
+        let mut need = 0usize;
+        lab[x] = 2;
+        let mut stack2 = vec![x];
+        while let Some(y) = stack2.pop() {
+            cells += 1;
+            for &j in remaining {
+                let (sc, sz) = seeds[order[j]];
+                if sc == y {
+                    need += sz;
+                }
+            }
+            neigh(y, &mut nb);
+            for &z in &nb {
+                if lab[z] == 0 {
+                    lab[z] = 2;
+                    stack2.push(z);
+                }
+            }
+        }
+        if cells != need {
+            return false;
+        }
+    }
+    true
+}
+
 fn res_roomy(
     puzzle: &Puzzle,
     w: usize,
@@ -4022,10 +4765,25 @@ fn solve_number_cover(
     let mut remaining: Vec<usize> = (0..order.len()).collect();
     let mut placed: Vec<(usize, Mask)> = Vec::new();
     let mut active: Vec<Vec<bool>> = cands.iter().map(|v| vec![true; v.len()]).collect();
+    // Value ordering (doc 07 修订11 / 0308 开项: "值序待优化").  The candidate
+    // generator is complete for the official assignment (COVER_TRUTH confirms
+    // every truth region is in its seed's list) — the search just walks the
+    // 200-candidate lists in generation order and the truth sits deep.
+    // `COVER_ORDER` picks a static value order:
+    //   * `rare` — ascending Σ owners(cell): prefer placements that consume
+    //     "prize" cells few other candidates can cover (fail-first on cells);
+    //   * `mcv`  — descending count of other regions' candidates the
+    //     placement overlaps (most-constraining value first);
+    //   * `wall` — descending number of sides against pre-drawn walls (tight
+    //     placements first: they cannot shift, loose ones can).
+    // Generation order is kept for any other value (and as the safe default).
+    apply_cover_static_order(puzzle, w, h, n, &order, &mut cands, &seeds);
+    cover_truth_rank_walk(puzzle, w, h, n, &order, &cands, &seeds, res_cell, res_size, diff_mode);
     let mut nodes = 0usize;
     if std::env::var("COVER_DEBUG").is_ok() {
         eprintln!("cover: total cands {:?}", cands.iter().map(|v| v.len()).collect::<Vec<_>>());
     }
+    cover_depth_hist_reset();
     if !cover_dfs(
         puzzle,
         w,
@@ -4045,9 +4803,21 @@ fn solve_number_cover(
         None,
         None,
         false,
+        std::env::var("COVER_CHILD_CAP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1024),
     ) {
         if std::env::var("COVER_DEBUG").is_ok() {
             eprintln!("cover: FAIL nodes={nodes}");
+            let hist = cover_depth_hist_snapshot();
+            let prof: Vec<(usize, usize)> = hist
+                .iter()
+                .enumerate()
+                .filter(|(_, &c)| c > 0)
+                .map(|(d, &c)| (d, c))
+                .collect();
+            eprintln!("cover: depth-hist {prof:?}");
         }
         return None;
     }
@@ -4533,12 +5303,29 @@ fn cover_dfs(
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
     tail: Option<(usize, usize)>,
     full_cover: bool,
+    child_cap: usize,
 ) -> bool {
     const NODE_CAP: usize = 20_000_000;
+    let my_start = *nodes;
     if *nodes >= NODE_CAP || crate::clock::Instant::now() >= deadline {
         return false;
     }
     *nodes += 1;
+    // Iterative broadening (doc 07 修订11): `child_cap` bounds how many nodes
+    // this invocation's *subtree* may visit.  A giant dead sibling subtree can
+    // no longer starve the shallow solution sitting behind it (0308: the first
+    // root candidate's 800k-node dead subtree burned the whole budget while the
+    // truth sat at rank 2).  Parents retry truncated children at 8× the cap, so
+    // the union of passes is complete.  `0` disables the bound.
+    if child_cap > 0 && *nodes - my_start >= child_cap {
+        return false;
+    }
+    // Depth profile (COVER_DEBUG): where the tree actually grows.  Bounded
+    // histogram, printed once when the cover search ends.
+    if std::env::var("COVER_DEBUG").is_ok() {
+        let depth = (order.len() - remaining.len()).min(31);
+        COVER_DEPTH_HIST.with(|h| h.borrow_mut()[depth] += 1);
+    }
     // Base propagation at every node (root included).
     let rem_snapshot = remaining.clone();
     let placed_snapshot = placed.len();
@@ -4548,6 +5335,17 @@ fn cover_dfs(
         res_cell, res_size, diff_mode,
     )
     .is_none()
+    {
+        return false;
+    }
+    // Pocket exact-fill (see `pocket_ok`): dies at the first mis-sized
+    // unreachable pocket instead of at the leaf residue check.  Gated on
+    // `tail.is_none()`: a deferred tail region is carved from the leftover at
+    // the very end (`find_tail_set`), so its cells are not in `remaining` and
+    // a pocket that the tail would legitimately fill must not be declared
+    // dead (the gate that regressed 0289's tail-slot cover).
+    if tail.is_none()
+        && !pocket_ok(puzzle, w, h, n, placed, remaining, order, seeds, res_cell, res_size)
     {
         return false;
     }
@@ -4594,10 +5392,9 @@ fn cover_dfs(
             }
         }
         let (k, _) = best.unwrap();
+        // Collect the viable candidates first, then decide their visit order.
+        let mut viable: Vec<usize> = Vec::new();
         for ci in 0..cands[k].len() {
-            if crate::clock::Instant::now() >= deadline {
-                break;
-            }
             if !active[k][ci] {
                 continue;
             }
@@ -4607,20 +5404,53 @@ fn cover_dfs(
             if !res_roomy(puzzle, w, h, n, placed, res_cell, res_size, &cands[k][ci]) {
                 continue;
             }
-            let mut rem2 = remaining.clone();
-            rem2.retain(|&x| x != k);
-            let mut placed2 = placed.clone();
-            placed2.push((order[k], cands[k][ci].mask));
-            let mut active2 = active.clone();
-            active2[k][ci] = true; // keep chosen visible for compat of others
-            if cover_dfs(
-                puzzle, w, h, n, &mut rem2, order, cands, seeds, res_cell, res_size,
-                diff_mode, &mut placed2, &mut active2, nodes, deadline, sym, tail, full_cover,
-            ) {
-                *placed = placed2;
-                *remaining = rem2;
-                return true;
+            viable.push(ci);
+        }
+        let mut ordered = probe_order_cover_candidates(
+            puzzle, w, h, n, k, remaining, order, cands, seeds, &viable, active,
+            res_cell, res_size, diff_mode, placed, deadline,
+        );
+        // Visit in order with iterative broadening (see `child_cap` on the
+        // entry): each child's subtree is bounded by `cap_now` nodes; children
+        // truncated at the cap are retried at 8× (final round unlimited), so
+        // no giant dead sibling subtree can starve a shallow solution.
+        let mut pending = ordered;
+        let mut cap_now = child_cap;
+        loop {
+            let mut truncated: Vec<usize> = Vec::new();
+            for &ci in &pending {
+                if crate::clock::Instant::now() >= deadline {
+                    break;
+                }
+                let before = *nodes;
+                let mut rem2 = remaining.clone();
+                rem2.retain(|&x| x != k);
+                let mut placed2 = placed.clone();
+                placed2.push((order[k], cands[k][ci].mask));
+                let mut active2 = active.clone();
+                active2[k][ci] = true; // keep chosen visible for compat of others
+                if cover_dfs(
+                    puzzle, w, h, n, &mut rem2, order, cands, seeds, res_cell, res_size,
+                    diff_mode, &mut placed2, &mut active2, nodes, deadline, sym, tail, full_cover,
+                    cap_now,
+                ) {
+                    *placed = placed2;
+                    *remaining = rem2;
+                    return true;
+                }
+                if cap_now > 0 && *nodes - before >= cap_now {
+                    truncated.push(ci);
+                }
             }
+            if truncated.is_empty() {
+                break;
+            }
+            pending = truncated;
+            cap_now = if cap_now == 0 || cap_now > usize::MAX / 8 {
+                0
+            } else {
+                cap_now * 8
+            };
         }
         false
     })();
@@ -4969,6 +5799,199 @@ fn assemble_attempt_lists(
     Some((order, cands))
 }
 
+/// Phase A (matching-led slack families) + Phase B/B2/B3 (size-DFS families
+/// in at_min / cost / reversed order) — extracted from solve_rose_cover for
+/// complexity.  Three orderings, one queue (doc 07 「分相排序」).
+#[allow(clippy::too_many_arguments)]
+fn run_rose_cover_phases(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    total: usize,
+    min_sz: usize,
+    attempts: &[((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)],
+    cache: &std::collections::HashMap<(usize, usize), Vec<CoverCand>>,
+    sym_of: &std::collections::HashMap<usize, usize>,
+    n_types: usize,
+    diff_mode: bool,
+    deadline: crate::clock::Instant,
+    pair: Option<&PairLb>,
+    anchor_cells: &[usize],
+) -> Option<Vec<crate::types::RegionInfo>> {
+    const DEFER_CAP: usize = 10;
+    let h_ = h;
+    let _ = h_;
+    // Phase A: matching-led tight families (0804 class — the truth sits at
+    // pairing-lb+slack<=2 which the size DFS never reaches in budget).
+    let mut slack_attempts: Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)> =
+        Vec::new();
+    if let Some((lb, _)) = pair.as_ref() {
+        enum_pair_slacks(
+            lb,
+            anchor_cells.len(),
+            total,
+            min_sz,
+            anchor_cells,
+            &cache,
+            DEFER_CAP,
+            &mut slack_attempts,
+            deadline,
+        );
+    }
+    slack_attempts.sort_by_key(|(c, _, _, _)| *c);
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("rose_cover: slack_attempts={}", slack_attempts.len());
+    }
+    let mid = {
+        let now = crate::clock::Instant::now();
+        let t = now + deadline.saturating_duration_since(now) / 2;
+        if t < deadline {
+            t
+        } else {
+            deadline
+        }
+    };
+    if let Some(regions) = run_cover_attempts(
+        puzzle,
+        w,
+        h,
+        n,
+        &slack_attempts,
+        &cache,
+        &sym_of,
+        n_types,
+        diff_mode,
+        mid,
+        pair,
+    ) {
+        return Some(regions);
+    }
+    // Phase B: the enumeration's own order (at_min DESC — 0289 class:
+    // floor islands with big residue/tail lead).
+    let mut out = run_cover_attempts(
+        puzzle,
+        w,
+        h,
+        n,
+        &attempts,
+        &cache,
+        &sym_of,
+        n_types,
+        diff_mode,
+        deadline,
+        pair,
+    );
+    if out.is_none() {
+        // Phase B2: cost-ascending (product of candidate-list lengths).  The
+        // 0838 balanced truth ranks 9140 here vs 16581 in the at_min order
+        // (COVER_TRUTH measured) — still deep for one-attempt enumeration;
+        // the joint size-multiset search is the real fix (open item).
+        let mut by_cost = attempts.to_vec();
+        by_cost.sort_by_key(|((_, _, cost), _, _, _)| *cost);
+        out = run_cover_attempts(
+            puzzle,
+            w,
+            h,
+            n,
+            &by_cost,
+            &cache,
+            &sym_of,
+            n_types,
+            diff_mode,
+            deadline,
+            pair,
+        );
+    }
+    if out.is_none() {
+        // Phase B3: reversed queue (lean-floor families first).  Three
+        // orderings, one queue — doc 07 「分相排序」.
+        let mut rev = attempts.to_vec();
+        rev.reverse();
+        out = run_cover_attempts(
+            puzzle,
+            w,
+            h,
+            n,
+            &rev,
+            &cache,
+            &sym_of,
+            n_types,
+            diff_mode,
+            deadline,
+            pair,
+        );
+    }
+    out
+}
+
+/// COVER_TRUTH membership check for the rose cover assignment enumeration
+/// (extracted from solve_rose_cover for complexity).  A missing member means
+/// the enumeration is incomplete (cap/order) — sorting can never recover it.
+fn rose_cover_truth_report(
+    puzzle: &Puzzle,
+    w: usize,
+    n: usize,
+    anchor_cells: &[usize],
+    seed_cell: &std::collections::HashSet<usize>,
+    attempts: &[((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)],
+) {
+    let _ = n;
+    let Ok(truth_path) = std::env::var("COVER_TRUTH") else {
+        return;
+    };
+    let Ok(text) = std::fs::read_to_string(&truth_path) else {
+        return;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return;
+    };
+    let Some(arr) = v.get("regions").and_then(|r| r.as_array()) else {
+        return;
+    };
+    let mut truth_sz: std::collections::HashMap<usize, usize> = Default::default();
+    for reg in arr {
+        let cells: Vec<usize> = reg
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|cell| {
+                        let pair = cell.as_array()?;
+                        let r = pair.first().and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                        let c = pair.get(1).and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                        Some(r * w + c)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for &x in &cells {
+            if seed_cell.contains(&x) {
+                truth_sz.insert(x, cells.len());
+            }
+        }
+    }
+    let want: Vec<(usize, usize)> = anchor_cells
+        .iter()
+        .map(|&a| (a, *truth_sz.get(&a).unwrap_or(&0)))
+        .collect();
+    let hit = attempts.iter().position(|(_, _, seeds, tail)| {
+        tail.is_none()
+            && seeds.iter().copied().collect::<std::collections::HashSet<_>>()
+                == want.iter().copied().collect::<std::collections::HashSet<_>>()
+    });
+    let mut cost_rank = None;
+    if let Some(h) = hit {
+        let tc = attempts[h].0 .2;
+        cost_rank = Some(attempts.iter().filter(|(k, _, _, _)| k.2 < tc).count());
+    }
+    eprintln!(
+        "rose-cover-truth: anchors={:?} in-attempts={:?} cost-rank={cost_rank:?} (puzzle cells {}) ",
+        want.iter().map(|&(_, s)| s).collect::<Vec<_>>(),
+        hit,
+        puzzle.height * puzzle.width
+    );
+}
+
 /// Close one successful cover attempt: stamp placed regions, capture the
 /// deferred tail via leftover BFS, give the rest to the residue, validate.
 #[allow(clippy::too_many_arguments)]
@@ -5048,7 +6071,7 @@ fn run_cover_attempts(
     deadline: crate::clock::Instant,
     pair: Option<&PairLb>,
 ) -> Option<Vec<crate::types::RegionInfo>> {
-    const RUN_CAP: usize = 3000;
+    const RUN_CAP: usize = 20_000;
     // Partner type (rose pairing filter) — every kept candidate must carry
     // a partner the size matching can still assign to this anchor.
     let ptype = pair.and_then(|(_, pcells)| pcells.first().and_then(|&c| sym_of.get(&c).copied()));
@@ -5121,6 +6144,7 @@ fn run_cover_attempts(
             Some((sym_of, n_types)),
             *tail,
             false,
+            0,
         ) {
             if let Some(regions) = close_attempt(
                 puzzle,
@@ -6058,7 +7082,12 @@ pub(crate) fn solve_rose_cover(
     const DEFER_CAP: usize = 10;
     let h = puzzle.height;
     let m = anchor_cells.len();
-    if m < 2 || m > 12 {
+    // Region-count cap.  12 covered the 0289/0804 class (m ≤ 9); 0838
+    // (non_block + rose, m=14, forced multiset 7×4+7×3) sat just above it and
+    // fell to region_match's single-candidate pipeline.  24 keeps the
+    // all-small enumeration (DEFER_CAP parts) meaningful while bounding the
+    // size-multiset fan-out.
+    if m < 2 || m > 24 {
         return None;
     }
     if std::env::var("COVER_DEBUG").is_ok() {
@@ -6182,68 +7211,13 @@ pub(crate) fn solve_rose_cover(
             attempts.len()
         );
     }
+    rose_cover_truth_report(puzzle, w, n, &anchor_cells, &seed_cell, &attempts);
     if std::env::var("COVER_DEBUG").is_ok() {
         eprintln!("rose_cover: phase enum {:?}", t_enum.elapsed());
     }
-    // Phase A: matching-led tight families (0804 class — the truth sits at
-    // pairing-lb+slack<=2 which the size DFS never reaches in budget).
-    let mut slack_attempts: Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)> =
-        Vec::new();
-    if let Some((lb, _)) = pair.as_ref() {
-        enum_pair_slacks(
-            lb,
-            anchor_cells.len(),
-            total,
-            min_sz,
-            anchor_cells,
-            &cache,
-            DEFER_CAP,
-            &mut slack_attempts,
-            deadline,
-        );
-    }
-    slack_attempts.sort_by_key(|(c, _, _, _)| *c);
-    if std::env::var("COVER_DEBUG").is_ok() {
-        eprintln!("rose_cover: slack_attempts={}", slack_attempts.len());
-    }
-    let mid = {
-        let now = crate::clock::Instant::now();
-        let t = now + deadline.saturating_duration_since(now) / 2;
-        if t < deadline {
-            t
-        } else {
-            deadline
-        }
-    };
-    if let Some(regions) = run_cover_attempts(
-        puzzle,
-        w,
-        h,
-        n,
-        &slack_attempts,
-        &cache,
-        &sym_of,
-        n_types,
-        diff_mode,
-        mid,
-        pair.as_ref(),
-    ) {
-        return Some(regions);
-    }
-    // Phase B: size-DFS families (0289 class — floor islands with big
-    // residue/tail that the matching-led slack cap misses).
-    run_cover_attempts(
-        puzzle,
-        w,
-        h,
-        n,
-        &attempts,
-        &cache,
-        &sym_of,
-        n_types,
-        diff_mode,
-        deadline,
-        pair.as_ref(),
+    run_rose_cover_phases(
+        puzzle, w, h, n, total, min_sz, &attempts, &cache, &sym_of, n_types,
+        diff_mode, deadline, pair.as_ref(), &anchor_cells,
     )
 }
 
@@ -7263,7 +8237,7 @@ mod multi_rem_tests {
         let out = cover_dfs(
             &p, w, h, n, &mut remaining, &(0..m).collect::<Vec<_>>(), &cands, &seeds,
             0, 0, false, &mut placed, &mut active, &mut nodes, deadline,
-            Some((&sym_of, 1)), None, true,
+            Some((&sym_of, 1)), None, true, 0,
         );
         eprintln!("tmp_diag_0317_truth: solved={out} nodes={nodes}");
     }

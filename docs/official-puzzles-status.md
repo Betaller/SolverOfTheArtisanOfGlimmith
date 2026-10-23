@@ -109,6 +109,8 @@
 ---
 
 | 2026-10-22 | rose 配对下界+尾部槽+匹配引导 slack（`804b694`） | `results/bench/20261022_804b694_rose-pairing.txt` | `benchmark_rust_solver.py --timeout 30 -j 6` + solo 复核 best-of | **1212 / 1258** | +3 | Zone1/2/3 满档对比 a63a3e4 档 **0 丢失**。真新解 **0289**（6 区 rose，truth `[15,12,7,5,5,5]` 的 12 格次大区走尾部槽；官方指派直喂 runner 11.7ms 解——先证搜索再修排序）与 **0804**（9 区 rose，8 个 exact-lb 紧致包走匹配引导 slack 枚举，348µs 解）。另 +1 为 0586 上档重试统计口径差。0586/0685/1067 本档 -j6 抖动、solo 复归（非回归）。49-FAIL 池 → 46-FAIL 池。 |
+| 2026-10-23/24 | edge_csp 不等式空转修复 + 断连多组件 + cover m 上限 + retry 口径修复 | `results/tmp/20261023_final.{txt,jsonl}`（全量） | `benchmark_rust_solver.py --timeout 30 -j 6 --retry-timeouts` | **1216 / 1258 raw，1217 best-of**（--retry-timeouts 2× 复测 +1092） | **+5**（1212 → 1217 best-of） | 四笔真新解：**1133**（diff+ineq+range，edge_csp 85-91s）——`narrow_inequality_bounds`「钉死-重建回滚」假进展空转修复（收窄折进 `build_components`，0586 空转 280 万趟实锤，doc 11）；**0928**（diff+different+range）——断连约束图多组件笛卡尔情形枚举（`enum_comp_raw`+乘积+全局残余账，doc 07）；**1130**（15×15 finalboss，aog 33-45s）与 **0932**（aog 40-47s）——预算阶梯内稳定解出（旧档 -j6 争抢下 60s aog 墙线未过，本档复测 3/3 稳）。配套：`--check-solution` 纯校验 CLI + `validate_reason` 命名拒绝（46 官方解全过→证伪「验证器过严」）；`--retry-timeouts` 口径修复（原只认 error 含 timeout，模块级超时的「No solution found」从不复测）；cover m 上限 12→24 + non_block 尺寸地板 3（0838 进 cover 但真解指派排 16581/5 万，逐尝试枚举范式撞墙，开项「联合尺寸多重集搜索」）。0 丢失（0289/0804/0317/0325 等控制组全绿）。42-FAIL 池较 46-FAIL 池少 0928/0932/1130/1133。 |
+
 
 ## 第二部分：变更内容
 
@@ -1245,9 +1247,12 @@ exact-lb 紧致区（尺寸=配对路径下界+2 以内）。四层机制（doc 
   （0317/0325/0833/1333 全绿；0586/0685/1067 -j6 抖动 solo 复归）。
 - `cargo test` 72+8、`pytest` 304、complexity_gate 全过（2 函数拆分
   emit_attempt_leaf/assemble_attempt_lists/close_attempt 过 clippy 认知门）。
-冲 1220 剩 **+8**。残余弹药：0308 覆盖值序、0171 数字分组、0586/0742/0866
-hom-het 形状类、0683/1258/1080 compass 残簇、0912/0928/0930d/1407a 大图
-多组件、1138 m=2+wt。
+冲 1220 剩 **+3**（1217/1258 best-of：1216 raw + 1092 retry 复归）。残余弹药：0308/0838 联合搜索（预物化
+候选+逐尝试范式双双撞墙，正解=尺寸不固定进搜索核）、0171 数字分组、
+0742/0866 hom-het（edge_csp 搜索过慢）、0683/1258/1080 compass 残簇、
+0912/0930d/1407a 大图断连（0928 已破）、1138 m=2+wt、compass WALL 簇
+（0374/0469/0492/0618/0619/1074/1078/1080/1092/1107/1109/1258/1395b
+共 13 题，桥/网关已在、edge_csp 搜索深度不足）。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

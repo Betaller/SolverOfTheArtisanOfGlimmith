@@ -153,11 +153,27 @@ impl<'a> Solver<'a> {
     pub(crate) fn propagate(&mut self) -> Result<bool, ()> {
         // Diagnostic: `EDGE_CSP_SKIP=compass,solitary,probe` disables named
         // propagators so a soundness bug can be bisected without a rebuild.
+        let debug = std::env::var("EDGE_CSP_DEBUG").is_ok();
+        let mut pass: u64 = 0;
         loop {
             if self.check_deadline() {
+                if debug {
+                    eprintln!(
+                        "edge_csp: propagate deadline after {pass} passes, unknown={}",
+                        self.curr_unknown
+                    );
+                }
                 return Err(());
             }
             let mut progress = false;
+            pass += 1;
+            if debug && pass % 1000 == 0 {
+                eprintln!(
+                    "edge_csp: propagate pass={pass} unknown={} changed={}",
+                    self.curr_unknown,
+                    self.changed.len()
+                );
+            }
 
             if (self.rules.bricky || self.rules.loopy) && !csp_skip("bricky") {
                 progress |= self.propagate_bricky_loopy()?;
@@ -670,6 +686,21 @@ impl<'a> Solver<'a> {
                     return Err(());
                 }
             }
+        }
+
+        // Fold inequality chain narrowing into the rebuilt bounds.  The
+        // narrowing mutates `curr_min_area`/`curr_max_area` and pins
+        // `curr_target_area` where min==max, but `build_components` resets all
+        // three from clue-derived defaults — so without this fold-in every
+        // rebuild wipes the narrowing, `narrow_inequality_bounds` re-derives
+        // it, re-pins the same targets and reports progress, and the outer
+        // fixpoint spins to its deadline with zero edge changes (0586: 2.8M
+        // passes, `unknown` stuck at 59).  Re-deriving here makes the state
+        // rebuild-idempotent and the later `propagate_inequality_clues` call
+        // sees its targets already pinned (no spurious progress).
+        let ineq_pairs = self.ineq_pairs(num_comp);
+        if !ineq_pairs.is_empty() {
+            self.narrow_inequality_bounds(&ineq_pairs)?;
         }
 
         // Growth-edge pass: classify Unknown edges between different components.
@@ -1479,6 +1510,34 @@ impl<'a> Solver<'a> {
     /// The narrowing is skipped during failed-literal probing (one fixpoint
     /// per probe × up to 256 probes is pure overhead — it pushed 1131 from a
     /// 2.5s solve past its deadline); the contradiction checks below still run.
+    /// Ordered (smaller, larger) component pairs across Cut inequality clue
+    /// edges — the shared derivation for `narrow_inequality_bounds`, used both
+    /// here and inside `build_components` (fold-in keeps narrowing
+    /// rebuild-idempotent; see the comment there).
+    fn ineq_pairs(&self, num_comp: usize) -> Vec<(usize, usize)> {
+        let mut pairs: Vec<(usize, usize)> = Vec::new();
+        for cl in &self.edge_clues {
+            let smaller_first = match cl.kind {
+                EdgeClueKind::Inequality { smaller_first } => smaller_first,
+                _ => continue,
+            };
+            if self.edges[cl.edge] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(cl.edge);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            pairs.push(if smaller_first { (ci1, ci2) } else { (ci2, ci1) });
+        }
+        pairs
+    }
+
     fn propagate_inequality_clues(&mut self, num_comp: usize) -> Result<bool, ()> {
         let ineq_clues: Vec<(EdgeId, bool)> = self
             .edge_clues
@@ -1490,22 +1549,7 @@ impl<'a> Solver<'a> {
             .collect();
 
         // Component-level ordered pairs across Cut clue edges.
-        let mut pairs: Vec<(usize, usize)> = Vec::new();
-        for &(e, smaller_first) in &ineq_clues {
-            if self.edges[e] != EdgeState::Cut {
-                continue;
-            }
-            let (c1, c2) = self.grid.edge_cells(e);
-            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
-                continue;
-            }
-            let ci1 = self.curr_comp_id[c1];
-            let ci2 = self.curr_comp_id[c2];
-            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
-                continue;
-            }
-            pairs.push(if smaller_first { (ci1, ci2) } else { (ci2, ci1) });
-        }
+        let pairs = self.ineq_pairs(num_comp);
 
         let progress = self.narrow_inequality_bounds(&pairs)?;
 

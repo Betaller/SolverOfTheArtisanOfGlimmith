@@ -5,6 +5,9 @@
 //!   - `rsolver` / `rsolver {file}` : solve one puzzle (single JSON in, solution out).
 //!   - `rsolver --batch`            : read one puzzle JSON per line from stdin, write
 //!                                    one solution JSON per line to stdout.
+//!   - `rsolver --check-solution <regions.json> [puzzle.json]` :
+//!                                    validate an external region assignment and
+//!                                    print `OK` / `REJECTED <check>` (no solving).
 //!
 //! Per-puzzle timeout is controlled by the `RSOLVER_TIMEOUT_MS` env var
 //! (milliseconds, default 30 000).  It is a *unit budget*: each of aog /
@@ -55,7 +58,53 @@ fn resolve_timeout_ms() -> u64 {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let batch = args.iter().any(|a| a == "--batch");
+    // `--check-solution <regions.json> [puzzle.json]`: validate an external
+    // region assignment (no solving) and print `OK` or `REJECTED <check>`.
+    // Puzzle JSON comes from `puzzle.json` when given, else stdin.
+    let check_solution: Option<&String> = args
+        .iter()
+        .position(|a| a == "--check-solution")
+        .and_then(|i| args.get(i + 1));
     let timeout_ms = resolve_timeout_ms();
+
+    if let Some(regions_path) = check_solution {
+        let mut puzzle_input = String::new();
+        // Optional trailing puzzle path sits after the regions path.
+        let puzzle_path = args
+            .iter()
+            .position(|a| a == "--check-solution")
+            .and_then(|i| args.get(i + 2))
+            .filter(|p| !p.starts_with("--"));
+        if let Some(path) = puzzle_path {
+            std::fs::File::open(path)
+                .and_then(|mut f| f.read_to_string(&mut puzzle_input))
+                .unwrap_or_else(|e| {
+                    eprintln!("Error reading puzzle {}: {}", path, e);
+                    std::process::exit(1);
+                });
+        } else {
+            std::io::stdin()
+                .read_to_string(&mut puzzle_input)
+                .unwrap_or_else(|e| {
+                    eprintln!("Error reading stdin: {}", e);
+                    std::process::exit(1);
+                });
+        }
+        let regions_input = std::fs::read_to_string(regions_path).unwrap_or_else(|e| {
+            eprintln!("Error reading regions {}: {}", regions_path, e);
+            std::process::exit(1);
+        });
+        match rsolver::io::check_regions_json(&puzzle_input, &regions_input) {
+            Ok(()) => {
+                println!("OK");
+                std::process::exit(0);
+            }
+            Err(name) => {
+                println!("REJECTED {name}");
+                std::process::exit(2);
+            }
+        }
+    }
 
     let mut input = String::new();
 

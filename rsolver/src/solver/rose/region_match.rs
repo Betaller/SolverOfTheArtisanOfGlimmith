@@ -106,6 +106,7 @@ pub fn generate_all_candidates(
     timeout_ms: u64,
     size_window: (usize, usize),
     force_grow: bool,
+    collect_floor: usize,
 ) -> Vec<CellSet> {
     let h = puzzle.height;
     let w = puzzle.width;
@@ -171,7 +172,7 @@ pub fn generate_all_candidates(
         // `useful_max` (further growth can only be worse).
         let (useful_min, useful_max) = size_window;
         let complete_multi = is_multi && syms == all_required;
-        if complete_multi || !is_multi {
+        if (complete_multi || !is_multi) && current.len() >= collect_floor {
             if !(no_rect && set_is_rectangle(&current, w)) {
                 results.push(current.clone());
             }
@@ -515,6 +516,48 @@ fn enum_area_combos_bounded(
 /// So every complement is run through the full validator and the first one
 /// that passes is returned; if none do, the caller falls through to the
 /// normal search.
+
+/// Cover search fallback: the exact-size DFS generates candidates the BFS
+/// misses.  Only when spans fall short (0975a: max size 12-13, need avg 24).
+#[allow(clippy::too_many_arguments)]
+fn try_cover_fallback(
+    puzzle: &crate::types::Puzzle,
+    w: usize,
+    seeds: &[usize],
+    min_sz: usize,
+    max_sz: usize,
+    total: usize,
+    span_sum: usize,
+    m: usize,
+    start: &Instant,
+    timeout_ms: u64,
+    symbol_types: &[String],
+) -> Option<Vec<crate::types::RegionInfo>> {
+    if span_sum >= total || m < 2 {
+        return None;
+    }
+    let elapsed_ms = start.elapsed().as_millis() as u64;
+    let remaining = timeout_ms.saturating_sub(elapsed_ms);
+    if remaining <= 2000 {
+        return None;
+    }
+    let cover_deadline = *start + std::time::Duration::from_millis(elapsed_ms + remaining);
+    if crate::aog_debug_enabled() {
+        eprintln!(
+            "rose: span_sum={span_sum} < total={total}, trying cover search (remaining={remaining}ms)"
+        );
+    }
+    let g = min_sz.max(symbol_types.len());
+    crate::solver::rose::puzzle_piece_pin::solve_rose_cover(
+        puzzle,
+        w,
+        puzzle.height * w,
+        seeds,
+        g,
+        max_sz.min(total),
+        cover_deadline,
+    )
+}
 fn try_complement_cover(
     cands0: &[CellSet],
     all_positions: &CellSet,
@@ -692,10 +735,20 @@ pub fn solve_by_region_match(
     // with grow-through; puzzles whose spans already cover (0833 class) are
     // left on the cheap pass.
     let mut all_candidates: Vec<Vec<CellSet>> = Vec::new();
+    let mut span_sum = 0usize;
     for pass in 0..2 {
         all_candidates.clear();
         let force_grow = pass == 1;
-        let mut span_sum = 0usize;
+        span_sum = 0;
+        // Collection floor for force-grow: skip tiny complete sets so the
+        // CANDIDATE_CAP budget is spent on cover-relevant sizes.  Floor is
+        // total/(3*m) — low enough for unbalanced covers (0975a truth:
+        // {61,20,15,13,12}) while skipping the size-1..6 explosion.
+        let collect_floor = if force_grow {
+            (total / m.max(1) / 3).max(useful_min).max(1)
+        } else {
+            0
+        };
         for &seed in &seeds {
             let t0 = Instant::now();
             let cands = generate_all_candidates(
@@ -709,6 +762,7 @@ pub fn solve_by_region_match(
                 timeout_ms,
                 (useful_min, useful_max),
                 force_grow,
+                collect_floor,
             );
             if crate::aog_debug_enabled() {
                 eprintln!(
@@ -731,11 +785,8 @@ pub fn solve_by_region_match(
             span_sum += cands.iter().map(|c| c.len()).max().unwrap_or(0);
             all_candidates.push(cands);
         }
-        if span_sum >= total || m > 4 {
-            // Force-grow regeneration is for tiny-m cover-style puzzles
-            // (1406: m=3); on higher-m wide-window puzzles (0833, m=6) the
-            // grown lists explode the candidate cap and starve the combo
-            // pipeline.
+        if span_sum >= total {
+            // Spans already cover the board — no need for force-grow.
             break;
         }
     }
@@ -746,19 +797,18 @@ pub fn solve_by_region_match(
         );
     }
 
-    // m == 2: the complement of a complete seed-0 candidate is the only shape
-    // the second region can take, and the BFS never produces it (see
-    // `try_complement_cover`).  Cheapest possible exact cover — one BFS per
-    // candidate — so try it before any of the expensive pre-filters.
+    // Cover search: the exact-size DFS generates candidates the BFS misses.
+    if let Some(regions) = try_cover_fallback(
+        puzzle, w, &seeds, min_sz, max_sz, total, span_sum, m,
+        start, timeout_ms, symbol_types,
+    ) {
+        return Some(regions);
+    }
+
+    // m == 2: complement cover before the expensive pre-filters.
     if m == 2 {
         if let Some(regions) = try_complement_cover(&all_candidates[0], all_positions, pre, h, w, puzzle) {
-            if crate::aog_debug_enabled() {
-                eprintln!("rose: m==2 complement cover found");
-            }
             return Some(regions);
-        }
-        if crate::aog_debug_enabled() {
-            eprintln!("rose: m==2 complement cover missed");
         }
     }
 
@@ -1308,7 +1358,7 @@ mod tests {
         let symbol_types = vec!["A".to_string()];
         let mut symbol_of = HashMap::new();
         symbol_of.insert(0usize, 0usize);
-        let cands = generate_all_candidates(&puzzle, 0, &all_positions, &pre, &symbol_of, &symbol_types, &crate::clock::Instant::now(), 1_000, (1, 100), false);
+        let cands = generate_all_candidates(&puzzle, 0, &all_positions, &pre, &symbol_of, &symbol_types, &crate::clock::Instant::now(), 1_000, (1, 100), false, 0);
         assert!(!cands.is_empty(), "must return at least the singleton region");
         assert!(cands.iter().all(|c| c.contains(0)), "every candidate contains the seed");
         assert!(cands.len() <= CANDIDATE_CAP);

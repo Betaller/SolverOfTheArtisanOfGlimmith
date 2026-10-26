@@ -689,6 +689,34 @@ cover 门外，落到 region_match 单候选管线（被 non_block 拒收）。�
 不固定进 cover_dfs、带多重性追踪），逐尝试枚举到此为止——与 0308 的
 「值序墙」同根：预物化候选项 + 逐项试的范式在大空间上都会撞墙。
 
+## 大均区类 cover 搜索扩展（0975a/C4-2 类，2026-10-24）
+
+0975a（ring+rose，m=5，真解 {61,20,15,13,12}）/ C4-2（rose，m=6）/
+0844 / 1434 / 0882 等「少量大区」rose 题的 BFS 候选最大尺寸 12-13，
+远小于真解均区 ~24——`span_sum < total`，combo 管线 0 area combos。
+`try_rose_cover` 的门限（avg≤8.5）和 `solve_rose_cover` 的
+`all_small_max` 硬退（全小部多重集为空即退）把这类题挡在 cover 门外。
+
+**改动**：
+1. **`all_small_max` 硬退改 `enum_cap` 分流**：全小类用 DEFER_CAP=10，
+   大均类用 wide 多重集最大部（≤ max_sz）——`gen_cover_cands` 生成
+   精确尺寸候选（DFS）而非 BFS 全尺寸。
+2. **尺寸窗口 `[min_sz, total/m]`**（非 ±m 环绕均值——真解可极不均衡，
+   0975a 非残余尺寸 12/13/15/20 全在 [3,24] 内）。
+3. **`gen_cover_cands` 早剪 + 符号优先**：剩余格 < 缺失类型数 → 剪；
+   frontier 缺失类型符号格排最后（LIFO 先探索）；`cand_cap` 大尺寸 500
+   （每尝试搜索 O(cap^m)，4000^4 不可行）。
+4. **`emit_attempt_leaf` 大类跳过 pairwise 预筛**（独立生成的候选在密集
+   覆盖下必然重叠），排序键改「残余超额降序」（one-big 模式优先）。
+5. **region_match cover 回退**：`span_sum < total` 时调 `solve_rose_cover`
+   （全预算）；`m > 4` force-grow 门限移除（`collect_floor` 防小尺寸爆帽）。
+6. **`enum_pair_slacks` 限 500ms**——pair 下界修正后 slack 空间膨胀，
+   曾把整个 cover 预算烧光（runner 0 起步）。
+
+**现状**：候选生成已到位（hostable 18-19 尺寸/种子），但 runner 每尝试
+~30ms 在 500^4 组合空间内不可达；真解多重集 {12,13,15,20,61} 的排序
+位置 ~35000/50000。需要联合搜索或更强剪枝。
+
 
 ## 断连约束图多组件情形枚举（0912 类，2026-10-23）
 

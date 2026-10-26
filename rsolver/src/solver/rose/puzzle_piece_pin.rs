@@ -4609,6 +4609,67 @@ fn res_roomy(
 
 /// Connected exact-size candidates for one seed (no other seeds, no wall
 /// crossings); mask + dilated touch mask stored up front.
+
+/// Rose regions hold exactly one cell of each symbol type.
+fn rose_exactly_one_each(
+    cells: &[usize],
+    sym_of: &std::collections::HashMap<usize, usize>,
+    n_types: usize,
+) -> bool {
+    let mut counts = vec![0usize; n_types];
+    for &x in cells {
+        if let Some(&t) = sym_of.get(&x) {
+            counts[t] += 1;
+            if counts[t] > 1 {
+                return false;
+            }
+        }
+    }
+    counts.iter().all(|&c| c == 1)
+}
+
+/// Early prune: can this partial set still reach a complete rose region?
+fn rose_can_complete(
+    cur: &[usize],
+    size: usize,
+    sym_of: &std::collections::HashMap<usize, usize>,
+    n_types: usize,
+) -> bool {
+    let remaining = size - cur.len();
+    let mut type_seen = vec![false; n_types];
+    let mut types_present = 0u32;
+    for &x in cur {
+        if let Some(&t) = sym_of.get(&x) {
+            if !type_seen[t] {
+                type_seen[t] = true;
+                types_present += 1;
+            }
+        }
+    }
+    let missing = n_types as u32 - types_present;
+    remaining >= missing as usize
+}
+
+/// Sort frontier cells so missing-type symbol cells are pushed last (LIFO).
+fn prioritize_missing_symbols(
+    mut frontier: Vec<usize>,
+    sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+    cur: &[usize],
+) -> Vec<usize> {
+    if let Some((sym_of, n_types)) = sym {
+        let mut type_seen = vec![false; n_types];
+        for &x in cur {
+            if let Some(&t) = sym_of.get(&x) {
+                type_seen[t] = true;
+            }
+        }
+        frontier.sort_by_key(|&y| match sym_of.get(&y) {
+            Some(&t) if !type_seen[t] => 1u8,
+            _ => 0u8,
+        });
+    }
+    frontier
+}
 fn gen_cover_cands(
     puzzle: &Puzzle,
     w: usize,
@@ -4620,32 +4681,20 @@ fn gen_cover_cands(
     deadline: crate::clock::Instant,
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
 ) -> Vec<CoverCand> {
-    const CAND_CAP: usize = 4_000;
+    // Large regions (size > 10): fewer candidates per list — the per-attempt
+    // cover DFS is O(cap^m) and 4000^4 is intractable.  Small regions keep
+    // the full cap (0289 class needs the breadth).
+    let cand_cap: usize = if size > 10 { 500 } else { 4_000 };
     let mut out: Vec<CoverCand> = Vec::new();
     let mut seen: std::collections::HashSet<Vec<usize>> = Default::default();
     let mut stack: Vec<Vec<usize>> = vec![vec![cell]];
     while let Some(cur) = stack.pop() {
-        if crate::clock::Instant::now() >= deadline || out.len() >= CAND_CAP {
+        if crate::clock::Instant::now() >= deadline || out.len() >= cand_cap {
             break;
         }
         if cur.len() == size {
             if let Some((sym_of, n_types)) = sym {
-                // Rose regions hold exactly one cell of each symbol type.
-                let mut counts = vec![0usize; n_types];
-                let mut ok = true;
-                for &x in &cur {
-                    match sym_of.get(&x) {
-                        Some(&t) => {
-                            counts[t] += 1;
-                            if counts[t] > 1 {
-                                ok = false;
-                                break;
-                            }
-                        }
-                        None => {}
-                    }
-                }
-                if !ok || counts.iter().any(|&c| c != 1) {
+                if !rose_exactly_one_each(&cur, sym_of, n_types) {
                     continue;
                 }
             }
@@ -4657,6 +4706,13 @@ fn gen_cover_cands(
                 touch,
             });
             continue;
+        }
+        // Early prune: if remaining cells < missing symbol types, this branch
+        // can never produce a complete rose region (exactly one of each type).
+        if let Some((sym_of, n_types)) = sym {
+            if !rose_can_complete(&cur, size, sym_of, n_types) {
+                continue;
+            }
         }
         let mut frontier: std::collections::BTreeSet<usize> = Default::default();
         for &x in &cur {
@@ -4691,7 +4747,9 @@ fn gen_cover_cands(
                 frontier.insert(y);
             }
         }
-        for y in frontier {
+        // Push missing-type symbol cells last (stack is LIFO → explored first).
+        let frontier_vec = prioritize_missing_symbols(frontier.into_iter().collect(), sym, &cur);
+        for y in frontier_vec {
             let mut nxt = cur.clone();
             nxt.push(y);
             nxt.sort_unstable();
@@ -5827,6 +5885,14 @@ fn run_rose_cover_phases(
     let mut slack_attempts: Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)> =
         Vec::new();
     if let Some((lb, _)) = pair.as_ref() {
+        let _t_slack = crate::clock::Instant::now();
+        // Bound the slack enumeration — with the pair_lb fix, the smaller
+        // lower bounds explode the slack space and eat the runner's budget.
+        let slack_deadline = {
+            let now = crate::clock::Instant::now();
+            let cap = now + std::time::Duration::from_millis(500);
+            if cap < deadline { cap } else { deadline }
+        };
         enum_pair_slacks(
             lb,
             anchor_cells.len(),
@@ -5836,8 +5902,11 @@ fn run_rose_cover_phases(
             &cache,
             DEFER_CAP,
             &mut slack_attempts,
-            deadline,
+            slack_deadline,
         );
+        if std::env::var("COVER_DEBUG").is_ok() {
+            eprintln!("rose_cover: enum_pair_slacks took {:?}", _t_slack.elapsed());
+        }
     }
     slack_attempts.sort_by_key(|(c, _, _, _)| *c);
     if std::env::var("COVER_DEBUG").is_ok() {
@@ -5864,6 +5933,7 @@ fn run_rose_cover_phases(
         diff_mode,
         mid,
         pair,
+        anchor_cells,
     ) {
         return Some(regions);
     }
@@ -5881,6 +5951,7 @@ fn run_rose_cover_phases(
         diff_mode,
         deadline,
         pair,
+        anchor_cells,
     );
     if out.is_none() {
         // Phase B2: cost-ascending (product of candidate-list lengths).  The
@@ -5901,6 +5972,7 @@ fn run_rose_cover_phases(
             diff_mode,
             deadline,
             pair,
+            anchor_cells,
         );
     }
     if out.is_none() {
@@ -5920,6 +5992,7 @@ fn run_rose_cover_phases(
             diff_mode,
             deadline,
             pair,
+            anchor_cells,
         );
     }
     out
@@ -6070,6 +6143,7 @@ fn run_cover_attempts(
     diff_mode: bool,
     deadline: crate::clock::Instant,
     pair: Option<&PairLb>,
+    anchor_cells: &[usize],
 ) -> Option<Vec<crate::types::RegionInfo>> {
     const RUN_CAP: usize = 20_000;
     // Partner type (rose pairing filter) — every kept candidate must carry
@@ -6089,6 +6163,7 @@ fn run_cover_attempts(
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                     if let Some(arr) = v.get("regions").and_then(|r| r.as_array()) {
                         let mut truth_sz = std::collections::HashSet::new();
+                        let anchor_set: std::collections::HashSet<usize> = anchor_cells.iter().copied().collect();
                         for reg in arr {
                             let cells: Vec<usize> = reg.as_array().map(|list| list.iter().filter_map(|cell| {
                                 let pair = cell.as_array()?;
@@ -6097,7 +6172,7 @@ fn run_cover_attempts(
                                 Some(r * w + c)
                             }).collect()).unwrap_or_default();
                             for &x in &cells {
-                                if sym_of.contains_key(&x) {
+                                if anchor_set.contains(&x) {
                                     truth_sz.insert((x, cells.len()));
                                 }
                             }
@@ -6123,7 +6198,7 @@ fn run_cover_attempts(
         let run_i = run_ord;
         if crate::clock::Instant::now() >= deadline || run_i >= RUN_CAP {
             if std::env::var("COVER_DEBUG").is_ok() {
-                eprintln!("rose_cover: runner stopped at {run_i}");
+                eprintln!("rose_cover: runner stopped at {run_i} (now={:?} deadline={:?})", crate::clock::Instant::now(), deadline);
             }
             break;
         }
@@ -6778,11 +6853,29 @@ fn enumerate_assignments(
         }
     }
     let mut out: Vec<((usize, usize, usize), usize, Vec<(usize, usize)>, Option<(usize, usize)>)> = Vec::new();
-    // Hostable sizes per region.
-    let mut hostable: Vec<Vec<usize>> = Vec::new();
-    for si in 0..m {
-        let mut sizes: Vec<usize> = Vec::new();
-        for sz in min_sz..=defer_cap {
+    // Hostable sizes per region.  Round-robin over sizes so a deadline hit
+    // leaves every seed with candidates for the smaller sizes (sequential
+    // per-seed order starves seeds 1..m when seed 0's large-size DFS is slow).
+    //
+    // For the large class (defer_cap > 10), the non-residue sizes are bounded
+    // by total/m (the residue must be the largest).  The truth can be very
+    // unbalanced (0975a: {61,20,15,13,12}), so the window is [min_sz, total/m]
+    // — not just ±m around the average.
+    let (sz_lo, sz_hi) = if defer_cap > 10 {
+        let avg = total / m.max(1);
+        (min_sz, avg.min(defer_cap))
+    } else {
+        (min_sz, defer_cap)
+    };
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("rose_cover: enum sizes [{sz_lo}, {sz_hi}] (min={min_sz} cap={defer_cap} total={total} m={m})");
+    }
+    let mut hostable: Vec<Vec<usize>> = vec![Vec::new(); m];
+    for sz in sz_lo..=sz_hi {
+        if crate::clock::Instant::now() >= deadline {
+            break;
+        }
+        for si in 0..m {
             let key = (si, sz);
             if !cache.contains_key(&key) {
                 let cands = gen_cover_cands(
@@ -6804,9 +6897,11 @@ fn enumerate_assignments(
             } else if cache[&key].is_empty() {
                 continue;
             }
-            sizes.push(sz);
+            hostable[si].push(sz);
         }
-        hostable.push(sizes);
+    }
+    if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("rose_cover: hostable lists: {:?}", hostable);
     }
     // DFS over residues: for each residue seed, assign sizes to the others.
     for res_seed in 0..m {
@@ -6899,6 +6994,9 @@ fn emit_attempt_leaf(
 ) {
     let res_sz = total.saturating_sub(cur.iter().sum::<usize>());
     if res_sz < min_sz {
+        if std::env::var("COVER_DEBUG").is_ok() {
+            eprintln!("emit: reject res_sz={res_sz} < min={min_sz} cur={cur:?}");
+        }
         return;
     }
     let mut bounds: Vec<usize> = vec![0; m];
@@ -6910,11 +7008,21 @@ fn emit_attempt_leaf(
     // residue-smaller-than-tail/placed decompositions (the cheap noisy
     // family) keeps solutions reachable.
     if (0..m).any(|i| i != res_seed && cur[i] > res_sz) {
+        if std::env::var("COVER_DEBUG").is_ok() {
+            eprintln!("emit: reject residue-not-max res={res_sz} cur={cur:?}");
+        }
         return;
     }
-    if let Some((lb, _)) = pair {
-        if !pair_match_ok(lb, &bounds) {
-            return;
+    // Pair matching: skip for the large class — the bounds are computed for
+    // small regions and reject everything when regions are large.
+    if defer_cap <= 10 {
+        if let Some((lb, _)) = pair {
+            if !pair_match_ok(lb, &bounds) {
+                if std::env::var("COVER_DEBUG").is_ok() {
+                    eprintln!("emit: reject pair_match bounds={bounds:?}");
+                }
+                return;
+            }
         }
     }
     // assemble the attempt: seeds + tail + raw list cost
@@ -6931,6 +7039,9 @@ fn emit_attempt_leaf(
         } else {
             let cl = cache.get(&(i, sz)).map(|v| v.len()).unwrap_or(0);
             if cl == 0 {
+                if std::env::var("COVER_DEBUG").is_ok() {
+                    eprintln!("emit: reject empty-cache seed={i} sz={sz}");
+                }
                 return;
             }
             cost = cost.saturating_mul(cl.max(1));
@@ -6940,13 +7051,40 @@ fn emit_attempt_leaf(
         .filter(|&i| i != res_seed && Some((i, seeds[i].1)) != tail)
         .map(|i| (i, seeds[i].1))
         .collect();
-    if attempt_pairwise_ok(cache, &seeds, &small, false) {
+    // Pairwise disjointness screen: for dense covers (large-class, regions
+    // filling the board) independently-generated candidates always overlap,
+    // so the screen rejects everything.  Skip it there and let the runner
+    // find the actual disjoint cover.
+    let pairwise_ok = if defer_cap > 10 {
+        true
+    } else {
+        attempt_pairwise_ok(cache, &seeds, &small, false)
+    };
+    if pairwise_ok {
         let (max_ex, _) = pair
             .map(|(lb, _)| pair_min_max_excess(lb, &bounds))
             .unwrap_or((0, Vec::new()));
         // Floor islands (0289's three size-5s) lead the DFS list order.
+        // For the large class, prefer "one big residue" patterns (the truth
+        // is often unbalanced — 0975a: {61,20,15,13,12}).
         let at_min = bounds.iter().filter(|&&s| s == min_sz).count();
-        out.push(((usize::MAX - at_min, max_ex, cost), res_seed, seeds, tail));
+        let sort_key = if defer_cap > 10 {
+            let max_other = bounds
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != res_seed)
+                .map(|(_, &s)| s)
+                .max()
+                .unwrap_or(0);
+            let residue_excess = res_sz.saturating_sub(max_other);
+            // Higher excess first (one-big pattern), then lower cost.
+            (usize::MAX - residue_excess, max_ex, cost)
+        } else {
+            (usize::MAX - at_min, max_ex, cost)
+        };
+        out.push((sort_key, res_seed, seeds, tail));
+    } else if std::env::var("COVER_DEBUG").is_ok() {
+        eprintln!("emit: reject pairwise seeds={seeds:?}");
     }
 }
 
@@ -7017,7 +7155,10 @@ fn assign_dfs(
                 bounds.push(ub.min(reach[i]));
             }
         }
-        if !pair_match_ok(lb, &bounds) {
+        if defer_cap <= 10 && !pair_match_ok(lb, &bounds) {
+            if std::env::var("COVER_DEBUG").is_ok() {
+                eprintln!("assign_dfs: pair_match prune k={k} bounds={bounds:?}");
+            }
             return;
         }
     }
@@ -7178,9 +7319,24 @@ pub(crate) fn solve_rose_cover(
         .iter()
         .map(|p| p.last().copied().unwrap_or(0))
         .max();
-    if all_small_max.is_none() {
-        return None;
-    }
+    // Enum cap: the small class uses DEFER_CAP (all regions ≤ 10 cells); the
+    // large class (all regions > DEFER_CAP, e.g. 0975a avg=24) needs the wide
+    // multisets' max part so `gen_cover_cands` produces exact-size candidates
+    // the BFS misses.
+    let enum_cap: usize = match all_small_max {
+        Some(_) => DEFER_CAP,
+        None => {
+            let wide_max = multisets
+                .iter()
+                .map(|p| p.last().copied().unwrap_or(0))
+                .max()
+                .unwrap_or(0);
+            if wide_max < min_sz {
+                return None;
+            }
+            wide_max.min(max_sz)
+        }
+    };
     let diff_mode = puzzle.rules.iter().any(|r| r.ctype == "differentiation");
     // Full-cover whenever an all-small space exists (0317/0325 — the truth
     // lives there even when the wide space is mixed).  0289/0804 mixed-class
@@ -7219,12 +7375,20 @@ pub(crate) fn solve_rose_cover(
     let t_enum = crate::clock::Instant::now();
     // The assignment enumeration must never starve the runner: give it at
     // most a third of the remaining cover budget (0804's m=9 tree walked
-    // straight into the deadline and the runner started at zero).
+    // straight into the deadline and the runner started at zero).  The large
+    // class (enum_cap > DEFER_CAP) needs more time — `gen_cover_cands` for
+    // size 20+ is much slower than for size ≤ 10.
     let enum_deadline = {
         let now = crate::clock::Instant::now();
-        let third = now + deadline.saturating_duration_since(now) / 3;
-        let halfsec = now + std::time::Duration::from_millis(500);
-        let t = if third < halfsec { third } else { halfsec };
+        let remaining = deadline.saturating_duration_since(now);
+        let (frac, cap_ms) = if enum_cap > DEFER_CAP {
+            (2u32, 3000u64) // large class: up to half the budget, cap 3s
+        } else {
+            (3u32, 500u64) // small class: one third, cap 500ms
+        };
+        let share = now + remaining / frac;
+        let cap = now + std::time::Duration::from_millis(cap_ms);
+        let t = if share < cap { share } else { cap };
         if t < deadline {
             t
         } else {
@@ -7242,7 +7406,7 @@ pub(crate) fn solve_rose_cover(
         &seed_cell,
         &mut cache,
         min_sz,
-        DEFER_CAP,
+        enum_cap,
         shape_limited,
         enum_deadline,
         pair.as_ref(),
@@ -7258,6 +7422,7 @@ pub(crate) fn solve_rose_cover(
     rose_cover_truth_report(puzzle, w, n, &anchor_cells, &seed_cell, &attempts);
     if std::env::var("COVER_DEBUG").is_ok() {
         eprintln!("rose_cover: phase enum {:?}", t_enum.elapsed());
+        eprintln!("rose_cover: before runner, deadline={:?} now={:?}", deadline, crate::clock::Instant::now());
     }
     run_rose_cover_phases(
         puzzle, w, h, n, total, min_sz, &attempts, &cache, &sym_of, n_types,
@@ -8394,6 +8559,7 @@ mod multi_rem_tests {
             false,
             deadline,
             pair.as_ref(),
+            &[],
         );
         eprintln!(
             "tmp_diag_0289_truth: solved={} in {:?}",
@@ -8505,6 +8671,7 @@ mod multi_rem_tests {
             false,
             deadline,
             pair.as_ref(),
+            &[],
         );
         eprintln!(
             "tmp_diag_0804_truth: solved={} in {:?}",

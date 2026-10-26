@@ -4684,7 +4684,7 @@ fn gen_cover_cands(
     // Large regions (size > 10): fewer candidates per list — the per-attempt
     // cover DFS is O(cap^m) and 4000^4 is intractable.  Small regions keep
     // the full cap (0289 class needs the breadth).
-    let cand_cap: usize = if size > 10 { 500 } else { 4_000 };
+    let cand_cap: usize = if size > 10 { 100 } else { 4_000 };
     let mut out: Vec<CoverCand> = Vec::new();
     let mut seen: std::collections::HashSet<Vec<usize>> = Default::default();
     let mut stack: Vec<Vec<usize>> = vec![vec![cell]];

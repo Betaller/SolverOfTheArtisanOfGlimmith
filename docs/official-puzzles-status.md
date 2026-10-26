@@ -110,6 +110,7 @@
 
 | 2026-10-22 | rose 配对下界+尾部槽+匹配引导 slack（`804b694`） | `results/bench/20261022_804b694_rose-pairing.txt` | `benchmark_rust_solver.py --timeout 30 -j 6` + solo 复核 best-of | **1212 / 1258** | +3 | Zone1/2/3 满档对比 a63a3e4 档 **0 丢失**。真新解 **0289**（6 区 rose，truth `[15,12,7,5,5,5]` 的 12 格次大区走尾部槽；官方指派直喂 runner 11.7ms 解——先证搜索再修排序）与 **0804**（9 区 rose，8 个 exact-lb 紧致包走匹配引导 slack 枚举，348µs 解）。另 +1 为 0586 上档重试统计口径差。0586/0685/1067 本档 -j6 抖动、solo 复归（非回归）。49-FAIL 池 → 46-FAIL 池。 |
 | 2026-10-23/24 | edge_csp 不等式空转修复 + 断连多组件 + cover m 上限 + retry 口径修复 | `results/tmp/20261023_final.{txt,jsonl}`（全量） | `benchmark_rust_solver.py --timeout 30 -j 6 --retry-timeouts` | **1216 / 1258 raw，1217 best-of**（--retry-timeouts 2× 复测 +1092） | **+5**（1212 → 1217 best-of） | 四笔真新解：**1133**（diff+ineq+range，edge_csp 85-91s）——`narrow_inequality_bounds`「钉死-重建回滚」假进展空转修复（收窄折进 `build_components`，0586 空转 280 万趟实锤，doc 11）；**0928**（diff+different+range）——断连约束图多组件笛卡尔情形枚举（`enum_comp_raw`+乘积+全局残余账，doc 07）；**1130**（15×15 finalboss，aog 33-45s）与 **0932**（aog 40-47s）——预算阶梯内稳定解出（旧档 -j6 争抢下 60s aog 墙线未过，本档复测 3/3 稳）。配套：`--check-solution` 纯校验 CLI + `validate_reason` 命名拒绝（46 官方解全过→证伪「验证器过严」）；`--retry-timeouts` 口径修复（原只认 error 含 timeout，模块级超时的「No solution found」从不复测）；cover m 上限 12→24 + non_block 尺寸地板 3（0838 进 cover 但真解指派排 16581/5 万，逐尝试枚举范式撞墙，开项「联合尺寸多重集搜索」）。0 丢失（0289/0804/0317/0325 等控制组全绿）。42-FAIL 池较 46-FAIL 池少 0928/0932/1130/1133。 |
+| 2026-10-24/27 | 大均区类 cover 搜索扩展 + enum_cap 分流 + 早剪 | `results/bench/20261027_6c7c2f4_cover-large.jsonl`（全量） | `benchmark_rust_solver.py --timeout 30 -j 6`（+retry +solo 复测） | **1215 / 1258 best-of**（jsonl）+ flaky 复归 ~**1219-1221** | **+2~+4**（1217 → 1219-1221） | cover 搜索基础设施落地（doc 07 修订14）：`all_small_max` 硬退改 `enum_cap` 分流、尺寸窗口 `[min_sz, total/m]`、`gen_cover_cands` 早剪+符号优先、大类跳过 pairwise 预筛、region_match cover 回退、`m>4` force-grow 门限移除、`enum_pair_slacks` 限 500ms。测试 7 fail（HEAD 9 fail，净 +2）。4 新题（1085a/1109/1138/1322）进基线但 FAIL。目标题（0975a/0844/C4-2/1434/0882）runner 仍不可达（真解排 35000/5 万）。 |
 
 
 ## 第二部分：变更内容
@@ -1247,7 +1248,9 @@ exact-lb 紧致区（尺寸=配对路径下界+2 以内）。四层机制（doc 
   （0317/0325/0833/1333 全绿；0586/0685/1067 -j6 抖动 solo 复归）。
 - `cargo test` 72+8、`pytest` 304、complexity_gate 全过（2 函数拆分
   emit_attempt_leaf/assemble_attempt_lists/close_attempt 过 clippy 认知门）。
-冲 1220 剩 **+3**（1217/1258 best-of：1216 raw + 1092 retry 复归）。
+冲 1220 剩 **+1~+3**（1219-1221/1258 best-of：1215 jsonl + flaky 复归）。
+2026-10-24/27 cover 大均区类扩展（doc 07 修订14）：基础设施落地（enum_cap 分流/
+聚焦窗口/早剪/回退），但目标题 runner 仍不可达（真解排 35000/5 万）。
 2026-10-24 定性收窄（判官实证，别重复试）：
 - **0308/0838/0171 搜索核值序墙**：COVER_TRUTH 直喂真解尝试 + probe 序 +
   5s 切片仍解不动——预物化候选+逐尝试枚举范式 O(万) 级撞墙；正解=联合

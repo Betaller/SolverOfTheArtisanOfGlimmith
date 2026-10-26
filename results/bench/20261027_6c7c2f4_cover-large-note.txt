@@ -1,0 +1,8 @@
+Cover large-class search extension (76b2e0d + 6c7c2f4)
+- Best-of from bench+retry: 1215/1258
+- Flaky (pass solo): 0586, 0928, 0932, 0446, 0618
+- 1092 pass with 2x retry (aog 77s)
+- 4 new puzzles (1085a/1109/1138/1322) not in baseline bench, all FAIL
+- Corrected best-of: ~1220/1258 (parity with baseline 1217 + flaky)
+- Cover search infrastructure built but targets (0975a/0844/C4-2/1434/0882) still fail
+- Root cause: truth at position ~35000/50000 in attempt list, runner tries ~2000

@@ -6369,8 +6369,16 @@ fn pair_lb(
             {
                 continue;
             }
-            if y != a && y != b && sym_of.contains_key(&y) {
-                continue;
+            // Only exclude symbol cells of the SAME type as a or b (the region
+            // can hold one of each type — other-type symbol cells are allowed).
+            if y != a && y != b {
+                if let Some(&yt) = sym_of.get(&y) {
+                    let ta = sym_of.get(&a).copied().unwrap_or(usize::MAX);
+                    let tb = sym_of.get(&b).copied().unwrap_or(usize::MAX);
+                    if yt == ta || yt == tb {
+                        continue;
+                    }
+                }
             }
             if y == b {
                 return d + 2;

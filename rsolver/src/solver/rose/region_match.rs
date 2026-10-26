@@ -572,12 +572,13 @@ fn try_cover_after_combos(
     symbol_types: &[String],
 ) -> Option<Vec<crate::types::RegionInfo>> {
     let remaining = deadline.saturating_duration_since(Instant::now()).as_millis() as u64;
-    if remaining <= 2000 {
-        return None;
-    }
+    // Guarantee at least 10s for the cover search — the combo pipeline may
+    // exhaust most of the budget but the cover needs time for the runner.
+    let cover_budget = remaining.max(10_000);
+    let cover_deadline = Instant::now() + std::time::Duration::from_millis(cover_budget);
     let g = min_sz.max(symbol_types.len());
     if crate::aog_debug_enabled() {
-        eprintln!("rose: combo pipeline failed, trying cover fallback (remaining={remaining}ms)");
+        eprintln!("rose: combo failed, cover fallback (remaining={remaining}ms budget={cover_budget}ms)");
     }
     crate::solver::rose::puzzle_piece_pin::solve_rose_cover(
         puzzle,
@@ -586,7 +587,7 @@ fn try_cover_after_combos(
         seeds,
         g,
         max_sz.min(total),
-        deadline,
+        cover_deadline,
     )
 }
 fn try_complement_cover(

@@ -558,6 +558,37 @@ fn try_cover_fallback(
         cover_deadline,
     )
 }
+
+/// Cover search fallback after the combo pipeline fails.
+fn try_cover_after_combos(
+    puzzle: &crate::types::Puzzle,
+    w: usize,
+    seeds: &[usize],
+    min_sz: usize,
+    max_sz: usize,
+    total: usize,
+    m: usize,
+    deadline: Instant,
+    symbol_types: &[String],
+) -> Option<Vec<crate::types::RegionInfo>> {
+    let remaining = deadline.saturating_duration_since(Instant::now()).as_millis() as u64;
+    if remaining <= 2000 {
+        return None;
+    }
+    let g = min_sz.max(symbol_types.len());
+    if crate::aog_debug_enabled() {
+        eprintln!("rose: combo pipeline failed, trying cover fallback (remaining={remaining}ms)");
+    }
+    crate::solver::rose::puzzle_piece_pin::solve_rose_cover(
+        puzzle,
+        w,
+        puzzle.height * w,
+        seeds,
+        g,
+        max_sz.min(total),
+        deadline,
+    )
+}
 fn try_complement_cover(
     cands0: &[CellSet],
     all_positions: &CellSet,
@@ -901,7 +932,10 @@ pub fn solve_by_region_match(
         );
     }
 
-    try_combos(&combos, &candidates_by_size, all_positions, total, h, w, pre, m, deadline, puzzle)
+    if let Some(regions) = try_combos(&combos, &candidates_by_size, all_positions, total, h, w, pre, m, deadline, puzzle) {
+        return Some(regions);
+    }
+    try_cover_after_combos(puzzle, w, &seeds, min_sz, max_sz, total, m, deadline, symbol_types)
 }
 
 /// Pick the most-constrained symbol type (fewest cells in `all_positions`).

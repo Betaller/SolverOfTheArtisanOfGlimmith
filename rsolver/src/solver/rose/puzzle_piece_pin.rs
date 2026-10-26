@@ -4684,7 +4684,7 @@ fn gen_cover_cands(
     // Large regions (size > 10): fewer candidates per list — the per-attempt
     // cover DFS is O(cap^m) and 4000^4 is intractable.  Small regions keep
     // the full cap (0289 class needs the breadth).
-    let cand_cap: usize = if size > 10 { 100 } else { 4_000 };
+    let cand_cap: usize = if size > 10 { 500 } else { 4_000 };
     let mut out: Vec<CoverCand> = Vec::new();
     let mut seen: std::collections::HashSet<Vec<usize>> = Default::default();
     let mut stack: Vec<Vec<usize>> = vec![vec![cell]];
@@ -6145,7 +6145,7 @@ fn run_cover_attempts(
     pair: Option<&PairLb>,
     anchor_cells: &[usize],
 ) -> Option<Vec<crate::types::RegionInfo>> {
-    const RUN_CAP: usize = 20_000;
+    const RUN_CAP: usize = 100_000;
     // Partner type (rose pairing filter) — every kept candidate must carry
     // a partner the size matching can still assign to this anchor.
     let ptype = pair.and_then(|(_, pcells)| pcells.first().and_then(|&c| sym_of.get(&c).copied()));
@@ -7069,6 +7069,7 @@ fn emit_attempt_leaf(
         // is often unbalanced — 0975a: {61,20,15,13,12}).
         let at_min = bounds.iter().filter(|&&s| s == min_sz).count();
         let sort_key = if defer_cap > 10 {
+            // Tighter pairing first (lower max_ex), then one-big residue.
             let max_other = bounds
                 .iter()
                 .enumerate()
@@ -7077,8 +7078,7 @@ fn emit_attempt_leaf(
                 .max()
                 .unwrap_or(0);
             let residue_excess = res_sz.saturating_sub(max_other);
-            // Higher excess first (one-big pattern), then lower cost.
-            (usize::MAX - residue_excess, max_ex, cost)
+            (max_ex, usize::MAX - residue_excess, cost)
         } else {
             (usize::MAX - at_min, max_ex, cost)
         };

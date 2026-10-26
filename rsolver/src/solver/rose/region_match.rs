@@ -13,7 +13,7 @@ use crate::types::Puzzle;
 
 use super::cells::{CellSet, PreBoundaries};
 
-pub const CANDIDATE_CAP: usize = 20_000;
+pub const CANDIDATE_CAP: usize = 50_000;
 pub const MAX_CANDIDATE_CELLS: usize = 100;
 pub const PER_COMBO_TIMEOUT_MS: u64 = 1_000;
 /// Hard cap on the area-combo enumeration (`enum_area_combos_bounded`). For

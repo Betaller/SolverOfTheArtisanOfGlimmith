@@ -1,0 +1,13 @@
+edge_csp 不等式空转修复 + 断连多组件 + cover m 上限批基准（2026-10-23/24，744b6a9）
+
+范围: 全量 1258，口径 --timeout 30 -j 6 --retry-timeouts（2× 复测，solo）。
+结论: **1216 / 1258 raw，1217 best-of（46 FAIL → 42 FAIL raw，best-of 41）**，
+     较 804b694 档 1212 **+5**。
+新解: 1133（不等式空转修复，edge_csp）、0928（断连多组件，rose/aog 57s）、
+     1130/0932（aog 稳定化 33/40s）、1092（2× retry 复归，aog 64.5s）。
+零丢失: 0289/0804/0317/0325 控制组 solo 全绿（0289 在负载下 slack 枚举
+     500ms 预算抖动，需无争抢环境复核——已知负载敏感）。
+工具: --check-solution CLI、validate_reason、EDGE_CSP_DEBUG pass 计数、
+     COVER_TRUTH 判官（membership/cost-rank/rank-walk）、retry 口径修复。
+开项: 0308/0838 联合尺寸多重集搜索（逐尝试枚举范式撞墙）、0171 数字分组、
+     hom-het 0742/0866、compass WALL 簇 13 题、1138 m=2+wt。

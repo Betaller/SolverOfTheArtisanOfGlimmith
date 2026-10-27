@@ -12,6 +12,15 @@ use crate::shapes::{collect_pool_shapes, dihedral_key, is_rectangle, rose_symbol
 use crate::types::*;
 
 pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
+    validate_reason(puzzle, regions).is_ok()
+}
+
+/// Named-rejection variant of [`validate`]: returns the first failing check's
+/// name instead of a bare `false`, so diagnostics can say *which* gate rejected
+/// a candidate (structural gates are `assign` / `connectivity` /
+/// `pre-boundary`; rule gates are the rule `ctype`).  Used by the
+/// `rsolver --check-solution` CLI and by `VALIDATE_DEBUG` tracing.
+pub fn validate_reason(puzzle: &Puzzle, regions: &[RegionInfo]) -> Result<(), &'static str> {
     let h = puzzle.height;
     let w = puzzle.width;
 
@@ -35,7 +44,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                 }
             }
             if !found {
-                return false; // unassigned fillable cell
+                return Err("assign"); // unassigned fillable cell
             }
         }
     }
@@ -43,7 +52,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     // Connectivity.
     for cells in by_rid.values() {
         if !is_connected(cells, h, w) {
-            return false;
+            return Err("connectivity");
         }
     }
 
@@ -54,7 +63,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                 let a = region_of(&cell_to_rid, r, c, w);
                 let b = region_of(&cell_to_rid, r, c + 1, w);
                 if a.is_some() && b.is_some() && a == b {
-                    return false;
+                    return Err("pre-boundary");
                 }
             }
         }
@@ -65,7 +74,7 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
                 let a = region_of(&cell_to_rid, r, c, w);
                 let b = region_of(&cell_to_rid, r + 1, c, w);
                 if a.is_some() && b.is_some() && a == b {
-                    return false;
+                    return Err("pre-boundary");
                 }
             }
         }
@@ -88,10 +97,18 @@ pub fn validate(puzzle: &Puzzle, regions: &[RegionInfo]) -> bool {
     };
     for rule in &puzzle.rules {
         if !ctx.dispatch(rule) {
-            return false;
+            return Err(leak_rule_name(&rule.ctype));
         }
     }
-    true
+    Ok(())
+}
+
+/// Rule `ctype`s come from parsed JSON and outlive the caller's `Puzzle` only
+/// by accident of arena lifetime; the diagnostic path needs a `&'static str`
+/// for `validate_reason`'s error type.  Interning is fine here — this is only
+/// reached on the rejection path (never in a search hot loop).
+fn leak_rule_name(ctype: &str) -> &'static str {
+    Box::leak(ctype.to_string().into_boxed_str())
 }
 
 /// Shared, borrow-free view of the data `validate` needs, so each rule check can

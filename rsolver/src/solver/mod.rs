@@ -16,6 +16,67 @@ use crate::types::*;
 use std::collections::HashMap;
 use crate::clock::Instant;
 
+/// Clue/precut density feeding the same-tiling gate: shape/fence patterns,
+/// watchtower vertices, and pre-drawn/constraint edges (the m=2 parity
+/// propagator consumes the latter — 0974 has 46 precuts and no other clue).
+fn st_local_density(puzzle: &Puzzle) -> usize {
+    puzzle
+        .cells
+        .iter()
+        .flatten()
+        .filter(|c| c.shape_pattern.is_some() || c.fence_pattern.is_some())
+        .count()
+        + puzzle
+            .vertices
+            .iter()
+            .flatten()
+            .filter(|v| v.watchtower.is_some())
+            .count()
+        + puzzle
+            .h_edges
+            .iter()
+            .flatten()
+            .filter(|e| e.is_boundary || e.constraint.is_some())
+            .count()
+        + puzzle
+            .v_edges
+            .iter()
+            .flatten()
+            .filter(|e| e.is_boundary || e.constraint.is_some())
+            .count()
+}
+
+/// One self-budgeted chain-module attempt: run `f`, record the attempt, and
+/// return the validated solution when it wins (falling through on miss).
+fn attempt_module(
+    name: &str,
+    puzzle: &Puzzle,
+    start: &Instant,
+    timeout_ms: u64,
+    attempts: &mut Vec<SolverAttempt>,
+    f: impl FnOnce(&Puzzle, Instant) -> Option<Vec<crate::types::RegionInfo>>,
+) -> Option<Solution> {
+    let m_start = Instant::now();
+    let deadline = m_start + std::time::Duration::from_millis(timeout_ms);
+    match f(puzzle, deadline) {
+        Some(regions) => {
+            let elapsed = m_start.elapsed().as_millis() as u64;
+            attempts.push(SolverAttempt {
+                solver: name.into(),
+                status: SolverStatus::Success,
+                elapsed_ms: elapsed,
+                note: None,
+            });
+            Some(build_solution(regions, start, puzzle, name, std::mem::take(attempts)))
+        }
+        None => {
+            let elapsed = m_start.elapsed().as_millis() as u64;
+            record_module_with_elapsed(name, ModuleOutcome::None, deadline, elapsed, attempts);
+            None
+        }
+    }
+}
+
 pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     let start = Instant::now();
 
@@ -61,6 +122,23 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // success it is attached to the returned `Solution`.
     let mut attempts: Vec<SolverAttempt> = Vec::new();
 
+    // Sum-locked number pre-pass (`num-pin`): `check_area` numbers pin exact
+    // region sizes and either sum identity locks the region count (0262 class
+    // distinct-sum; 0308/1138 class all-sum) — the FreeRem endgame collapses
+    // in milliseconds when the lock is the key.  Gated on the lock itself so
+    // it never costs non-number puzzles anything; self-sliced, false-negative
+    // only (falls through to the full chain).
+    if let Some(sol) = attempt_module(
+        "num-pin",
+        puzzle,
+        &start,
+        timeout_ms,
+        &mut attempts,
+        |p, d| rose::puzzle_piece_pin::solve_number_pin(p, p.height * p.width, d),
+    ) {
+        return sol;
+    }
+
     // Compass+solitary joint partition searcher (`compass_part`): runs first
     // and exclusively of `same_tiling` when the puzzle is pure compass+solitary.
     // aog / edge_csp each burn a full unit timing out on the `6-compass-main`
@@ -72,23 +150,18 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // skipped for these puzzles).
     let cp_applicable = compass_part::is_applicable(puzzle);
     if cp_applicable {
-        let cp_start = Instant::now();
-        let cp_deadline = cp_start + std::time::Duration::from_millis(timeout_ms);
-        let outcome = compass_part::solve_compass_part(puzzle, timeout_ms);
-        let elapsed = cp_start.elapsed().as_millis() as u64;
-        match outcome {
-            ModuleOutcome::Solved(regions) => {
-                attempts.push(SolverAttempt {
-                    solver: "compass-part".into(),
-                    status: SolverStatus::Success,
-                    elapsed_ms: elapsed,
-                    note: None,
-                });
-                return build_solution(regions, &start, puzzle, "compass-part", attempts);
-            }
-            other => {
-                record_module_with_elapsed("compass-part", other, cp_deadline, elapsed, &mut attempts)
-            }
+        if let Some(sol) = attempt_module(
+            "compass-part",
+            puzzle,
+            &start,
+            timeout_ms,
+            &mut attempts,
+            |_p, _d| match compass_part::solve_compass_part(puzzle, timeout_ms) {
+                ModuleOutcome::Solved(regions) => Some(regions),
+                _ => None,
+            },
+        ) {
+            return sol;
         }
     }
 
@@ -99,53 +172,22 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // its full unit budget shape-library-exploding on these puzzles (0382:
     // 45s) where this module finishes in milliseconds.  Gated so the other
     // 1200+ puzzles pay nothing and record nothing.
-    let st_local_density = puzzle
-        .cells
-        .iter()
-        .flatten()
-        .filter(|c| c.shape_pattern.is_some() || c.fence_pattern.is_some())
-        .count()
-        + puzzle
-            .vertices
-            .iter()
-            .flatten()
-            .filter(|v| v.watchtower.is_some())
-            .count()
-        // Pre-drawn boundaries / constraint edges feed the m=2 parity
-        // propagator (0974: 46 precuts and no fence/watchtower at all).
-        + puzzle
-            .h_edges
-            .iter()
-            .flatten()
-            .filter(|e| e.is_boundary || e.constraint.is_some())
-            .count()
-        + puzzle
-            .v_edges
-            .iter()
-            .flatten()
-            .filter(|e| e.is_boundary || e.constraint.is_some())
-            .count();
     if !cp_applicable
         && (puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "homogeneous")
-            || st_local_density > 0)
+            || st_local_density(puzzle) > 0)
     {
-        let st_start = Instant::now();
-        let st_deadline = st_start + std::time::Duration::from_millis(timeout_ms);
-        let outcome = same_tiling::solve_same_tiling(puzzle, timeout_ms);
-        let elapsed = st_start.elapsed().as_millis() as u64;
-        match outcome {
-            ModuleOutcome::Solved(regions) => {
-                attempts.push(SolverAttempt {
-                    solver: "same-tiling".into(),
-                    status: SolverStatus::Success,
-                    elapsed_ms: elapsed,
-                    note: None,
-                });
-                return build_solution(regions, &start, puzzle, "same-tiling", attempts);
-            }
-            other => {
-                record_module_with_elapsed("same-tiling", other, st_deadline, elapsed, &mut attempts)
-            }
+        if let Some(sol) = attempt_module(
+            "same-tiling",
+            puzzle,
+            &start,
+            timeout_ms,
+            &mut attempts,
+            |_p, _d| match same_tiling::solve_same_tiling(puzzle, timeout_ms) {
+                ModuleOutcome::Solved(regions) => Some(regions),
+                _ => None,
+            },
+        ) {
+            return sol;
         }
     }
 
@@ -190,6 +232,10 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // full budget on "no size constraint" ones — give it a short budget, then
     // hand the rest to the rose solver.
     let rose_capable = is_rose_capable(puzzle);
+    // Non-rose puzzles give aog the whole unit budget; 2× since 2026-10-21 —
+    // several endgame-class puzzles need 35-60 s of aog (1146: solved at
+    // ~34 s with a 60 s unit, timed out at 30 s).  Rose-capable puzzles keep
+    // the short 20 s rein (aog shape-library-explodes there; rose owns them).
     let aog_budget = if rose_capable {
         AOG_ROSE_BUDGET_MS.min(timeout_ms)
     } else {
@@ -199,8 +245,10 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
         // The aog search is bounded by its deadline thanks to the hot-loop
         // checks (search.rs Fix B/C), so it stops at `timeout_ms` instead of
         // burning the whole subprocess budget; pieces/backtrack still get their
-        // own full unit budget afterwards.
-        timeout_ms
+        // own full unit budget afterwards.  2× since 2026-10-21: several
+        // endgame-class puzzles need 35-60 s of aog (1146: solved at ~34 s
+        // with a 60 s unit, timed out at 30 s).
+        timeout_ms.saturating_mul(2)
     };
     // Diagnostic: `SKIP_AOG=1` bypasses the aog/rose phases so a single
     // downstream solver can be exercised in isolation (mirrors `AOG_ONLY`).
@@ -285,29 +333,15 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // Area-bounded partition (range/precise with an emergent region count):
     // the FreeRem size windows + spawn ceiling carry the search (1351 class —
     // aog/edge_csp both flail on these).  Self-sliced 8 s, false-negative only.
-    {
-        let rr_start = Instant::now();
-        let outcome = match rose::puzzle_piece_pin::solve_range_partition(
-            puzzle,
-            puzzle.height * puzzle.width,
-            rr_start + std::time::Duration::from_millis(timeout_ms),
-        ) {
-            Some(regions) => ModuleOutcome::Solved(regions),
-            None => ModuleOutcome::None,
-        };
-        let elapsed = rr_start.elapsed().as_millis() as u64;
-        match outcome {
-            ModuleOutcome::Solved(regions) => {
-                attempts.push(SolverAttempt {
-                    solver: "range-part".into(),
-                    status: SolverStatus::Success,
-                    elapsed_ms: elapsed,
-                    note: None,
-                });
-                return build_solution(regions, &start, puzzle, "range-part", attempts);
-            }
-            other => record_module_with_elapsed("range-part", other, rr_start + std::time::Duration::from_millis(timeout_ms), elapsed, &mut attempts),
-        }
+    if let Some(sol) = attempt_module(
+        "range-part",
+        puzzle,
+        &start,
+        timeout_ms,
+        &mut attempts,
+        |p, d| rose::puzzle_piece_pin::solve_range_partition(p, p.height * p.width, d),
+    ) {
+        return sol;
     }
 
 
@@ -317,9 +351,16 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     //    Returns a `build_solution`-validated result (non-trusted: the router's
     //    `validate::validate` gate re-checks it), so a wrong answer can't pass.
     if edge_csp::is_edge_csp_capable(puzzle) {
-        let ec_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        // edge_csp is the last real search standing for a large class of
+        // puzzles (aog+rose routinely exhaust before it); under `-j 6` bench
+        // contention its 1.0× unit budget is the binding constraint (1406:
+        // 26 s solo, 0/6 at parallel load → 1.5× fixed that one; 0932 needs
+        // ~48 s, 1141 ~80 s).  3× keeps the chain sum inside the Python wall
+        // allowance (RUST_PARTS × timeout + slack = 216 s at timeout 30).
+        let ec_budget = timeout_ms.saturating_mul(3);
+        let ec_deadline = Instant::now() + std::time::Duration::from_millis(ec_budget);
         let ec_start = Instant::now();
-        let outcome = edge_csp::solve_edge_csp(puzzle, &start, timeout_ms);
+        let outcome = edge_csp::solve_edge_csp(puzzle, &start, ec_budget);
         let elapsed = ec_start.elapsed().as_millis() as u64;
         match outcome {
             ModuleOutcome::Solved(regions) => {
@@ -561,7 +602,10 @@ fn is_rose_capable(puzzle: &Puzzle) -> bool {
     if crate::shapes::rose_symbol_types(puzzle).len() > 64 {
         return false;
     }
-    !puzzle.rules.iter().any(|r| r.ctype == "same" || r.ctype == "different")
+    // 2026-10-22: the same/different exclusion is lifted — the matching
+    // search now validates at the leaf and continues on rejection (doc 07
+    // 修订11), so shape-identity companions are safe to search around.
+    true
 }
 
 /// Cap on aog's budget when the puzzle is rose-capable, so the rose solver gets

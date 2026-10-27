@@ -74,6 +74,39 @@ pub fn accept_if_valid(regions: Vec<RegionInfo>, puzzle: &Puzzle) -> Option<Vec<
     if crate::solver::validate::validate(puzzle, &regions) {
         Some(regions)
     } else {
+        if std::env::var("VALIDATE_DEBUG").is_ok() {
+            let reason = crate::solver::validate::validate_reason(puzzle, &regions)
+                .err()
+                .unwrap_or("?");
+            eprintln!("accept_if_valid: REJECTED {} regions ({reason})", regions.len());
+            for r in regions.iter().take(20) {
+                let mut syms = Vec::new();
+                for cell in &r.cells {
+                    if let Some(sym) = puzzle.cells[cell[0]][cell[1]].symbol.as_deref() {
+                        syms.push(sym);
+                    }
+                }
+                let mut min_r = usize::MAX;
+                let mut max_r = 0usize;
+                let mut min_c = usize::MAX;
+                let mut max_c = 0usize;
+                for cell in &r.cells {
+                    let (rr, cc) = (cell[0], cell[1]);
+                    min_r = min_r.min(rr);
+                    max_r = max_r.max(rr);
+                    min_c = min_c.min(cc);
+                    max_c = max_c.max(cc);
+                }
+                eprintln!(
+                    "  region {} len={} bbox={}x{} rect={} syms={syms:?}",
+                    r.region_id,
+                    r.cells.len(),
+                    max_r - min_r + 1,
+                    max_c - min_c + 1,
+                    (max_r - min_r + 1) * (max_c - min_c + 1) == r.cells.len()
+                );
+            }
+        }
         None
     }
 }

@@ -4678,12 +4678,93 @@ fn prioritize_missing_symbols(
     }
     frontier
 }
-/// Accept a complete cover candidate: symbol check + non_block rectangle filter.
+/// Check `watchtower` vertex constraints on a complete partition: for each
+/// vertex with a watchtower value, the number of distinct regions among its
+/// 4 neighboring cells must equal the value.
+fn watchtower_partition_ok(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    placed: &[(usize, Mask)],
+    rest: &[usize],
+    res_seed_idx: usize,
+    seeds: &[(usize, usize)],
+) -> bool {
+    // Build cell→region-id mapping.
+    let mut cell_rid: Vec<usize> = vec![usize::MAX; n];
+    for (i, (_, pm)) in placed.iter().enumerate() {
+        for idx in 0..n {
+            if pm[idx / 64] & (1u64 << (idx % 64)) != 0 {
+                cell_rid[idx] = i;
+            }
+        }
+    }
+    let res_rid = placed.len();
+    for &idx in rest {
+        cell_rid[idx] = res_rid;
+    }
+    // Check each watchtower vertex.
+    for vr in 0..=h {
+        for vc in 0..=w {
+            if let Some(val) = puzzle.vertices[vr][vc].watchtower {
+                let mut distinct: std::collections::HashSet<usize> = Default::default();
+                for (dr, dc) in [(-1i64, -1i64), (-1, 0), (0, -1), (0, 0)] {
+                    let nr = vr as i64 + dr;
+                    let nc = vc as i64 + dc;
+                    if nr < 0 || nc < 0 || nr >= h as i64 || nc >= w as i64 {
+                        continue;
+                    }
+                    let idx = (nr as usize) * w + (nc as usize);
+                    if idx < n && cell_rid[idx] != usize::MAX {
+                        distinct.insert(cell_rid[idx]);
+                    }
+                }
+                if distinct.len() != val as usize {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Check `heterogeneous`/`homogeneous` adjacency shape constraints.
+/// het: adjacent regions must have different dihedral classes.
+/// hom: adjacent regions must have the same dihedral class.
+fn het_hom_ok(
+    all_masks: &[Mask],
+    keys: &[String],
+    het_mode: bool,
+    hom_mode: bool,
+    w: usize,
+    h: usize,
+    n: usize,
+) -> bool {
+    for i in 0..all_masks.len() {
+        let touch_i = dilate(&all_masks[i], w, h, n);
+        for j in (i + 1)..all_masks.len() {
+            if mask_and(&touch_i, &all_masks[j]) {
+                if het_mode && keys[i] == keys[j] {
+                    return false;
+                }
+                if hom_mode && keys[i] != keys[j] {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Accept a complete cover candidate: symbol check + non_block rectangle filter
+/// + compass direction-count check (candidate is a complete region).
 fn cover_cand_acceptable(
     cur: &[usize],
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
     non_block: bool,
     w: usize,
+    puzzle: &Puzzle,
 ) -> bool {
     if let Some((sym_of, n_types)) = sym {
         if !rose_exactly_one_each(cur, sym_of, n_types) {
@@ -4694,6 +4775,41 @@ fn cover_cand_acceptable(
         let cells: Vec<[usize; 2]> = cur.iter().map(|&x| [x / w, x % w]).collect();
         if crate::shapes::is_rectangle(&cells) {
             return false;
+        }
+    }
+    // Compass: each clue in the candidate demands exact direction counts.
+    for &x in cur {
+        let (r, c) = (x / w, x % w);
+        if let Some(compass) = &puzzle.cells[r][c].compass {
+            let (ri, ci) = (r as i64, c as i64);
+            let mut cnt = [0i64; 4]; // up, down, left, right
+            for &y in cur {
+                let (pr, pc) = ((y / w) as i64, (y % w) as i64);
+                if pr < ri {
+                    cnt[0] += 1;
+                }
+                if pr > ri {
+                    cnt[1] += 1;
+                }
+                if pc < ci {
+                    cnt[2] += 1;
+                }
+                if pc > ci {
+                    cnt[3] += 1;
+                }
+            }
+            for (limit, actual) in [
+                (compass.up, cnt[0]),
+                (compass.down, cnt[1]),
+                (compass.left, cnt[2]),
+                (compass.right, cnt[3]),
+            ] {
+                if let Some(v) = limit {
+                    if v >= 0 && actual != v {
+                        return false;
+                    }
+                }
+            }
         }
     }
     true
@@ -4724,7 +4840,7 @@ fn gen_cover_cands(
             break;
         }
         if cur.len() == size {
-            if !cover_cand_acceptable(&cur, sym, non_block, w) {
+            if !cover_cand_acceptable(&cur, sym, non_block, w, puzzle) {
                 continue;
             }
             let mask = mask_of(&cur, n);
@@ -5307,6 +5423,7 @@ fn find_tail_set(
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
     deadline: crate::clock::Instant,
 ) -> Option<Mask> {
+    let different_mode = puzzle.rules.iter().any(|r| r.ctype == "different");
     let tail_seed = seeds[tail_ri].0;
     let mut used = [0u64; 3];
     for (_, pm) in placed.iter() {
@@ -5347,7 +5464,7 @@ fn find_tail_set(
             let mask = mask_of(&cur, n);
             let mut placed2 = placed.to_vec();
             placed2.push((tail_ri, mask));
-            if residue_ok(puzzle, w, h, n, &placed2, seeds, res_cell, res_size, diff_mode, sym) {
+            if residue_ok(puzzle, w, h, n, &placed2, seeds, res_cell, res_size, diff_mode, sym, different_mode) {
                 return Some(mask);
             }
             continue;
@@ -5392,6 +5509,7 @@ fn cover_dfs(
     full_cover: bool,
     child_cap: usize,
 ) -> bool {
+    let different_mode = puzzle.rules.iter().any(|r| r.ctype == "different");
     const NODE_CAP: usize = 20_000_000;
     let my_start = *nodes;
     if *nodes >= NODE_CAP || crate::clock::Instant::now() >= deadline {
@@ -5459,7 +5577,7 @@ fn cover_dfs(
                 return true;
             }
             return match tail {
-                None => residue_ok(puzzle, w, h, n, placed, seeds, res_cell, res_size, diff_mode, sym),
+                None => residue_ok(puzzle, w, h, n, placed, seeds, res_cell, res_size, diff_mode, sym, different_mode),
                 Some((ri2, sz2)) => find_tail_set(
                     puzzle, w, h, n, placed, seeds, ri2, sz2, res_cell, res_size,
                     diff_mode, sym, deadline,
@@ -5614,6 +5732,7 @@ fn residue_ok(
     res_size: usize,
     diff_mode: bool,
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+    different_mode: bool,
 ) -> bool {
     let mut used = [0u64; 3];
     for (_, pm) in placed.iter() {
@@ -5661,6 +5780,53 @@ fn residue_ok(
             if mask_and(&touch, &res_mask) {
                 return false;
             }
+        }
+    }
+    // `different` rule: all region shapes (dihedral classes) must be unique.
+    if different_mode {
+        let mut keys: std::collections::HashSet<String> = Default::default();
+        for (_, pm) in placed.iter() {
+            let cells: Vec<[usize; 2]> = (0..n)
+                .filter(|&idx| pm[idx / 64] & (1u64 << (idx % 64)) != 0)
+                .map(|idx| [idx / w, idx % w])
+                .collect();
+            if !keys.insert(crate::shapes::dihedral_key(&cells)) {
+                return false;
+            }
+        }
+        let res_cells: Vec<[usize; 2]> = rest.iter().map(|&idx| [idx / w, idx % w]).collect();
+        if !keys.insert(crate::shapes::dihedral_key(&res_cells)) {
+            return false;
+        }
+    }
+    // `heterogeneous` / `homogeneous`: adjacent regions must have
+    // different / same shapes (dihedral classes).
+    let het_mode = puzzle
+        .rules
+        .iter()
+        .any(|r| r.ctype == "heterogeneous" || r.ctype == "mixed");
+    let hom_mode = puzzle.rules.iter().any(|r| r.ctype == "homogeneous");
+    if het_mode || hom_mode {
+        let mut all_masks: Vec<Mask> = placed.iter().map(|(_, pm)| *pm).collect();
+        all_masks.push(mask_of(&rest, n));
+        let keys: Vec<String> = all_masks
+            .iter()
+            .map(|pm| {
+                let cells: Vec<[usize; 2]> = (0..n)
+                    .filter(|&idx| pm[idx / 64] & (1u64 << (idx % 64)) != 0)
+                    .map(|idx| [idx / w, idx % w])
+                    .collect();
+                crate::shapes::dihedral_key(&cells)
+            })
+            .collect();
+        if !het_hom_ok(&all_masks, &keys, het_mode, hom_mode, w, h, n) {
+            return false;
+        }
+    }
+    // `watchtower` vertex constraints: distinct regions around each vertex.
+    if puzzle.rules.iter().any(|r| r.ctype == "watchtower") {
+        if !watchtower_partition_ok(puzzle, w, h, n, placed, &rest, 0, seeds) {
+            return false;
         }
     }
     true

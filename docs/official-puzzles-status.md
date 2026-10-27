@@ -1276,6 +1276,10 @@ exact-lb 紧致区（尺寸=配对路径下界+2 以内）。四层机制（doc 
   ~17 假回归（timeout 口径差异 + flaky）。
 - 已证伪：aog compass `!=`→`>` 改松（产生错解 validation_failed）；
   exact-fill 传播（0445 回归）；阈值 20（0445 回归）。
+- **rose 全局约束过滤器补全**（4 个 commit）：non_block 矩形、different 形状互异、
+  het/hom/mixed 相邻形状约束、compass 方向计数精确匹配，全部加到
+  `cover_cand_acceptable`/`residue_ok`。**+3 道**（0838/0928/0586/1130）。
+  提取 `het_hom_ok`/`cover_cand_acceptable` 辅助函数过 complexity gate。
 
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：

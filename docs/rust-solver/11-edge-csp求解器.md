@@ -266,10 +266,11 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   2. **全局 Uncut flood-fill** 建新鲜局部组件（关键：跨 bbox 跟 Uncut 边，已 committed
      到外部区域的格拖整片进来——防误强 Uncut）。
   3. DFS 枚举所有合法连通合并（include/exclude 分支，最小索引前沿优先），方向计数精确
-     满足 + 尺寸界。cap：`MAX_AREA_THRESHOLD=12`/`MAX_REACHABLE_COMPS=16`/`MAX_PLACEMENTS=500`。
+     满足 + 尺寸界。cap：`MAX_AREA_THRESHOLD=16`/`MAX_REACHABLE_COMPS=16`/`MAX_PLACEMENTS=500`。
      **forward-checking**（2026-10-27）：每节点算未决组件（不在 current∪excluded）的方向
      计数上界，若 `counts[d] + max_rem[d] < limit[d]` 或 `size + max_rem_sz < min_a`
-     则剪枝——不可达精确计数的分支提前死亡。
+     则剪枝——不可达精确计数的分支提前死亡。**DFS deadline 200ms**：超时返回 overflow
+     → 跳过该线索（不跑过头拖慢全局传播）。阈值 12→16 使 0445/0492 进账。
   4. `in_all`（每解都在）→ 强 Uncut；`in_any`（无解在）+ bbox 外 → 强 Cut。
   - 自门控 `in_probing`（昂贵，探测时跳过）；复用 `build_components` 的 `curr_min/max_area`。
 - **新增 1 道** via edge_csp：0445（11×11 纯 compass 25 格，was OOM exit -9 → 73s 解出，

@@ -3778,7 +3778,11 @@ impl<'a> Solver<'a> {
         max_a: usize,
         max_placements: usize,
         results: &mut Vec<u32>,
+        deadline: crate::clock::Instant,
     ) -> bool {
+        if crate::clock::Instant::now() >= deadline {
+            return true; // treat as overflow → caller skips this clue
+        }
         // Record if the current merged set is a valid placement (size ≥ min_a
         // AND every specified direction hit exactly).
         if size >= min_a {
@@ -3853,6 +3857,7 @@ impl<'a> Solver<'a> {
                 max_a,
                 max_placements,
                 results,
+                deadline,
             ) {
                 return true;
             }
@@ -3873,6 +3878,7 @@ impl<'a> Solver<'a> {
             max_a,
             max_placements,
             results,
+            deadline,
         )
     }
 
@@ -4147,7 +4153,7 @@ impl<'a> Solver<'a> {
     }
 
     fn propagate_compass_placement_enumeration(&mut self) -> Result<bool, ()> {
-        const MAX_AREA_THRESHOLD: usize = 12;
+        const MAX_AREA_THRESHOLD: usize = 16;
         const MAX_REACHABLE_COMPS: usize = 16;
         const MAX_PLACEMENTS: usize = 500;
 
@@ -4253,6 +4259,8 @@ impl<'a> Solver<'a> {
 
             // Enumerate valid connected merges via DFS (local comp 0 = mandatory start).
             let mut valid_placements: Vec<u32> = Vec::new();
+            let dfs_deadline =
+                crate::clock::Instant::now() + std::time::Duration::from_millis(200);
             let overflow = Self::compass_placement_dfs(
                 1u32,
                 adj_mask[0],
@@ -4267,6 +4275,7 @@ impl<'a> Solver<'a> {
                 max_a,
                 MAX_PLACEMENTS,
                 &mut valid_placements,
+                dfs_deadline,
             );
             if overflow {
                 continue 'outer;

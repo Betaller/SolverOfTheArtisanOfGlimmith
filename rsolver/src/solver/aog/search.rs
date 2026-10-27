@@ -368,6 +368,22 @@ fn place_non_predifined_shape(
                     compass_fail = true;
                     break;
                 }
+                // K-bounding: compass values give region size upper bound
+                // = sum(dir counts) + 1.  Only when ALL four directions are
+                // concrete (non -1).
+                let (u, d, l, r) = (
+                    core.puzzle_compass_up[nx][ny],
+                    core.puzzle_compass_down[nx][ny],
+                    core.puzzle_compass_left[nx][ny],
+                    core.puzzle_compass_right[nx][ny],
+                );
+                if u >= 0 && d >= 0 && l >= 0 && r >= 0 {
+                    let max_sz = (u + d + l + r + 1) as usize;
+                    if L.current_shape_cnt > max_sz {
+                        compass_fail = true;
+                        break;
+                    }
+                }
             }
 
             if shape_check_fail

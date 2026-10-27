@@ -3795,6 +3795,33 @@ impl<'a> Solver<'a> {
             return false;
         }
 
+        // Forward-check: can undecided components still reach direction limits
+        // and min_a?  Sum counts over components not in current ∪ excluded.
+        {
+            let n_comps = comp_dir_counts.len().min(32);
+            let decided = current_mask | excluded_mask;
+            let mut max_rem = [0usize; 4];
+            let mut max_rem_sz = 0usize;
+            for i in 0..n_comps {
+                if decided & (1u32 << i) == 0 {
+                    for d in 0..4 {
+                        max_rem[d] += comp_dir_counts[i][d];
+                    }
+                    max_rem_sz += comp_sizes[i];
+                }
+            }
+            for d in 0..4 {
+                if let Some(lim) = limits[d] {
+                    if counts[d] + max_rem[d] < lim {
+                        return false; // cannot reach exact count for direction d
+                    }
+                }
+            }
+            if size + max_rem_sz < min_a {
+                return false; // cannot reach min_a even with all remaining
+            }
+        }
+
         // Pick the smallest-index frontier component.
         let v = frontier_mask.trailing_zeros() as usize;
         let v_bit = 1u32 << v;

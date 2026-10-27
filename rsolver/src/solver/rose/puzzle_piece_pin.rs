@@ -4656,6 +4656,9 @@ fn prioritize_missing_symbols(
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
     cur: &[usize],
 ) -> Vec<usize> {
+    // Deterministic hash-based interleaving for DFS diversity: different
+    // paths from the seed explore different candidate shapes.
+    let hash = |y: usize| y.wrapping_mul(2654435761) & 0xffff;
     if let Some((sym_of, n_types)) = sym {
         let mut type_seen = vec![false; n_types];
         for &x in cur {
@@ -4663,10 +4666,15 @@ fn prioritize_missing_symbols(
                 type_seen[t] = true;
             }
         }
-        frontier.sort_by_key(|&y| match sym_of.get(&y) {
-            Some(&t) if !type_seen[t] => 1u8,
-            _ => 0u8,
+        frontier.sort_by_key(|&y| {
+            let pri = match sym_of.get(&y) {
+                Some(&t) if !type_seen[t] => 0u8,
+                _ => 1u8,
+            };
+            (pri, hash(y))
         });
+    } else {
+        frontier.sort_by_key(|&y| hash(y));
     }
     frontier
 }

@@ -4678,6 +4678,27 @@ fn prioritize_missing_symbols(
     }
     frontier
 }
+/// Accept a complete cover candidate: symbol check + non_block rectangle filter.
+fn cover_cand_acceptable(
+    cur: &[usize],
+    sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+    non_block: bool,
+    w: usize,
+) -> bool {
+    if let Some((sym_of, n_types)) = sym {
+        if !rose_exactly_one_each(cur, sym_of, n_types) {
+            return false;
+        }
+    }
+    if non_block {
+        let cells: Vec<[usize; 2]> = cur.iter().map(|&x| [x / w, x % w]).collect();
+        if crate::shapes::is_rectangle(&cells) {
+            return false;
+        }
+    }
+    true
+}
+
 fn gen_cover_cands(
     puzzle: &Puzzle,
     w: usize,
@@ -4693,6 +4714,8 @@ fn gen_cover_cands(
     // cover DFS is O(cap^m) and 4000^4 is intractable.  Small regions keep
     // the full cap (0289 class needs the breadth).
     let cand_cap: usize = if size > 10 { 500 } else { 4_000 };
+    // non_block: no region may be a rectangle — filter at generation time.
+    let non_block = puzzle.rules.iter().any(|r| r.ctype == "non_block");
     let mut out: Vec<CoverCand> = Vec::new();
     let mut seen: std::collections::HashSet<Vec<usize>> = Default::default();
     let mut stack: Vec<Vec<usize>> = vec![vec![cell]];
@@ -4701,10 +4724,8 @@ fn gen_cover_cands(
             break;
         }
         if cur.len() == size {
-            if let Some((sym_of, n_types)) = sym {
-                if !rose_exactly_one_each(&cur, sym_of, n_types) {
-                    continue;
-                }
+            if !cover_cand_acceptable(&cur, sym, non_block, w) {
+                continue;
             }
             let mask = mask_of(&cur, n);
             let touch = dilate(&mask, w, h, n);

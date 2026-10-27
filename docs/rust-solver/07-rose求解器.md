@@ -712,6 +712,9 @@ cover 门外，落到 region_match 单候选管线（被 non_block 拒收）。�
    （全预算）；`m > 4` force-grow 门限移除（`collect_floor` 防小尺寸爆帽）。
 6. **`enum_pair_slacks` 限 500ms**——pair 下界修正后 slack 空间膨胀，
    曾把整个 cover 预算烧光（runner 0 起步）。
+7. **`non_block` 矩形过滤**（2026-10-27）：`gen_cover_cands` 对含 `non_block`
+   规则的题过滤矩形候选（`is_rectangle`），防 rose 产生矩形区域被
+   `accept_if_valid` 拒绝（0838 类 validation_failed 根因）。
 
 **现状**：候选生成已到位（hostable 18-19 尺寸/种子），但 runner 每尝试
 ~30ms 在 500^4 组合空间内不可达；真解多重集 {12,13,15,20,61} 的排序

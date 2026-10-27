@@ -4155,7 +4155,7 @@ impl<'a> Solver<'a> {
     fn propagate_compass_placement_enumeration(&mut self) -> Result<bool, ()> {
         const MAX_AREA_THRESHOLD: usize = 16;
         const MAX_REACHABLE_COMPS: usize = 16;
-        const MAX_PLACEMENTS: usize = 500;
+        const MAX_PLACEMENTS: usize = 5_000;
 
         if self.in_probing {
             return Ok(false);

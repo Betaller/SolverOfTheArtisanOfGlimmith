@@ -567,7 +567,7 @@ fn try_cover_after_combos(
     min_sz: usize,
     max_sz: usize,
     total: usize,
-    m: usize,
+    _m: usize,
     deadline: Instant,
     symbol_types: &[String],
 ) -> Option<Vec<crate::types::RegionInfo>> {

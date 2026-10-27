@@ -2,11 +2,11 @@
   "unit": "官方谜题 (puzzles/official, 排除 -answer 目录)",
   "total": 1258,
   "latest": {
-    "date": "2026-09-24",
-    "commit": "83f03fe",
-    "passed": 1203,
+    "date": "2026-10-27",
+    "commit": "5616ec2",
+    "passed": 1221,
     "total": 1258,
-    "pct": 95.63
+    "pct": 97.06
   },
   "history": [
     {
@@ -232,6 +232,13 @@
       "passed": 1203,
       "total": 1258,
       "pct": 95.63
+    },
+    {
+      "date": "2026-10-27",
+      "commit": "5616ec2",
+      "passed": 1221,
+      "total": 1258,
+      "pct": 97.06
     }
   ]
 }

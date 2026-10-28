@@ -1577,15 +1577,28 @@ impl<'a> FreeRem<'a> {
             }
         }
         // Prefer smaller labels first — they need to grow to reach lo before
-        // getting isolated (0770 class).  Label-size tiebreak keeps ordering
-        // deterministic.
+        // getting isolated (0770 class).  Within same size, prefer labels with
+        // more unassigned neighbors (more room to grow).  Label-ID tiebreak
+        // keeps ordering deterministic.
         let label_size = |l: u32| -> usize {
             self.lab_units[l as usize]
                 .iter()
                 .map(|&v| self.unit_cells[v as usize].len())
                 .sum()
         };
-        adj.sort_unstable_by_key(|&l| (label_size(l), l));
+        let label_growth = |l: u32| -> usize {
+            // Count unassigned cells adjacent to this label's units.
+            let mut seen = std::collections::HashSet::new();
+            for &v in &self.lab_units[l as usize] {
+                for &nbr in &self.unit_adj[v as usize] {
+                    if self.lab_of[nbr as usize].is_none() {
+                        seen.insert(nbr);
+                    }
+                }
+            }
+            seen.len()
+        };
+        adj.sort_unstable_by_key(|&l| (label_size(l), std::cmp::Reverse(label_growth(l)), l));
         let mut out: Vec<Option<u32>> = adj.iter().map(|&l| Some(l)).collect();
         for val in &dom {
             if val.is_some() && !out.contains(val) {

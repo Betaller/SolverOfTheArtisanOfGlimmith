@@ -454,3 +454,5 @@ edge_csp 适配题常规耗尽，edge_csp 是最后一道真搜索；其 1.0× �
 时从 `{2, 4}` 收紧为 `{2}`（Slitherlink exact-2 传播）。degree-4 交叉是
 自接触 figure-8，官方解中不存在（1136 junction 分布 `{1:16, 2:123}`）。
 效果：1136 从 timeout→30s 解出，0445/0492 加速 2x。
+- `propagate_watchtower_degree` val=3 也收紧为 exact-3（排除 degree-4 交叉，
+  与 val=2 同理）。混合值 puzzle（0985/0189/0998）仍需更深层传播。

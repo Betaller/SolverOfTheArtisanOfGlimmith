@@ -2998,13 +2998,7 @@ impl<'a> Solver<'a> {
             let candidates: Vec<usize> = match val {
                 1 => vec![0],
                 2 => vec![2],
-                3 => {
-                    if self.rules.loopy {
-                        vec![4]
-                    } else {
-                        vec![3, 4]
-                    }
-                }
+                3 => vec![3],
                 _ => vec![4],
             };
             let x = unknown.len();

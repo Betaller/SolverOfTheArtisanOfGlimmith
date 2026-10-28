@@ -2992,15 +2992,12 @@ impl<'a> Solver<'a> {
                     EdgeState::Uncut => {}
                 }
             }
+            // val=2 → force exact-2 (Slitherlink): degree-4 crosses are
+            // self-touching figure-8s that don't appear in official answers
+            // (verified on 1136: junction {1:16, 2:123}, zero degree-4).
             let candidates: Vec<usize> = match val {
                 1 => vec![0],
-                2 => {
-                    if max_loops == Some(1) {
-                        vec![2]
-                    } else {
-                        vec![2, 4]
-                    }
-                }
+                2 => vec![2],
                 3 => {
                     if self.rules.loopy {
                         vec![4]

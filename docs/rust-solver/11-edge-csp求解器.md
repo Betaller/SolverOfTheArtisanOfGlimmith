@@ -447,3 +447,10 @@ edge_csp 适配题常规耗尽，edge_csp 是最后一道真搜索；其 1.0× �
 `pass/unknown/changed`，deadline 处打总趟数——「恒定 unknown + 高 pass 数」
 就是假进展死循环的指纹；`EDGE_CSP_SKIP=area` 二分定位到 area 家族后再用
 子开关（areatgt/areachk）收窄到 `narrow_inequality_bounds`。
+
+### 2026-10-28 watchtower 全=2 exact-2 边度
+
+`propagate_watchtower_degree` 的 val=2 候选集在「所有 watchtower 值均为 2」
+时从 `{2, 4}` 收紧为 `{2}`（Slitherlink exact-2 传播）。degree-4 交叉是
+自接触 figure-8，官方解中不存在（1136 junction 分布 `{1:16, 2:123}`）。
+效果：1136 从 timeout→30s 解出，0445/0492 加速 2x。

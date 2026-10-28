@@ -731,3 +731,13 @@ range-part 因此只有无提示兜底 run。改为：按连通分量各自枚�
 排（真解壳大先走）+ CASE_CAP 截断。case 只是窗口提示序列（末位永远有
 兜底 run），错提示只损排序不损完备性——低风险。0171 类「多 clue 同区的
 分组枚举」仍为开项（`number_sum_lock` 不覆盖该形态，num-pin 直接放行）。
+
+### 2026-10-28 FreeRem 剪枝补强
+
+- `merge_window_ok` 加弱 reach 检查（`reach >= lo/2`）：range-part 搜索中
+  标签过早孤立（reach < lo）导致 `base_windows` 死亡；半阈值仅剪绝望标签，
+  不影响正常搜索（完整 `reach >= lo` 会回归 0270/0804/0682）。
+- `fixpoint` 加全局 lo 总和检查（`sum_lo <= total_free`）：逐标签窗口一致性
+  检查遗漏跨标签超额承诺；加全局求和剪枝。
+- `value_order` 相邻标签排序改为当前尺寸升序（小标签先长到 lo），
+  防止标签过早孤立；修复 `compass_label::tests::solves_official_0682`。

@@ -1348,6 +1348,18 @@ impl<'a> FreeRem<'a> {
                     return None;
                 }
             };
+            // Global sum check: if all labels' lo values exceed total free
+            // cells, the partition is impossible.  Catches cross-label
+            // over-commitment that per-label windows miss.
+            {
+                let total_free: usize = self.unit_cells.iter().map(|c| c.len()).sum();
+                let sum_lo: usize = self.win_cache.iter().map(|(lo, _)| *lo).sum();
+                if sum_lo > total_free {
+                    #[cfg(test)]
+                    die_note("sum_lo", a);
+                    return None;
+                }
+            }
             if !self.diff_ok() {
                 #[cfg(test)]
                 die_note("diff", a);
@@ -1548,7 +1560,16 @@ impl<'a> FreeRem<'a> {
                 }
             }
         }
-        adj.sort_unstable();
+        // Prefer smaller labels first — they need to grow to reach lo before
+        // getting isolated (0770 class).  Label-size tiebreak keeps ordering
+        // deterministic.
+        let label_size = |l: u32| -> usize {
+            self.lab_units[l as usize]
+                .iter()
+                .map(|&v| self.unit_cells[v as usize].len())
+                .sum()
+        };
+        adj.sort_unstable_by_key(|&l| (label_size(l), l));
         let mut out: Vec<Option<u32>> = adj.iter().map(|&l| Some(l)).collect();
         for val in &dom {
             if val.is_some() && !out.contains(val) {
@@ -1862,7 +1883,15 @@ impl<'a> FreeRem<'a> {
             return false;
         }
         let cur: usize = units.iter().map(|&v| self.unit_cells[v as usize].len()).sum();
-        lo <= hi && cur <= hi
+        if lo > hi || cur > hi {
+            return false;
+        }
+        // Reach check: the label must be able to grow to at least the
+        // midpoint between its current size and its minimum size.  Full
+        // `reach >= lo` is too aggressive (regresses 0270/0804/0682);
+        // midpoint is stronger than `lo/2` when cur > 0 but still safe.
+        let reach = self.label_reach(units).1;
+        reach >= (lo + cur) / 2
     }
 
     fn merge_ord_caps(

@@ -741,3 +741,5 @@ range-part 因此只有无提示兜底 run。改为：按连通分量各自枚�
   检查遗漏跨标签超额承诺；加全局求和剪枝。
 - `value_order` 相邻标签排序改为当前尺寸升序（小标签先长到 lo），
   防止标签过早孤立；修复 `compass_label::tests::solves_official_0682`。
+- `pick_mrv` 加 `min_adj_label_size` 排序键（第 4 位）：优先分配到
+  能加入小标签的格子，配合 value_order 小标签优先。

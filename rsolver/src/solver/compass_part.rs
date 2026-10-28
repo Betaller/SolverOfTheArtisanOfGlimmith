@@ -358,7 +358,7 @@ impl Model {
             let spec = self.targets[i].iter().filter(|t| t.is_some()).count();
             (
                 std::cmp::Reverse(spec),
-                self.hi[i] - self.lo[i],
+                self.hi[i].saturating_sub(self.lo[i]),
                 std::cmp::Reverse(self.lo[i]),
             )
         });

@@ -3826,8 +3826,26 @@ impl<'a> Solver<'a> {
             }
         }
 
-        // Pick the smallest-index frontier component.
-        let v = frontier_mask.trailing_zeros() as usize;
+        // Pick the frontier component that best fits remaining direction
+        // targets (least total slack after inclusion).  This is more
+        // constrained than smallest-index and prunes faster.
+        let v = (0..32usize)
+            .filter(|&i| frontier_mask & (1u32 << i) != 0)
+            .min_by_key(|&i| {
+                let nc = [
+                    counts[0] + comp_dir_counts[i][0],
+                    counts[1] + comp_dir_counts[i][1],
+                    counts[2] + comp_dir_counts[i][2],
+                    counts[3] + comp_dir_counts[i][3],
+                ];
+                let slack: usize = (0..4)
+                    .map(|d| {
+                        limits[d].map_or(0usize, |lim| lim.saturating_sub(nc[d]))
+                    })
+                    .sum();
+                (slack, comp_sizes[i], i)
+            })
+            .unwrap_or(frontier_mask.trailing_zeros() as usize);
         let v_bit = 1u32 << v;
         let rest = frontier_mask & !v_bit;
 

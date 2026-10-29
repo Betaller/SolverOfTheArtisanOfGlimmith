@@ -3157,7 +3157,7 @@ fn windows_runs_from_cases(
     for (win, n_lbl) in cases {
         let mut lo = vec![0usize; n_units];
         let mut hi = vec![0usize; n_units];
-        for (u, &(a, b)) in win.iter().enumerate() {
+        for (u, &(a, b)) in win.iter().enumerate().take(n_units) {
             if a != 0 || b != 0 {
                 lo[u] = a;
                 hi[u] = b;

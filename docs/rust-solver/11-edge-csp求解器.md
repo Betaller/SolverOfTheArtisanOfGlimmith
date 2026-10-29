@@ -472,3 +472,11 @@ edge_csp 适配题常规耗尽，edge_csp 是最后一道真搜索；其 1.0× �
 **配套 area_sum 前置**（`solver/mod.rs`）：`area_sum_piece_count` ≤ 4 且
 最大面积值 ≥ 30 时跳过 aog（大形状→形状库 OOM，1138 exit -9）。最大值门
 保护小面积题（0710 {7,18,19,20} max=20 不触发，aog 28.8s 解出）。
+
+### 2026-10-29 compass 缺陷检查不健全修复
+
+`propagate_compass_clue` 的缺陷检查 `counts + dir_count < v → 矛盾` 是**不健全**的：
+合并一条生长边会在同方向产生新生长边，`dir_count` 低估可达范围。
+1078 实例：e=2, counts=0, dir_count=1 → `0+1<2` 假矛盾，实际合并 (1,2) 后
+可经 (1,3) 达到 2 格。移除该检查；exact-deficit 强制保留（健全：每条生长边
+恰好贡献 1 格，`dir_count == deficit` 时全 Uncut 正确）。

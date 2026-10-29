@@ -1793,23 +1793,29 @@ impl<'a> Solver<'a> {
 
         let clue_indices = self.prop.compass_clue_indices.clone();
         for &cl_idx in &clue_indices {
-            let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] else {
-                continue;
+            let (cell_val, compass_val) = match &self.cell_clues[cl_idx] {
+                CellClue::Compass { cell, compass } => (*cell, *compass),
+                _ => continue,
             };
-            let ci = self.curr_comp_id[*cell];
+            let ci = self.curr_comp_id[cell_val];
             if ci == usize::MAX || ci >= num_comp {
                 continue;
             }
-            let compass = *compass;
-            self.propagate_compass_clue(*cell, ci, compass, &mut cut_ef, &mut uncut_ef)?;
+            let result = self.propagate_compass_clue(cell_val, ci, compass_val, &mut cut_ef, &mut uncut_ef);
+            if result.is_err() {
+                self.debug_compass_contradiction(cell_val, ci, compass_val);
+                return Err(());
+            }
         }
 
         // Pair-wise compass compatibility + bounding-box pruning.
         self.propagate_compass_pairwise()?;
-        progress |= self.propagate_compass_bbox(num_comp)?;
+        if !csp_skip("compass_bbox") {
+            progress |= self.propagate_compass_bbox(num_comp)?;
+        }
 
         // Bridge/gateway forcing (skip during probing to avoid per-probe overhead).
-        if !self.in_probing {
+        if !self.in_probing && !csp_skip("compass_bridge") {
             let mut compass_per_comp: Vec<Vec<(CellId, CompassData)>> = vec![Vec::new(); num_comp];
             for &cl_idx in &self.prop.compass_clue_indices {
                 if let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] {
@@ -1843,6 +1849,39 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(progress)
+    }
+
+    /// Debug helper: print compass-clue contradiction details (gated on
+    /// `EDGE_CSP_DEBUG`).  Extracted to keep `propagate_compass_in_components`
+    /// under the cognitive-complexity threshold.
+    fn debug_compass_contradiction(&self, cell_val: CellId, ci: usize, compass_val: CompassData) {
+        if std::env::var("EDGE_CSP_DEBUG").is_err() {
+            return;
+        }
+        let (cr, cc) = self.grid.cell_pos(cell_val);
+        let mut counts = [0usize; 4];
+        for &c in &self.comp_cells[ci] {
+            let (pr, pc) = self.grid.cell_pos(c);
+            if pr < cr { counts[0] += 1; }
+            if pr > cr { counts[1] += 1; }
+            if pc > cc { counts[2] += 1; }
+            if pc < cc { counts[3] += 1; }
+        }
+        let mut dir_count = [0usize; 4];
+        for &e in &self.prop.growth_edges[ci] {
+            let (c1, c2) = self.grid.edge_cells(e);
+            let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
+            let (pr, pc) = self.grid.cell_pos(other);
+            if pr < cr { dir_count[0] += 1; }
+            if pr > cr { dir_count[1] += 1; }
+            if pc > cc { dir_count[2] += 1; }
+            if pc < cc { dir_count[3] += 1; }
+        }
+        let sealed = self.is_sealed(ci);
+        eprintln!(
+            "edge_csp: compass_clue contradiction at ({},{}), comp={}, compass={:?}, counts={:?}, dir_count={:?}, sealed={}",
+            cr, cc, ci, compass_val, counts, dir_count, sealed
+        );
     }
 
     /// Per-compass-clue directional count + limit propagation.  Pushes `Cut`
@@ -1915,15 +1954,14 @@ impl<'a> Solver<'a> {
                 self.compass_collect_dir_cut_edges(ci, cr, cc, idx, cut_ef);
             }
             if counts[idx] < v {
-                // Deficit check: the growth edges in this direction must be
-                // able to cover the deficit.  Each growth edge can add at most
-                // one cell in the direction, so `counts[idx] + dir_count[idx]`
-                // is the directional ceiling.
-                if counts[idx] + dir_count[idx] < v {
-                    return Err(());
-                }
-                // Exact deficit: when the growth-edge count exactly equals the
-                // deficit, every growth edge in that direction must be uncut.
+                // NOTE: the old deficit check `counts[idx] + dir_count[idx] < v`
+                // was UNSOUND — merging a growth edge creates NEW growth edges
+                // further in the same direction, so `dir_count` underestimates
+                // the reachable extent (1078: e=2 with dir_count=1 was falsely
+                // rejected).  Removed 2026-10-29.
+                // Exact deficit is still sound: each growth edge contributes
+                // exactly 1 cell, so if we need `deficit` more and have exactly
+                // `deficit` edges, all must be Uncut.
                 let deficit = v - counts[idx];
                 if dir_count[idx] == deficit {
                     for &e in &self.prop.growth_edges[ci] {

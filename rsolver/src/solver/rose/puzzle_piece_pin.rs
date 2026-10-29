@@ -2507,8 +2507,12 @@ fn window_size_cases(
         let dists = make_distributions(n_reg, g, total, extra);
         for szs in dists {
             if szs.iter().all(|&s| s >= g) && szs.iter().sum::<usize>() == total {
-                let assigns: Vec<(usize, usize)> =
-                    szs.iter().enumerate().map(|(i, &s)| (i, s)).collect();
+                // Per-unit size windows: (lo, hi) = (min_szs, max_szs) for
+                // all units.  The old (label_id, size) format was misread by
+                // windows_runs_from_cases as (lo, hi) windows.
+                let min_s = *szs.iter().min().unwrap_or(&g);
+                let max_s = *szs.iter().max().unwrap_or(&total);
+                let assigns: Vec<(usize, usize)> = vec![(min_s, max_s); total];
                 cases.push((assigns, n_reg));
             }
         }
@@ -7992,12 +7996,10 @@ fn run_range_searches(
     let case_deadline = if number_locked {
         module_deadline
     } else {
-        let t = crate::clock::Instant::now() + std::time::Duration::from_millis(6_000);
-        if t < module_deadline {
-            t
-        } else {
-            module_deadline
-        }
+        // Size-tuple cases get the full module budget: the true case for
+        // 0770-class puzzles (window_size_cases) may be ordered after
+        // several wrong cases that exhaust the old 6s cap.
+        module_deadline
     };
     for (i, (case_lo, case_hi, case_max)) in runs.drain(..).enumerate() {
         let is_case = i < n_cases;

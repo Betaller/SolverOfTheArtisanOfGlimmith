@@ -703,6 +703,12 @@ impl<'a> Solver<'a> {
         }
 
         if self.propagate().is_err() {
+            if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                eprintln!(
+                    "edge_csp: root propagate contradiction, unknown={}",
+                    self.curr_unknown
+                );
+            }
             return None;
         }
         if std::env::var("EDGE_CSP_DEBUG").is_ok() {

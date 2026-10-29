@@ -1809,7 +1809,9 @@ impl<'a> Solver<'a> {
         }
 
         // Pair-wise compass compatibility + bounding-box pruning.
-        self.propagate_compass_pairwise()?;
+        if !csp_skip("compass_pairwise") {
+            self.propagate_compass_pairwise()?;
+        }
         if !csp_skip("compass_bbox") {
             progress |= self.propagate_compass_bbox(num_comp)?;
         }

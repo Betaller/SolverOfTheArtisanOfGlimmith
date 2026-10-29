@@ -57,7 +57,14 @@ pub fn is_applicable(puzzle: &Puzzle) -> bool {
     for r in &puzzle.rules {
         ctypes.insert(r.ctype.as_str());
     }
-    if ctypes.len() != 2 || !ctypes.contains("compass") || !ctypes.contains("solitary") {
+    // Accept {compass, solitary} or {compass, solitary, differentiation}.
+    // `differentiation` (adjacent regions have different areas) is checked by
+    // the final validator; the search may produce invalid candidates but the
+    // validator rejects them (1080 class).
+    let base_ok = ctypes.contains("compass") && ctypes.contains("solitary");
+    let extra_ok = ctypes.len() == 2
+        || (ctypes.len() == 3 && ctypes.contains("differentiation"));
+    if !base_ok || !extra_ok {
         return false;
     }
     if !puzzle.shape_pool.is_empty() {

@@ -2031,15 +2031,17 @@ impl<'a> Solver<'a> {
             }
             if counts[idx] < v {
                 self.compass_exact_deficit_force(ci, cr, cc, idx, v, &counts, &dir_count, &compass_vals, uncut_ef);
-                self.compass_maybe_force_uncut(
-                    ci,
-                    idx,
-                    &counts,
-                    &dir_count,
-                    &dir_last,
-                    &compass_vals,
-                    uncut_ef,
-                );
+                if !csp_skip("compass_maybe_uncut") {
+                    self.compass_maybe_force_uncut(
+                        ci,
+                        idx,
+                        &counts,
+                        &dir_count,
+                        &dir_last,
+                        &compass_vals,
+                        uncut_ef,
+                    );
+                }
             }
             // Sealed component with unsatisfied compass constraint.
             if self.is_sealed(ci) && counts[idx] < v {
@@ -2077,11 +2079,10 @@ impl<'a> Solver<'a> {
     }
 
     /// Push every growth edge of `ci` lying in compass direction `idx` into
-    /// `cut_ef` (the direction is already at its required count).  Only
-    /// axis-aligned edges are forced: a diagonal edge spans two directions,
-    /// and forcing Cut would also block the other direction (which may need
-    /// more cells).  The conflict detection in `propagate_compass_in_components`
-    /// catches the Cut/Uncut clash when both directions fire.
+    /// `cut_ef` (the direction is already at its required count).  All edges
+    /// are forced (including diagonal) — the conflict detection in
+    /// `propagate_compass_in_components` catches Cut/Uncut clashes when two
+    /// directions disagree on the same diagonal edge.
     fn compass_collect_dir_cut_edges(
         &mut self,
         ci: usize,
@@ -2094,16 +2095,14 @@ impl<'a> Solver<'a> {
             let (c1, c2) = self.grid.edge_cells(e);
             let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
             let (pr, pc) = self.grid.cell_pos(other);
-            let dr = pr as isize - cr as isize;
-            let dc = pc as isize - cc as isize;
-            let is_axis = match idx {
-                0 => dr == -1 && dc == 0,
-                1 => dr == 1 && dc == 0,
-                2 => dr == 0 && dc == 1,
-                3 => dr == 0 && dc == -1,
+            let matches = match idx {
+                0 => pr < cr,
+                1 => pr > cr,
+                2 => pc > cc,
+                3 => pc < cc,
                 _ => false,
             };
-            if is_axis {
+            if matches {
                 cut_ef.push(e);
             }
         }

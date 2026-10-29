@@ -227,12 +227,12 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   - **Pass A（component-ID）**：`curr_comp_id` 已填充时，数每个 watchtower 顶点
     周围 2×2 的 distinct sealed/growing 组件 → `[min_distinct, max_distinct]` 区间。
     `value` 越界→矛盾；`max_distinct==value && comp_count>1` 时强制不同组件间的
-    Unknown 边 `Cut`；`min_distinct==value && comp_count>1` 时强制不同组件间的
-    Unknown 边 `Uncut`（合并强制，0985 wt=1 类）。
+    Unknown 边 `Cut`；`min_distinct==value && comp_count>1` 时强制 growing
+    组件间的 Unknown 边 `Uncut`（合并强制，sealed 组件不能合并）。
   - **Pass B（edge-count）**：数 2×2 内部 4 边的 Cut/Unknown。cycle(4格)：
-    `pieces=max(1,k)`；`value==1` 精确（强制 Uncut），`value≥2` 下界（强制 Cut 达 value）。
-    tree(2-3格)：`pieces=1+k`；`value==2` 下界，`value==1/≥3` 精确。处理 double-touching
-    （区域经两路径触顶点只算一次）。
+    `value==1` 精确（强制全 Uncut——所有格同区），`value≥2` 仅下界（环上相邻切割
+    可少于切割数，不强制 Cut）。tree(2-3格)：`pieces=1+k`；`value==2` 下界，`value==1/≥3` 精确。
+    处理 double-touching（区域经两路径触顶点只算一次）。
 - **value==1 启动优化**（`mod.rs::solve`）：内部顶点（4 格全在）`value==1` 预先强制
   4 条内部边 Uncut（Pass B 只在已有 cut 时行动，此优化主动解 `value==1⇒0 cut`）。
 - `VertexClue.value` 不再 dead_code；`grid::vertex_pos` 逆映射 helper 新增。

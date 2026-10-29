@@ -3174,8 +3174,14 @@ impl<'a> Solver<'a> {
                                             if max_distinct == value {
                                                 forced_cuts.push(eid);
                                             }
+                                            // Merge forcing only between growing
+                                            // components (sealed ones can't merge).
                                             if min_distinct == value {
-                                                forced_uncuts.push(eid);
+                                                let g1 = !self.is_sealed(self.curr_comp_id[a]);
+                                                let g2 = !self.is_sealed(self.curr_comp_id[b]);
+                                                if g1 && g2 {
+                                                    forced_uncuts.push(eid);
+                                                }
                                             }
                                         }
                                     }
@@ -3286,7 +3292,8 @@ impl<'a> Solver<'a> {
                     if n_cut >= 2 {
                         return Err(());
                     }
-                    if n_cut == 1 && !unk.is_empty() {
+                    // All edges must be Uncut for value=1 (all cells same region).
+                    if !unk.is_empty() {
                         for eid in unk {
                             if !self.set_edge(eid, EdgeState::Uncut) {
                                 return Err(());
@@ -3296,16 +3303,10 @@ impl<'a> Solver<'a> {
                     }
                 } else {
                     // value >= 2: lower bound only (double-touching allows k > value).
+                    // On cycles, adjacent cuts can give fewer pieces than k,
+                    // so we cannot force cuts when n_cut + unk == value.
                     if n_cut + unk.len() < value {
                         return Err(());
-                    }
-                    if n_cut + unk.len() == value && !unk.is_empty() {
-                        for eid in unk {
-                            if !self.set_edge(eid, EdgeState::Cut) {
-                                return Err(());
-                            }
-                            progress = true;
-                        }
                     }
                 }
             } else {

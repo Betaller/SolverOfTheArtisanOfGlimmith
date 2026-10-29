@@ -479,6 +479,17 @@ sealed 组件（不可再分裂）中两个同类型 rose 符号格 → 矛盾�
 每区只许每种符号一次（rose_window 语义），sealed 组件无法再分。
 仅检查 sealed 组件（growing 组件仍可分裂，不报矛盾）。
 
+### 2026-10-29 compass exact-deficit 对角边冲突修复
+
+对角生长边同时计入两个方向（如 (cr-1,cc+1) 同时计 N 和 E）。exact-deficit
+对 dir N 强制 Uncut 时，对角边也在 dir E 计数——Uncut 同时在两方向加格，
+可能超另一方向限制。`cut_ef` 先执行设 Cut，`uncut_ef` 跳过已设边——冲突被
+静默吞掉（1092/1078 root-propagate 矛盾）。
+
+修复：exact-deficit 只对**轴向边**（dr=±1,dc=0 或 dr=0,dc=±1）强制 Uncut。
+另加 `cut_ef`/`uncut_ef` 状态冲突检测（已设边值与强制方向相反即矛盾）。
+效果：1078 root=104、1092 root=92——假矛盾消除，edge_csp 开始搜索。
+
 ### 2026-10-29 compass 缺陷检查不健全修复
 
 `propagate_compass_clue` 的缺陷检查 `counts + dir_count < v → 矛盾` 是**不健全**的：

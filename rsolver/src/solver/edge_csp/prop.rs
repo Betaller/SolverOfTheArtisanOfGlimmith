@@ -1834,6 +1834,28 @@ impl<'a> Solver<'a> {
             )?;
         }
 
+        // Conflict detection: (1) an edge in both cut_ef and uncut_ef means
+        // two compass constraints disagree (diagonal growth edges span two
+        // directions); (2) an edge in cut_ef already Uncut (or uncut_ef
+        // already Cut) means a previous propagator set it differently.  Both
+        // were silently swallowed by the set_edge loops (which skip non-Unknown
+        // edges), surfacing as later contradictions (1092/1078).
+        {
+            let cut_set: std::collections::HashSet<EdgeId> = cut_ef.iter().copied().collect();
+            for &e in &uncut_ef {
+                if cut_set.contains(&e) && self.edges[e] == EdgeState::Unknown {
+                    return Err(());
+                }
+                if self.edges[e] == EdgeState::Cut {
+                    return Err(());
+                }
+            }
+            for &e in &cut_ef {
+                if self.edges[e] == EdgeState::Uncut {
+                    return Err(());
+                }
+            }
+        }
         for e in cut_ef {
             if self.edges[e] == EdgeState::Unknown {
                 if !self.set_edge(e, EdgeState::Cut) {
@@ -1851,6 +1873,58 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(progress)
+    }
+
+    /// Exact-deficit forcing: when `counts[idx] + dir_count[idx] == v` (exactly
+    /// enough growth edges to reach the target), force all axis-aligned growth
+    /// edges in direction `idx` to Uncut.  Diagonal edges are excluded because
+    /// they count toward TWO directions — Uncut adds cells in both and may
+    /// exceed the other direction's limit (1092/1078 class).
+    fn compass_exact_deficit_force(
+        &mut self,
+        ci: usize,
+        cr: usize,
+        cc: usize,
+        idx: usize,
+        v: usize,
+        counts: &[usize; 4],
+        dir_count: &[usize; 4],
+        compass_vals: &[Option<usize>; 4],
+        uncut_ef: &mut Vec<EdgeId>,
+    ) {
+        let deficit = v - counts[idx];
+        if dir_count[idx] != deficit || csp_skip("compass_exact_deficit") {
+            return;
+        }
+        // Skip when another direction is at its limit (would force Cut on the
+        // same diagonal edge).
+        for oidx in 0..4 {
+            if oidx == idx {
+                continue;
+            }
+            if let Some(ov) = compass_vals[oidx] {
+                if counts[oidx] == ov {
+                    return;
+                }
+            }
+        }
+        for &e in &self.prop.growth_edges[ci] {
+            let (c1, c2) = self.grid.edge_cells(e);
+            let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
+            let (pr, pc) = self.grid.cell_pos(other);
+            let dr = pr as isize - cr as isize;
+            let dc = pc as isize - cc as isize;
+            let is_axis = match idx {
+                0 => dr == -1 && dc == 0,
+                1 => dr == 1 && dc == 0,
+                2 => dr == 0 && dc == 1,
+                3 => dr == 0 && dc == -1,
+                _ => false,
+            };
+            if is_axis {
+                uncut_ef.push(e);
+            }
+        }
     }
 
     /// Debug helper: print compass-clue contradiction details (gated on
@@ -1956,32 +2030,7 @@ impl<'a> Solver<'a> {
                 self.compass_collect_dir_cut_edges(ci, cr, cc, idx, cut_ef);
             }
             if counts[idx] < v {
-                // NOTE: the old deficit check `counts[idx] + dir_count[idx] < v`
-                // was UNSOUND — merging a growth edge creates NEW growth edges
-                // further in the same direction, so `dir_count` underestimates
-                // the reachable extent (1078: e=2 with dir_count=1 was falsely
-                // rejected).  Removed 2026-10-29.
-                // Exact deficit is still sound: each growth edge contributes
-                // exactly 1 cell, so if we need `deficit` more and have exactly
-                // `deficit` edges, all must be Uncut.
-                let deficit = v - counts[idx];
-                if dir_count[idx] == deficit {
-                    for &e in &self.prop.growth_edges[ci] {
-                        let (c1, c2) = self.grid.edge_cells(e);
-                        let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
-                        let (pr, pc) = self.grid.cell_pos(other);
-                        let matches = match idx {
-                            0 => pr < cr,
-                            1 => pr > cr,
-                            2 => pc > cc,
-                            3 => pc < cc,
-                            _ => false,
-                        };
-                        if matches {
-                            uncut_ef.push(e);
-                        }
-                    }
-                }
+                self.compass_exact_deficit_force(ci, cr, cc, idx, v, &counts, &dir_count, &compass_vals, uncut_ef);
                 self.compass_maybe_force_uncut(
                     ci,
                     idx,

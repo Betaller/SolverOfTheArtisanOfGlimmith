@@ -473,6 +473,12 @@ edge_csp 适配题常规耗尽，edge_csp 是最后一道真搜索；其 1.0× �
 最大面积值 ≥ 30 时跳过 aog（大形状→形状库 OOM，1138 exit -9）。最大值门
 保护小面积题（0710 {7,18,19,20} max=20 不触发，aog 28.8s 解出）。
 
+### 2026-10-29 rose sealed 组件重复符号检查
+
+sealed 组件（不可再分裂）中两个同类型 rose 符号格 → 矛盾。
+每区只许每种符号一次（rose_window 语义），sealed 组件无法再分。
+仅检查 sealed 组件（growing 组件仍可分裂，不报矛盾）。
+
 ### 2026-10-29 compass 缺陷检查不健全修复
 
 `propagate_compass_clue` 的缺陷检查 `counts + dir_count < v → 矛盾` 是**不健全**的：

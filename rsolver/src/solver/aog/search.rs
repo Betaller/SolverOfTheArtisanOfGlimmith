@@ -8,7 +8,7 @@ use super::types::*;
 use super::types::{Node, Pools, PlaceLevel};
 
 use super::core::{
-    check_edge, check_edge_shape, check_loopy, check_nearby_shape, check_nearby_size,
+    check_edge, check_edge_shape, check_loopy, check_nearby_shape, check_nearby_shape_same, check_nearby_size,
     check_palisade_type1, check_palisade_type2, check_radar, check_tatami, sp_at, AoGCore,
 };
 use super::empty::{dfs_empty_area, empty_area_check, empty_area_size_range, find_special_start_area};
@@ -303,6 +303,10 @@ fn place_non_predifined_shape(
                     break;
                 }
                 if core.config.adjacent_shapes_different && !check_nearby_shape(nxi, nyi, core, sp) {
+                    nearby_shape_fail = true;
+                    break;
+                }
+                if core.config.adjacent_shapes_same && !check_nearby_shape_same(nxi, nyi, core, sp) {
                     nearby_shape_fail = true;
                     break;
                 }
@@ -1247,6 +1251,12 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
                 }
                 if core.config.adjacent_shapes_different
                     && !check_nearby_shape(pxn as i32, pyn as i32, core, sp)
+                {
+                    fail2 = true;
+                    break;
+                }
+                if core.config.adjacent_shapes_same
+                    && !check_nearby_shape_same(pxn as i32, pyn as i32, core, sp)
                 {
                     fail2 = true;
                     break;

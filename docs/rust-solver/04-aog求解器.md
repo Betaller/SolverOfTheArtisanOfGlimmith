@@ -354,7 +354,8 @@ empty_block_line_count += 最小切割数
 |---|---|---|
 | `check_edge` | `aog/core.rs:316` | 同区域格不能跨 `LINE_BLOCK` |
 | `check_edge_shape` | `aog/core.rs:264` | 边约束：双生/异生/不等号/差值 |
-| `check_nearby_shape` | `aog/core.rs:225` | mixed：相邻区域形状不同 |
+| `check_nearby_shape` | `aog/core.rs:225` | mixed/heterogeneous：相邻区域形状不同 |
+| `check_nearby_shape_same` | `aog/core.rs:253` | homogeneous：相邻区域形状相同 |
 | `check_nearby_size` | `aog/core.rs:243` | differentiation：相邻区域面积不同 |
 | `check_palisade_type1` | `aog/core.rs:362` | 围栏（部分填时） |
 | `check_palisade_type2` | `aog/core.rs:332` | 围栏（整形状后） |

@@ -251,6 +251,25 @@ pub fn check_nearby_shape(x: i32, y: i32, core: &AoGCore, sp: &Vec<Vec<u32>>) ->
     true
 }
 
+/// check_nearby_shape_same: adjacent regions must have the SAME shape
+/// (`homogeneous` / 双生 rule).
+pub fn check_nearby_shape_same(x: i32, y: i32, core: &AoGCore, sp: &Vec<Vec<u32>>) -> bool {
+    let index = sp_at(sp, x, y);
+    for (dx, dy) in [(-2, 0), (2, 0), (0, -2), (0, 2)] {
+        if !core.area_in_puzzle_range(x + dx, y + dy) {
+            continue;
+        }
+        let v = sp_at(sp, x + dx, y + dy);
+        if v != AREA_NORMAL
+            && v != index
+            && (v & SOLVE_AREA_SHAPE_INDEX_BIT) != (index & SOLVE_AREA_SHAPE_INDEX_BIT)
+        {
+            return false;
+        }
+    }
+    true
+}
+
 /// check_nearby_size: adjacent regions must have different sizes.
 pub fn check_nearby_size(x: i32, y: i32, core: &AoGCore, sp: &Vec<Vec<u32>>) -> bool {
     let index = sp_at(sp, x, y);
@@ -554,6 +573,11 @@ fn build_config(puzzle: &Puzzle, active: &HashSet<&str>) -> Config {
             "different" => config.all_shapes_different = true,
             "same" => config.all_shapes_same = true,
             "mixed" => config.adjacent_shapes_different = true,
+            // heterogeneous (异生): adjacent regions have different shapes —
+            // same semantics as `mixed`.
+            "heterogeneous" => config.adjacent_shapes_different = true,
+            // homogeneous (双生): adjacent regions have the SAME shape.
+            "homogeneous" => config.adjacent_shapes_same = true,
             "differentiation" => config.adjacent_sizes_different = true,
             "block" => config.only_rectangles = true,
             "non_block" => {

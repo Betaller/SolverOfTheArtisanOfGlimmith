@@ -123,7 +123,8 @@ compass_rec 递归生长：
   · 每步更新 counts[4]（北/南/东/西计数）
   · 任何方向超过罗盘指定值 → 剪枝
   · 四个方向都恰好满足 → 记录候选（并停止该分支）
-  · 候选总数上限 MAX_COMPASS_PLACEMENTS = 2000（防爆）
+  · 候选总数上限 MAX_COMPASS_PLACEMENTS = 10000（防爆）
+  · spec 过滤：仅跳过 spec=0 的线索（原 spec<3 过于激进，0469 类被误跳）
 ```
 
 ### 4.4 去重
@@ -288,7 +289,7 @@ reconstruct_and_validate(puzzle, placements, row_ids, ctx)
 
 **落点枚举完备性**：原共享 `candidates` 的 DFS 在任一分支尝试过某格后把它永久移除，
 兄弟分支连带丢失整个集合族。重写为 frontier 生长 + 以格集为键的 visited 去重
-（每个连通子集恰好展开一次），另有 `MAX_COMPASS_ENUM_STATES` 状态上限防爆。
+（每个连通子集恰好展开一次），另有 `MAX_COMPASS_ENUM_STATES` = 1M 状态上限防爆。
 
 **新落点源**：
 - `block` 矩形落点（`check_block`：任意长宽实心矩形）——1004 型（28 个 3-6 格矩形区）

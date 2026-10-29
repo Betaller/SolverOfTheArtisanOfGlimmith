@@ -28,11 +28,11 @@ struct SolveContext {
     fillable: Vec<[usize; 2]>,
 }
 
-const MAX_COMPASS_PLACEMENTS: usize = 2000;
+const MAX_COMPASS_PLACEMENTS: usize = 10_000;
 /// Upper bound on the compass placement-search state space (visited cell-sets).
 /// Only loosely-specified clues can reach it; truncation then keeps D8's
 /// "first N placements are still useful" semantics instead of blowing memory.
-const MAX_COMPASS_ENUM_STATES: usize = 200_000;
+const MAX_COMPASS_ENUM_STATES: usize = 1_000_000;
 /// Area-number targets above this are left to the backtracker: enumerating all
 /// connected polyominoes of a large size explodes (e.g. area 48 on 1301).  This
 /// matches the Python ExactCoverSolver threshold (max(targets) <= 12).
@@ -317,8 +317,11 @@ fn push_compass_placements(
             if let Some(ref comp) = puzzle.cells[r][c].compass {
                 let spec_count = count_specified(comp);
                 let is_strip = comp.east_west_strip() || comp.north_south_strip();
-                if spec_count < 3 && !is_strip {
-                    continue; // too loosely constrained
+                // D8: relax spec filter — spec<3 was too aggressive (0469:
+                // 19/23 cells had spec=1 and were all skipped).  Only skip
+                // spec=0 (no direction constraints at all).
+                if spec_count == 0 && !is_strip {
+                    continue;
                 }
                 let mut results = generate_compass_polyominoes(puzzle, r, c, comp, deadline);
                 // D8: truncate instead of discarding when too many compass placements.

@@ -1008,6 +1008,11 @@ impl<'a> Solver<'a> {
             self.check_size_separation_sealed_pairs(num_comp)?;
             // Gemini: the two regions across a gemini edge must match in area.
             self.check_gemini_pairs(num_comp)?;
+            // Rule-level homogeneous: adjacent sealed regions must have the
+            // same size (necessary condition for same shape).
+            if self.rules.homogeneous {
+                self.check_homogeneous_sealed_pairs(num_comp)?;
+            }
         }
         // Gemini/Delta shape-identity: sealed regions across a gemini edge must
         // share a canonical shape; across a delta edge they must differ.
@@ -4701,6 +4706,32 @@ impl<'a> Solver<'a> {
     /// `third_party/aog area.rs:1244-1265`. For each Cut edge between two
     /// SEALED components of equal size → contradiction (adjacent equal-size
     /// pieces violate differentiation).
+    /// Rule-level homogeneous check: adjacent sealed regions must have the
+    /// same size (necessary condition for same shape under `homogeneous`).
+    fn check_homogeneous_sealed_pairs(&self, num_comp: usize) -> Result<(), ()> {
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            if self.is_growing(ci1) || self.is_growing(ci2) {
+                continue;
+            }
+            if self.curr_comp_sz[ci1] != self.curr_comp_sz[ci2] {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+
     fn check_size_separation_sealed_pairs(&self, num_comp: usize) -> Result<(), ()> {
         if !self.rules.size_separation {
             return Ok(());

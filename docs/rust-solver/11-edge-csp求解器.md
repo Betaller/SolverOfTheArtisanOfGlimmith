@@ -460,3 +460,15 @@ edge_csp 适配题常规耗尽，edge_csp 是最后一道真搜索；其 1.0× �
   与 val=2 同理）。混合值 puzzle（0985/0189/0998）仍需更深层传播。
 - `watchtower_diff_comp_force`：精确度数约束下，需要量恰好等于不同组件间
   Unknown 边数时全 Cut（0985 wt=2 类）。
+
+### 2026-10-29 偶度约束扩展到 structural_pieces=2
+
+`propagate_two_piece_vertex_parity`（顶点偶度约束：2 区域划分下每个内部顶点
+的 Cut 边数必偶）此前只在 `exact_piece_count == Some(2)`（rose 窗口推导）时
+触发。1138（area_sum → `structural_pieces=2`）不走 rose 路径，约束未生效。
+现门控扩展为 `exact_piece_count == Some(2) || structural_pieces == Some(2)`——
+偶度约束是网格二染色的拓扑事实，对任何 2 区域划分成立，与推导来源无关。
+
+**配套 area_sum 前置**（`solver/mod.rs`）：`area_sum_piece_count` ≤ 4 且
+最大面积值 ≥ 30 时跳过 aog（大形状→形状库 OOM，1138 exit -9）。最大值门
+保护小面积题（0710 {7,18,19,20} max=20 不触发，aog 28.8s 解出）。

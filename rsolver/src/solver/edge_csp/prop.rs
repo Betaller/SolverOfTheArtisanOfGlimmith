@@ -178,7 +178,12 @@ impl<'a> Solver<'a> {
             if (self.rules.bricky || self.rules.loopy) && !csp_skip("bricky") {
                 progress |= self.propagate_bricky_loopy()?;
             }
-            if self.exact_piece_count == Some(2) && !csp_skip("vparity2") {
+            // Even-degree constraint holds for ANY 2-region partition (grid
+            // 2-colouring topological fact), not just rose-derived piece counts.
+            // 1138 (area_sum→structural_pieces=2) previously missed this.
+            if (self.exact_piece_count == Some(2) || self.structural_pieces == Some(2))
+                && !csp_skip("vparity2")
+            {
                 progress |= self.propagate_two_piece_vertex_parity()?;
             }
             if self.exact_piece_count.is_some() || self.structural_pieces.is_some() {

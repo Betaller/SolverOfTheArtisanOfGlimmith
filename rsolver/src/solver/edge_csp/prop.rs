@@ -1955,6 +1955,33 @@ impl<'a> Solver<'a> {
         Ok(())
     }
 
+    /// When the exact degree constraint needs `need` more Cut edges and the
+    /// unknown edges between different components exactly equal `need`,
+    /// all of them must be Cut.
+    fn watchtower_diff_comp_force(&mut self, unknown: &[EdgeId], need: usize) -> bool {
+        if need == 0 {
+            return false;
+        }
+        let diff: Vec<EdgeId> = unknown
+            .iter()
+            .copied()
+            .filter(|&e| {
+                let (c1, c2) = self.grid.edge_cells(e);
+                self.curr_comp_id[c1] != self.curr_comp_id[c2]
+            })
+            .collect();
+        if diff.len() != need {
+            return false;
+        }
+        let mut progress = false;
+        for &e in &diff {
+            if self.set_edge(e, EdgeState::Cut) {
+                progress = true;
+            }
+        }
+        progress
+    }
+
     /// Push every growth edge of `ci` lying in compass direction `idx` into
     /// `cut_ef` (the direction is already at its required count).
     fn compass_collect_dir_cut_edges(
@@ -3057,6 +3084,8 @@ impl<'a> Solver<'a> {
                         progress = true;
                     }
                 }
+            } else if lo == hi && lo > known_cut {
+                progress |= self.watchtower_diff_comp_force(&unknown, lo - known_cut);
             }
         }
         Ok(progress)
@@ -3088,8 +3117,8 @@ impl<'a> Solver<'a> {
         let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
         // === Pass A: component-ID-based (distinct region counting) ===
         if !self.curr_comp_id.is_empty() {
-            // Collect (is_err, forced_cuts) per clue to avoid borrow conflicts.
-            let comp_id_results: Vec<(bool, Vec<EdgeId>)> = self
+            // Collect (is_err, forced_cuts, forced_uncuts) per clue to avoid borrow conflicts.
+            let comp_id_results: Vec<(bool, Vec<EdgeId>, Vec<EdgeId>)> = self
                 .vertex_clues
                 .iter()
                 .map(|clue| {
@@ -3105,7 +3134,7 @@ impl<'a> Solver<'a> {
                         .collect();
                     let n = cells.len();
                     if n == 0 || value > n || (n == 1 && value > 1) {
-                        return (false, vec![]); // caught by edge-based pass
+                        return (false, vec![], vec![]); // caught by edge-based pass
                     }
 
                     // Deduplicate component IDs (at most 4 cells).
@@ -3132,7 +3161,8 @@ impl<'a> Solver<'a> {
                     let is_err = value < min_distinct || value > max_distinct;
 
                     let mut forced_cuts = Vec::new();
-                    if max_distinct == value && comp_count > 1 {
+                    let mut forced_uncuts = Vec::new();
+                    if comp_count > 1 {
                         for &(a_idx, b_idx) in &cell_pair_indices {
                             if let (Some(a), Some(b)) = (cell_opts[a_idx], cell_opts[b_idx]) {
                                 if !self.grid.cell_exists[a] || !self.grid.cell_exists[b] {
@@ -3141,25 +3171,36 @@ impl<'a> Solver<'a> {
                                 if self.curr_comp_id[a] != self.curr_comp_id[b] {
                                     if let Some(eid) = self.grid.edge_between(a, b) {
                                         if self.edges[eid] == EdgeState::Unknown {
-                                            forced_cuts.push(eid);
+                                            if max_distinct == value {
+                                                forced_cuts.push(eid);
+                                            }
+                                            if min_distinct == value {
+                                                forced_uncuts.push(eid);
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    (is_err, forced_cuts)
+                    (is_err, forced_cuts, forced_uncuts)
                 })
                 .collect();
 
-            for (is_err, _) in &comp_id_results {
+            for (is_err, _, _) in &comp_id_results {
                 if *is_err {
                     return Err(());
                 }
             }
-            for (_, forced_cuts) in &comp_id_results {
+            for (_, forced_cuts, forced_uncuts) in &comp_id_results {
                 for &eid in forced_cuts {
                     if !self.set_edge(eid, EdgeState::Cut) {
+                        return Err(());
+                    }
+                    progress = true;
+                }
+                for &eid in forced_uncuts {
+                    if !self.set_edge(eid, EdgeState::Uncut) {
                         return Err(());
                     }
                     progress = true;

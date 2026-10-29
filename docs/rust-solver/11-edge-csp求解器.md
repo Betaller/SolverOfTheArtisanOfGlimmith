@@ -227,7 +227,8 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   - **Pass A（component-ID）**：`curr_comp_id` 已填充时，数每个 watchtower 顶点
     周围 2×2 的 distinct sealed/growing 组件 → `[min_distinct, max_distinct]` 区间。
     `value` 越界→矛盾；`max_distinct==value && comp_count>1` 时强制不同组件间的
-    Unknown 边 `Cut`。
+    Unknown 边 `Cut`；`min_distinct==value && comp_count>1` 时强制不同组件间的
+    Unknown 边 `Uncut`（合并强制，0985 wt=1 类）。
   - **Pass B（edge-count）**：数 2×2 内部 4 边的 Cut/Unknown。cycle(4格)：
     `pieces=max(1,k)`；`value==1` 精确（强制 Uncut），`value≥2` 下界（强制 Cut 达 value）。
     tree(2-3格)：`pieces=1+k`；`value==2` 下界，`value==1/≥3` 精确。处理 double-touching
@@ -457,3 +458,5 @@ edge_csp 适配题常规耗尽，edge_csp 是最后一道真搜索；其 1.0× �
 效果：1136 从 timeout→30s 解出，0445/0492 加速 2x。
 - `propagate_watchtower_degree` val=3 也收紧为 exact-3（排除 degree-4 交叉，
   与 val=2 同理）。混合值 puzzle（0985/0189/0998）仍需更深层传播。
+- `watchtower_diff_comp_force`：精确度数约束下，需要量恰好等于不同组件间
+  Unknown 边数时全 Cut（0985 wt=2 类）。

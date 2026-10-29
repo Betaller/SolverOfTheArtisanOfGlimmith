@@ -1071,6 +1071,17 @@ impl<'a> Solver<'a> {
                 return false;
             }
         }
+        // Compass components need to grow to satisfy directional counts →
+        // prefer Uncut when either side carries a compass clue.
+        if self.has_compass_clue && !self.cell_clues.is_empty() {
+            for cell in [c1, c2] {
+                if self.cell_clues.iter().any(|cl| {
+                    matches!(cl, CellClue::Compass { cell: c, .. } if *c == cell)
+                }) {
+                    return false;
+                }
+            }
+        }
         true
     }
 

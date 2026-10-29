@@ -2077,7 +2077,11 @@ impl<'a> Solver<'a> {
     }
 
     /// Push every growth edge of `ci` lying in compass direction `idx` into
-    /// `cut_ef` (the direction is already at its required count).
+    /// `cut_ef` (the direction is already at its required count).  Only
+    /// axis-aligned edges are forced: a diagonal edge spans two directions,
+    /// and forcing Cut would also block the other direction (which may need
+    /// more cells).  The conflict detection in `propagate_compass_in_components`
+    /// catches the Cut/Uncut clash when both directions fire.
     fn compass_collect_dir_cut_edges(
         &mut self,
         ci: usize,
@@ -2090,14 +2094,16 @@ impl<'a> Solver<'a> {
             let (c1, c2) = self.grid.edge_cells(e);
             let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
             let (pr, pc) = self.grid.cell_pos(other);
-            let matches = match idx {
-                0 => pr < cr,
-                1 => pr > cr,
-                2 => pc > cc,
-                3 => pc < cc,
+            let dr = pr as isize - cr as isize;
+            let dc = pc as isize - cc as isize;
+            let is_axis = match idx {
+                0 => dr == -1 && dc == 0,
+                1 => dr == 1 && dc == 0,
+                2 => dr == 0 && dc == 1,
+                3 => dr == 0 && dc == -1,
                 _ => false,
             };
-            if matches {
+            if is_axis {
                 cut_ef.push(e);
             }
         }

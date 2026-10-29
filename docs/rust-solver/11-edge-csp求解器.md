@@ -479,6 +479,12 @@ sealed 组件（不可再分裂）中两个同类型 rose 符号格 → 矛盾�
 每区只许每种符号一次（rose_window 语义），sealed 组件无法再分。
 仅检查 sealed 组件（growing 组件仍可分裂，不报矛盾）。
 
+### 2026-10-29 compass_collect_dir_cut_edges 轴向边限制
+
+`compass_collect_dir_cut_edges`（方向到限强制 Cut）也限轴向边。对角边 Cut
+同时封两个方向——若另一方向需要更多格子则误封。只对轴向边强制 Cut，
+对角边留搜索决定（配合冲突检测兜底）。
+
 ### 2026-10-29 compass exact-deficit 对角边冲突修复
 
 对角生长边同时计入两个方向（如 (cr-1,cc+1) 同时计 N 和 E）。exact-deficit

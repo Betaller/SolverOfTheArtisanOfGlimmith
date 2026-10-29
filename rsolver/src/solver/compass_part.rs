@@ -57,14 +57,14 @@ pub fn is_applicable(puzzle: &Puzzle) -> bool {
     for r in &puzzle.rules {
         ctypes.insert(r.ctype.as_str());
     }
-    // Accept {compass, solitary} or {compass, solitary, differentiation}.
-    // `differentiation` (adjacent regions have different areas) is checked by
-    // the final validator; the search may produce invalid candidates but the
-    // validator rejects them (1080 class).
+    // Accept {compass, solitary} plus optional differentiation/heterogeneous/
+    // homogeneous.  These extra rules are checked by the final validator; the
+    // search may produce invalid candidates but the validator rejects them.
     let base_ok = ctypes.contains("compass") && ctypes.contains("solitary");
-    let extra_ok = ctypes.len() == 2
-        || (ctypes.len() == 3 && ctypes.contains("differentiation"));
-    if !base_ok || !extra_ok {
+    let extras_ok: bool = ctypes
+        .iter()
+        .all(|&r| matches!(r, "compass" | "solitary" | "differentiation" | "heterogeneous" | "homogeneous"));
+    if !base_ok || !extras_ok {
         return false;
     }
     if !puzzle.shape_pool.is_empty() {

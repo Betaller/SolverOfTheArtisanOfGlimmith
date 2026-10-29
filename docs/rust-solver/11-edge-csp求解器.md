@@ -202,7 +202,8 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   前置（它们的部分传播会产出中间无效解）。
 - **compass 方向计数基础**（P1）：`propagate_compass`（0 方向邻边强制 Cut）+
   `propagate_compass_in_components`（组件方向计数 + 到限 Cut/缺限单网关 Uncut +
-  两两相容 + 边界框剪生长边）。**大 compass 题仍超时**（需桥/网关强制，迭代三）。
+  两两相容 + 边界框剪生长边）+ **方向不足检查**（`counts[idx] + dir_count[idx] < v`
+  即死——生长边数量不足以补足方向缺口时直接矛盾）。**大 compass 题仍超时**（需桥/网关强制，迭代三）。
 - **fence 围栏**（P2）：`palisade_kind`（3×3 十字 → `PalisadeKind`）+
   `propagate_palisade_constraints`（4 旋转枚举取交集强制边）；`SUPPORTED` 加 `fence`。
   **新增 4 道**：0923fix / 0924fix / 0903 / 0628。

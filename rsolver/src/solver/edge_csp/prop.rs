@@ -1910,6 +1910,13 @@ impl<'a> Solver<'a> {
                 self.compass_collect_dir_cut_edges(ci, cr, cc, idx, cut_ef);
             }
             if counts[idx] < v {
+                // Deficit check: the growth edges in this direction must be
+                // able to cover the deficit.  Each growth edge can add at most
+                // one cell in the direction, so `counts[idx] + dir_count[idx]`
+                // is the directional ceiling.
+                if counts[idx] + dir_count[idx] < v {
+                    return Err(());
+                }
                 self.compass_maybe_force_uncut(
                     ci,
                     idx,

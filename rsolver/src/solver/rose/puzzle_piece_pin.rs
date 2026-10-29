@@ -1526,22 +1526,7 @@ impl<'a> FreeRem<'a> {
     /// and falsified: 0206's plain search went 3.3 s → >12 s on the changed
     /// trajectory.)
     fn pick_mrv(&self) -> Option<u32> {
-        // Minimum adjacent label size (smallest label the unit can join);
-        // prefer growing small labels before they get isolated (0770 class).
-        let min_adj_label_size = |u: u32| -> usize {
-            let mut min = usize::MAX;
-            for &v in &self.unit_adj[u as usize] {
-                if let Some(l) = self.lab_of[v as usize] {
-                    let sz: usize = self.lab_units[l as usize]
-                        .iter()
-                        .map(|&w| self.unit_cells[w as usize].len())
-                        .sum();
-                    min = min.min(sz);
-                }
-            }
-            min
-        };
-        let mut best_key: Option<(usize, usize, std::cmp::Reverse<usize>, usize, usize)> = None;
+        let mut best_key: Option<(usize, usize, std::cmp::Reverse<usize>, usize)> = None;
         let mut best_u = None;
         for u in 0..self.lab_of.len() as u32 {
             if self.lab_of[u as usize].is_some() {
@@ -1554,7 +1539,6 @@ impl<'a> FreeRem<'a> {
                 self.cheap_domain(u).len(),
                 self.sz_hi[u as usize].saturating_sub(self.sz_lo[u as usize]),
                 std::cmp::Reverse(self.facts_of_unit[u as usize].len()),
-                min_adj_label_size(u),
                 self.unit_cells[u as usize][0],
             );
             if best_key.map_or(true, |bk| key < bk) {
@@ -1577,28 +1561,15 @@ impl<'a> FreeRem<'a> {
             }
         }
         // Prefer smaller labels first — they need to grow to reach lo before
-        // getting isolated (0770 class).  Within same size, prefer labels with
-        // more unassigned neighbors (more room to grow).  Label-ID tiebreak
-        // keeps ordering deterministic.
+        // getting isolated (0770 class).  Label-ID tiebreak keeps ordering
+        // deterministic.
         let label_size = |l: u32| -> usize {
             self.lab_units[l as usize]
                 .iter()
                 .map(|&v| self.unit_cells[v as usize].len())
                 .sum()
         };
-        let label_growth = |l: u32| -> usize {
-            // Count unassigned cells adjacent to this label's units.
-            let mut seen = std::collections::HashSet::new();
-            for &v in &self.lab_units[l as usize] {
-                for &nbr in &self.unit_adj[v as usize] {
-                    if self.lab_of[nbr as usize].is_none() {
-                        seen.insert(nbr);
-                    }
-                }
-            }
-            seen.len()
-        };
-        adj.sort_unstable_by_key(|&l| (label_size(l), std::cmp::Reverse(label_growth(l)), l));
+        adj.sort_unstable_by_key(|&l| (label_size(l), l));
         let mut out: Vec<Option<u32>> = adj.iter().map(|&l| Some(l)).collect();
         for val in &dom {
             if val.is_some() && !out.contains(val) {

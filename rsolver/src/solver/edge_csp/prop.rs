@@ -1856,6 +1856,7 @@ impl<'a> Solver<'a> {
                 }
             }
         }
+        // Apply forces.
         for e in cut_ef {
             if self.edges[e] == EdgeState::Unknown {
                 if !self.set_edge(e, EdgeState::Cut) {

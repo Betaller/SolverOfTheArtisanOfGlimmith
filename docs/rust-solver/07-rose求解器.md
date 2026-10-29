@@ -715,6 +715,10 @@ cover 门外，落到 region_match 单候选管线（被 non_block 拒收）。�
 7. **`non_block` 矩形过滤**（2026-10-27）：`gen_cover_cands` 对含 `non_block`
    规则的题过滤矩形候选（`is_rectangle`），防 rose 产生矩形区域被
    `accept_if_valid` 拒绝（0838 类 validation_failed 根因）。
+8. **`residue_ok` compass 校验**（2026-10-29）：`residue_ok` 此前不检查
+   compass 方向计数，rose 生成的区域违反 compass 后被最终 validate 拒绝
+   （1402 类 validation_failed）。加 `compass_partition_ok`：对每个 compass
+   线索格，检查其所在区域在各方向的格数与线索值一致。
 
 **现状**：候选生成已到位（hostable 18-19 尺寸/种子），但 runner 每尝试
 ~30ms 在 500^4 组合空间内不可达；真解多重集 {12,13,15,20,61} 的排序

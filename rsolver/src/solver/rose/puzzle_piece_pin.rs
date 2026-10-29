@@ -26,7 +26,7 @@
 
 use std::collections::HashSet;
 
-use crate::types::Puzzle;
+use crate::types::{CompassClue, Puzzle};
 
 use super::cells::{CellSet, PreBoundaries};
 
@@ -4765,6 +4765,81 @@ fn prioritize_missing_symbols(
     frontier
 }
 /// Check `watchtower` vertex constraints on a complete partition: for each
+/// Compass check wrapper: only applies when the puzzle has compass rules.
+fn compass_residue_ok(puzzle: &Puzzle, placed: &[(usize, Mask)], rest: &[usize], n: usize) -> bool {
+    if !puzzle.rules.iter().any(|r| r.ctype == "compass") {
+        return true;
+    }
+    let rest_mask = mask_of(rest, n);
+    compass_partition_ok(puzzle, placed, &rest_mask)
+}
+
+/// Check compass directional counts for one clue cell within one region mask.
+fn compass_region_counts_ok(
+    puzzle: &Puzzle,
+    w: usize,
+    r: usize,
+    c: usize,
+    compass: &CompassClue,
+    pm: &Mask,
+) -> bool {
+    let (cr, cc) = (r as isize, c as isize);
+    let mut counts = [0isize; 4]; // N, S, E, W
+    for r2 in 0..puzzle.height {
+        for c2 in 0..puzzle.width {
+            let idx2 = r2 * w + c2;
+            if pm[idx2 / 64] & (1u64 << (idx2 % 64)) == 0 {
+                continue;
+            }
+            let (pr, pc) = (r2 as isize, c2 as isize);
+            if pr < cr { counts[0] += 1; }
+            if pr > cr { counts[1] += 1; }
+            if pc > cc { counts[2] += 1; }
+            if pc < cc { counts[3] += 1; }
+        }
+    }
+    if let Some(v) = compass.up {
+        if v >= 0 && counts[0] != v as isize { return false; }
+    }
+    if let Some(v) = compass.down {
+        if v >= 0 && counts[1] != v as isize { return false; }
+    }
+    if let Some(v) = compass.right {
+        if v >= 0 && counts[2] != v as isize { return false; }
+    }
+    if let Some(v) = compass.left {
+        if v >= 0 && counts[3] != v as isize { return false; }
+    }
+    true
+}
+
+/// Compass directional-count check: for each compass clue cell, its region
+/// must have exactly the specified number of cells in each direction (N/S/E/W
+/// relative to the clue cell).  Regions are the placed masks + the rest mask.
+fn compass_partition_ok(puzzle: &Puzzle, placed: &[(usize, Mask)], rest_mask: &Mask) -> bool {
+    let w = puzzle.width;
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width {
+            let Some(compass) = &puzzle.cells[r][c].compass else { continue };
+            let idx = r * w + c;
+            let mut found = false;
+            for pm in placed.iter().map(|(_, pm)| pm).chain(std::iter::once(rest_mask)) {
+                if pm[idx / 64] & (1u64 << (idx % 64)) == 0 {
+                    continue;
+                }
+                found = true;
+                if !compass_region_counts_ok(puzzle, w, r, c, compass, pm) {
+                    return false;
+                }
+            }
+            if !found {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// vertex with a watchtower value, the number of distinct regions among its
 /// 4 neighboring cells must equal the value.
 fn watchtower_partition_ok(
@@ -5914,6 +5989,13 @@ fn residue_ok(
         if !watchtower_partition_ok(puzzle, w, h, n, placed, &rest, 0, seeds) {
             return false;
         }
+    }
+    // `compass` directional counts: each compass clue cell's region must have
+    // exactly the specified number of cells in each direction.  Without this
+    // check the solver generates solutions that fail final validation (1402
+    // class: rose validation_failed).
+    if !compass_residue_ok(puzzle, placed, &rest, n) {
+        return false;
     }
     true
 }

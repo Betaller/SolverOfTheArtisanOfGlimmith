@@ -345,25 +345,25 @@ fn place_non_predifined_shape(
                 let nx = to_puzzle_x(x + L.compass_visited[i].x) as usize;
                 let ny = to_puzzle_y(y + L.compass_visited[i].y) as usize;
                 if core.puzzle_compass_up[nx][ny] != -1
-                    && core.puzzle_compass_up[nx][ny] != L.compass_visited_up_cnt[i]
+                    && core.puzzle_compass_up[nx][ny] < L.compass_visited_up_cnt[i]
                 {
                     compass_fail = true;
                     break;
                 }
                 if core.puzzle_compass_down[nx][ny] != -1
-                    && core.puzzle_compass_down[nx][ny] != L.compass_visited_down_cnt[i]
+                    && core.puzzle_compass_down[nx][ny] < L.compass_visited_down_cnt[i]
                 {
                     compass_fail = true;
                     break;
                 }
                 if core.puzzle_compass_left[nx][ny] != -1
-                    && core.puzzle_compass_left[nx][ny] != L.compass_visited_left_cnt[i]
+                    && core.puzzle_compass_left[nx][ny] < L.compass_visited_left_cnt[i]
                 {
                     compass_fail = true;
                     break;
                 }
                 if core.puzzle_compass_right[nx][ny] != -1
-                    && core.puzzle_compass_right[nx][ny] != L.compass_visited_right_cnt[i]
+                    && core.puzzle_compass_right[nx][ny] < L.compass_visited_right_cnt[i]
                 {
                     compass_fail = true;
                     break;

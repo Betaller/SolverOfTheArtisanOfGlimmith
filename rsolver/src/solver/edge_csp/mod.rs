@@ -913,6 +913,23 @@ impl<'a> Solver<'a> {
     }
 
     /// Multi-factor edge selection (target area, sealed/growing, watchtower).
+    /// Watchtower-aware edge bonus: edges whose state directly determines a
+    /// vertex's cut-degree get priority (0985/1138 class).
+    fn watchtower_edge_bonus(&self, c1: CellId, c2: CellId) -> i32 {
+        if self.vertex_clues.is_empty() {
+            return 0;
+        }
+        let (r1, c1p) = self.grid.cell_pos(c1);
+        let (r2, c2p) = self.grid.cell_pos(c2);
+        for &(vr, vc) in &[(r1, c1p), (r2, c2p), (r1 + 1, c1p), (r1, c1p + 1)] {
+            let vtx = self.grid.vertex(vr, vc);
+            if self.vertex_clues.iter().any(|v| v.vertex == vtx) {
+                return 200;
+            }
+        }
+        0
+    }
+
     fn select_edge(&mut self) -> Option<(EdgeId, i32)> {
         let num_edges = self.grid.num_edges();
         if self.curr_comp_id.is_empty() {
@@ -973,6 +990,8 @@ impl<'a> Solver<'a> {
                     score += 50;
                 }
             }
+
+            score += self.watchtower_edge_bonus(c1, c2);
 
             // Edge incident to a watchtower vertex.
             if !self.watchtower_vertices.is_empty() {

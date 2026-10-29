@@ -144,7 +144,7 @@ k==0 才能落地为逐边强制，中间情形必须留给搜索。
 
 ### 3.4 搜索（`mod.rs::backtrack_edges`）
 
-`select_edge`（目标面积 + 密封 + watchtower 顶点多因子评分）→ `prefer_cut_first` →
+`select_edge`（目标面积 + 密封 + watchtower 顶点多因子评分 + watchtower 度数感知加分）→ `prefer_cut_first` →
 `set_edge` + `propagate` → 递归回溯。`curr_unknown==0` 时 flood-fill 非 Cut 边重建区域
 → `rose::build_regions`。deadline 每 1024 节点 + 每轮传播检查。
 

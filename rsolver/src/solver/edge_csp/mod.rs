@@ -936,6 +936,22 @@ impl<'a> Solver<'a> {
         0
     }
 
+    /// Compass-aware edge bonus: edges incident to a compass clue cell are
+    /// more likely boundaries (compass constrains region shape).
+    fn compass_edge_bonus(&self, c1: CellId, c2: CellId) -> i32 {
+        if !self.has_compass_clue {
+            return 0;
+        }
+        for cell in [c1, c2] {
+            if self.cell_clues.iter().any(|cl| {
+                matches!(cl, CellClue::Compass { cell: c, .. } if *c == cell)
+            }) {
+                return 30;
+            }
+        }
+        0
+    }
+
     fn select_edge(&mut self) -> Option<(EdgeId, i32)> {
         let num_edges = self.grid.num_edges();
         if self.curr_comp_id.is_empty() {
@@ -998,6 +1014,7 @@ impl<'a> Solver<'a> {
             }
 
             score += self.watchtower_edge_bonus(c1, c2);
+            score += self.compass_edge_bonus(c1, c2);
 
             // Edge incident to a watchtower vertex.
             if !self.watchtower_vertices.is_empty() {

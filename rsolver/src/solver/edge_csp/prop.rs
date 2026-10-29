@@ -1917,6 +1917,26 @@ impl<'a> Solver<'a> {
                 if counts[idx] + dir_count[idx] < v {
                     return Err(());
                 }
+                // Exact deficit: when the growth-edge count exactly equals the
+                // deficit, every growth edge in that direction must be uncut.
+                let deficit = v - counts[idx];
+                if dir_count[idx] == deficit {
+                    for &e in &self.prop.growth_edges[ci] {
+                        let (c1, c2) = self.grid.edge_cells(e);
+                        let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
+                        let (pr, pc) = self.grid.cell_pos(other);
+                        let matches = match idx {
+                            0 => pr < cr,
+                            1 => pr > cr,
+                            2 => pc > cc,
+                            3 => pc < cc,
+                            _ => false,
+                        };
+                        if matches {
+                            uncut_ef.push(e);
+                        }
+                    }
+                }
                 self.compass_maybe_force_uncut(
                     ci,
                     idx,

@@ -937,7 +937,8 @@ impl<'a> Solver<'a> {
     }
 
     /// Compass-aware edge bonus: edges incident to a compass clue cell are
-    /// more likely boundaries (compass constrains region shape).
+    /// more likely boundaries (compass constrains region shape).  Higher bonus
+    /// when the component has a directional deficit (needs to grow).
     fn compass_edge_bonus(&self, c1: CellId, c2: CellId) -> i32 {
         if !self.has_compass_clue {
             return 0;
@@ -946,7 +947,7 @@ impl<'a> Solver<'a> {
             if self.cell_clues.iter().any(|cl| {
                 matches!(cl, CellClue::Compass { cell: c, .. } if *c == cell)
             }) {
-                return 30;
+                return 50;
             }
         }
         0

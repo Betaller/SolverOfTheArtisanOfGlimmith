@@ -2491,6 +2491,63 @@ fn orient_and_pin_comp(
 /// pinned; the gap system's disjunctions (signed-sum offsets) are invisible
 /// to interval windows, so enumerate the surviving size tuples here instead.
 /// Assumes each constraint unit holds its own label — merging with equal
+/// Generate size-multiset cases from the window when no ord/diff constraints
+/// exist (0770 class: pure range min=12).  For each region count, produce
+/// representative distributions: even split, one-large, two-medium,
+/// one-large-one-medium, three-medium.
+fn window_size_cases(
+    total: usize,
+    g: usize,
+    case_cap: usize,
+) -> Vec<(Vec<(usize, usize)>, usize)> {
+    let mut cases = Vec::new();
+    let max_regions = if g >= 1 { total / g } else { 0 };
+    for n_reg in (2..=max_regions.min(12)).rev() {
+        let extra = total.saturating_sub(g * n_reg);
+        let dists = make_distributions(n_reg, g, total, extra);
+        for szs in dists {
+            if szs.iter().all(|&s| s >= g) && szs.iter().sum::<usize>() == total {
+                let assigns: Vec<(usize, usize)> =
+                    szs.iter().enumerate().map(|(i, &s)| (i, s)).collect();
+                cases.push((assigns, n_reg));
+            }
+        }
+    }
+    cases.sort_unstable_by_key(|(assigns, _)| {
+        let max = assigns.iter().map(|(_, s)| *s).max().unwrap_or(0);
+        (max, assigns.len())
+    });
+    cases.truncate(case_cap);
+    cases
+}
+
+/// Build up to 5 representative size vectors for `n_reg` regions.
+fn make_distributions(n_reg: usize, g: usize, total: usize, extra: usize) -> Vec<Vec<usize>> {
+    let avg = total / n_reg;
+    let remainder = total % n_reg;
+    let mut even: Vec<usize> = vec![avg; n_reg];
+    for item in even.iter_mut().take(remainder) {
+        *item += 1;
+    }
+    let mut one_large = vec![g; n_reg];
+    one_large[n_reg - 1] = total - g * (n_reg - 1);
+    let mut two_med = vec![g; n_reg];
+    let mut one_med = vec![g; n_reg];
+    let mut three_med = vec![g; n_reg];
+    if n_reg >= 3 {
+        two_med[n_reg - 1] = g + extra / 2 + extra % 2;
+        two_med[n_reg - 2] = g + extra / 2;
+        one_med[n_reg - 1] = g + (extra * 2) / 3;
+        one_med[n_reg - 2] = g + extra / 3;
+    }
+    if n_reg >= 4 {
+        three_med[n_reg - 1] = g + extra / 3 + extra % 3;
+        three_med[n_reg - 2] = g + extra / 3;
+        three_med[n_reg - 3] = g + extra / 3;
+    }
+    vec![even, one_large, two_med, one_med, three_med]
+}
+
 /// sizes stays expressible and anything missed falls back to the plain
 /// un-hinted search.  Returns `(per-unit exact windows, label count)` cases.
 fn enum_size_cases(
@@ -2524,7 +2581,7 @@ fn enum_size_cases(
     }
     let members: Vec<u32> = (0..n as u32).filter(|&u| touched[u as usize]).collect();
     if members.is_empty() {
-        return Vec::new();
+        return window_size_cases(total, g, CASE_CAP);
     }
     // Component labelling over the constraint graph.
     let mut comp_of = vec![usize::MAX; n];
@@ -8532,12 +8589,14 @@ mod multi_rem_tests {
     #[test]
     #[ignore]
     fn solves_range_partition_0770() {
+        dies_reset();
         let p = crate::io::parse_puzzle(include_str!(
             "../../../../puzzles/official/Zone2/5-minmax/0770.json"
         ))
         .expect("parse");
         let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
         let out = solve_range_partition(&p, p.height * p.width, deadline);
+        eprintln!("DBG dies {:?}", dies_snapshot());
         assert!(out.is_some(), "0770 range partition must solve");
     }
 

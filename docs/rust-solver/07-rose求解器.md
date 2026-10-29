@@ -744,3 +744,6 @@ range-part 因此只有无提示兜底 run。改为：按连通分量各自枚�
 - ~~`pick_mrv` 加 `min_adj_label_size` 排序键~~ — 已回退：与 MRV 冲突
   （优先能加入小标签的格子 = 偏好约束少的格子，与 MRV 相反），导致
   0270/0262 等 range-part 回归。`value_order` 的 `label_growth` 同理回退。
+- `enum_size_cases` 空约束图时生成窗口尺寸情形（`window_size_cases`）：
+  无 ord/diff 约束的纯 range 题（0770 类）获得 5 种代表性尺寸分布搜索提示
+  （均分/一大/两大/一大一中/三分），joinable 死亡 304→110。

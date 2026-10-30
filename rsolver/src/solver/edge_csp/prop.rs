@@ -1013,6 +1013,12 @@ impl<'a> Solver<'a> {
             if self.rules.homogeneous {
                 self.check_homogeneous_sealed_pairs(num_comp)?;
             }
+            // Gemini shape forcing: when one side is sealed, force the other
+            // to match its shape.  This is the strongest pruning for
+            // homogeneous puzzles.
+            if self.rules.homogeneous || !self.gemini_edges.is_empty() {
+                progress |= self.force_gemini_shape(num_comp)?;
+            }
             // Shape embeddability: growing components must be extendable to
             // some polyomino of their target area.  Prunes partial shapes that
             // can't form a valid region.  Opt-in via EDGE_CSP_SHAPE_CHECK=1
@@ -4857,6 +4863,173 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Gemini shape forcing: when one side of a gemini edge is sealed with
+    /// shape S and the other side is growing, the growing side must also end
+    /// up with shape S.  This forces specific cells to be included/excluded.
+    fn force_gemini_shape(&mut self, num_comp: usize) -> Result<bool, ()> {
+        if self.gemini_edges.is_empty() {
+            return Ok(false);
+        }
+        let mut progress = false;
+        for i in 0..self.gemini_edges.len() {
+            let e = self.gemini_edges[i];
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            // One sealed, one growing.
+            let (sealed_ci, growing_ci) = if !self.is_growing(ci1) && self.is_growing(ci2) {
+                (ci1, ci2)
+            } else if self.is_growing(ci1) && !self.is_growing(ci2) {
+                (ci2, ci1)
+            } else {
+                continue;
+            };
+            // Compute sealed shape.
+            let sealed_shape = self.comp_canonical_shape(sealed_ci);
+            let Some(sealed_shape) = sealed_shape else {
+                continue;
+            };
+            let target_sz = sealed_shape.len();
+            // Growing component must reach the same size.
+            if self.curr_comp_sz[growing_ci] > target_sz {
+                return Err(());
+            }
+            // Get growing component's cells as relative coordinates.
+            let growing_cells = &self.comp_cells[growing_ci];
+            if growing_cells.is_empty() {
+                continue;
+            }
+            let base_r = growing_cells[0] / self.grid.cols;
+            let base_c = growing_cells[0] % self.grid.cols;
+            let partial: Vec<(i32, i32)> = growing_cells
+                .iter()
+                .map(|&c| {
+                    let r = (c / self.grid.cols) as i32;
+                    let col = (c % self.grid.cols) as i32;
+                    (r - base_r as i32, col - base_c as i32)
+                })
+                .collect();
+            // Find which dihedral transform of the sealed shape contains the
+            // growing component's partial shape.
+            if let Some(forced_cells) =
+                Self::find_shape_transform(&partial, &sealed_shape, base_r, base_c, self.grid.cols)
+            {
+                // Force cells: the growing component must include exactly the
+                // cells in `forced_cells` and exclude all others.
+                for &(r, col) in &forced_cells {
+                    let cell_id = r * self.grid.cols + col;
+                    if cell_id >= self.grid.num_cells() {
+                        continue;
+                    }
+                    if !self.grid.cell_exists[cell_id] {
+                        continue;
+                    }
+                    // This cell must be in the growing component → its edge to
+                    // the component must be Uncut.
+                    if self.curr_comp_id[cell_id] != growing_ci {
+                        // Find the edge connecting this cell to the component.
+                        for eid in self.grid.cell_edges(cell_id).into_iter().flatten() {
+                            let (a, b) = self.grid.edge_cells(eid);
+                            let other = if a == cell_id { b } else { a };
+                            if self.curr_comp_id[other] == growing_ci
+                                && self.edges[eid] == EdgeState::Unknown
+                            {
+                                if self.set_edge(eid, EdgeState::Uncut) {
+                                    progress = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // No valid transform found → contradiction.
+                return Err(());
+            }
+        }
+        Ok(progress)
+    }
+
+    /// Find a dihedral transform of `sealed_shape` that contains `partial` as
+    /// a sub-shape, and return the absolute cell positions the growing
+    /// component must include.
+    fn find_shape_transform(
+        partial: &[(i32, i32)],
+        sealed_shape: &[(i32, i32)],
+        base_r: usize,
+        base_c: usize,
+        cols: usize,
+    ) -> Option<Vec<(usize, usize)>> {
+        let sealed_set: std::collections::HashSet<(i32, i32)> = sealed_shape.iter().copied().collect();
+        for &reflect in &[false, true] {
+            for &rot in &[0u8, 1, 2, 3] {
+                // Transform the sealed shape.
+                let transformed: Vec<(i32, i32)> = sealed_shape
+                    .iter()
+                    .map(|&(r, c)| {
+                        let (r, c) = if reflect { (r, -c) } else { (r, c) };
+                        match rot {
+                            0 => (r, c),
+                            1 => (c, -r),
+                            2 => (-r, -c),
+                            _ => (-c, r),
+                        }
+                    })
+                    .collect();
+                // Normalize to origin.
+                let min_r = transformed.iter().map(|&(r, _)| r).min().unwrap();
+                let min_c = transformed.iter().map(|&(_, c)| c).min().unwrap();
+                let normalized: Vec<(i32, i32)> = transformed
+                    .iter()
+                    .map(|&(r, c)| (r - min_r, c - min_c))
+                    .collect();
+                let norm_set: std::collections::HashSet<(i32, i32)> = normalized.iter().copied().collect();
+                // Check if partial is a subset of normalized.
+                let partial_set: std::collections::HashSet<(i32, i32)> = partial.iter().copied().collect();
+                if partial_set.is_subset(&norm_set) {
+                    // Found! Map back to absolute coordinates.
+                    let offset_r = base_r as i32;
+                    let offset_c = base_c as i32;
+                    return Some(
+                        normalized
+                            .iter()
+                            .map(|&(r, c)| ((r + offset_r) as usize, (c + offset_c) as usize))
+                            .collect(),
+                    );
+                }
+            }
+        }
+        None
+    }
+
+    /// Compute the canonical shape of a sealed component.
+    fn comp_canonical_shape(&self, ci: usize) -> Option<Vec<(i32, i32)>> {
+        let cells = &self.comp_cells[ci];
+        if cells.is_empty() {
+            return None;
+        }
+        let base_r = cells[0] / self.grid.cols;
+        let base_c = cells[0] % self.grid.cols;
+        let mut coords: Vec<(i32, i32)> = cells
+            .iter()
+            .map(|&c| {
+                let r = (c / self.grid.cols) as i32;
+                let col = (c % self.grid.cols) as i32;
+                (r - base_r as i32, col - base_c as i32)
+            })
+            .collect();
+        coords.sort();
+        Some(coords)
     }
 
     /// Shape embeddability check: for each growing component with a target area

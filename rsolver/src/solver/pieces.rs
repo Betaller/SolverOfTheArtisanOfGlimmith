@@ -145,11 +145,10 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
             let econs_ok = econs_rows_ok(&econs, &ctx, &cell_row);
             let distinct_ok = distinct_rows_ok(need_distinct, &keys, partial);
             let clue_ok = cell_clue_rows_ok(puzzle, &placements, &keys, &pat_keys, partial);
-            // Delta constraints are checked in reconstruct_and_validate (leaf).
-            // During DLX search, only check gemini (same shape) — delta (different
-            // shape) is too strict for partial solutions.
-            let gemini_ok = std::env::var("PIECES_SKIP_GEMINI").is_ok()
-                || gemini_shape_rows_ok(&econs, &ctx, &keys, &cell_row);
+            // Gemini/Delta constraints are checked in reconstruct_and_validate (leaf).
+            // During DLX search, both are too strict for partial solutions —
+            // partial shapes don't yet reflect the final region shapes.
+            let gemini_ok = true;
             if std::env::var("EDGE_CSP_DEBUG").is_ok() && !(wt_ok && econs_ok && distinct_ok && clue_ok && gemini_ok) {
                 eprintln!("pieces: row_check fail wt={} econs={} distinct={} clue={} gemini={}", wt_ok, econs_ok, distinct_ok, clue_ok, gemini_ok);
             }
@@ -960,9 +959,11 @@ fn generate_all_placements(
     });
 
     // Gemini shape constraint propagation
-    if std::env::var("PIECES_SKIP_GEMINI").is_err() {
-        filter_gemini_incompatible(puzzle, ctx, &mut placements);
-    }
+    // Gemini shape filtering is too aggressive for partial solutions —
+    // disabled.  Gemini/Delta constraints are checked in reconstruct_and_validate.
+    // if std::env::var("PIECES_SKIP_GEMINI").is_err() {
+    //     filter_gemini_incompatible(puzzle, ctx, &mut placements);
+    // }
 
     // `solitary`: each region holds exactly one clue cell.  A placement that
     // spans two or more clue cells can never be part of a valid partition, so

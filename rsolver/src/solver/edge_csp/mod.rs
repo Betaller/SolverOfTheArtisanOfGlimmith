@@ -71,6 +71,9 @@ pub(crate) struct Solver<'a> {
     pub max_discrepancies: usize,
     /// LDS: current discrepancy count in this search path.
     pub discrepancies: usize,
+    /// When true, invert the Cut/Uncut preference in `prefer_cut_first`.
+    /// Used by the value-ordering restart (phase 3).
+    pub invert_value_order: bool,
     // Cached component info from the last `build_components`.
     pub curr_comp_id: Vec<usize>,
     pub curr_comp_sz: Vec<usize>,
@@ -412,6 +415,7 @@ impl<'a> Solver<'a> {
             node_count: 0,
             max_discrepancies: usize::MAX, // unlimited by default
             discrepancies: 0,
+            invert_value_order: false,
             curr_comp_id: Vec::new(),
             curr_comp_sz: Vec::new(),
             curr_target_area: Vec::new(),
@@ -726,10 +730,11 @@ impl<'a> Solver<'a> {
             );
         }
 
-        // Two-phase search: first try the pure heuristic path (LDS 0), then
-        // fall back to unlimited DFS.  Phase 1 is fast for puzzles where the
-        // heuristic ordering is correct; phase 2 handles the rest.  CBJ is
-        // active in both phases.
+        // Two-phase search with value-ordering restart:
+        // Phase 1: LDS 0 (pure heuristic path).
+        // Phase 2: unlimited DFS with original heuristic.
+        // Phase 3: unlimited DFS with inverted value ordering (restart).
+        // CBJ is active in all phases.
         //
         // Phase 1: LDS with 0 discrepancies (only heuristic-preferred values).
         self.max_discrepancies = 0;
@@ -741,6 +746,24 @@ impl<'a> Solver<'a> {
             self.max_discrepancies = usize::MAX;
             self.discrepancies = 0;
             self.backtrack_edges();
+        }
+
+        // Phase 3: restart with inverted value ordering.  When the heuristic
+        // ordering puts the solution deep in the tree, trying the opposite
+        // ordering first can find it quickly.  This is a lightweight restart
+        // that doesn't require learning nogoods.
+        if self.solution_regions.is_none() && !self.timed_out {
+            self.invert_value_order = true;
+            self.max_discrepancies = 0;
+            self.discrepancies = 0;
+            self.backtrack_edges();
+            // If still not found, try unlimited with inverted ordering.
+            if self.solution_regions.is_none() && !self.timed_out {
+                self.max_discrepancies = usize::MAX;
+                self.discrepancies = 0;
+                self.backtrack_edges();
+            }
+            self.invert_value_order = false;
         }
 
         if std::env::var("EDGE_CSP_DEBUG").is_ok() {
@@ -1086,6 +1109,15 @@ impl<'a> Solver<'a> {
 
     /// Whether to try `Cut` before `Uncut` for the selected edge.
     fn prefer_cut_first(&self, e: EdgeId) -> bool {
+        let base = self.prefer_cut_first_base(e);
+        if self.invert_value_order {
+            !base
+        } else {
+            base
+        }
+    }
+
+    fn prefer_cut_first_base(&self, e: EdgeId) -> bool {
         if self.curr_comp_id.is_empty() {
             return true;
         }

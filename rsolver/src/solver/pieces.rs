@@ -109,6 +109,9 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
                 .map(|p| (c.row, c.col, crate::shapes::dihedral_key(p)))
         })
         .collect();
+    // Gemini shape keys: for `homogeneous` / `heterogeneous` rules, compute
+    // dihedral shape keys for all placements.  Gemini edges require same shape,
+    // delta edges require different shapes.
     let row_check = |partial: &[usize]| -> bool {
         if let Some(mc) = m_cap {
             if partial.len() > mc {
@@ -126,6 +129,7 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
             && econs_rows_ok(&econs, &ctx, &cell_row)
             && distinct_rows_ok(need_distinct, &keys, partial)
             && cell_clue_rows_ok(puzzle, &placements, &keys, &pat_keys, partial)
+            && gemini_shape_rows_ok(&econs, &ctx, &keys, &cell_row)
     };
     let mut row_check = row_check;
     let mut on_solution = |row_ids: &[usize]| {
@@ -514,6 +518,37 @@ fn econs_rows_ok(
     true
 }
 
+/// Gemini/Delta shape compatibility during DLX search.
+/// - Gemini edge: both endpoints placed in different rows → same shape.
+/// - Delta edge: both endpoints placed in different rows → different shapes.
+fn gemini_shape_rows_ok(
+    econs: &[([usize; 2], [usize; 2], &'static str, Option<i64>)],
+    ctx: &SolveContext,
+    keys: &[String],
+    cell_row: &std::collections::HashMap<usize, usize>,
+) -> bool {
+    for (c1, c2, kind, _) in econs {
+        if *kind != "gemini" && *kind != "delta" {
+            continue;
+        }
+        let i1 = ctx.cell_to_idx[c1[0]][c1[1]];
+        let i2 = ctx.cell_to_idx[c2[0]][c2[1]];
+        if let (Some(&r1), Some(&r2)) = (cell_row.get(&i1), cell_row.get(&i2)) {
+            if r1 == r2 {
+                continue; // same region — no shape constraint
+            }
+            let same_shape = keys[r1] == keys[r2];
+            if *kind == "gemini" && !same_shape {
+                return false; // gemini requires same shape
+            }
+            if *kind == "delta" && same_shape {
+                return false; // delta requires different shapes
+            }
+        }
+    }
+    true
+}
+
 /// `different` (Mismatch): chosen rows must have pairwise distinct shapes.
 fn distinct_rows_ok(need_distinct: bool, keys: &[String], partial: &[usize]) -> bool {
     if !need_distinct {
@@ -529,6 +564,7 @@ fn distinct_rows_ok(need_distinct: bool, keys: &[String], partial: &[usize]) -> 
     true
 }
 
+/// Gemini/Delta shape compatibility during DLX search.
 /// Per-row cell-clue consistency: number ⇒ exact area, `shape_pattern` ⇒
 /// dihedrally equal shape, compass ⇒ exact half-plane counts (a row is a whole
 /// region, so the counts are final).

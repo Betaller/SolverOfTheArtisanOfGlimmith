@@ -141,12 +141,16 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
         if std::env::var("PIECES_SKIP_ALL").is_ok() {
             true
         } else {
-            watchtower_rows_ok(&wt, &ctx, &cell_row)
-                && econs_rows_ok(&econs, &ctx, &cell_row)
-                && distinct_rows_ok(need_distinct, &keys, partial)
-                && cell_clue_rows_ok(puzzle, &placements, &keys, &pat_keys, partial)
-                && (std::env::var("PIECES_SKIP_GEMINI").is_ok()
-                    || gemini_shape_rows_ok(&econs, &ctx, &keys, &cell_row))
+            let wt_ok = watchtower_rows_ok(&wt, &ctx, &cell_row);
+            let econs_ok = econs_rows_ok(&econs, &ctx, &cell_row);
+            let distinct_ok = distinct_rows_ok(need_distinct, &keys, partial);
+            let clue_ok = cell_clue_rows_ok(puzzle, &placements, &keys, &pat_keys, partial);
+            let gemini_ok = std::env::var("PIECES_SKIP_GEMINI").is_ok()
+                || gemini_shape_rows_ok(&econs, &ctx, &keys, &cell_row);
+            if std::env::var("EDGE_CSP_DEBUG").is_ok() && !(wt_ok && econs_ok && distinct_ok && clue_ok && gemini_ok) {
+                eprintln!("pieces: row_check fail wt={} econs={} distinct={} clue={} gemini={}", wt_ok, econs_ok, distinct_ok, clue_ok, gemini_ok);
+            }
+            wt_ok && econs_ok && distinct_ok && clue_ok && gemini_ok
         }
     };
     let mut row_check = row_check;

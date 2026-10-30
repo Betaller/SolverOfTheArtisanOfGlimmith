@@ -103,7 +103,7 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
     let need_distinct = puzzle.rules.iter().any(|r| r.ctype == "different");
     let keys: Vec<String> = placements
         .iter()
-        .map(|p| crate::shapes::dihedral_key(&p.cells))
+        .map(|p| p.shape_key.clone())
         .collect();
     // Region-count cap when derivable (solitary clue count): a cover with more
     // rows than regions is already wrong.
@@ -138,14 +138,22 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
                 cell_row.insert(idx, rid);
             }
         }
-        watchtower_rows_ok(&wt, &ctx, &cell_row)
-            && econs_rows_ok(&econs, &ctx, &cell_row)
-            && distinct_rows_ok(need_distinct, &keys, partial)
-            && cell_clue_rows_ok(puzzle, &placements, &keys, &pat_keys, partial)
-            && gemini_shape_rows_ok(&econs, &ctx, &keys, &cell_row)
+        if std::env::var("PIECES_SKIP_ALL").is_ok() {
+            true
+        } else {
+            watchtower_rows_ok(&wt, &ctx, &cell_row)
+                && econs_rows_ok(&econs, &ctx, &cell_row)
+                && distinct_rows_ok(need_distinct, &keys, partial)
+                && cell_clue_rows_ok(puzzle, &placements, &keys, &pat_keys, partial)
+                && (std::env::var("PIECES_SKIP_GEMINI").is_ok()
+                    || gemini_shape_rows_ok(&econs, &ctx, &keys, &cell_row))
+        }
     };
     let mut row_check = row_check;
     let mut on_solution = |row_ids: &[usize]| {
+        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+            eprintln!("pieces: DLX candidate tiling with {} rows", row_ids.len());
+        }
         match reconstruct_and_validate(puzzle, &placements, row_ids, &ctx) {
             Some(regions) => {
                 result = Some(regions);
@@ -329,8 +337,9 @@ fn push_area_placements(
                 None => {
                     // Generate placements for cells without area numbers using
                     // all possible area values.  This ensures the DLX solver
-                    // can cover all cells.
-                    let lo = min_area.max(ctx.eff_min_area);
+                    // can cover all cells.  Start from 1 (not min_area) because
+                    // regions without area numbers can be any size.
+                    let lo = 1usize.max(ctx.eff_min_area);
                     let hi = max_area.min(ctx.eff_max_area).min(MAX_AREA_TARGET);
                     if lo > hi {
                         continue;
@@ -597,6 +606,55 @@ fn gemini_shape_rows_ok(
             if *kind == "delta" && same_shape {
                 return false; // delta requires different shapes
             }
+        }
+    }
+    true
+}
+
+/// Check edge constraints in a complete tiling.
+fn edge_constraints_ok(
+    placements: &[Placement],
+    row_ids: &[usize],
+    piece_of_cell: &BTreeMap<(usize, usize), usize>,
+    ctx: &SolveContext,
+) -> bool {
+    for &(c1, c2, kind, val) in &ctx.edge_constraints {
+        let p1 = piece_of_cell.get(&(c1[0], c1[1]));
+        let p2 = piece_of_cell.get(&(c2[0], c2[1]));
+        let (p1, p2) = match (p1, p2) {
+            (Some(&a), Some(&b)) => (a, b),
+            _ => continue,
+        };
+        if p1 == p2 {
+            continue;
+        }
+        let a1 = placements[row_ids[p1]].area;
+        let a2 = placements[row_ids[p2]].area;
+        match kind {
+            "inequality" => {
+                if a1 == a2 {
+                    return false;
+                }
+            }
+            "difference" => {
+                let diff = (a1 as i64 - a2 as i64).unsigned_abs() as usize;
+                if let Some(target) = val {
+                    if diff != target as usize {
+                        return false;
+                    }
+                }
+            }
+            "delta" => {
+                if placements[row_ids[p1]].shape_key == placements[row_ids[p2]].shape_key {
+                    return false;
+                }
+            }
+            "gemini" => {
+                if placements[row_ids[p1]].shape_key != placements[row_ids[p2]].shape_key {
+                    return false;
+                }
+            }
+            _ => {}
         }
     }
     true
@@ -884,7 +942,9 @@ fn generate_all_placements(
     });
 
     // Gemini shape constraint propagation
-    filter_gemini_incompatible(puzzle, ctx, &mut placements);
+    if std::env::var("PIECES_SKIP_GEMINI").is_err() {
+        filter_gemini_incompatible(puzzle, ctx, &mut placements);
+    }
 
     // `solitary`: each region holds exactly one clue cell.  A placement that
     // spans two or more clue cells can never be part of a valid partition, so
@@ -1246,31 +1306,8 @@ fn reconstruct_and_validate(
     }
 
     // Edge constraints
-    for &(c1, c2, kind, val) in &ctx.edge_constraints {
-        let p1 = piece_of_cell.get(&(c1[0], c1[1]));
-        let p2 = piece_of_cell.get(&(c2[0], c2[1]));
-        let p1 = match p1 { Some(&v) => v, None => continue };
-        let p2 = match p2 { Some(&v) => v, None => continue };
-        if p1 == p2 { continue; }
-
-        let a1 = placements[row_ids[p1]].area;
-        let a2 = placements[row_ids[p2]].area;
-        match kind {
-            "inequality" => { if a1 == a2 { return None; } }
-            "difference" => {
-                let diff = (a1 as i64 - a2 as i64).unsigned_abs() as usize;
-                if let Some(target) = val {
-                    if diff != target as usize { return None; }
-                }
-            }
-            "delta" => {
-                if placements[row_ids[p1]].shape == placements[row_ids[p2]].shape { return None; }
-            }
-            "gemini" => {
-                if placements[row_ids[p1]].shape != placements[row_ids[p2]].shape { return None; }
-            }
-            _ => {}
-        }
+    if !edge_constraints_ok(placements, row_ids, &piece_of_cell, ctx) {
+        return None;
     }
 
     // Watchtowers

@@ -145,6 +145,9 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
             let econs_ok = econs_rows_ok(&econs, &ctx, &cell_row);
             let distinct_ok = distinct_rows_ok(need_distinct, &keys, partial);
             let clue_ok = cell_clue_rows_ok(puzzle, &placements, &keys, &pat_keys, partial);
+            // Delta constraints are checked in reconstruct_and_validate (leaf).
+            // During DLX search, only check gemini (same shape) — delta (different
+            // shape) is too strict for partial solutions.
             let gemini_ok = std::env::var("PIECES_SKIP_GEMINI").is_ok()
                 || gemini_shape_rows_ok(&econs, &ctx, &keys, &cell_row);
             if std::env::var("EDGE_CSP_DEBUG").is_ok() && !(wt_ok && econs_ok && distinct_ok && clue_ok && gemini_ok) {
@@ -594,7 +597,9 @@ fn gemini_shape_rows_ok(
     cell_row: &std::collections::HashMap<usize, usize>,
 ) -> bool {
     for (c1, c2, kind, _) in econs {
-        if *kind != "gemini" && *kind != "delta" {
+        // Only check gemini (same shape) during DLX search.
+        // Delta (different shape) is checked in reconstruct_and_validate.
+        if *kind != "gemini" {
             continue;
         }
         let i1 = ctx.cell_to_idx[c1[0]][c1[1]];
@@ -603,18 +608,8 @@ fn gemini_shape_rows_ok(
             if r1 == r2 {
                 continue; // same region — no shape constraint
             }
-            let same_shape = keys[r1] == keys[r2];
-            if *kind == "gemini" && !same_shape {
-                if std::env::var("EDGE_CSP_DEBUG").is_ok() {
-                    eprintln!("gemini fail: ({},{})-({},{}) key1={} key2={}", c1[0], c1[1], c2[0], c2[1], keys[r1], keys[r2]);
-                }
+            if keys[r1] != keys[r2] {
                 return false; // gemini requires same shape
-            }
-            if *kind == "delta" && same_shape {
-                if std::env::var("EDGE_CSP_DEBUG").is_ok() {
-                    eprintln!("delta fail: ({},{})-({},{}) key={}", c1[0], c1[1], c2[0], c2[1], keys[r1]);
-                }
-                return false; // delta requires different shapes
             }
         }
     }

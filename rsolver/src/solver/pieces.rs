@@ -916,6 +916,48 @@ fn rose_signature_ok(puzzle: &Puzzle, cells: &[[usize; 2]], types: &[String]) ->
     got.len() == types.len() && types.iter().all(|t| got.get(t) == Some(&1))
 }
 
+/// Propagate area numbers through gemini edges.  If cell A has area X and cell
+/// B is on the other side of a gemini edge, then B's region must also have
+/// area X.  Returns a map of cell -> propagated area.
+fn propagate_gemini_areas(
+    puzzle: &Puzzle,
+    ctx: &SolveContext,
+) -> std::collections::HashMap<(usize, usize), usize> {
+    let mut propagated = std::collections::HashMap::new();
+    // Collect area numbers.
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width {
+            if let Some(n) = puzzle.cells[r][c].number {
+                propagated.insert((r, c), n as usize);
+            }
+        }
+    }
+    // Propagate through gemini edges (BFS until fixpoint).
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &(c1, c2, kind, _) in &ctx.edge_constraints {
+            if kind != "gemini" {
+                continue;
+            }
+            let a1 = propagated.get(&(c1[0], c1[1])).copied();
+            let a2 = propagated.get(&(c2[0], c2[1])).copied();
+            match (a1, a2) {
+                (Some(x), None) => {
+                    propagated.insert((c2[0], c2[1]), x);
+                    changed = true;
+                }
+                (None, Some(x)) => {
+                    propagated.insert((c1[0], c1[1]), x);
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+    }
+    propagated
+}
+
 fn generate_all_placements(
     puzzle: &Puzzle,
     ctx: &SolveContext,
@@ -925,6 +967,11 @@ fn generate_all_placements(
     let w = puzzle.width;
     let rose_types = crate::shapes::rose_symbol_types(puzzle);
     let mut placements = Vec::new();
+
+    // Gemini area propagation: gemini edges propagate area numbers to
+    // cells that don't have them.  This dramatically reduces the search
+    // space for gemini-constrained puzzles.
+    let gemini_areas = propagate_gemini_areas(puzzle, ctx);
 
     // 1. Shape pool placements (if any)
     if !puzzle.shape_pool.is_empty() {
@@ -1012,12 +1059,13 @@ fn generate_all_placements(
     push_pattern_placements(puzzle, ctx, w, &rose_types, &mut placements);
 
     // Pre-filter: remove placements that include cells with area numbers but
-    // have the wrong area.  This reduces the DLX search space.
+    // have the wrong area.  Uses gemini-propagated areas for more effective
+    // filtering.
     let before_count = placements.len();
     placements.retain(|p| {
         for &[r, c] in &p.cells {
-            if let Some(n) = puzzle.cells[r][c].number {
-                if p.area != n as usize {
+            if let Some(&n) = gemini_areas.get(&(r, c)) {
+                if p.area != n {
                     return false;
                 }
             }

@@ -48,6 +48,18 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
 
     let ctx = build_context(puzzle);
     let placements = generate_all_placements(puzzle, &ctx, deadline);
+    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+        eprintln!("pieces: {} placements, {} cells", placements.len(), ctx.num_cells);
+        // Check cell coverage.
+        let mut covered = std::collections::HashSet::new();
+        for p in &placements {
+            for &idx in &p.cell_ids_flat {
+                covered.insert(idx);
+            }
+        }
+        let uncovered: Vec<usize> = (0..ctx.num_cells).filter(|i| !covered.contains(i)).collect();
+        eprintln!("pieces: {} uncovered cells: {:?}", uncovered.len(), &uncovered[..uncovered.len().min(20)]);
+    }
 
     if placements.is_empty() {
         if ctx.num_cells == 0 {

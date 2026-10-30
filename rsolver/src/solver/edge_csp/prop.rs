@@ -4709,6 +4709,7 @@ impl<'a> Solver<'a> {
     /// Rule-level homogeneous check: adjacent sealed regions must have the
     /// same size (necessary condition for same shape under `homogeneous`).
     fn check_homogeneous_sealed_pairs(&self, num_comp: usize) -> Result<(), ()> {
+        // Check sealed pairs (original logic).
         for e in 0..self.grid.num_edges() {
             if self.edges[e] != EdgeState::Cut {
                 continue;
@@ -4727,6 +4728,46 @@ impl<'a> Solver<'a> {
             }
             if self.curr_comp_sz[ci1] != self.curr_comp_sz[ci2] {
                 return Err(());
+            }
+        }
+        // Check growing pairs connected by gemini edges: if both have target
+        // sizes and they differ, contradiction (homogeneous implies same shape
+        // implies same size).
+        for clue in &self.edge_clues {
+            if !matches!(clue.kind, EdgeClueKind::Gemini) {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(clue.edge);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            // Both growing: check target size compatibility.
+            if let (Some(t1), Some(t2)) = (self.curr_target_area[ci1], self.curr_target_area[ci2]) {
+                if t1 != t2 {
+                    return Err(());
+                }
+            }
+            // One sealed, one growing: the growing one must reach the sealed one's size.
+            if !self.is_growing(ci1) && self.is_growing(ci2) {
+                let sealed_sz = self.curr_comp_sz[ci1];
+                if let Some(t2) = self.curr_target_area[ci2] {
+                    if t2 != sealed_sz {
+                        return Err(());
+                    }
+                }
+            }
+            if !self.is_growing(ci2) && self.is_growing(ci1) {
+                let sealed_sz = self.curr_comp_sz[ci2];
+                if let Some(t1) = self.curr_target_area[ci1] {
+                    if t1 != sealed_sz {
+                        return Err(());
+                    }
+                }
             }
         }
         Ok(())

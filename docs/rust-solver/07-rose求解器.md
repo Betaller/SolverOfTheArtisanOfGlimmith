@@ -712,6 +712,13 @@ cover 门外，落到 region_match 单候选管线（被 non_block 拒收）。�
    （全预算）；`m > 4` force-grow 门限移除（`collect_floor` 防小尺寸爆帽）。
 6. **`enum_pair_slacks` 限 500ms**——pair 下界修正后 slack 空间膨胀，
    曾把整个 cover 预算烧光（runner 0 起步）。
+7. **`non_block` 矩形过滤**（2026-10-27）：`gen_cover_cands` 对含 `non_block`
+   规则的题过滤矩形候选（`is_rectangle`），防 rose 产生矩形区域被
+   `accept_if_valid` 拒绝（0838 类 validation_failed 根因）。
+8. **`residue_ok` compass 校验**（2026-10-29）：`residue_ok` 此前不检查
+   compass 方向计数，rose 生成的区域违反 compass 后被最终 validate 拒绝
+   （1402 类 validation_failed）。加 `compass_partition_ok`：对每个 compass
+   线索格，检查其所在区域在各方向的格数与线索值一致。
 
 **现状**：候选生成已到位（hostable 18-19 尺寸/种子），但 runner 每尝试
 ~30ms 在 500^4 组合空间内不可达；真解多重集 {12,13,15,20,61} 的排序
@@ -728,3 +735,19 @@ range-part 因此只有无提示兜底 run。改为：按连通分量各自枚�
 排（真解壳大先走）+ CASE_CAP 截断。case 只是窗口提示序列（末位永远有
 兜底 run），错提示只损排序不损完备性——低风险。0171 类「多 clue 同区的
 分组枚举」仍为开项（`number_sum_lock` 不覆盖该形态，num-pin 直接放行）。
+
+### 2026-10-28 FreeRem 剪枝补强
+
+- `merge_window_ok` 加弱 reach 检查（`reach >= lo/2`）：range-part 搜索中
+  标签过早孤立（reach < lo）导致 `base_windows` 死亡；半阈值仅剪绝望标签，
+  不影响正常搜索（完整 `reach >= lo` 会回归 0270/0804/0682）。
+- `fixpoint` 加全局 lo 总和检查（`sum_lo <= total_free`）：逐标签窗口一致性
+  检查遗漏跨标签超额承诺；加全局求和剪枝。
+- `value_order` 相邻标签排序改为当前尺寸升序（小标签先长到 lo），
+  防止标签过早孤立；修复 `compass_label::tests::solves_official_0682`。
+- ~~`pick_mrv` 加 `min_adj_label_size` 排序键~~ — 已回退：与 MRV 冲突
+  （优先能加入小标签的格子 = 偏好约束少的格子，与 MRV 相反），导致
+  0270/0262 等 range-part 回归。`value_order` 的 `label_growth` 同理回退。
+- `enum_size_cases` 空约束图时生成窗口尺寸情形（`window_size_cases`）：
+  无 ord/diff 约束的纯 range 题（0770 类）获得 5 种代表性尺寸分布搜索提示
+  （均分/一大/两大/一大一中/三分），joinable 死亡 304→110。

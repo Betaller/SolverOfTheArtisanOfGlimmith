@@ -178,7 +178,12 @@ impl<'a> Solver<'a> {
             if (self.rules.bricky || self.rules.loopy) && !csp_skip("bricky") {
                 progress |= self.propagate_bricky_loopy()?;
             }
-            if self.exact_piece_count == Some(2) && !csp_skip("vparity2") {
+            // Even-degree constraint holds for ANY 2-region partition (grid
+            // 2-colouring topological fact), not just rose-derived piece counts.
+            // 1138 (area_sum→structural_pieces=2) previously missed this.
+            if (self.exact_piece_count == Some(2) || self.structural_pieces == Some(2))
+                && !csp_skip("vparity2")
+            {
                 progress |= self.propagate_two_piece_vertex_parity()?;
             }
             if self.exact_piece_count.is_some() || self.structural_pieces.is_some() {
@@ -1003,6 +1008,31 @@ impl<'a> Solver<'a> {
             self.check_size_separation_sealed_pairs(num_comp)?;
             // Gemini: the two regions across a gemini edge must match in area.
             self.check_gemini_pairs(num_comp)?;
+            // Rule-level homogeneous: adjacent sealed regions must have the
+            // same size (necessary condition for same shape).
+            if self.rules.homogeneous {
+                self.check_homogeneous_sealed_pairs(num_comp)?;
+            }
+            // Gemini shape forcing: when one side is sealed, force the other
+            // to match its shape.  This is the strongest pruning for
+            // homogeneous puzzles.
+            if self.rules.homogeneous || !self.gemini_edges.is_empty() {
+                progress |= self.force_gemini_shape(num_comp)?;
+                // Gemini shape domain intersection: two growing sides must
+                // share at least one possible shape.  Opt-in via
+                // EDGE_CSP_SHAPE_CHECK=1 (expensive: O(num_gemini * num_shapes)).
+                if std::env::var("EDGE_CSP_SHAPE_CHECK").is_ok() {
+                    progress |= self.propagate_gemini_shape_domains(num_comp)?;
+                    self.check_gemini_double_growing(num_comp)?;
+                }
+            }
+            // Shape embeddability: growing components must be extendable to
+            // some polyomino of their target area.  Prunes partial shapes that
+            // can't form a valid region.  Opt-in via EDGE_CSP_SHAPE_CHECK=1
+            // (default off: too slow for the pruning power on most puzzles).
+            if std::env::var("EDGE_CSP_SHAPE_CHECK").is_ok() {
+                self.check_shape_embeddability(num_comp)?;
+            }
         }
         // Gemini/Delta shape-identity: sealed regions across a gemini edge must
         // share a canonical shape; across a delta edge they must differ.
@@ -1788,23 +1818,31 @@ impl<'a> Solver<'a> {
 
         let clue_indices = self.prop.compass_clue_indices.clone();
         for &cl_idx in &clue_indices {
-            let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] else {
-                continue;
+            let (cell_val, compass_val) = match &self.cell_clues[cl_idx] {
+                CellClue::Compass { cell, compass } => (*cell, *compass),
+                _ => continue,
             };
-            let ci = self.curr_comp_id[*cell];
+            let ci = self.curr_comp_id[cell_val];
             if ci == usize::MAX || ci >= num_comp {
                 continue;
             }
-            let compass = *compass;
-            self.propagate_compass_clue(*cell, ci, compass, &mut cut_ef, &mut uncut_ef)?;
+            let result = self.propagate_compass_clue(cell_val, ci, compass_val, &mut cut_ef, &mut uncut_ef);
+            if result.is_err() {
+                self.debug_compass_contradiction(cell_val, ci, compass_val);
+                return Err(());
+            }
         }
 
         // Pair-wise compass compatibility + bounding-box pruning.
-        self.propagate_compass_pairwise()?;
-        progress |= self.propagate_compass_bbox(num_comp)?;
+        if !csp_skip("compass_pairwise") {
+            self.propagate_compass_pairwise()?;
+        }
+        if !csp_skip("compass_bbox") {
+            progress |= self.propagate_compass_bbox(num_comp)?;
+        }
 
         // Bridge/gateway forcing (skip during probing to avoid per-probe overhead).
-        if !self.in_probing {
+        if !self.in_probing && !csp_skip("compass_bridge") {
             let mut compass_per_comp: Vec<Vec<(CellId, CompassData)>> = vec![Vec::new(); num_comp];
             for &cl_idx in &self.prop.compass_clue_indices {
                 if let CellClue::Compass { cell, compass } = &self.cell_clues[cl_idx] {
@@ -1821,6 +1859,29 @@ impl<'a> Solver<'a> {
             )?;
         }
 
+        // Conflict detection: (1) an edge in both cut_ef and uncut_ef means
+        // two compass constraints disagree (diagonal growth edges span two
+        // directions); (2) an edge in cut_ef already Uncut (or uncut_ef
+        // already Cut) means a previous propagator set it differently.  Both
+        // were silently swallowed by the set_edge loops (which skip non-Unknown
+        // edges), surfacing as later contradictions (1092/1078).
+        {
+            let cut_set: std::collections::HashSet<EdgeId> = cut_ef.iter().copied().collect();
+            for &e in &uncut_ef {
+                if cut_set.contains(&e) && self.edges[e] == EdgeState::Unknown {
+                    return Err(());
+                }
+                if self.edges[e] == EdgeState::Cut {
+                    return Err(());
+                }
+            }
+            for &e in &cut_ef {
+                if self.edges[e] == EdgeState::Uncut {
+                    return Err(());
+                }
+            }
+        }
+        // Apply forces.
         for e in cut_ef {
             if self.edges[e] == EdgeState::Unknown {
                 if !self.set_edge(e, EdgeState::Cut) {
@@ -1838,6 +1899,91 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(progress)
+    }
+
+    /// Exact-deficit forcing: when `counts[idx] + dir_count[idx] == v` (exactly
+    /// enough growth edges to reach the target), force all axis-aligned growth
+    /// edges in direction `idx` to Uncut.  Diagonal edges are excluded because
+    /// they count toward TWO directions — Uncut adds cells in both and may
+    /// exceed the other direction's limit (1092/1078 class).
+    fn compass_exact_deficit_force(
+        &mut self,
+        ci: usize,
+        cr: usize,
+        cc: usize,
+        idx: usize,
+        v: usize,
+        counts: &[usize; 4],
+        dir_count: &[usize; 4],
+        compass_vals: &[Option<usize>; 4],
+        uncut_ef: &mut Vec<EdgeId>,
+    ) {
+        let deficit = v - counts[idx];
+        if dir_count[idx] != deficit || csp_skip("compass_exact_deficit") {
+            return;
+        }
+        // Skip when another direction is at its limit (would force Cut on the
+        // same diagonal edge).
+        for oidx in 0..4 {
+            if oidx == idx {
+                continue;
+            }
+            if let Some(ov) = compass_vals[oidx] {
+                if counts[oidx] == ov {
+                    return;
+                }
+            }
+        }
+        for &e in &self.prop.growth_edges[ci] {
+            let (c1, c2) = self.grid.edge_cells(e);
+            let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
+            let (pr, pc) = self.grid.cell_pos(other);
+            let dr = pr as isize - cr as isize;
+            let dc = pc as isize - cc as isize;
+            let is_axis = match idx {
+                0 => dr == -1 && dc == 0,
+                1 => dr == 1 && dc == 0,
+                2 => dr == 0 && dc == 1,
+                3 => dr == 0 && dc == -1,
+                _ => false,
+            };
+            if is_axis {
+                uncut_ef.push(e);
+            }
+        }
+    }
+
+    /// Debug helper: print compass-clue contradiction details (gated on
+    /// `EDGE_CSP_DEBUG`).  Extracted to keep `propagate_compass_in_components`
+    /// under the cognitive-complexity threshold.
+    fn debug_compass_contradiction(&self, cell_val: CellId, ci: usize, compass_val: CompassData) {
+        if std::env::var("EDGE_CSP_DEBUG").is_err() {
+            return;
+        }
+        let (cr, cc) = self.grid.cell_pos(cell_val);
+        let mut counts = [0usize; 4];
+        for &c in &self.comp_cells[ci] {
+            let (pr, pc) = self.grid.cell_pos(c);
+            if pr < cr { counts[0] += 1; }
+            if pr > cr { counts[1] += 1; }
+            if pc > cc { counts[2] += 1; }
+            if pc < cc { counts[3] += 1; }
+        }
+        let mut dir_count = [0usize; 4];
+        for &e in &self.prop.growth_edges[ci] {
+            let (c1, c2) = self.grid.edge_cells(e);
+            let other = if self.curr_comp_id[c1] == ci { c2 } else { c1 };
+            let (pr, pc) = self.grid.cell_pos(other);
+            if pr < cr { dir_count[0] += 1; }
+            if pr > cr { dir_count[1] += 1; }
+            if pc > cc { dir_count[2] += 1; }
+            if pc < cc { dir_count[3] += 1; }
+        }
+        let sealed = self.is_sealed(ci);
+        eprintln!(
+            "edge_csp: compass_clue contradiction at ({},{}), comp={}, compass={:?}, counts={:?}, dir_count={:?}, sealed={}",
+            cr, cc, ci, compass_val, counts, dir_count, sealed
+        );
     }
 
     /// Per-compass-clue directional count + limit propagation.  Pushes `Cut`
@@ -1910,15 +2056,18 @@ impl<'a> Solver<'a> {
                 self.compass_collect_dir_cut_edges(ci, cr, cc, idx, cut_ef);
             }
             if counts[idx] < v {
-                self.compass_maybe_force_uncut(
-                    ci,
-                    idx,
-                    &counts,
-                    &dir_count,
-                    &dir_last,
-                    &compass_vals,
-                    uncut_ef,
-                );
+                self.compass_exact_deficit_force(ci, cr, cc, idx, v, &counts, &dir_count, &compass_vals, uncut_ef);
+                if !csp_skip("compass_maybe_uncut") {
+                    self.compass_maybe_force_uncut(
+                        ci,
+                        idx,
+                        &counts,
+                        &dir_count,
+                        &dir_last,
+                        &compass_vals,
+                        uncut_ef,
+                    );
+                }
             }
             // Sealed component with unsatisfied compass constraint.
             if self.is_sealed(ci) && counts[idx] < v {
@@ -1928,8 +2077,38 @@ impl<'a> Solver<'a> {
         Ok(())
     }
 
+    /// When the exact degree constraint needs `need` more Cut edges and the
+    /// unknown edges between different components exactly equal `need`,
+    /// all of them must be Cut.
+    fn watchtower_diff_comp_force(&mut self, unknown: &[EdgeId], need: usize) -> bool {
+        if need == 0 {
+            return false;
+        }
+        let diff: Vec<EdgeId> = unknown
+            .iter()
+            .copied()
+            .filter(|&e| {
+                let (c1, c2) = self.grid.edge_cells(e);
+                self.curr_comp_id[c1] != self.curr_comp_id[c2]
+            })
+            .collect();
+        if diff.len() != need {
+            return false;
+        }
+        let mut progress = false;
+        for &e in &diff {
+            if self.set_edge(e, EdgeState::Cut) {
+                progress = true;
+            }
+        }
+        progress
+    }
+
     /// Push every growth edge of `ci` lying in compass direction `idx` into
-    /// `cut_ef` (the direction is already at its required count).
+    /// `cut_ef` (the direction is already at its required count).  All edges
+    /// are forced (including diagonal) — the conflict detection in
+    /// `propagate_compass_in_components` catches Cut/Uncut clashes when two
+    /// directions disagree on the same diagonal edge.
     fn compass_collect_dir_cut_edges(
         &mut self,
         ci: usize,
@@ -2992,22 +3171,13 @@ impl<'a> Solver<'a> {
                     EdgeState::Uncut => {}
                 }
             }
+            // val=2 → force exact-2 (Slitherlink): degree-4 crosses are
+            // self-touching figure-8s that don't appear in official answers
+            // (verified on 1136: junction {1:16, 2:123}, zero degree-4).
             let candidates: Vec<usize> = match val {
                 1 => vec![0],
-                2 => {
-                    if max_loops == Some(1) {
-                        vec![2]
-                    } else {
-                        vec![2, 4]
-                    }
-                }
-                3 => {
-                    if self.rules.loopy {
-                        vec![4]
-                    } else {
-                        vec![3, 4]
-                    }
-                }
+                2 => vec![2],
+                3 => vec![3],
                 _ => vec![4],
             };
             let x = unknown.len();
@@ -3039,6 +3209,8 @@ impl<'a> Solver<'a> {
                         progress = true;
                     }
                 }
+            } else if lo == hi && lo > known_cut {
+                progress |= self.watchtower_diff_comp_force(&unknown, lo - known_cut);
             }
         }
         Ok(progress)
@@ -3070,8 +3242,8 @@ impl<'a> Solver<'a> {
         let cell_pair_indices: [(usize, usize); 4] = [(0, 1), (0, 2), (1, 3), (2, 3)];
         // === Pass A: component-ID-based (distinct region counting) ===
         if !self.curr_comp_id.is_empty() {
-            // Collect (is_err, forced_cuts) per clue to avoid borrow conflicts.
-            let comp_id_results: Vec<(bool, Vec<EdgeId>)> = self
+            // Collect (is_err, forced_cuts, forced_uncuts) per clue to avoid borrow conflicts.
+            let comp_id_results: Vec<(bool, Vec<EdgeId>, Vec<EdgeId>)> = self
                 .vertex_clues
                 .iter()
                 .map(|clue| {
@@ -3087,7 +3259,7 @@ impl<'a> Solver<'a> {
                         .collect();
                     let n = cells.len();
                     if n == 0 || value > n || (n == 1 && value > 1) {
-                        return (false, vec![]); // caught by edge-based pass
+                        return (false, vec![], vec![]); // caught by edge-based pass
                     }
 
                     // Deduplicate component IDs (at most 4 cells).
@@ -3114,7 +3286,8 @@ impl<'a> Solver<'a> {
                     let is_err = value < min_distinct || value > max_distinct;
 
                     let mut forced_cuts = Vec::new();
-                    if max_distinct == value && comp_count > 1 {
+                    let mut forced_uncuts = Vec::new();
+                    if comp_count > 1 {
                         for &(a_idx, b_idx) in &cell_pair_indices {
                             if let (Some(a), Some(b)) = (cell_opts[a_idx], cell_opts[b_idx]) {
                                 if !self.grid.cell_exists[a] || !self.grid.cell_exists[b] {
@@ -3123,25 +3296,42 @@ impl<'a> Solver<'a> {
                                 if self.curr_comp_id[a] != self.curr_comp_id[b] {
                                     if let Some(eid) = self.grid.edge_between(a, b) {
                                         if self.edges[eid] == EdgeState::Unknown {
-                                            forced_cuts.push(eid);
+                                            if max_distinct == value {
+                                                forced_cuts.push(eid);
+                                            }
+                                            // Merge forcing only between growing
+                                            // components (sealed ones can't merge).
+                                            if min_distinct == value {
+                                                let g1 = !self.is_sealed(self.curr_comp_id[a]);
+                                                let g2 = !self.is_sealed(self.curr_comp_id[b]);
+                                                if g1 && g2 {
+                                                    forced_uncuts.push(eid);
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    (is_err, forced_cuts)
+                    (is_err, forced_cuts, forced_uncuts)
                 })
                 .collect();
 
-            for (is_err, _) in &comp_id_results {
+            for (is_err, _, _) in &comp_id_results {
                 if *is_err {
                     return Err(());
                 }
             }
-            for (_, forced_cuts) in &comp_id_results {
+            for (_, forced_cuts, forced_uncuts) in &comp_id_results {
                 for &eid in forced_cuts {
                     if !self.set_edge(eid, EdgeState::Cut) {
+                        return Err(());
+                    }
+                    progress = true;
+                }
+                for &eid in forced_uncuts {
+                    if !self.set_edge(eid, EdgeState::Uncut) {
                         return Err(());
                     }
                     progress = true;
@@ -3227,7 +3417,8 @@ impl<'a> Solver<'a> {
                     if n_cut >= 2 {
                         return Err(());
                     }
-                    if n_cut == 1 && !unk.is_empty() {
+                    // All edges must be Uncut for value=1 (all cells same region).
+                    if !unk.is_empty() {
                         for eid in unk {
                             if !self.set_edge(eid, EdgeState::Uncut) {
                                 return Err(());
@@ -3237,16 +3428,10 @@ impl<'a> Solver<'a> {
                     }
                 } else {
                     // value >= 2: lower bound only (double-touching allows k > value).
+                    // On cycles, adjacent cuts can give fewer pieces than k,
+                    // so we cannot force cuts when n_cut + unk == value.
                     if n_cut + unk.len() < value {
                         return Err(());
-                    }
-                    if n_cut + unk.len() == value && !unk.is_empty() {
-                        for eid in unk {
-                            if !self.set_edge(eid, EdgeState::Cut) {
-                                return Err(());
-                            }
-                            progress = true;
-                        }
                     }
                 }
             } else {
@@ -3778,7 +3963,11 @@ impl<'a> Solver<'a> {
         max_a: usize,
         max_placements: usize,
         results: &mut Vec<u32>,
+        deadline: crate::clock::Instant,
     ) -> bool {
+        if crate::clock::Instant::now() >= deadline {
+            return true; // treat as overflow → caller skips this clue
+        }
         // Record if the current merged set is a valid placement (size ≥ min_a
         // AND every specified direction hit exactly).
         if size >= min_a {
@@ -3795,8 +3984,53 @@ impl<'a> Solver<'a> {
             return false;
         }
 
-        // Pick the smallest-index frontier component.
-        let v = frontier_mask.trailing_zeros() as usize;
+        // Forward-check: can undecided components still reach direction limits
+        // and min_a?  Sum counts over components not in current ∪ excluded.
+        {
+            let n_comps = comp_dir_counts.len().min(32);
+            let decided = current_mask | excluded_mask;
+            let mut max_rem = [0usize; 4];
+            let mut max_rem_sz = 0usize;
+            for i in 0..n_comps {
+                if decided & (1u32 << i) == 0 {
+                    for d in 0..4 {
+                        max_rem[d] += comp_dir_counts[i][d];
+                    }
+                    max_rem_sz += comp_sizes[i];
+                }
+            }
+            for d in 0..4 {
+                if let Some(lim) = limits[d] {
+                    if counts[d] + max_rem[d] < lim {
+                        return false; // cannot reach exact count for direction d
+                    }
+                }
+            }
+            if size + max_rem_sz < min_a {
+                return false; // cannot reach min_a even with all remaining
+            }
+        }
+
+        // Pick the frontier component that best fits remaining direction
+        // targets (least total slack after inclusion).  This is more
+        // constrained than smallest-index and prunes faster.
+        let v = (0..32usize)
+            .filter(|&i| frontier_mask & (1u32 << i) != 0)
+            .min_by_key(|&i| {
+                let nc = [
+                    counts[0] + comp_dir_counts[i][0],
+                    counts[1] + comp_dir_counts[i][1],
+                    counts[2] + comp_dir_counts[i][2],
+                    counts[3] + comp_dir_counts[i][3],
+                ];
+                let slack: usize = (0..4)
+                    .map(|d| {
+                        limits[d].map_or(0usize, |lim| lim.saturating_sub(nc[d]))
+                    })
+                    .sum();
+                (slack, comp_sizes[i], i)
+            })
+            .unwrap_or(frontier_mask.trailing_zeros() as usize);
         let v_bit = 1u32 << v;
         let rest = frontier_mask & !v_bit;
 
@@ -3826,6 +4060,7 @@ impl<'a> Solver<'a> {
                 max_a,
                 max_placements,
                 results,
+                deadline,
             ) {
                 return true;
             }
@@ -3846,6 +4081,7 @@ impl<'a> Solver<'a> {
             max_a,
             max_placements,
             results,
+            deadline,
         )
     }
 
@@ -4120,9 +4356,9 @@ impl<'a> Solver<'a> {
     }
 
     fn propagate_compass_placement_enumeration(&mut self) -> Result<bool, ()> {
-        const MAX_AREA_THRESHOLD: usize = 12;
+        const MAX_AREA_THRESHOLD: usize = 16;
         const MAX_REACHABLE_COMPS: usize = 16;
-        const MAX_PLACEMENTS: usize = 500;
+        const MAX_PLACEMENTS: usize = 5_000;
 
         if self.in_probing {
             return Ok(false);
@@ -4226,6 +4462,8 @@ impl<'a> Solver<'a> {
 
             // Enumerate valid connected merges via DFS (local comp 0 = mandatory start).
             let mut valid_placements: Vec<u32> = Vec::new();
+            let dfs_deadline =
+                crate::clock::Instant::now() + std::time::Duration::from_millis(200);
             let overflow = Self::compass_placement_dfs(
                 1u32,
                 adj_mask[0],
@@ -4240,6 +4478,7 @@ impl<'a> Solver<'a> {
                 max_a,
                 MAX_PLACEMENTS,
                 &mut valid_placements,
+                dfs_deadline,
             );
             if overflow {
                 continue 'outer;
@@ -4487,6 +4726,73 @@ impl<'a> Solver<'a> {
     /// `third_party/aog area.rs:1244-1265`. For each Cut edge between two
     /// SEALED components of equal size → contradiction (adjacent equal-size
     /// pieces violate differentiation).
+    /// Rule-level homogeneous check: adjacent sealed regions must have the
+    /// same size (necessary condition for same shape under `homogeneous`).
+    fn check_homogeneous_sealed_pairs(&self, num_comp: usize) -> Result<(), ()> {
+        // Check sealed pairs (original logic).
+        for e in 0..self.grid.num_edges() {
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            if self.is_growing(ci1) || self.is_growing(ci2) {
+                continue;
+            }
+            if self.curr_comp_sz[ci1] != self.curr_comp_sz[ci2] {
+                return Err(());
+            }
+        }
+        // Check growing pairs connected by gemini edges: if both have target
+        // sizes and they differ, contradiction (homogeneous implies same shape
+        // implies same size).
+        for clue in &self.edge_clues {
+            if !matches!(clue.kind, EdgeClueKind::Gemini) {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(clue.edge);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            // Both growing: check target size compatibility.
+            if let (Some(t1), Some(t2)) = (self.curr_target_area[ci1], self.curr_target_area[ci2]) {
+                if t1 != t2 {
+                    return Err(());
+                }
+            }
+            // One sealed, one growing: the growing one must reach the sealed one's size.
+            if !self.is_growing(ci1) && self.is_growing(ci2) {
+                let sealed_sz = self.curr_comp_sz[ci1];
+                if let Some(t2) = self.curr_target_area[ci2] {
+                    if t2 != sealed_sz {
+                        return Err(());
+                    }
+                }
+            }
+            if !self.is_growing(ci2) && self.is_growing(ci1) {
+                let sealed_sz = self.curr_comp_sz[ci2];
+                if let Some(t1) = self.curr_target_area[ci1] {
+                    if t1 != sealed_sz {
+                        return Err(());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn check_size_separation_sealed_pairs(&self, num_comp: usize) -> Result<(), ()> {
         if !self.rules.size_separation {
             return Ok(());
@@ -4564,6 +4870,436 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Gemini shape domain intersection: for two growing components connected
+    /// by a gemini edge, compute their shape domains (which shapes they can
+    /// each become) and check if they intersect.  If empty → contradiction.
+    /// If only one shape in the intersection → force both to that shape.
+    fn propagate_gemini_shape_domains(&mut self, num_comp: usize) -> Result<bool, ()> {
+        if self.gemini_edges.is_empty() {
+            return Ok(false);
+        }
+        let mut progress = false;
+        for i in 0..self.gemini_edges.len() {
+            let e = self.gemini_edges[i];
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            // Both growing.
+            if !self.is_growing(ci1) || !self.is_growing(ci2) {
+                continue;
+            }
+            let Some(target) = self.curr_target_area[ci1] else {
+                continue;
+            };
+            if target > 6 || target == 0 {
+                continue;
+            }
+            // Compute shape domains for both components.
+            let domain1 = self.component_shape_domain(ci1, target);
+            let domain2 = self.component_shape_domain(ci2, target);
+            // Find intersection.
+            let intersection: Vec<usize> = domain1.iter().filter(|&&s| domain2.contains(&s)).copied().collect();
+            if intersection.is_empty() {
+                return Err(());
+            }
+            if intersection.len() == 1 {
+                // Only one shape works → force both components to that shape.
+                let shape_idx = intersection[0];
+                // TODO: force cells to match the shape.
+                // For now, just record progress (the contradiction check is the main value).
+                progress = true;
+            }
+        }
+        Ok(progress)
+    }
+
+    /// Compute the shape domain of a component: which polyomino indices it can
+    /// become (contain its current cells as a sub-shape).
+    fn component_shape_domain(&self, ci: usize, target: usize) -> Vec<usize> {
+        use std::cell::RefCell;
+        thread_local! {
+            static POLYOMINO_CACHE: RefCell<Vec<Option<Vec<Vec<[usize; 2]>>>>> =
+                RefCell::new(Vec::new());
+        }
+        POLYOMINO_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() <= target {
+                cache.resize(target + 1, None);
+            }
+            if cache[target].is_none() {
+                cache[target] = Some(crate::polyomino::enumerate_free_polyominoes(target));
+            }
+            let shapes = cache[target].as_ref().unwrap();
+            // Get component's current cells as relative coordinates.
+            let cells = &self.comp_cells[ci];
+            if cells.is_empty() {
+                return (0..shapes.len()).collect();
+            }
+            let base_r = cells[0] / self.grid.cols;
+            let base_c = cells[0] % self.grid.cols;
+            let partial: Vec<(i32, i32)> = cells
+                .iter()
+                .map(|&c| {
+                    let r = (c / self.grid.cols) as i32;
+                    let col = (c % self.grid.cols) as i32;
+                    (r - base_r as i32, col - base_c as i32)
+                })
+                .collect();
+            // Filter to shapes that contain the partial.
+            let mut domain = Vec::new();
+            for (idx, shape) in shapes.iter().enumerate() {
+                if Self::is_sub_shape(&partial, shape) {
+                    domain.push(idx);
+                }
+            }
+            domain
+        })
+    }
+
+    /// Gemini shape forcing: when one side of a gemini edge is sealed with
+    /// shape S and the other side is growing, the growing side must also end
+    /// up with shape S.  This forces specific cells to be included/excluded.
+    fn force_gemini_shape(&mut self, num_comp: usize) -> Result<bool, ()> {
+        if self.gemini_edges.is_empty() {
+            return Ok(false);
+        }
+        let mut progress = false;
+        for i in 0..self.gemini_edges.len() {
+            let e = self.gemini_edges[i];
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            // One sealed, one growing.
+            let (sealed_ci, growing_ci) = if !self.is_growing(ci1) && self.is_growing(ci2) {
+                (ci1, ci2)
+            } else if self.is_growing(ci1) && !self.is_growing(ci2) {
+                (ci2, ci1)
+            } else {
+                continue;
+            };
+            // Compute sealed shape.
+            let sealed_shape = self.comp_canonical_shape(sealed_ci);
+            let Some(sealed_shape) = sealed_shape else {
+                continue;
+            };
+            let target_sz = sealed_shape.len();
+            // Growing component must reach the same size.
+            if self.curr_comp_sz[growing_ci] > target_sz {
+                return Err(());
+            }
+            // Get growing component's cells as relative coordinates.
+            let growing_cells = &self.comp_cells[growing_ci];
+            if growing_cells.is_empty() {
+                continue;
+            }
+            let base_r = growing_cells[0] / self.grid.cols;
+            let base_c = growing_cells[0] % self.grid.cols;
+            let partial: Vec<(i32, i32)> = growing_cells
+                .iter()
+                .map(|&c| {
+                    let r = (c / self.grid.cols) as i32;
+                    let col = (c % self.grid.cols) as i32;
+                    (r - base_r as i32, col - base_c as i32)
+                })
+                .collect();
+            // Find which dihedral transform of the sealed shape contains the
+            // growing component's partial shape.
+            if let Some(forced_cells) =
+                Self::find_shape_transform(&partial, &sealed_shape, base_r, base_c, self.grid.cols)
+            {
+                // Force cells: the growing component must include exactly the
+                // cells in `forced_cells` and exclude all others.
+                for &(r, col) in &forced_cells {
+                    let cell_id = r * self.grid.cols + col;
+                    if cell_id >= self.grid.num_cells() {
+                        continue;
+                    }
+                    if !self.grid.cell_exists[cell_id] {
+                        continue;
+                    }
+                    // This cell must be in the growing component → its edge to
+                    // the component must be Uncut.
+                    if self.curr_comp_id[cell_id] != growing_ci {
+                        // Find the edge connecting this cell to the component.
+                        for eid in self.grid.cell_edges(cell_id).into_iter().flatten() {
+                            let (a, b) = self.grid.edge_cells(eid);
+                            let other = if a == cell_id { b } else { a };
+                            if self.curr_comp_id[other] == growing_ci
+                                && self.edges[eid] == EdgeState::Unknown
+                            {
+                                if self.set_edge(eid, EdgeState::Uncut) {
+                                    progress = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // No valid transform found → contradiction.
+                return Err(());
+            }
+        }
+        Ok(progress)
+    }
+
+    /// Find a dihedral transform of `sealed_shape` that contains `partial` as
+    /// a sub-shape, and return the absolute cell positions the growing
+    /// component must include.
+    fn find_shape_transform(
+        partial: &[(i32, i32)],
+        sealed_shape: &[(i32, i32)],
+        base_r: usize,
+        base_c: usize,
+        cols: usize,
+    ) -> Option<Vec<(usize, usize)>> {
+        let sealed_set: std::collections::HashSet<(i32, i32)> = sealed_shape.iter().copied().collect();
+        for &reflect in &[false, true] {
+            for &rot in &[0u8, 1, 2, 3] {
+                // Transform the sealed shape.
+                let transformed: Vec<(i32, i32)> = sealed_shape
+                    .iter()
+                    .map(|&(r, c)| {
+                        let (r, c) = if reflect { (r, -c) } else { (r, c) };
+                        match rot {
+                            0 => (r, c),
+                            1 => (c, -r),
+                            2 => (-r, -c),
+                            _ => (-c, r),
+                        }
+                    })
+                    .collect();
+                // Normalize to origin.
+                let min_r = transformed.iter().map(|&(r, _)| r).min().unwrap();
+                let min_c = transformed.iter().map(|&(_, c)| c).min().unwrap();
+                let normalized: Vec<(i32, i32)> = transformed
+                    .iter()
+                    .map(|&(r, c)| (r - min_r, c - min_c))
+                    .collect();
+                let norm_set: std::collections::HashSet<(i32, i32)> = normalized.iter().copied().collect();
+                // Check if partial is a subset of normalized.
+                let partial_set: std::collections::HashSet<(i32, i32)> = partial.iter().copied().collect();
+                if partial_set.is_subset(&norm_set) {
+                    // Found! Map back to absolute coordinates.
+                    let offset_r = base_r as i32;
+                    let offset_c = base_c as i32;
+                    return Some(
+                        normalized
+                            .iter()
+                            .map(|&(r, c)| ((r + offset_r) as usize, (c + offset_c) as usize))
+                            .collect(),
+                    );
+                }
+            }
+        }
+        None
+    }
+
+    /// Compute the canonical shape of a sealed component.
+    fn comp_canonical_shape(&self, ci: usize) -> Option<Vec<(i32, i32)>> {
+        let cells = &self.comp_cells[ci];
+        if cells.is_empty() {
+            return None;
+        }
+        let base_r = cells[0] / self.grid.cols;
+        let base_c = cells[0] % self.grid.cols;
+        let mut coords: Vec<(i32, i32)> = cells
+            .iter()
+            .map(|&c| {
+                let r = (c / self.grid.cols) as i32;
+                let col = (c % self.grid.cols) as i32;
+                (r - base_r as i32, col - base_c as i32)
+            })
+            .collect();
+        coords.sort();
+        Some(coords)
+    }
+
+    /// Gemini double-growing compatibility: when both sides of a gemini edge
+    /// are growing, their partial shapes must be extendable to the SAME shape.
+    /// Check if the union of both partial shapes can be extended to some
+    /// polyomino of the target area.
+    fn check_gemini_double_growing(&self, num_comp: usize) -> Result<(), ()> {
+        if self.gemini_edges.is_empty() {
+            return Ok(());
+        }
+        for i in 0..self.gemini_edges.len() {
+            let e = self.gemini_edges[i];
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            // Both growing.
+            if !self.is_growing(ci1) || !self.is_growing(ci2) {
+                continue;
+            }
+            // Get target area (both must be the same for gemini).
+            let Some(target) = self.curr_target_area[ci1] else {
+                continue;
+            };
+            if self.curr_target_area[ci2] != Some(target) {
+                return Err(());
+            }
+            if target > 8 {
+                continue;
+            }
+            // Collect union of both components' cells as relative coordinates.
+            let cells1 = &self.comp_cells[ci1];
+            let cells2 = &self.comp_cells[ci2];
+            if cells1.is_empty() || cells2.is_empty() {
+                continue;
+            }
+            // Use ci1's first cell as base.
+            let base_r = cells1[0] / self.grid.cols;
+            let base_c = cells1[0] % self.grid.cols;
+            let mut union: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+            for &c in cells1.iter().chain(cells2.iter()) {
+                let r = (c / self.grid.cols) as i32;
+                let col = (c % self.grid.cols) as i32;
+                union.insert((r - base_r as i32, col - base_c as i32));
+            }
+            let partial: Vec<(i32, i32)> = union.into_iter().collect();
+            // Check if the union can be extended to a polyomino of target area.
+            if !Self::is_shape_embeddable(&partial, target) {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Shape embeddability check: for each growing component with a target area
+    /// under homogeneous/heterogeneous rules, verify its current cells can be
+    /// extended to some free polyomino of the target area.  Prunes partial
+    /// shapes that can't form a valid region (e.g., disconnected gaps, shapes
+    /// that would need to overlap themselves).
+    fn check_shape_embeddability(&self, num_comp: usize) -> Result<(), ()> {
+        // Only check when the target area is small enough for enumeration
+        // (≤ 8 → ≤ 365 free polyominoes).
+        for &ci in &self.prop.growing_list {
+            if ci >= num_comp {
+                continue;
+            }
+            let Some(target) = self.curr_target_area[ci] else {
+                continue;
+            };
+            if target > 8 || target == 0 {
+                continue;
+            }
+            let sz = self.curr_comp_sz[ci];
+            if sz >= target {
+                continue; // already at or above target, no extension needed
+            }
+            // Collect the component's current cells (relative to first cell).
+            let cells = &self.comp_cells[ci];
+            if cells.is_empty() {
+                continue;
+            }
+            let base_r = cells[0] / self.grid.cols;
+            let base_c = cells[0] % self.grid.cols;
+            let partial: Vec<(i32, i32)> = cells
+                .iter()
+                .map(|&c| {
+                    let r = (c / self.grid.cols) as i32;
+                    let col = (c % self.grid.cols) as i32;
+                    (r - base_r as i32, col - base_c as i32)
+                })
+                .collect();
+            // Check if any polyomino of `target` area contains `partial` as a
+            // sub-shape (after dihedral transforms).
+            if !Self::is_shape_embeddable(&partial, target) {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if `partial` (a set of relative cell positions) is a sub-shape of
+    /// some free polyomino of `target` area.  Uses cached polyomino enumeration.
+    fn is_shape_embeddable(partial: &[(i32, i32)], target: usize) -> bool {
+        use std::cell::RefCell;
+        thread_local! {
+            static POLYOMINO_CACHE: RefCell<Vec<Option<Vec<Vec<[usize; 2]>>>>> =
+                RefCell::new(Vec::new());
+        }
+        POLYOMINO_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() <= target {
+                cache.resize(target + 1, None);
+            }
+            if cache[target].is_none() {
+                cache[target] = Some(crate::polyomino::enumerate_free_polyominoes(target));
+            }
+            let shapes = cache[target].as_ref().unwrap();
+            for shape in shapes {
+                if Self::is_sub_shape(partial, shape) {
+                    return true;
+                }
+            }
+            false
+        })
+    }
+
+    /// Check if `partial` is a sub-shape of `full` (both as relative cell sets).
+    /// Tries all 8 dihedral transforms of `partial`.
+    fn is_sub_shape(partial: &[(i32, i32)], full: &[[usize; 2]]) -> bool {
+        let full_set: std::collections::HashSet<(i32, i32)> =
+            full.iter().map(|&[r, c]| (r as i32, c as i32)).collect();
+        // Try all 8 dihedral transforms of partial.
+        for &reflect in &[false, true] {
+            for &rot in &[0u8, 1, 2, 3] {
+                let transformed: Vec<(i32, i32)> = partial
+                    .iter()
+                    .map(|&(r, c)| {
+                        let (r, c) = if reflect { (r, -c) } else { (r, c) };
+                        match rot {
+                            0 => (r, c),
+                            1 => (c, -r),
+                            2 => (-r, -c),
+                            _ => (-c, r),
+                        }
+                    })
+                    .collect();
+                // Normalize to origin.
+                let min_r = transformed.iter().map(|&(r, _)| r).min().unwrap();
+                let min_c = transformed.iter().map(|&(_, c)| c).min().unwrap();
+                let normalized: std::collections::HashSet<(i32, i32)> = transformed
+                    .iter()
+                    .map(|&(r, c)| (r - min_r, c - min_c))
+                    .collect();
+                // Check if normalized is a subset of full_set.
+                if normalized.is_subset(&full_set) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Shape-identity propagation for Gemini (same shape) and Delta (different

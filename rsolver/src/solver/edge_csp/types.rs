@@ -168,4 +168,7 @@ pub struct GlobalRules {
     /// `mixed`: pieces sharing an edge have different canonical shapes
     /// (matches `check_rule_mixed`).  Consumed by `propagate_shape_constraints`.
     pub mixed: bool,
+    /// `homogeneous` (双生): adjacent pieces must have the SAME shape.
+    /// Consumed by `check_homogeneous_sealed_pairs`.
+    pub homogeneous: bool,
 }

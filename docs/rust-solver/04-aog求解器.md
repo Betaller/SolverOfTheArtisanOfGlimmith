@@ -343,7 +343,7 @@ empty_block_line_count += 最小切割数
 | 4 | 玫瑰窗 | 每种符号计数不相等、或为 0、或 1 个但隔边 |
 | 5 | 精确尺寸整除 | 上下界相等时：`empty_count % lb != 0` |
 | 6 | same 规则整除 | 空区大小 % 已定形状面积 != 0 |
-| 7 | 罗盘 | `dfs_empty_compass_check` 逐方向比对是否可能满足 |
+| 7 | 罗盘 | `dfs_empty_compass_check` 逐方向比对是否可能满足（计数超目标即死，生长期允许未达） |
 | 8 | 围栏（空格上） | 空格上围栏类型与相邻空格方向矛盾 |
 
 ---
@@ -354,7 +354,8 @@ empty_block_line_count += 最小切割数
 |---|---|---|
 | `check_edge` | `aog/core.rs:316` | 同区域格不能跨 `LINE_BLOCK` |
 | `check_edge_shape` | `aog/core.rs:264` | 边约束：双生/异生/不等号/差值 |
-| `check_nearby_shape` | `aog/core.rs:225` | mixed：相邻区域形状不同 |
+| `check_nearby_shape` | `aog/core.rs:225` | mixed/heterogeneous：相邻区域形状不同 |
+| `check_nearby_shape_same` | `aog/core.rs:253` | homogeneous：相邻区域形状相同 |
 | `check_nearby_size` | `aog/core.rs:243` | differentiation：相邻区域面积不同 |
 | `check_palisade_type1` | `aog/core.rs:362` | 围栏（部分填时） |
 | `check_palisade_type2` | `aog/core.rs:332` | 围栏（整形状后） |

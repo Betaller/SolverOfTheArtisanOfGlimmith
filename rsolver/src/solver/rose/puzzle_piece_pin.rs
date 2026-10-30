@@ -26,7 +26,7 @@
 
 use std::collections::HashSet;
 
-use crate::types::Puzzle;
+use crate::types::{CompassClue, Puzzle};
 
 use super::cells::{CellSet, PreBoundaries};
 
@@ -1348,6 +1348,18 @@ impl<'a> FreeRem<'a> {
                     return None;
                 }
             };
+            // Global sum check: if all labels' lo values exceed total free
+            // cells, the partition is impossible.  Catches cross-label
+            // over-commitment that per-label windows miss.
+            {
+                let total_free: usize = self.unit_cells.iter().map(|c| c.len()).sum();
+                let sum_lo: usize = self.win_cache.iter().map(|(lo, _)| *lo).sum();
+                if sum_lo > total_free {
+                    #[cfg(test)]
+                    die_note("sum_lo", a);
+                    return None;
+                }
+            }
             if !self.diff_ok() {
                 #[cfg(test)]
                 die_note("diff", a);
@@ -1548,7 +1560,16 @@ impl<'a> FreeRem<'a> {
                 }
             }
         }
-        adj.sort_unstable();
+        // Prefer smaller labels first — they need to grow to reach lo before
+        // getting isolated (0770 class).  Label-ID tiebreak keeps ordering
+        // deterministic.
+        let label_size = |l: u32| -> usize {
+            self.lab_units[l as usize]
+                .iter()
+                .map(|&v| self.unit_cells[v as usize].len())
+                .sum()
+        };
+        adj.sort_unstable_by_key(|&l| (label_size(l), l));
         let mut out: Vec<Option<u32>> = adj.iter().map(|&l| Some(l)).collect();
         for val in &dom {
             if val.is_some() && !out.contains(val) {
@@ -1862,7 +1883,15 @@ impl<'a> FreeRem<'a> {
             return false;
         }
         let cur: usize = units.iter().map(|&v| self.unit_cells[v as usize].len()).sum();
-        lo <= hi && cur <= hi
+        if lo > hi || cur > hi {
+            return false;
+        }
+        // Reach check: the label must be able to grow to at least the
+        // midpoint between its current size and its minimum size.  Full
+        // `reach >= lo` is too aggressive (regresses 0270/0804/0682);
+        // midpoint is stronger than `lo/2` when cur > 0 but still safe.
+        let reach = self.label_reach(units).1;
+        reach >= (lo + cur) / 2
     }
 
     fn merge_ord_caps(
@@ -2462,6 +2491,70 @@ fn orient_and_pin_comp(
 /// pinned; the gap system's disjunctions (signed-sum offsets) are invisible
 /// to interval windows, so enumerate the surviving size tuples here instead.
 /// Assumes each constraint unit holds its own label — merging with equal
+/// Generate size-multiset cases from the window when no ord/diff constraints
+/// exist (0770 class: pure range min=12).  For each region count, produce
+/// representative distributions: even split, one-large, two-medium,
+/// one-large-one-medium, three-medium.
+fn window_size_cases(
+    total: usize,
+    g: usize,
+    case_cap: usize,
+) -> Vec<(Vec<(usize, usize)>, usize)> {
+    let mut cases = Vec::new();
+    let max_regions = if g >= 1 { total / g } else { 0 };
+    for n_reg in (2..=max_regions.min(12)).rev() {
+        let extra = total.saturating_sub(g * n_reg);
+        let dists = make_distributions(n_reg, g, total, extra);
+        for szs in dists {
+            if szs.iter().all(|&s| s >= g) && szs.iter().sum::<usize>() == total {
+                // Per-unit size windows: (lo, hi) = (min_szs, max_szs) for
+                // all units.  The old (label_id, size) format was misread by
+                // windows_runs_from_cases as (lo, hi) windows.
+                let min_s = *szs.iter().min().unwrap_or(&g);
+                let max_s = *szs.iter().max().unwrap_or(&total);
+                let assigns: Vec<(usize, usize)> = vec![(min_s, max_s); total];
+                cases.push((assigns, n_reg));
+            }
+        }
+    }
+    cases.sort_unstable_by_key(|(assigns, _)| {
+        let max = assigns.iter().map(|(_, s)| *s).max().unwrap_or(0);
+        let min = assigns.iter().map(|(_, s)| *s).min().unwrap_or(0);
+        // Prefer balanced distributions (smaller max-min gap first): the
+        // official answer for 0770-class puzzles tends to have moderate spread.
+        (max.saturating_sub(min), max, assigns.len())
+    });
+    cases.truncate(case_cap);
+    cases
+}
+
+/// Build up to 5 representative size vectors for `n_reg` regions.
+fn make_distributions(n_reg: usize, g: usize, total: usize, extra: usize) -> Vec<Vec<usize>> {
+    let avg = total / n_reg;
+    let remainder = total % n_reg;
+    let mut even: Vec<usize> = vec![avg; n_reg];
+    for item in even.iter_mut().take(remainder) {
+        *item += 1;
+    }
+    let mut one_large = vec![g; n_reg];
+    one_large[n_reg - 1] = total - g * (n_reg - 1);
+    let mut two_med = vec![g; n_reg];
+    let mut one_med = vec![g; n_reg];
+    let mut three_med = vec![g; n_reg];
+    if n_reg >= 3 {
+        two_med[n_reg - 1] = g + extra / 2 + extra % 2;
+        two_med[n_reg - 2] = g + extra / 2;
+        one_med[n_reg - 1] = g + (extra * 2) / 3;
+        one_med[n_reg - 2] = g + extra / 3;
+    }
+    if n_reg >= 4 {
+        three_med[n_reg - 1] = g + extra / 3 + extra % 3;
+        three_med[n_reg - 2] = g + extra / 3;
+        three_med[n_reg - 3] = g + extra / 3;
+    }
+    vec![even, one_large, two_med, one_med, three_med]
+}
+
 /// sizes stays expressible and anything missed falls back to the plain
 /// un-hinted search.  Returns `(per-unit exact windows, label count)` cases.
 fn enum_size_cases(
@@ -2495,7 +2588,7 @@ fn enum_size_cases(
     }
     let members: Vec<u32> = (0..n as u32).filter(|&u| touched[u as usize]).collect();
     if members.is_empty() {
-        return Vec::new();
+        return window_size_cases(total, g, CASE_CAP);
     }
     // Component labelling over the constraint graph.
     let mut comp_of = vec![usize::MAX; n];
@@ -3067,7 +3160,7 @@ fn windows_runs_from_cases(
     for (win, n_lbl) in cases {
         let mut lo = vec![0usize; n_units];
         let mut hi = vec![0usize; n_units];
-        for (u, &(a, b)) in win.iter().enumerate() {
+        for (u, &(a, b)) in win.iter().enumerate().take(n_units) {
             if a != 0 || b != 0 {
                 lo[u] = a;
                 hi[u] = b;
@@ -4656,6 +4749,9 @@ fn prioritize_missing_symbols(
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
     cur: &[usize],
 ) -> Vec<usize> {
+    // Deterministic hash-based interleaving for DFS diversity: different
+    // paths from the seed explore different candidate shapes.
+    let hash = |y: usize| y.wrapping_mul(2654435761) & 0xffff;
     if let Some((sym_of, n_types)) = sym {
         let mut type_seen = vec![false; n_types];
         for &x in cur {
@@ -4663,13 +4759,230 @@ fn prioritize_missing_symbols(
                 type_seen[t] = true;
             }
         }
-        frontier.sort_by_key(|&y| match sym_of.get(&y) {
-            Some(&t) if !type_seen[t] => 1u8,
-            _ => 0u8,
+        frontier.sort_by_key(|&y| {
+            let pri = match sym_of.get(&y) {
+                Some(&t) if !type_seen[t] => 0u8,
+                _ => 1u8,
+            };
+            (pri, hash(y))
         });
+    } else {
+        frontier.sort_by_key(|&y| hash(y));
     }
     frontier
 }
+/// Check `watchtower` vertex constraints on a complete partition: for each
+/// Compass check wrapper: only applies when the puzzle has compass rules.
+fn compass_residue_ok(puzzle: &Puzzle, placed: &[(usize, Mask)], rest: &[usize], n: usize) -> bool {
+    if !puzzle.rules.iter().any(|r| r.ctype == "compass") {
+        return true;
+    }
+    let rest_mask = mask_of(rest, n);
+    compass_partition_ok(puzzle, placed, &rest_mask)
+}
+
+/// Check compass directional counts for one clue cell within one region mask.
+fn compass_region_counts_ok(
+    puzzle: &Puzzle,
+    w: usize,
+    r: usize,
+    c: usize,
+    compass: &CompassClue,
+    pm: &Mask,
+) -> bool {
+    let (cr, cc) = (r as isize, c as isize);
+    let mut counts = [0isize; 4]; // N, S, E, W
+    for r2 in 0..puzzle.height {
+        for c2 in 0..puzzle.width {
+            let idx2 = r2 * w + c2;
+            if pm[idx2 / 64] & (1u64 << (idx2 % 64)) == 0 {
+                continue;
+            }
+            let (pr, pc) = (r2 as isize, c2 as isize);
+            if pr < cr { counts[0] += 1; }
+            if pr > cr { counts[1] += 1; }
+            if pc > cc { counts[2] += 1; }
+            if pc < cc { counts[3] += 1; }
+        }
+    }
+    if let Some(v) = compass.up {
+        if v >= 0 && counts[0] != v as isize { return false; }
+    }
+    if let Some(v) = compass.down {
+        if v >= 0 && counts[1] != v as isize { return false; }
+    }
+    if let Some(v) = compass.right {
+        if v >= 0 && counts[2] != v as isize { return false; }
+    }
+    if let Some(v) = compass.left {
+        if v >= 0 && counts[3] != v as isize { return false; }
+    }
+    true
+}
+
+/// Compass directional-count check: for each compass clue cell, its region
+/// must have exactly the specified number of cells in each direction (N/S/E/W
+/// relative to the clue cell).  Regions are the placed masks + the rest mask.
+fn compass_partition_ok(puzzle: &Puzzle, placed: &[(usize, Mask)], rest_mask: &Mask) -> bool {
+    let w = puzzle.width;
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width {
+            let Some(compass) = &puzzle.cells[r][c].compass else { continue };
+            let idx = r * w + c;
+            let mut found = false;
+            for pm in placed.iter().map(|(_, pm)| pm).chain(std::iter::once(rest_mask)) {
+                if pm[idx / 64] & (1u64 << (idx % 64)) == 0 {
+                    continue;
+                }
+                found = true;
+                if !compass_region_counts_ok(puzzle, w, r, c, compass, pm) {
+                    return false;
+                }
+            }
+            if !found {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// vertex with a watchtower value, the number of distinct regions among its
+/// 4 neighboring cells must equal the value.
+fn watchtower_partition_ok(
+    puzzle: &Puzzle,
+    w: usize,
+    h: usize,
+    n: usize,
+    placed: &[(usize, Mask)],
+    rest: &[usize],
+    res_seed_idx: usize,
+    seeds: &[(usize, usize)],
+) -> bool {
+    // Build cell→region-id mapping.
+    let mut cell_rid: Vec<usize> = vec![usize::MAX; n];
+    for (i, (_, pm)) in placed.iter().enumerate() {
+        for idx in 0..n {
+            if pm[idx / 64] & (1u64 << (idx % 64)) != 0 {
+                cell_rid[idx] = i;
+            }
+        }
+    }
+    let res_rid = placed.len();
+    for &idx in rest {
+        cell_rid[idx] = res_rid;
+    }
+    // Check each watchtower vertex.
+    for vr in 0..=h {
+        for vc in 0..=w {
+            if let Some(val) = puzzle.vertices[vr][vc].watchtower {
+                let mut distinct: std::collections::HashSet<usize> = Default::default();
+                for (dr, dc) in [(-1i64, -1i64), (-1, 0), (0, -1), (0, 0)] {
+                    let nr = vr as i64 + dr;
+                    let nc = vc as i64 + dc;
+                    if nr < 0 || nc < 0 || nr >= h as i64 || nc >= w as i64 {
+                        continue;
+                    }
+                    let idx = (nr as usize) * w + (nc as usize);
+                    if idx < n && cell_rid[idx] != usize::MAX {
+                        distinct.insert(cell_rid[idx]);
+                    }
+                }
+                if distinct.len() != val as usize {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Check `heterogeneous`/`homogeneous` adjacency shape constraints.
+/// het: adjacent regions must have different dihedral classes.
+/// hom: adjacent regions must have the same dihedral class.
+fn het_hom_ok(
+    all_masks: &[Mask],
+    keys: &[String],
+    het_mode: bool,
+    hom_mode: bool,
+    w: usize,
+    h: usize,
+    n: usize,
+) -> bool {
+    for i in 0..all_masks.len() {
+        let touch_i = dilate(&all_masks[i], w, h, n);
+        for j in (i + 1)..all_masks.len() {
+            if mask_and(&touch_i, &all_masks[j]) {
+                if het_mode && keys[i] == keys[j] {
+                    return false;
+                }
+                if hom_mode && keys[i] != keys[j] {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Accept a complete cover candidate: symbol check + non_block rectangle filter
+/// + compass direction-count check (candidate is a complete region).
+fn cover_cand_acceptable(
+    cur: &[usize],
+    sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+    non_block: bool,
+    w: usize,
+    puzzle: &Puzzle,
+) -> bool {
+    if let Some((sym_of, n_types)) = sym {
+        if !rose_exactly_one_each(cur, sym_of, n_types) {
+            return false;
+        }
+    }
+    if non_block {
+        let cells: Vec<[usize; 2]> = cur.iter().map(|&x| [x / w, x % w]).collect();
+        if crate::shapes::is_rectangle(&cells) {
+            return false;
+        }
+    }
+    // Compass: each clue in the candidate demands exact direction counts.
+    for &x in cur {
+        let (r, c) = (x / w, x % w);
+        if let Some(compass) = &puzzle.cells[r][c].compass {
+            let (ri, ci) = (r as i64, c as i64);
+            let mut cnt = [0i64; 4]; // up, down, left, right
+            for &y in cur {
+                let (pr, pc) = ((y / w) as i64, (y % w) as i64);
+                if pr < ri {
+                    cnt[0] += 1;
+                }
+                if pr > ri {
+                    cnt[1] += 1;
+                }
+                if pc < ci {
+                    cnt[2] += 1;
+                }
+                if pc > ci {
+                    cnt[3] += 1;
+                }
+            }
+            for (limit, actual) in [
+                (compass.up, cnt[0]),
+                (compass.down, cnt[1]),
+                (compass.left, cnt[2]),
+                (compass.right, cnt[3]),
+            ] {
+                if let Some(v) = limit {
+                    if v >= 0 && actual != v {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
 fn gen_cover_cands(
     puzzle: &Puzzle,
     w: usize,
@@ -4685,6 +4998,8 @@ fn gen_cover_cands(
     // cover DFS is O(cap^m) and 4000^4 is intractable.  Small regions keep
     // the full cap (0289 class needs the breadth).
     let cand_cap: usize = if size > 10 { 500 } else { 4_000 };
+    // non_block: no region may be a rectangle — filter at generation time.
+    let non_block = puzzle.rules.iter().any(|r| r.ctype == "non_block");
     let mut out: Vec<CoverCand> = Vec::new();
     let mut seen: std::collections::HashSet<Vec<usize>> = Default::default();
     let mut stack: Vec<Vec<usize>> = vec![vec![cell]];
@@ -4693,10 +5008,8 @@ fn gen_cover_cands(
             break;
         }
         if cur.len() == size {
-            if let Some((sym_of, n_types)) = sym {
-                if !rose_exactly_one_each(&cur, sym_of, n_types) {
-                    continue;
-                }
+            if !cover_cand_acceptable(&cur, sym, non_block, w, puzzle) {
+                continue;
             }
             let mask = mask_of(&cur, n);
             let touch = dilate(&mask, w, h, n);
@@ -5278,6 +5591,7 @@ fn find_tail_set(
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
     deadline: crate::clock::Instant,
 ) -> Option<Mask> {
+    let different_mode = puzzle.rules.iter().any(|r| r.ctype == "different");
     let tail_seed = seeds[tail_ri].0;
     let mut used = [0u64; 3];
     for (_, pm) in placed.iter() {
@@ -5318,7 +5632,7 @@ fn find_tail_set(
             let mask = mask_of(&cur, n);
             let mut placed2 = placed.to_vec();
             placed2.push((tail_ri, mask));
-            if residue_ok(puzzle, w, h, n, &placed2, seeds, res_cell, res_size, diff_mode, sym) {
+            if residue_ok(puzzle, w, h, n, &placed2, seeds, res_cell, res_size, diff_mode, sym, different_mode) {
                 return Some(mask);
             }
             continue;
@@ -5363,6 +5677,7 @@ fn cover_dfs(
     full_cover: bool,
     child_cap: usize,
 ) -> bool {
+    let different_mode = puzzle.rules.iter().any(|r| r.ctype == "different");
     const NODE_CAP: usize = 20_000_000;
     let my_start = *nodes;
     if *nodes >= NODE_CAP || crate::clock::Instant::now() >= deadline {
@@ -5430,7 +5745,7 @@ fn cover_dfs(
                 return true;
             }
             return match tail {
-                None => residue_ok(puzzle, w, h, n, placed, seeds, res_cell, res_size, diff_mode, sym),
+                None => residue_ok(puzzle, w, h, n, placed, seeds, res_cell, res_size, diff_mode, sym, different_mode),
                 Some((ri2, sz2)) => find_tail_set(
                     puzzle, w, h, n, placed, seeds, ri2, sz2, res_cell, res_size,
                     diff_mode, sym, deadline,
@@ -5585,6 +5900,7 @@ fn residue_ok(
     res_size: usize,
     diff_mode: bool,
     sym: Option<(&std::collections::HashMap<usize, usize>, usize)>,
+    different_mode: bool,
 ) -> bool {
     let mut used = [0u64; 3];
     for (_, pm) in placed.iter() {
@@ -5633,6 +5949,60 @@ fn residue_ok(
                 return false;
             }
         }
+    }
+    // `different` rule: all region shapes (dihedral classes) must be unique.
+    if different_mode {
+        let mut keys: std::collections::HashSet<String> = Default::default();
+        for (_, pm) in placed.iter() {
+            let cells: Vec<[usize; 2]> = (0..n)
+                .filter(|&idx| pm[idx / 64] & (1u64 << (idx % 64)) != 0)
+                .map(|idx| [idx / w, idx % w])
+                .collect();
+            if !keys.insert(crate::shapes::dihedral_key(&cells)) {
+                return false;
+            }
+        }
+        let res_cells: Vec<[usize; 2]> = rest.iter().map(|&idx| [idx / w, idx % w]).collect();
+        if !keys.insert(crate::shapes::dihedral_key(&res_cells)) {
+            return false;
+        }
+    }
+    // `heterogeneous` / `homogeneous`: adjacent regions must have
+    // different / same shapes (dihedral classes).
+    let het_mode = puzzle
+        .rules
+        .iter()
+        .any(|r| r.ctype == "heterogeneous" || r.ctype == "mixed");
+    let hom_mode = puzzle.rules.iter().any(|r| r.ctype == "homogeneous");
+    if het_mode || hom_mode {
+        let mut all_masks: Vec<Mask> = placed.iter().map(|(_, pm)| *pm).collect();
+        all_masks.push(mask_of(&rest, n));
+        let keys: Vec<String> = all_masks
+            .iter()
+            .map(|pm| {
+                let cells: Vec<[usize; 2]> = (0..n)
+                    .filter(|&idx| pm[idx / 64] & (1u64 << (idx % 64)) != 0)
+                    .map(|idx| [idx / w, idx % w])
+                    .collect();
+                crate::shapes::dihedral_key(&cells)
+            })
+            .collect();
+        if !het_hom_ok(&all_masks, &keys, het_mode, hom_mode, w, h, n) {
+            return false;
+        }
+    }
+    // `watchtower` vertex constraints: distinct regions around each vertex.
+    if puzzle.rules.iter().any(|r| r.ctype == "watchtower") {
+        if !watchtower_partition_ok(puzzle, w, h, n, placed, &rest, 0, seeds) {
+            return false;
+        }
+    }
+    // `compass` directional counts: each compass clue cell's region must have
+    // exactly the specified number of cells in each direction.  Without this
+    // check the solver generates solutions that fail final validation (1402
+    // class: rose validation_failed).
+    if !compass_residue_ok(puzzle, placed, &rest, n) {
+        return false;
     }
     true
 }
@@ -7629,12 +7999,10 @@ fn run_range_searches(
     let case_deadline = if number_locked {
         module_deadline
     } else {
-        let t = crate::clock::Instant::now() + std::time::Duration::from_millis(6_000);
-        if t < module_deadline {
-            t
-        } else {
-            module_deadline
-        }
+        // Size-tuple cases get the full module budget: the true case for
+        // 0770-class puzzles (window_size_cases) may be ordered after
+        // several wrong cases that exhaust the old 6s cap.
+        module_deadline
     };
     for (i, (case_lo, case_hi, case_max)) in runs.drain(..).enumerate() {
         let is_case = i < n_cases;
@@ -8308,12 +8676,14 @@ mod multi_rem_tests {
     #[test]
     #[ignore]
     fn solves_range_partition_0770() {
+        dies_reset();
         let p = crate::io::parse_puzzle(include_str!(
             "../../../../puzzles/official/Zone2/5-minmax/0770.json"
         ))
         .expect("parse");
         let deadline = crate::clock::Instant::now() + std::time::Duration::from_secs(30);
         let out = solve_range_partition(&p, p.height * p.width, deadline);
+        eprintln!("DBG dies {:?}", dies_snapshot());
         assert!(out.is_some(), "0770 range partition must solve");
     }
 

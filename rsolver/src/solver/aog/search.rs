@@ -8,7 +8,7 @@ use super::types::*;
 use super::types::{Node, Pools, PlaceLevel};
 
 use super::core::{
-    check_edge, check_edge_shape, check_loopy, check_nearby_shape, check_nearby_size,
+    check_edge, check_edge_shape, check_loopy, check_nearby_shape, check_nearby_shape_same, check_nearby_size,
     check_palisade_type1, check_palisade_type2, check_radar, check_tatami, sp_at, AoGCore,
 };
 use super::empty::{dfs_empty_area, empty_area_check, empty_area_size_range, find_special_start_area};
@@ -306,6 +306,10 @@ fn place_non_predifined_shape(
                     nearby_shape_fail = true;
                     break;
                 }
+                if core.config.adjacent_shapes_same && !check_nearby_shape_same(nxi, nyi, core, sp) {
+                    nearby_shape_fail = true;
+                    break;
+                }
                 if core.config.adjacent_sizes_different && !check_nearby_size(nxi, nyi, core, sp) {
                     nearby_size_fail = true;
                     break;
@@ -345,28 +349,44 @@ fn place_non_predifined_shape(
                 let nx = to_puzzle_x(x + L.compass_visited[i].x) as usize;
                 let ny = to_puzzle_y(y + L.compass_visited[i].y) as usize;
                 if core.puzzle_compass_up[nx][ny] != -1
-                    && core.puzzle_compass_up[nx][ny] != L.compass_visited_up_cnt[i]
+                    && core.puzzle_compass_up[nx][ny] < L.compass_visited_up_cnt[i]
                 {
                     compass_fail = true;
                     break;
                 }
                 if core.puzzle_compass_down[nx][ny] != -1
-                    && core.puzzle_compass_down[nx][ny] != L.compass_visited_down_cnt[i]
+                    && core.puzzle_compass_down[nx][ny] < L.compass_visited_down_cnt[i]
                 {
                     compass_fail = true;
                     break;
                 }
                 if core.puzzle_compass_left[nx][ny] != -1
-                    && core.puzzle_compass_left[nx][ny] != L.compass_visited_left_cnt[i]
+                    && core.puzzle_compass_left[nx][ny] < L.compass_visited_left_cnt[i]
                 {
                     compass_fail = true;
                     break;
                 }
                 if core.puzzle_compass_right[nx][ny] != -1
-                    && core.puzzle_compass_right[nx][ny] != L.compass_visited_right_cnt[i]
+                    && core.puzzle_compass_right[nx][ny] < L.compass_visited_right_cnt[i]
                 {
                     compass_fail = true;
                     break;
+                }
+                // K-bounding: compass values give region size upper bound
+                // = sum(dir counts) + 1.  Only when ALL four directions are
+                // concrete (non -1).
+                let (u, d, l, r) = (
+                    core.puzzle_compass_up[nx][ny],
+                    core.puzzle_compass_down[nx][ny],
+                    core.puzzle_compass_left[nx][ny],
+                    core.puzzle_compass_right[nx][ny],
+                );
+                if u >= 0 && d >= 0 && l >= 0 && r >= 0 {
+                    let max_sz = (u + d + l + r + 1) as usize;
+                    if L.current_shape_cnt > max_sz {
+                        compass_fail = true;
+                        break;
+                    }
                 }
             }
 
@@ -1231,6 +1251,12 @@ pub fn dfs(index: u32, core: &mut AoGCore, sp: &mut Vec<Vec<u32>>, pools: &Pools
                 }
                 if core.config.adjacent_shapes_different
                     && !check_nearby_shape(pxn as i32, pyn as i32, core, sp)
+                {
+                    fail2 = true;
+                    break;
+                }
+                if core.config.adjacent_shapes_same
+                    && !check_nearby_shape_same(pxn as i32, pyn as i32, core, sp)
                 {
                     fail2 = true;
                     break;

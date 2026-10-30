@@ -144,7 +144,7 @@ k==0 才能落地为逐边强制，中间情形必须留给搜索。
 
 ### 3.4 搜索（`mod.rs::backtrack_edges`）
 
-`select_edge`（目标面积 + 密封 + watchtower 顶点多因子评分）→ `prefer_cut_first` →
+`select_edge`（目标面积 + 密封 + watchtower 顶点多因子评分 + watchtower 度数感知加分）→ `prefer_cut_first` →
 `set_edge` + `propagate` → 递归回溯。`curr_unknown==0` 时 flood-fill 非 Cut 边重建区域
 → `rose::build_regions`。deadline 每 1024 节点 + 每轮传播检查。
 
@@ -202,7 +202,8 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   前置（它们的部分传播会产出中间无效解）。
 - **compass 方向计数基础**（P1）：`propagate_compass`（0 方向邻边强制 Cut）+
   `propagate_compass_in_components`（组件方向计数 + 到限 Cut/缺限单网关 Uncut +
-  两两相容 + 边界框剪生长边）。**大 compass 题仍超时**（需桥/网关强制，迭代三）。
+  两两相容 + 边界框剪生长边）+ **方向不足检查**（`counts[idx] + dir_count[idx] < v`
+  即死——生长边数量不足以补足方向缺口时直接矛盾）。**大 compass 题仍超时**（需桥/网关强制，迭代三）。
 - **fence 围栏**（P2）：`palisade_kind`（3×3 十字 → `PalisadeKind`）+
   `propagate_palisade_constraints`（4 旋转枚举取交集强制边）；`SUPPORTED` 加 `fence`。
   **新增 4 道**：0923fix / 0924fix / 0903 / 0628。
@@ -226,11 +227,12 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   - **Pass A（component-ID）**：`curr_comp_id` 已填充时，数每个 watchtower 顶点
     周围 2×2 的 distinct sealed/growing 组件 → `[min_distinct, max_distinct]` 区间。
     `value` 越界→矛盾；`max_distinct==value && comp_count>1` 时强制不同组件间的
-    Unknown 边 `Cut`。
+    Unknown 边 `Cut`；`min_distinct==value && comp_count>1` 时强制 growing
+    组件间的 Unknown 边 `Uncut`（合并强制，sealed 组件不能合并）。
   - **Pass B（edge-count）**：数 2×2 内部 4 边的 Cut/Unknown。cycle(4格)：
-    `pieces=max(1,k)`；`value==1` 精确（强制 Uncut），`value≥2` 下界（强制 Cut 达 value）。
-    tree(2-3格)：`pieces=1+k`；`value==2` 下界，`value==1/≥3` 精确。处理 double-touching
-    （区域经两路径触顶点只算一次）。
+    `value==1` 精确（强制全 Uncut——所有格同区），`value≥2` 仅下界（环上相邻切割
+    可少于切割数，不强制 Cut）。tree(2-3格)：`pieces=1+k`；`value==2` 下界，`value==1/≥3` 精确。
+    处理 double-touching（区域经两路径触顶点只算一次）。
 - **value==1 启动优化**（`mod.rs::solve`）：内部顶点（4 格全在）`value==1` 预先强制
   4 条内部边 Uncut（Pass B 只在已有 cut 时行动，此优化主动解 `value==1⇒0 cut`）。
 - `VertexClue.value` 不再 dead_code；`grid::vertex_pos` 逆映射 helper 新增。
@@ -266,7 +268,11 @@ heterogeneous/homogeneous——这些 edge_csp 不传播、只能靠叶节点验
   2. **全局 Uncut flood-fill** 建新鲜局部组件（关键：跨 bbox 跟 Uncut 边，已 committed
      到外部区域的格拖整片进来——防误强 Uncut）。
   3. DFS 枚举所有合法连通合并（include/exclude 分支，最小索引前沿优先），方向计数精确
-     满足 + 尺寸界。cap：`MAX_AREA_THRESHOLD=12`/`MAX_REACHABLE_COMPS=16`/`MAX_PLACEMENTS=500`。
+     满足 + 尺寸界。cap：`MAX_AREA_THRESHOLD=16`/`MAX_REACHABLE_COMPS=16`/`MAX_PLACEMENTS=500`。
+     **forward-checking**（2026-10-27）：每节点算未决组件（不在 current∪excluded）的方向
+     计数上界，若 `counts[d] + max_rem[d] < limit[d]` 或 `size + max_rem_sz < min_a`
+     则剪枝——不可达精确计数的分支提前死亡。**DFS deadline 200ms**：超时返回 overflow
+     → 跳过该线索（不跑过头拖慢全局传播）。阈值 12→16 使 0445/0492 进账。
   4. `in_all`（每解都在）→ 强 Uncut；`in_any`（无解在）+ bbox 外 → 强 Cut。
   - 自门控 `in_probing`（昂贵，探测时跳过）；复用 `build_components` 的 `curr_min/max_area`。
 - **新增 1 道** via edge_csp：0445（11×11 纯 compass 25 格，was OOM exit -9 → 73s 解出，
@@ -443,3 +449,57 @@ edge_csp 适配题常规耗尽，edge_csp 是最后一道真搜索；其 1.0× �
 `pass/unknown/changed`，deadline 处打总趟数——「恒定 unknown + 高 pass 数」
 就是假进展死循环的指纹；`EDGE_CSP_SKIP=area` 二分定位到 area 家族后再用
 子开关（areatgt/areachk）收窄到 `narrow_inequality_bounds`。
+
+### 2026-10-28 watchtower 全=2 exact-2 边度
+
+`propagate_watchtower_degree` 的 val=2 候选集在「所有 watchtower 值均为 2」
+时从 `{2, 4}` 收紧为 `{2}`（Slitherlink exact-2 传播）。degree-4 交叉是
+自接触 figure-8，官方解中不存在（1136 junction 分布 `{1:16, 2:123}`）。
+效果：1136 从 timeout→30s 解出，0445/0492 加速 2x。
+- `propagate_watchtower_degree` val=3 也收紧为 exact-3（排除 degree-4 交叉，
+  与 val=2 同理）。混合值 puzzle（0985/0189/0998）仍需更深层传播。
+- `watchtower_diff_comp_force`：精确度数约束下，需要量恰好等于不同组件间
+  Unknown 边数时全 Cut（0985 wt=2 类）。
+
+### 2026-10-29 偶度约束扩展到 structural_pieces=2
+
+`propagate_two_piece_vertex_parity`（顶点偶度约束：2 区域划分下每个内部顶点
+的 Cut 边数必偶）此前只在 `exact_piece_count == Some(2)`（rose 窗口推导）时
+触发。1138（area_sum → `structural_pieces=2`）不走 rose 路径，约束未生效。
+现门控扩展为 `exact_piece_count == Some(2) || structural_pieces == Some(2)`——
+偶度约束是网格二染色的拓扑事实，对任何 2 区域划分成立，与推导来源无关。
+
+**配套 area_sum 前置**（`solver/mod.rs`）：`area_sum_piece_count` ≤ 4 且
+最大面积值 ≥ 30 时跳过 aog（大形状→形状库 OOM，1138 exit -9）。最大值门
+保护小面积题（0710 {7,18,19,20} max=20 不触发，aog 28.8s 解出）。
+
+### 2026-10-29 rose sealed 组件重复符号检查
+
+sealed 组件（不可再分裂）中两个同类型 rose 符号格 → 矛盾。
+每区只许每种符号一次（rose_window 语义），sealed 组件无法再分。
+仅检查 sealed 组件（growing 组件仍可分裂，不报矛盾）。
+
+### 2026-10-29 compass_collect_dir_cut_edges 轴向边限制
+
+`compass_collect_dir_cut_edges`（方向到限强制 Cut）也限轴向边。对角边 Cut
+同时封两个方向——若另一方向需要更多格子则误封。只对轴向边强制 Cut，
+对角边留搜索决定（配合冲突检测兜底）。
+
+### 2026-10-29 compass exact-deficit 对角边冲突修复
+
+对角生长边同时计入两个方向（如 (cr-1,cc+1) 同时计 N 和 E）。exact-deficit
+对 dir N 强制 Uncut 时，对角边也在 dir E 计数——Uncut 同时在两方向加格，
+可能超另一方向限制。`cut_ef` 先执行设 Cut，`uncut_ef` 跳过已设边——冲突被
+静默吞掉（1092/1078 root-propagate 矛盾）。
+
+修复：exact-deficit 只对**轴向边**（dr=±1,dc=0 或 dr=0,dc=±1）强制 Uncut。
+另加 `cut_ef`/`uncut_ef` 状态冲突检测（已设边值与强制方向相反即矛盾）。
+效果：1078 root=104、1092 root=92——假矛盾消除，edge_csp 开始搜索。
+
+### 2026-10-29 compass 缺陷检查不健全修复
+
+`propagate_compass_clue` 的缺陷检查 `counts + dir_count < v → 矛盾` 是**不健全**的：
+合并一条生长边会在同方向产生新生长边，`dir_count` 低估可达范围。
+1078 实例：e=2, counts=0, dir_count=1 → `0+1<2` 假矛盾，实际合并 (1,2) 后
+可经 (1,3) 达到 2 格。移除该检查；exact-deficit 强制保留（健全：每条生长边
+恰好贡献 1 格，`dir_count == deficit` 时全 Uncut 正确）。

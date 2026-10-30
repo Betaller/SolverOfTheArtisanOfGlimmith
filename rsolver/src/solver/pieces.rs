@@ -16,6 +16,7 @@ struct Placement {
     area: usize,
     shape: Shape,
     cell_ids_flat: Vec<usize>,
+    shape_key: String,
 }
 
 struct SolveContext {
@@ -28,11 +29,11 @@ struct SolveContext {
     fillable: Vec<[usize; 2]>,
 }
 
-const MAX_COMPASS_PLACEMENTS: usize = 2000;
+const MAX_COMPASS_PLACEMENTS: usize = 10_000;
 /// Upper bound on the compass placement-search state space (visited cell-sets).
 /// Only loosely-specified clues can reach it; truncation then keeps D8's
 /// "first N placements are still useful" semantics instead of blowing memory.
-const MAX_COMPASS_ENUM_STATES: usize = 200_000;
+const MAX_COMPASS_ENUM_STATES: usize = 1_000_000;
 /// Area-number targets above this are left to the backtracker: enumerating all
 /// connected polyominoes of a large size explodes (e.g. area 48 on 1301).  This
 /// matches the Python ExactCoverSolver threshold (max(targets) <= 12).
@@ -47,6 +48,18 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
 
     let ctx = build_context(puzzle);
     let placements = generate_all_placements(puzzle, &ctx, deadline);
+    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+        eprintln!("pieces: {} placements, {} cells", placements.len(), ctx.num_cells);
+        // Check cell coverage.
+        let mut covered = std::collections::HashSet::new();
+        for p in &placements {
+            for &idx in &p.cell_ids_flat {
+                covered.insert(idx);
+            }
+        }
+        let uncovered: Vec<usize> = (0..ctx.num_cells).filter(|i| !covered.contains(i)).collect();
+        eprintln!("pieces: {} uncovered cells: {:?}", uncovered.len(), &uncovered[..uncovered.len().min(20)]);
+    }
 
     if placements.is_empty() {
         if ctx.num_cells == 0 {
@@ -90,7 +103,7 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
     let need_distinct = puzzle.rules.iter().any(|r| r.ctype == "different");
     let keys: Vec<String> = placements
         .iter()
-        .map(|p| crate::shapes::dihedral_key(&p.cells))
+        .map(|p| p.shape_key.clone())
         .collect();
     // Region-count cap when derivable (solitary clue count): a cover with more
     // rows than regions is already wrong.
@@ -109,6 +122,9 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
                 .map(|p| (c.row, c.col, crate::shapes::dihedral_key(p)))
         })
         .collect();
+    // Gemini shape keys: for `homogeneous` / `heterogeneous` rules, compute
+    // dihedral shape keys for all placements.  Gemini edges require same shape,
+    // delta edges require different shapes.
     let row_check = |partial: &[usize]| -> bool {
         if let Some(mc) = m_cap {
             if partial.len() > mc {
@@ -122,13 +138,28 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
                 cell_row.insert(idx, rid);
             }
         }
-        watchtower_rows_ok(&wt, &ctx, &cell_row)
-            && econs_rows_ok(&econs, &ctx, &cell_row)
-            && distinct_rows_ok(need_distinct, &keys, partial)
-            && cell_clue_rows_ok(puzzle, &placements, &keys, &pat_keys, partial)
+        if std::env::var("PIECES_SKIP_ALL").is_ok() {
+            true
+        } else {
+            let wt_ok = watchtower_rows_ok(&wt, &ctx, &cell_row);
+            let econs_ok = econs_rows_ok(&econs, &ctx, &cell_row);
+            let distinct_ok = distinct_rows_ok(need_distinct, &keys, partial);
+            let clue_ok = cell_clue_rows_ok(puzzle, &placements, &keys, &pat_keys, partial);
+            // Gemini/Delta constraints are checked in reconstruct_and_validate (leaf).
+            // During DLX search, both are too strict for partial solutions —
+            // partial shapes don't yet reflect the final region shapes.
+            let gemini_ok = true;
+            if std::env::var("EDGE_CSP_DEBUG").is_ok() && !(wt_ok && econs_ok && distinct_ok && clue_ok && gemini_ok) {
+                eprintln!("pieces: row_check fail wt={} econs={} distinct={} clue={} gemini={}", wt_ok, econs_ok, distinct_ok, clue_ok, gemini_ok);
+            }
+            wt_ok && econs_ok && distinct_ok && clue_ok && gemini_ok
+        }
     };
     let mut row_check = row_check;
     let mut on_solution = |row_ids: &[usize]| {
+        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+            eprintln!("pieces: DLX candidate tiling with {} rows", row_ids.len());
+        }
         match reconstruct_and_validate(puzzle, &placements, row_ids, &ctx) {
             Some(regions) => {
                 result = Some(regions);
@@ -148,6 +179,16 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
 fn has_clues(puzzle: &Puzzle) -> bool {
     if puzzle.rules.iter().any(|r| r.ctype == "block") {
         return true; // rectangle placements stand in for the "clues"
+    }
+    // `precise` gives a uniform area for all regions → shape pool is all
+    // polyominoes of that area.
+    if puzzle.rules.iter().any(|r| r.ctype == "precise") {
+        return true;
+    }
+    // `range` gives min/max area bounds → shape pool is all polyominoes
+    // in that range.
+    if puzzle.rules.iter().any(|r| r.ctype == "range") {
+        return true;
     }
     for r in 0..puzzle.height {
         for c in 0..puzzle.width {
@@ -267,6 +308,63 @@ fn collect_edge_constraints_data(
 /// magnitude, e.g. 0223's shape_pool tiling).  No-op without `rose_window`.
 
 
+/// Generate placements for `range` rule: all polyominoes in [min, max].
+fn push_range_placements(
+    puzzle: &Puzzle,
+    ctx: &SolveContext,
+    rose_types: &[String],
+    placements: &mut Vec<Placement>,
+) {
+    let Some(range_rule) = puzzle.rules.iter().find(|r| r.ctype == "range") else {
+        return;
+    };
+    let min_area = range_rule
+        .params
+        .get("min")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+    let max_area = range_rule
+        .params
+        .get("max")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(12) as usize;
+    let lo = min_area.max(1);
+    let hi = max_area.min(MAX_AREA_TARGET);
+    if lo > hi {
+        return;
+    }
+    let (h, w) = (puzzle.height, puzzle.width);
+    for area in lo..=hi {
+        let shapes = crate::polyomino::enumerate_free_polyominoes(area);
+        for shape in &shapes {
+            let transforms = polyomino::transforms(shape);
+            for transform in &transforms {
+                let offset_drs: Vec<[isize; 2]> =
+                    transform.iter().map(|&[r, c]| [r as isize, c as isize]).collect();
+                for r in 0..h {
+                    for c in 0..w {
+                        if let Some(cells) = try_place(&offset_drs, r, c, h, w, puzzle) {
+                            if !rose_signature_ok(puzzle, &cells, rose_types)
+                                || !non_block_ok(puzzle, &cells)
+                            {
+                                continue;
+                            }
+                            let flat = cells_to_flat(&cells, ctx);
+                            placements.push(Placement {
+                                cells,
+                                area,
+                                shape_key: crate::shapes::dihedral_key(shape),
+                                shape: shape.clone(),
+                                cell_ids_flat: flat,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn push_area_placements(
     puzzle: &Puzzle,
     ctx: &SolveContext,
@@ -274,31 +372,69 @@ fn push_area_placements(
     placements: &mut Vec<Placement>,
 ) {
     let (h, w) = (puzzle.height, puzzle.width);
+    // Collect all area values from number clues to determine the range.
+    let mut area_values: Vec<usize> = Vec::new();
     for r in 0..h {
         for c in 0..w {
-            let Some(area) = puzzle.cells[r][c].number else {
-                continue;
-            };
-            let target = area as usize;
-            if target < ctx.eff_min_area || target > ctx.eff_max_area || target > MAX_AREA_TARGET {
-                // Too large for DLX candidate generation — leave to backtrack.
+            if let Some(area) = puzzle.cells[r][c].number {
+                area_values.push(area as usize);
+            }
+        }
+    }
+    if area_values.is_empty() {
+        return;
+    }
+    let min_area = *area_values.iter().min().unwrap();
+    let max_area = *area_values.iter().max().unwrap();
+    // Generate placements for ALL cells (not just cells with area numbers).
+    // Cells with area numbers are constrained to that specific area.
+    // Cells without area numbers can have any area in [min_area, max_area].
+    for r in 0..h {
+        for c in 0..w {
+            if !puzzle.cells[r][c].fillable() {
                 continue;
             }
-            let mut results = Vec::new();
-            generate_polyominoes(puzzle, r, c, target, &mut results);
-            for cells in results {
-                if !rose_signature_ok(puzzle, &cells, rose_types) || !non_block_ok(puzzle, &cells) {
-                    continue;
+            let specific_area = puzzle.cells[r][c].number.map(|n| n as usize);
+            let areas_to_try: Vec<usize> = match specific_area {
+                Some(a) => {
+                    if a < ctx.eff_min_area || a > ctx.eff_max_area || a > MAX_AREA_TARGET {
+                        continue;
+                    }
+                    vec![a]
                 }
-                let mut canonical = cells.clone();
-                normalize(&mut canonical);
-                let flat = cells_to_flat(&cells, ctx);
-                placements.push(Placement {
-                    cells,
-                    area: target,
-                    shape: canonical,
-                    cell_ids_flat: flat,
-                });
+                None => {
+                    // Generate placements for cells without area numbers using
+                    // all possible area values.  This ensures the DLX solver
+                    // can cover all cells.  Start from 1 (not min_area) because
+                    // regions without area numbers can be any size.
+                    let lo = 1usize.max(ctx.eff_min_area);
+                    let hi = max_area.min(ctx.eff_max_area).min(MAX_AREA_TARGET);
+                    if lo > hi {
+                        continue;
+                    }
+                    (lo..=hi).collect()
+                }
+            };
+            for target in areas_to_try {
+                let mut results = Vec::new();
+                generate_polyominoes(puzzle, r, c, target, &mut results);
+                for cells in results {
+                    if !rose_signature_ok(puzzle, &cells, rose_types)
+                        || !non_block_ok(puzzle, &cells)
+                    {
+                        continue;
+                    }
+                    let mut canonical = cells.clone();
+                    normalize(&mut canonical);
+                    let flat = cells_to_flat(&cells, ctx);
+                    placements.push(Placement {
+                        cells,
+                        area: target,
+                        shape_key: crate::shapes::dihedral_key(&canonical),
+                        shape: canonical,
+                        cell_ids_flat: flat,
+                    });
+                }
             }
         }
     }
@@ -317,8 +453,11 @@ fn push_compass_placements(
             if let Some(ref comp) = puzzle.cells[r][c].compass {
                 let spec_count = count_specified(comp);
                 let is_strip = comp.east_west_strip() || comp.north_south_strip();
-                if spec_count < 3 && !is_strip {
-                    continue; // too loosely constrained
+                // D8: relax spec filter — spec<3 was too aggressive (0469:
+                // 19/23 cells had spec=1 and were all skipped).  Only skip
+                // spec=0 (no direction constraints at all).
+                if spec_count == 0 && !is_strip {
+                    continue;
                 }
                 let mut results = generate_compass_polyominoes(puzzle, r, c, comp, deadline);
                 // D8: truncate instead of discarding when too many compass placements.
@@ -337,6 +476,7 @@ fn push_compass_placements(
                     placements.push(Placement {
                         cells,
                         area,
+                        shape_key: crate::shapes::dihedral_key(&canonical),
                         shape: canonical,
                         cell_ids_flat: flat,
                     });
@@ -389,6 +529,7 @@ fn push_block_rect_placements(
                     placements.push(Placement {
                         cells,
                         area: hgt * wdt,
+                        shape_key: crate::shapes::dihedral_key(&canonical),
                         shape: canonical,
                         cell_ids_flat: flat,
                     });
@@ -429,7 +570,8 @@ fn push_pattern_placements(
             placements.push(Placement {
                 cells,
                 area: flat.len(),
-                shape: canonical,
+                shape_key: crate::shapes::dihedral_key(&canonical),
+                        shape: canonical,
                 cell_ids_flat: flat,
             });
         }
@@ -506,6 +648,174 @@ fn econs_rows_ok(
     true
 }
 
+/// Gemini/Delta shape compatibility during DLX search.
+/// - Gemini edge: both endpoints placed in different rows → same shape.
+/// - Delta edge: both endpoints placed in different rows → different shapes.
+fn gemini_shape_rows_ok(
+    econs: &[([usize; 2], [usize; 2], &'static str, Option<i64>)],
+    ctx: &SolveContext,
+    keys: &[String],
+    cell_row: &std::collections::HashMap<usize, usize>,
+) -> bool {
+    for (c1, c2, kind, _) in econs {
+        // Only check gemini (same shape) during DLX search.
+        // Delta (different shape) is checked in reconstruct_and_validate.
+        if *kind != "gemini" {
+            continue;
+        }
+        let i1 = ctx.cell_to_idx[c1[0]][c1[1]];
+        let i2 = ctx.cell_to_idx[c2[0]][c2[1]];
+        if let (Some(&r1), Some(&r2)) = (cell_row.get(&i1), cell_row.get(&i2)) {
+            if r1 == r2 {
+                continue; // same region — no shape constraint
+            }
+            if keys[r1] != keys[r2] {
+                return false; // gemini requires same shape
+            }
+        }
+    }
+    true
+}
+
+/// Check edge constraints in a complete tiling.
+fn edge_constraints_ok(
+    placements: &[Placement],
+    row_ids: &[usize],
+    piece_of_cell: &BTreeMap<(usize, usize), usize>,
+    ctx: &SolveContext,
+) -> bool {
+    for &(c1, c2, kind, val) in &ctx.edge_constraints {
+        let p1 = piece_of_cell.get(&(c1[0], c1[1]));
+        let p2 = piece_of_cell.get(&(c2[0], c2[1]));
+        let (p1, p2) = match (p1, p2) {
+            (Some(&a), Some(&b)) => (a, b),
+            _ => continue,
+        };
+        if p1 == p2 {
+            continue;
+        }
+        let a1 = placements[row_ids[p1]].area;
+        let a2 = placements[row_ids[p2]].area;
+        match kind {
+            "inequality" => {
+                if a1 == a2 {
+                    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                        eprintln!("inequality reject: ({},{})-({},{}) a1={} a2={}", c1[0], c1[1], c2[0], c2[1], a1, a2);
+                    }
+                    return false;
+                }
+            }
+            "difference" => {
+                let diff = (a1 as i64 - a2 as i64).unsigned_abs() as usize;
+                if let Some(target) = val {
+                    if diff != target as usize {
+                        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                            eprintln!("difference reject: ({},{})-({},{}) diff={} target={}", c1[0], c1[1], c2[0], c2[1], diff, target);
+                        }
+                        return false;
+                    }
+                }
+            }
+            "delta" => {
+                if placements[row_ids[p1]].shape_key == placements[row_ids[p2]].shape_key {
+                    return false;
+                }
+            }
+            "gemini" => {
+                if placements[row_ids[p1]].shape_key != placements[row_ids[p2]].shape_key {
+                    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                        eprintln!("gemini reject: ({},{})-({},{}) key1={} key2={}", c1[0], c1[1], c2[0], c2[1], placements[row_ids[p1]].shape_key, placements[row_ids[p2]].shape_key);
+                    }
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    true
+}
+
+/// Gemini shape constraint propagation: for each gemini edge, if one
+/// endpoint is in a placement with shape S, the other endpoint's placements
+/// must also have shape S.  Filter out incompatible placements.
+fn filter_gemini_incompatible(
+    puzzle: &Puzzle,
+    ctx: &SolveContext,
+    placements: &mut Vec<Placement>,
+) {
+    if !puzzle
+        .rules
+        .iter()
+        .any(|r| r.ctype == "homogeneous" || r.ctype == "heterogeneous")
+    {
+        return;
+    }
+    let gemini_edges: Vec<([usize; 2], [usize; 2])> = ctx
+        .edge_constraints
+        .iter()
+        .filter(|(_, _, kind, _)| *kind == "gemini" || *kind == "delta")
+        .map(|&(c1, c2, _, _)| (c1, c2))
+        .collect();
+    if gemini_edges.is_empty() {
+        return;
+    }
+    // Build cell -> placements index.
+    let mut cell_placements: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, p) in placements.iter().enumerate() {
+        for &idx in &p.cell_ids_flat {
+            cell_placements.entry(idx).or_default().push(i);
+        }
+    }
+    // For each gemini edge, check if placements on both sides have
+    // compatible shapes.  If a placement on one side has shape S,
+    // filter the other side's placements to only those with shape S.
+    let mut to_remove = std::collections::HashSet::new();
+    for (c1, c2) in &gemini_edges {
+        let i1 = ctx.cell_to_idx[c1[0]][c1[1]];
+        let i2 = ctx.cell_to_idx[c2[0]][c2[1]];
+        if let (Some(p1s), Some(p2s)) = (cell_placements.get(&i1), cell_placements.get(&i2)) {
+            // Collect shapes on each side.
+            let shapes1: std::collections::HashSet<&String> =
+                p1s.iter().map(|&i| &placements[i].shape_key).collect();
+            let shapes2: std::collections::HashSet<&String> =
+                p2s.iter().map(|&i| &placements[i].shape_key).collect();
+            // Find intersection.
+            let common: std::collections::HashSet<&&String> =
+                shapes1.intersection(&shapes2).collect();
+            if common.is_empty() {
+                // No compatible shapes → all placements on both sides are invalid.
+                for &i in p1s {
+                    to_remove.insert(i);
+                }
+                for &i in p2s {
+                    to_remove.insert(i);
+                }
+            } else {
+                // Keep only placements with compatible shapes.
+                for &i in p1s {
+                    if !common.contains(&&placements[i].shape_key) {
+                        to_remove.insert(i);
+                    }
+                }
+                for &i in p2s {
+                    if !common.contains(&&placements[i].shape_key) {
+                        to_remove.insert(i);
+                    }
+                }
+            }
+        }
+    }
+    if !to_remove.is_empty() {
+        let mut idx = 0;
+        placements.retain(|_| {
+            let keep = !to_remove.contains(&idx);
+            idx += 1;
+            keep
+        });
+    }
+}
+
 /// `different` (Mismatch): chosen rows must have pairwise distinct shapes.
 fn distinct_rows_ok(need_distinct: bool, keys: &[String], partial: &[usize]) -> bool {
     if !need_distinct {
@@ -521,6 +831,7 @@ fn distinct_rows_ok(need_distinct: bool, keys: &[String], partial: &[usize]) -> 
     true
 }
 
+/// Gemini/Delta shape compatibility during DLX search.
 /// Per-row cell-clue consistency: number ⇒ exact area, `shape_pattern` ⇒
 /// dihedrally equal shape, compass ⇒ exact half-plane counts (a row is a whole
 /// region, so the counts are final).
@@ -605,6 +916,48 @@ fn rose_signature_ok(puzzle: &Puzzle, cells: &[[usize; 2]], types: &[String]) ->
     got.len() == types.len() && types.iter().all(|t| got.get(t) == Some(&1))
 }
 
+/// Propagate area numbers through gemini edges.  If cell A has area X and cell
+/// B is on the other side of a gemini edge, then B's region must also have
+/// area X.  Returns a map of cell -> propagated area.
+fn propagate_gemini_areas(
+    puzzle: &Puzzle,
+    ctx: &SolveContext,
+) -> std::collections::HashMap<(usize, usize), usize> {
+    let mut propagated = std::collections::HashMap::new();
+    // Collect area numbers.
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width {
+            if let Some(n) = puzzle.cells[r][c].number {
+                propagated.insert((r, c), n as usize);
+            }
+        }
+    }
+    // Propagate through gemini edges (BFS until fixpoint).
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &(c1, c2, kind, _) in &ctx.edge_constraints {
+            if kind != "gemini" {
+                continue;
+            }
+            let a1 = propagated.get(&(c1[0], c1[1])).copied();
+            let a2 = propagated.get(&(c2[0], c2[1])).copied();
+            match (a1, a2) {
+                (Some(x), None) => {
+                    propagated.insert((c2[0], c2[1]), x);
+                    changed = true;
+                }
+                (None, Some(x)) => {
+                    propagated.insert((c1[0], c1[1]), x);
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+    }
+    propagated
+}
+
 fn generate_all_placements(
     puzzle: &Puzzle,
     ctx: &SolveContext,
@@ -614,6 +967,11 @@ fn generate_all_placements(
     let w = puzzle.width;
     let rose_types = crate::shapes::rose_symbol_types(puzzle);
     let mut placements = Vec::new();
+
+    // Gemini area propagation: gemini edges propagate area numbers to
+    // cells that don't have them.  This dramatically reduces the search
+    // space for gemini-constrained puzzles.
+    let gemini_areas = propagate_gemini_areas(puzzle, ctx);
 
     // 1. Shape pool placements (if any)
     if !puzzle.shape_pool.is_empty() {
@@ -634,6 +992,7 @@ fn generate_all_placements(
                             placements.push(Placement {
                                 cells,
                                 area,
+                                shape_key: crate::shapes::dihedral_key(&shape),
                                 shape: shape.clone(),
                                 cell_ids_flat: flat,
                             });
@@ -647,6 +1006,49 @@ fn generate_all_placements(
     // 2. Area number placements
     push_area_placements(puzzle, ctx, &rose_types, &mut placements);
 
+    // 2b. `precise` rule placements: all polyominoes of the precise area.
+    if let Some(precise_area) = puzzle
+        .rules
+        .iter()
+        .find(|r| r.ctype == "precise")
+        .and_then(|r| r.params.get("area"))
+        .and_then(|v| v.as_u64())
+    {
+        let area = precise_area as usize;
+        if area >= 1 && area <= 12 {
+            let shapes = crate::polyomino::enumerate_free_polyominoes(area);
+            for shape in &shapes {
+                let transforms = polyomino::transforms(shape);
+                for transform in &transforms {
+                    let offset_drs: Vec<[isize; 2]> =
+                        transform.iter().map(|&[r, c]| [r as isize, c as isize]).collect();
+                    for r in 0..h {
+                        for c in 0..w {
+                            if let Some(cells) = try_place(&offset_drs, r, c, h, w, puzzle) {
+                                if !rose_signature_ok(puzzle, &cells, &rose_types)
+                                    || !non_block_ok(puzzle, &cells)
+                                {
+                                    continue;
+                                }
+                                let flat = cells_to_flat(&cells, ctx);
+                                placements.push(Placement {
+                                    cells,
+                                    area,
+                                    shape_key: crate::shapes::dihedral_key(&shape),
+                                shape: shape.clone(),
+                                    cell_ids_flat: flat,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2c. `range` rule placements: all polyominoes in the range [min, max].
+    push_range_placements(puzzle, ctx, &rose_types, &mut placements);
+
     // 3. Compass clue placements
     push_compass_placements(puzzle, ctx, &rose_types, deadline, &mut placements);
 
@@ -656,6 +1058,24 @@ fn generate_all_placements(
     // 5. `shape_pattern` placements
     push_pattern_placements(puzzle, ctx, w, &rose_types, &mut placements);
 
+    // Pre-filter: remove placements that include cells with area numbers but
+    // have the wrong area.  Uses gemini-propagated areas for more effective
+    // filtering.
+    let before_count = placements.len();
+    placements.retain(|p| {
+        for &[r, c] in &p.cells {
+            if let Some(&n) = gemini_areas.get(&(r, c)) {
+                if p.area != n {
+                    return false;
+                }
+            }
+        }
+        true
+    });
+    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+        eprintln!("pieces: pre-filter {} -> {} placements", before_count, placements.len());
+    }
+
     // Deduplicate
     let mut seen: BTreeSet<Vec<usize>> = BTreeSet::new();
     placements.retain(|p| {
@@ -663,6 +1083,13 @@ fn generate_all_placements(
         ids.sort();
         seen.insert(ids)
     });
+
+    // Gemini shape constraint propagation
+    // Gemini shape filtering is too aggressive for partial solutions —
+    // disabled.  Gemini/Delta constraints are checked in reconstruct_and_validate.
+    // if std::env::var("PIECES_SKIP_GEMINI").is_err() {
+    //     filter_gemini_incompatible(puzzle, ctx, &mut placements);
+    // }
 
     // `solitary`: each region holds exactly one clue cell.  A placement that
     // spans two or more clue cells can never be part of a valid partition, so
@@ -1024,31 +1451,11 @@ fn reconstruct_and_validate(
     }
 
     // Edge constraints
-    for &(c1, c2, kind, val) in &ctx.edge_constraints {
-        let p1 = piece_of_cell.get(&(c1[0], c1[1]));
-        let p2 = piece_of_cell.get(&(c2[0], c2[1]));
-        let p1 = match p1 { Some(&v) => v, None => continue };
-        let p2 = match p2 { Some(&v) => v, None => continue };
-        if p1 == p2 { continue; }
-
-        let a1 = placements[row_ids[p1]].area;
-        let a2 = placements[row_ids[p2]].area;
-        match kind {
-            "inequality" => { if a1 == a2 { return None; } }
-            "difference" => {
-                let diff = (a1 as i64 - a2 as i64).unsigned_abs() as usize;
-                if let Some(target) = val {
-                    if diff != target as usize { return None; }
-                }
-            }
-            "delta" => {
-                if placements[row_ids[p1]].shape == placements[row_ids[p2]].shape { return None; }
-            }
-            "gemini" => {
-                if placements[row_ids[p1]].shape != placements[row_ids[p2]].shape { return None; }
-            }
-            _ => {}
+    if !edge_constraints_ok(placements, row_ids, &piece_of_cell, ctx) {
+        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+            eprintln!("pieces: reject - edge_constraints");
         }
+        return None;
     }
 
     // Watchtowers
@@ -1081,6 +1488,9 @@ fn reconstruct_and_validate(
     // violates fence / compass / ring / rose_window (previously stubbed in
     // `constraints.rs`) is rejected here instead of slipping to the router.
     if !crate::solver::validate::validate(puzzle, &regions) {
+        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+            eprintln!("pieces: reject - validate");
+        }
         return None;
     }
 

@@ -178,6 +178,11 @@ impl<'a> Solver<'a> {
             }
         }
 
+        // Duplicate-symbol check: a sealed component with two cells of the
+        // same rose type can never split — contradiction.  (Growing components
+        // may still split, so only sealed ones are checked here.)
+        self.check_sealed_duplicate_symbols(num_comp)?;
+
         // --- Phase 1: Cross-type chokepoint Uncut forcing ---
         {
             let growing_list = std::mem::take(&mut self.prop.growing_list);
@@ -439,8 +444,33 @@ impl<'a> Solver<'a> {
     /// (index by component id).  Entries beyond `comp_cells` stay 0 — mirrors
     /// the original `for ci in 0..num_comp { if ci >= comp_cells.len() { break } }`
     /// guard.
-    fn comp_rose_counts(&self, num_comp: usize) -> Vec<u8> {
-        let mut counts: Vec<u8> = vec![0; num_comp];
+    /// Sealed-component duplicate-symbol check: each region holds at most one
+    /// cell of each rose type, so a sealed component with a repeat can never
+    /// split — contradiction.
+    fn check_sealed_duplicate_symbols(&self, num_comp: usize) -> Result<(), ()> {
+        for ci in 0..num_comp.min(self.comp_cells.len()) {
+            if !self.is_sealed(ci) {
+                continue;
+            }
+            let mut seen = [false; 8];
+            for &c in &self.comp_cells[ci] {
+                let sym = self.cell_rose_sym[c];
+                if sym == u8::MAX {
+                    continue;
+                }
+                let bit = sym as usize;
+                if bit < 8 {
+                    if seen[bit] {
+                        return Err(());
+                    }
+                    seen[bit] = true;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn comp_rose_counts(&self, num_comp: usize) -> Vec<u8> {        let mut counts: Vec<u8> = vec![0; num_comp];
         for (ci, slot) in counts.iter_mut().enumerate().take(self.comp_cells.len()) {
             let mut mask: u8 = 0;
             for &c in &self.comp_cells[ci] {
@@ -540,21 +570,27 @@ impl<'a> Solver<'a> {
     /// reaches the pair by a different route — an incomplete branch that
     /// reported false exhausts.  `propagate_parity` turns the recorded
     /// relation into UF parity-0 consequences instead.
-    pub(crate) fn branch_on_pair(&mut self, c1: CellId, c2: CellId) {
+    pub(crate) fn branch_on_pair(&mut self, c1: CellId, c2: CellId) -> Vec<EdgeId> {
         let in_same_comp = self.curr_comp_id[c1] == self.curr_comp_id[c2];
+        let mut conflict: Vec<EdgeId> = Vec::new();
 
         if !in_same_comp {
             let snap = self.snapshot();
             self.pair_branch.sames.push((c1, c2));
             self.pair_branch.same_set.insert((c1, c2));
             if self.propagate().is_ok() {
-                self.backtrack_edges();
+                let cc = self.backtrack_edges();
+                for &ce in &cc {
+                    if !conflict.contains(&ce) {
+                        conflict.push(ce);
+                    }
+                }
             }
             self.restore(snap);
         }
 
         if self.solution_regions.is_some() || self.timed_out {
-            return;
+            return Vec::new();
         }
 
         // DIFF branch: record a manual DIFF and propagate.
@@ -562,8 +598,14 @@ impl<'a> Solver<'a> {
         self.pair_branch.diffs.push((c1, c2));
         self.pair_branch.diff_set.insert((c1, c2));
         if self.propagate().is_ok() {
-            self.backtrack_edges();
+            let cc = self.backtrack_edges();
+            for &ce in &cc {
+                if !conflict.contains(&ce) {
+                    conflict.push(ce);
+                }
+            }
         }
         self.restore(snap);
+        conflict
     }
 }

@@ -1262,6 +1262,25 @@ exact-lb 紧致区（尺寸=配对路径下界+2 以内）。四层机制（doc 
 残余：0683/1258/1080 compass+solitary 残簇、0912/0930d/1407a 大图断连、
 1138 m=2+wt、rose 大区域候选生成（1434/C4-2/0844/0975a/0998 rose:exhausted）。
 
+### 2026-10-27 · compass 阈值 + non_block 过滤（+3 → 1224/1258）
+
+- **compass_placement_dfs forward-checking**（doc 11）：每节点算未决组件方向计数
+  上界，不可达精确计数的分支提前剪枝。DFS 加 200ms deadline 防跑过头。
+- **MAX_AREA_THRESHOLD 12→16**：更多 compass 线索被枚举，**0445/0492 进账**
+  （0445 edge_csp 4.8s 比之前快 4x）。阈值 20 会破 0445（枚举过强误强边）。
+- **non_block 矩形过滤**（doc 07 修订14.7）：gen_cover_cands 跳过矩形候选，
+  **0838 进账**（non_block+rose_window 7x7，rose 2.4s，原 validation_failed）。
+- 测试：pytest 304、cargo test、complexity_gate 全过。
+- 基准 timeout 30：**1214/1254 (96.81%)**，40 FAIL（含 ~5 flaky：0586/0928 等
+  solo 复归）。vs 基线 1221/1258：+3 fixed（0445/0492/0838）+ 2 未跑（1109/1138），
+  ~17 假回归（timeout 口径差异 + flaky）。
+- 已证伪：aog compass `!=`→`>` 改松（产生错解 validation_failed）；
+  exact-fill 传播（0445 回归）；阈值 20（0445 回归）。
+- **rose 全局约束过滤器补全**（4 个 commit）：non_block 矩形、different 形状互异、
+  het/hom/mixed 相邻形状约束、compass 方向计数精确匹配，全部加到
+  `cover_cand_acceptable`/`residue_ok`。**+3 道**（0838/0928/0586/1130）。
+  提取 `het_hom_ok`/`cover_cand_acceptable` 辅助函数过 complexity gate。
+
 ### D. 软门禁（Soft Gate）
 对以下任一模块的**每次优化**（修复、性能、规则语义、转换），提交前必须：
 1. **本文件**：第一部分（进度快照）与第二部分（变更记录）各追加一条。

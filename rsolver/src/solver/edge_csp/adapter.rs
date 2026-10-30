@@ -210,6 +210,7 @@ pub fn build_input(puzzle: &Puzzle) -> Input {
         mingle: has("same"),
         mismatch: has("different"),
         mixed: has("mixed"),
+        homogeneous: has("homogeneous"),
     };
 
     // `area_bounds` returns (min incl. compass, max incl. B2 cap).  We want the

@@ -226,6 +226,8 @@ pub struct Config {
     pub only_rectangles: bool,
     pub no_rectangles: bool,
     pub adjacent_shapes_different: bool,
+    /// homogeneous (双生): adjacent regions must have the SAME shape.
+    pub adjacent_shapes_same: bool,
     pub adjacent_sizes_different: bool,
     pub all_shapes_different: bool,
     pub all_shapes_same: bool,
@@ -247,6 +249,7 @@ impl Default for Config {
             only_rectangles: false,
             no_rectangles: false,
             adjacent_shapes_different: false,
+            adjacent_shapes_same: false,
             adjacent_sizes_different: false,
             all_shapes_different: false,
             all_shapes_same: false,

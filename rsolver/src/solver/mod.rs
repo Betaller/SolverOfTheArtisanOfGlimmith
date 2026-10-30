@@ -77,6 +77,33 @@ fn attempt_module(
     }
 }
 
+/// Targeted edge_csp preempt: `area_sum_piece_count` ≤ 4 (distinct area values
+/// summing to fillable count → exact small piece count) AND max area value ≥ 30
+/// (large shapes → aog shape-library OOM, e.g. 1138 {60,61} exit -9 at 14 GB).
+/// The max-value gate keeps small-area puzzles like 0710 ({7,18,19,20}) on the
+/// aog path where they solve.
+fn area_sum_preempt(puzzle: &Puzzle) -> bool {
+    let mut distinct = std::collections::BTreeSet::new();
+    for r in 0..puzzle.height {
+        for c in 0..puzzle.width {
+            if !puzzle.cells[r][c].blocked {
+                if let Some(v) = puzzle.cells[r][c].number {
+                    distinct.insert(v as usize);
+                }
+            }
+        }
+    }
+    let fillable = (0..puzzle.height)
+        .flat_map(|r| (0..puzzle.width).map(move |c| (r, c)))
+        .filter(|&(r, c)| puzzle.cells[r][c].fillable())
+        .count();
+    distinct.len() >= 2
+        && distinct.len() <= 4
+        && distinct.iter().sum::<usize>() == fillable
+        && distinct.iter().max().copied().unwrap_or(0) >= 30
+        && edge_csp::is_edge_csp_capable(puzzle)
+}
+
 pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     let start = Instant::now();
 
@@ -253,7 +280,8 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     // Diagnostic: `SKIP_AOG=1` bypasses the aog/rose phases so a single
     // downstream solver can be exercised in isolation (mirrors `AOG_ONLY`).
     let skip_aog = std::env::var("SKIP_AOG").is_ok();
-    if !skip_aog && !puzzle.rules.is_empty() {
+    let area_sum_small = area_sum_preempt(puzzle);
+    if !skip_aog && !area_sum_small && !puzzle.rules.is_empty() {
         // Own-unit budget: anchor to *this* phase's start.  The global `start`
         // starved aog to 0ms whenever same-tiling burned its unit first
         // (0974/1137-class chains show `aog timeout 0ms`), which breaks the
@@ -323,9 +351,12 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
             };
         }
     } else {
-        // No rules, or `SKIP_AOG=1`: aog / rose never run (they need
-        // rule-driven search).
-        let note = if skip_aog { "SKIP_AOG" } else { "no rules" };
+        // No rules, `SKIP_AOG=1`, or area_sum preempt: aog / rose never run.
+        let note = match (skip_aog, area_sum_small) {
+            (true, _) => "SKIP_AOG",
+            (_, true) => "area_sum preempt",
+            _ => "no rules",
+        };
         attempts.push(not_attempted("aog", note));
         attempts.push(not_attempted("rose", note));
     }
@@ -387,11 +418,14 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     let has_compass_clues = has_constrained_compass(puzzle);
 
     let has_block = puzzle.rules.iter().any(|r| r.ctype == "block");
-    if has_shape_pool || has_area_clues || has_compass_clues || has_block {
+    let has_precise = puzzle.rules.iter().any(|r| r.ctype == "precise");
+    let has_range = puzzle.rules.iter().any(|r| r.ctype == "range");
+    if has_shape_pool || has_area_clues || has_compass_clues || has_block || has_precise || has_range {
         // Try piece-based solver first
-        let p_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        let p_timeout = pieces_timeout(puzzle, timeout_ms);
+        let p_deadline = Instant::now() + std::time::Duration::from_millis(p_timeout);
         let p_start = Instant::now();
-        let outcome = pieces::solve_pieces(puzzle, &start, timeout_ms);
+        let outcome = pieces::solve_pieces(puzzle, &start, p_timeout);
         let elapsed = p_start.elapsed().as_millis() as u64;
         match outcome {
             ModuleOutcome::Solved(regions) => {
@@ -657,6 +691,16 @@ fn has_constrained_compass(puzzle: &Puzzle) -> bool {
         }
     }
     false
+}
+
+/// Pieces solver timeout: area+homogeneous puzzles need more DLX search time.
+fn pieces_timeout(puzzle: &Puzzle, timeout_ms: u64) -> u64 {
+    let has_homogeneous = puzzle.rules.iter().any(|r| r.ctype == "homogeneous");
+    if has_homogeneous {
+        timeout_ms * 2
+    } else {
+        timeout_ms
+    }
 }
 
 /// Pre-search topology check: ring / brick constraints may already be violated

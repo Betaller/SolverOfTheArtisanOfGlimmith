@@ -57,7 +57,14 @@ pub fn is_applicable(puzzle: &Puzzle) -> bool {
     for r in &puzzle.rules {
         ctypes.insert(r.ctype.as_str());
     }
-    if ctypes.len() != 2 || !ctypes.contains("compass") || !ctypes.contains("solitary") {
+    // Accept {compass, solitary} plus optional differentiation/heterogeneous/
+    // homogeneous.  These extra rules are checked by the final validator; the
+    // search may produce invalid candidates but the validator rejects them.
+    let base_ok = ctypes.contains("compass") && ctypes.contains("solitary");
+    let extras_ok: bool = ctypes
+        .iter()
+        .all(|&r| matches!(r, "compass" | "solitary" | "differentiation" | "heterogeneous" | "homogeneous"));
+    if !base_ok || !extras_ok {
         return false;
     }
     if !puzzle.shape_pool.is_empty() {
@@ -358,7 +365,7 @@ impl Model {
             let spec = self.targets[i].iter().filter(|t| t.is_some()).count();
             (
                 std::cmp::Reverse(spec),
-                self.hi[i] - self.lo[i],
+                self.hi[i].saturating_sub(self.lo[i]),
                 std::cmp::Reverse(self.lo[i]),
             )
         });

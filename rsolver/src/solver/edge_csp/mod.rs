@@ -66,6 +66,14 @@ pub(crate) struct Solver<'a> {
     pub total_cells: usize,
     pub curr_unknown: usize,
     pub node_count: u64,
+    /// LDS: maximum allowed discrepancies (deviations from heuristic order).
+    /// 0 = pure heuristic (no deviations), usize::MAX = unlimited.
+    pub max_discrepancies: usize,
+    /// LDS: current discrepancy count in this search path.
+    pub discrepancies: usize,
+    /// When true, invert the Cut/Uncut preference in `prefer_cut_first`.
+    /// Used by the value-ordering restart (phase 3).
+    pub invert_value_order: bool,
     // Cached component info from the last `build_components`.
     pub curr_comp_id: Vec<usize>,
     pub curr_comp_sz: Vec<usize>,
@@ -405,6 +413,9 @@ impl<'a> Solver<'a> {
             total_cells: 0,
             curr_unknown: n,
             node_count: 0,
+            max_discrepancies: usize::MAX, // unlimited by default
+            discrepancies: 0,
+            invert_value_order: false,
             curr_comp_id: Vec::new(),
             curr_comp_sz: Vec::new(),
             curr_target_area: Vec::new(),
@@ -703,6 +714,12 @@ impl<'a> Solver<'a> {
         }
 
         if self.propagate().is_err() {
+            if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                eprintln!(
+                    "edge_csp: root propagate contradiction, unknown={}",
+                    self.curr_unknown
+                );
+            }
             return None;
         }
         if std::env::var("EDGE_CSP_DEBUG").is_ok() {
@@ -713,7 +730,41 @@ impl<'a> Solver<'a> {
             );
         }
 
+        // Two-phase search with value-ordering restart:
+        // Phase 1: LDS 0 (pure heuristic path).
+        // Phase 2: unlimited DFS with original heuristic.
+        // Phase 3: unlimited DFS with inverted value ordering (restart).
+        // CBJ is active in all phases.
+        //
+        // Phase 1: LDS with 0 discrepancies (only heuristic-preferred values).
+        self.max_discrepancies = 0;
+        self.discrepancies = 0;
         self.backtrack_edges();
+
+        // Phase 2: unlimited discrepancies (original DFS behavior + CBJ).
+        if self.solution_regions.is_none() && !self.timed_out {
+            self.max_discrepancies = usize::MAX;
+            self.discrepancies = 0;
+            self.backtrack_edges();
+        }
+
+        // Phase 3: restart with inverted value ordering.  When the heuristic
+        // ordering puts the solution deep in the tree, trying the opposite
+        // ordering first can find it quickly.  This is a lightweight restart
+        // that doesn't require learning nogoods.
+        if self.solution_regions.is_none() && !self.timed_out {
+            self.invert_value_order = true;
+            self.max_discrepancies = 0;
+            self.discrepancies = 0;
+            self.backtrack_edges();
+            // If still not found, try unlimited with inverted ordering.
+            if self.solution_regions.is_none() && !self.timed_out {
+                self.max_discrepancies = usize::MAX;
+                self.discrepancies = 0;
+                self.backtrack_edges();
+            }
+            self.invert_value_order = false;
+        }
 
         if std::env::var("EDGE_CSP_DEBUG").is_ok() {
             eprintln!(
@@ -913,6 +964,92 @@ impl<'a> Solver<'a> {
     }
 
     /// Multi-factor edge selection (target area, sealed/growing, watchtower).
+    /// Watchtower-aware edge bonus: edges whose state directly determines a
+    /// vertex's cut-degree get priority (0985/1138 class).
+    fn watchtower_edge_bonus(&self, c1: CellId, c2: CellId) -> i32 {
+        if self.vertex_clues.is_empty() {
+            return 0;
+        }
+        let (r1, c1p) = self.grid.cell_pos(c1);
+        let (r2, c2p) = self.grid.cell_pos(c2);
+        for &(vr, vc) in &[(r1, c1p), (r2, c2p), (r1 + 1, c1p), (r1, c1p + 1)] {
+            let vtx = self.grid.vertex(vr, vc);
+            if self.vertex_clues.iter().any(|v| v.vertex == vtx) {
+                return 200;
+            }
+        }
+        0
+    }
+
+    /// Compass-aware edge bonus: edges incident to a compass clue cell are
+    /// more likely boundaries (compass constrains region shape).  Higher bonus
+    /// when the component has a directional deficit (needs to grow).
+    fn compass_edge_bonus(&self, c1: CellId, c2: CellId) -> i32 {
+        if !self.has_compass_clue {
+            return 0;
+        }
+        for cell in [c1, c2] {
+            if self.cell_clues.iter().any(|cl| {
+                matches!(cl, CellClue::Compass { cell: c, .. } if *c == cell)
+            }) {
+                return 50;
+            }
+        }
+        0
+    }
+
+    /// Area-clue edge bonus: edges incident to an area number cell are more
+    /// likely boundaries (area constrains region size).
+    fn area_edge_bonus(&self, c1: CellId, c2: CellId) -> i32 {
+        for cell in [c1, c2] {
+            if self.cell_clues.iter().any(|cl| {
+                matches!(cl, CellClue::Area { cell: c, .. } if *c == cell)
+            }) {
+                return 30;
+            }
+        }
+        0
+    }
+
+    /// Gemini coordination bonus: encourage synchronized growth of components
+    /// connected by gemini edges.  When a component has a gemini-connected
+    /// growing partner, prefer edges that grow the smaller component to keep
+    /// sizes synchronized.
+    fn gemini_coordination_bonus(&self, ci1: usize, ci2: usize) -> i32 {
+        if self.gemini_edges.is_empty() {
+            return 0;
+        }
+        // Check if either component has a gemini-connected growing partner.
+        for &ge in &self.gemini_edges {
+            let (c1, c2) = self.grid.edge_cells(ge);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let gi1 = self.curr_comp_id[c1];
+            let gi2 = self.curr_comp_id[c2];
+            if gi1 == gi2 {
+                continue;
+            }
+            // If ci1 or ci2 is a gemini partner, give a bonus for growing the
+            // smaller one (to synchronize sizes).
+            for (me, partner) in [(gi1, gi2), (gi2, gi1)] {
+                if me == ci1 || me == ci2 {
+                    if self.is_growing(partner) {
+                        let my_sz = self.curr_comp_sz[me];
+                        let partner_sz = self.curr_comp_sz[partner];
+                        if my_sz < partner_sz {
+                            return 40; // strong bonus for growing the smaller one
+                        }
+                        if my_sz == partner_sz {
+                            return 20; // moderate bonus for synchronized growth
+                        }
+                    }
+                }
+            }
+        }
+        0
+    }
+
     fn select_edge(&mut self) -> Option<(EdgeId, i32)> {
         let num_edges = self.grid.num_edges();
         if self.curr_comp_id.is_empty() {
@@ -974,6 +1111,11 @@ impl<'a> Solver<'a> {
                 }
             }
 
+            score += self.watchtower_edge_bonus(c1, c2);
+            score += self.compass_edge_bonus(c1, c2);
+            score += self.area_edge_bonus(c1, c2);
+            score += self.gemini_coordination_bonus(ci1, ci2);
+
             // Edge incident to a watchtower vertex.
             if !self.watchtower_vertices.is_empty() {
                 let (v1, v2) = self.grid.edge_vertices(e);
@@ -1007,6 +1149,15 @@ impl<'a> Solver<'a> {
 
     /// Whether to try `Cut` before `Uncut` for the selected edge.
     fn prefer_cut_first(&self, e: EdgeId) -> bool {
+        let base = self.prefer_cut_first_base(e);
+        if self.invert_value_order {
+            !base
+        } else {
+            base
+        }
+    }
+
+    fn prefer_cut_first_base(&self, e: EdgeId) -> bool {
         if self.curr_comp_id.is_empty() {
             return true;
         }
@@ -1029,16 +1180,36 @@ impl<'a> Solver<'a> {
                 return false;
             }
         }
+        // Compass components need to grow to satisfy directional counts →
+        // prefer Uncut when either side carries a compass clue.
+        if self.has_compass_clue && !self.cell_clues.is_empty() {
+            for cell in [c1, c2] {
+                if self.cell_clues.iter().any(|cl| {
+                    matches!(cl, CellClue::Compass { cell: c, .. } if *c == cell)
+                }) {
+                    return false;
+                }
+            }
+        }
         true
     }
 
-    fn backtrack_edges(&mut self) {
+    /// Backtracking search with CBJ (Conflict-Directed Backjumping).
+    ///
+    /// Returns a conflict set: the set of decision edge IDs whose assignments
+    /// were involved in the failure below this node.  An empty set means the
+    /// subtree succeeded (solution found) or was exhausted independently of
+    /// any decision.  CBJ: if a node's decision edge is NOT in its children's
+    /// conflict sets, the second branch is irrelevant to the failure and can
+    /// be skipped — the conflict propagates directly to the ancestor whose
+    /// edge IS in the set.
+    fn backtrack_edges(&mut self) -> Vec<EdgeId> {
         if self.solution_regions.is_some() || self.timed_out {
-            return;
+            return Vec::new();
         }
         self.node_count += 1;
         if self.node_count % 1024 == 0 && self.check_deadline() {
-            return;
+            return Vec::new();
         }
 
         if self.curr_unknown == 0 {
@@ -1050,12 +1221,14 @@ impl<'a> Solver<'a> {
             let regions = self.extract_regions();
             if crate::solver::validate::validate(self.puzzle, &regions) {
                 self.solution_regions = Some(regions);
+                return Vec::new();
             }
-            return;
+            // Leaf validation failure: all current decisions contributed.
+            return self.current_decision_edges();
         }
 
         let Some((e, score)) = self.select_edge() else {
-            return;
+            return Vec::new();
         };
 
         // Rose-pair branching: resolve the final rose ambiguity near the leaves
@@ -1075,8 +1248,7 @@ impl<'a> Solver<'a> {
             || self.rose_by_type.iter().any(|t| t.len() == 2);
         if self.rose_bits_all != 0 && pair_pays && self.curr_unknown <= rose_branch_thr {
             if let Some((c1, c2)) = self.select_rose_pair(score) {
-                self.branch_on_pair(c1, c2);
-                return;
+                return self.branch_on_pair(c1, c2);
             }
         }
 
@@ -1087,20 +1259,67 @@ impl<'a> Solver<'a> {
             &[EdgeState::Uncut, EdgeState::Cut]
         };
 
-        for &val in order {
+        let mut conflict: Vec<EdgeId> = Vec::new();
+        for (i, &val) in order.iter().enumerate() {
             if self.solution_regions.is_some() || self.timed_out {
-                return;
+                return Vec::new();
             }
+            // LDS: the first value is the heuristic choice (0 discrepancies);
+            // the second value costs 1 discrepancy.
+            let disc_cost = if i == 0 { 0 } else { 1 };
+            if self.discrepancies + disc_cost > self.max_discrepancies {
+                continue; // LDS: skip this branch, exceeds discrepancy budget
+            }
+            self.discrepancies += disc_cost;
             let snap = self.snapshot();
             if !self.set_edge(e, val) {
+                self.discrepancies -= disc_cost;
+                if !conflict.contains(&e) {
+                    conflict.push(e);
+                }
                 continue;
             }
             match self.propagate() {
-                Ok(_) => self.backtrack_edges(),
-                Err(_) => {}
+                Ok(_) => {
+                    let child_conflict = self.backtrack_edges();
+                    if self.solution_regions.is_some() {
+                        self.discrepancies -= disc_cost;
+                        return Vec::new();
+                    }
+                    for &ce in &child_conflict {
+                        if !conflict.contains(&ce) {
+                            conflict.push(ce);
+                        }
+                    }
+                }
+                Err(_) => {
+                    if !conflict.contains(&e) {
+                        conflict.push(e);
+                    }
+                }
             }
             self.restore(snap);
+            self.discrepancies -= disc_cost;
+            // CBJ: if edge e is NOT in the conflict set, the failure below
+            // doesn't depend on e's value — the second branch is irrelevant.
+            if !conflict.contains(&e) {
+                return conflict;
+            }
         }
+        // Both branches failed and e IS in the conflict set: e contributed to
+        // the failure.  Remove e before propagating upward (the parent will
+        // decide about e's parent edge).
+        conflict.retain(|&x| x != e);
+        conflict
+    }
+
+    /// Collect the edge IDs of all current search decisions (edges that were
+    /// Unknown at the root but are now decided).  Used for leaf-validation
+    /// failure conflict sets.
+    fn current_decision_edges(&self) -> Vec<EdgeId> {
+        // Approximation: all currently-decided edges that were changed during
+        // this search path (tracked in `self.changed`).
+        self.changed.iter().map(|&(e, _)| e).collect()
     }
 }
 

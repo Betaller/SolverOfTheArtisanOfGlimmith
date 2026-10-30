@@ -148,7 +148,8 @@ pub fn solve_pieces(puzzle: &Puzzle, _start: &Instant, timeout_ms: u64) -> Modul
             // Gemini/Delta constraints are checked in reconstruct_and_validate (leaf).
             // During DLX search, both are too strict for partial solutions —
             // partial shapes don't yet reflect the final region shapes.
-            let gemini_ok = true;
+            let gemini_ok = std::env::var("PIECES_SKIP_GEMINI").is_ok()
+                || gemini_shape_rows_ok(&econs, &ctx, &keys, &cell_row);
             if std::env::var("EDGE_CSP_DEBUG").is_ok() && !(wt_ok && econs_ok && distinct_ok && clue_ok && gemini_ok) {
                 eprintln!("pieces: row_check fail wt={} econs={} distinct={} clue={} gemini={}", wt_ok, econs_ok, distinct_ok, clue_ok, gemini_ok);
             }

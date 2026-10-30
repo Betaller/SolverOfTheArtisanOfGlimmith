@@ -605,9 +605,15 @@ fn gemini_shape_rows_ok(
             }
             let same_shape = keys[r1] == keys[r2];
             if *kind == "gemini" && !same_shape {
+                if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                    eprintln!("gemini fail: ({},{})-({},{}) key1={} key2={}", c1[0], c1[1], c2[0], c2[1], keys[r1], keys[r2]);
+                }
                 return false; // gemini requires same shape
             }
             if *kind == "delta" && same_shape {
+                if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                    eprintln!("delta fail: ({},{})-({},{}) key={}", c1[0], c1[1], c2[0], c2[1], keys[r1]);
+                }
                 return false; // delta requires different shapes
             }
         }

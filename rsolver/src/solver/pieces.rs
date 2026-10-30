@@ -937,6 +937,19 @@ fn generate_all_placements(
     // 5. `shape_pattern` placements
     push_pattern_placements(puzzle, ctx, w, &rose_types, &mut placements);
 
+    // Pre-filter: remove placements that include cells with area numbers but
+    // have the wrong area.  This reduces the DLX search space.
+    placements.retain(|p| {
+        for &[r, c] in &p.cells {
+            if let Some(n) = puzzle.cells[r][c].number {
+                if p.area != n as usize {
+                    return false;
+                }
+            }
+        }
+        true
+    });
+
     // Deduplicate
     let mut seen: BTreeSet<Vec<usize>> = BTreeSet::new();
     placements.retain(|p| {

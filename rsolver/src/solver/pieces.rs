@@ -283,31 +283,67 @@ fn push_area_placements(
     placements: &mut Vec<Placement>,
 ) {
     let (h, w) = (puzzle.height, puzzle.width);
+    // Collect all area values from number clues to determine the range.
+    let mut area_values: Vec<usize> = Vec::new();
     for r in 0..h {
         for c in 0..w {
-            let Some(area) = puzzle.cells[r][c].number else {
-                continue;
-            };
-            let target = area as usize;
-            if target < ctx.eff_min_area || target > ctx.eff_max_area || target > MAX_AREA_TARGET {
-                // Too large for DLX candidate generation — leave to backtrack.
+            if let Some(area) = puzzle.cells[r][c].number {
+                area_values.push(area as usize);
+            }
+        }
+    }
+    if area_values.is_empty() {
+        return;
+    }
+    let min_area = *area_values.iter().min().unwrap();
+    let max_area = *area_values.iter().max().unwrap();
+    // Generate placements for ALL cells (not just cells with area numbers).
+    // Cells with area numbers are constrained to that specific area.
+    // Cells without area numbers can have any area in [min_area, max_area].
+    for r in 0..h {
+        for c in 0..w {
+            if !puzzle.cells[r][c].fillable() {
                 continue;
             }
-            let mut results = Vec::new();
-            generate_polyominoes(puzzle, r, c, target, &mut results);
-            for cells in results {
-                if !rose_signature_ok(puzzle, &cells, rose_types) || !non_block_ok(puzzle, &cells) {
-                    continue;
+            let specific_area = puzzle.cells[r][c].number.map(|n| n as usize);
+            let areas_to_try: Vec<usize> = match specific_area {
+                Some(a) => {
+                    if a < ctx.eff_min_area || a > ctx.eff_max_area || a > MAX_AREA_TARGET {
+                        continue;
+                    }
+                    vec![a]
                 }
-                let mut canonical = cells.clone();
-                normalize(&mut canonical);
-                let flat = cells_to_flat(&cells, ctx);
-                placements.push(Placement {
-                    cells,
-                    area: target,
-                    shape: canonical,
-                    cell_ids_flat: flat,
-                });
+                None => {
+                    // Generate placements for cells without area numbers using
+                    // all possible area values.  This ensures the DLX solver
+                    // can cover all cells.
+                    let lo = min_area.max(ctx.eff_min_area);
+                    let hi = max_area.min(ctx.eff_max_area).min(MAX_AREA_TARGET);
+                    if lo > hi {
+                        continue;
+                    }
+                    (lo..=hi).collect()
+                }
+            };
+            for target in areas_to_try {
+                let mut results = Vec::new();
+                generate_polyominoes(puzzle, r, c, target, &mut results);
+                for cells in results {
+                    if !rose_signature_ok(puzzle, &cells, rose_types)
+                        || !non_block_ok(puzzle, &cells)
+                    {
+                        continue;
+                    }
+                    let mut canonical = cells.clone();
+                    normalize(&mut canonical);
+                    let flat = cells_to_flat(&cells, ctx);
+                    placements.push(Placement {
+                        cells,
+                        area: target,
+                        shape: canonical,
+                        cell_ids_flat: flat,
+                    });
+                }
             }
         }
     }

@@ -696,7 +696,10 @@ fn has_constrained_compass(puzzle: &Puzzle) -> bool {
 /// Pieces solver timeout: area+homogeneous puzzles need more DLX search time.
 fn pieces_timeout(puzzle: &Puzzle, timeout_ms: u64) -> u64 {
     let has_homogeneous = puzzle.rules.iter().any(|r| r.ctype == "homogeneous");
-    if has_homogeneous {
+    let has_range = puzzle.rules.iter().any(|r| r.ctype == "range");
+    if has_homogeneous && has_range {
+        timeout_ms * 3
+    } else if has_homogeneous {
         timeout_ms * 2
     } else {
         timeout_ms

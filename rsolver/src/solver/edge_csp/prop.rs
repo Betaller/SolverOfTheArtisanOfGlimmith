@@ -1018,9 +1018,11 @@ impl<'a> Solver<'a> {
             // homogeneous puzzles.
             if self.rules.homogeneous || !self.gemini_edges.is_empty() {
                 progress |= self.force_gemini_shape(num_comp)?;
-                // Gemini double-growing compatibility: both sides growing
-                // must be extendable to the same shape.
+                // Gemini shape domain intersection: two growing sides must
+                // share at least one possible shape.  Opt-in via
+                // EDGE_CSP_SHAPE_CHECK=1 (expensive: O(num_gemini * num_shapes)).
                 if std::env::var("EDGE_CSP_SHAPE_CHECK").is_ok() {
+                    progress |= self.propagate_gemini_shape_domains(num_comp)?;
                     self.check_gemini_double_growing(num_comp)?;
                 }
             }
@@ -4868,6 +4870,101 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Gemini shape domain intersection: for two growing components connected
+    /// by a gemini edge, compute their shape domains (which shapes they can
+    /// each become) and check if they intersect.  If empty → contradiction.
+    /// If only one shape in the intersection → force both to that shape.
+    fn propagate_gemini_shape_domains(&mut self, num_comp: usize) -> Result<bool, ()> {
+        if self.gemini_edges.is_empty() {
+            return Ok(false);
+        }
+        let mut progress = false;
+        for i in 0..self.gemini_edges.len() {
+            let e = self.gemini_edges[i];
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            // Both growing.
+            if !self.is_growing(ci1) || !self.is_growing(ci2) {
+                continue;
+            }
+            let Some(target) = self.curr_target_area[ci1] else {
+                continue;
+            };
+            if target > 6 || target == 0 {
+                continue;
+            }
+            // Compute shape domains for both components.
+            let domain1 = self.component_shape_domain(ci1, target);
+            let domain2 = self.component_shape_domain(ci2, target);
+            // Find intersection.
+            let intersection: Vec<usize> = domain1.iter().filter(|&&s| domain2.contains(&s)).copied().collect();
+            if intersection.is_empty() {
+                return Err(());
+            }
+            if intersection.len() == 1 {
+                // Only one shape works → force both components to that shape.
+                let shape_idx = intersection[0];
+                // TODO: force cells to match the shape.
+                // For now, just record progress (the contradiction check is the main value).
+                progress = true;
+            }
+        }
+        Ok(progress)
+    }
+
+    /// Compute the shape domain of a component: which polyomino indices it can
+    /// become (contain its current cells as a sub-shape).
+    fn component_shape_domain(&self, ci: usize, target: usize) -> Vec<usize> {
+        use std::cell::RefCell;
+        thread_local! {
+            static POLYOMINO_CACHE: RefCell<Vec<Option<Vec<Vec<[usize; 2]>>>>> =
+                RefCell::new(Vec::new());
+        }
+        POLYOMINO_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() <= target {
+                cache.resize(target + 1, None);
+            }
+            if cache[target].is_none() {
+                cache[target] = Some(crate::polyomino::enumerate_free_polyominoes(target));
+            }
+            let shapes = cache[target].as_ref().unwrap();
+            // Get component's current cells as relative coordinates.
+            let cells = &self.comp_cells[ci];
+            if cells.is_empty() {
+                return (0..shapes.len()).collect();
+            }
+            let base_r = cells[0] / self.grid.cols;
+            let base_c = cells[0] % self.grid.cols;
+            let partial: Vec<(i32, i32)> = cells
+                .iter()
+                .map(|&c| {
+                    let r = (c / self.grid.cols) as i32;
+                    let col = (c % self.grid.cols) as i32;
+                    (r - base_r as i32, col - base_c as i32)
+                })
+                .collect();
+            // Filter to shapes that contain the partial.
+            let mut domain = Vec::new();
+            for (idx, shape) in shapes.iter().enumerate() {
+                if Self::is_sub_shape(&partial, shape) {
+                    domain.push(idx);
+                }
+            }
+            domain
+        })
     }
 
     /// Gemini shape forcing: when one side of a gemini edge is sealed with

@@ -1391,6 +1391,9 @@ fn reconstruct_and_validate(
 
     // Edge constraints
     if !edge_constraints_ok(placements, row_ids, &piece_of_cell, ctx) {
+        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+            eprintln!("pieces: reject - edge_constraints");
+        }
         return None;
     }
 
@@ -1424,6 +1427,9 @@ fn reconstruct_and_validate(
     // violates fence / compass / ring / rose_window (previously stubbed in
     // `constraints.rs`) is rejected here instead of slipping to the router.
     if !crate::solver::validate::validate(puzzle, &regions) {
+        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+            eprintln!("pieces: reject - validate");
+        }
         return None;
     }
 

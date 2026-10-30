@@ -66,6 +66,11 @@ pub(crate) struct Solver<'a> {
     pub total_cells: usize,
     pub curr_unknown: usize,
     pub node_count: u64,
+    /// LDS: maximum allowed discrepancies (deviations from heuristic order).
+    /// 0 = pure heuristic (no deviations), usize::MAX = unlimited.
+    pub max_discrepancies: usize,
+    /// LDS: current discrepancy count in this search path.
+    pub discrepancies: usize,
     // Cached component info from the last `build_components`.
     pub curr_comp_id: Vec<usize>,
     pub curr_comp_sz: Vec<usize>,
@@ -405,6 +410,8 @@ impl<'a> Solver<'a> {
             total_cells: 0,
             curr_unknown: n,
             node_count: 0,
+            max_discrepancies: usize::MAX, // unlimited by default
+            discrepancies: 0,
             curr_comp_id: Vec::new(),
             curr_comp_sz: Vec::new(),
             curr_target_area: Vec::new(),
@@ -719,7 +726,22 @@ impl<'a> Solver<'a> {
             );
         }
 
+        // Two-phase search: first try the pure heuristic path (LDS 0), then
+        // fall back to unlimited DFS.  Phase 1 is fast for puzzles where the
+        // heuristic ordering is correct; phase 2 handles the rest.  CBJ is
+        // active in both phases.
+        //
+        // Phase 1: LDS with 0 discrepancies (only heuristic-preferred values).
+        self.max_discrepancies = 0;
+        self.discrepancies = 0;
         self.backtrack_edges();
+
+        // Phase 2: unlimited discrepancies (original DFS behavior + CBJ).
+        if self.solution_regions.is_none() && !self.timed_out {
+            self.max_discrepancies = usize::MAX;
+            self.discrepancies = 0;
+            self.backtrack_edges();
+        }
 
         if std::env::var("EDGE_CSP_DEBUG").is_ok() {
             eprintln!(
@@ -1100,13 +1122,22 @@ impl<'a> Solver<'a> {
         true
     }
 
-    fn backtrack_edges(&mut self) {
+    /// Backtracking search with CBJ (Conflict-Directed Backjumping).
+    ///
+    /// Returns a conflict set: the set of decision edge IDs whose assignments
+    /// were involved in the failure below this node.  An empty set means the
+    /// subtree succeeded (solution found) or was exhausted independently of
+    /// any decision.  CBJ: if a node's decision edge is NOT in its children's
+    /// conflict sets, the second branch is irrelevant to the failure and can
+    /// be skipped — the conflict propagates directly to the ancestor whose
+    /// edge IS in the set.
+    fn backtrack_edges(&mut self) -> Vec<EdgeId> {
         if self.solution_regions.is_some() || self.timed_out {
-            return;
+            return Vec::new();
         }
         self.node_count += 1;
         if self.node_count % 1024 == 0 && self.check_deadline() {
-            return;
+            return Vec::new();
         }
 
         if self.curr_unknown == 0 {
@@ -1118,12 +1149,14 @@ impl<'a> Solver<'a> {
             let regions = self.extract_regions();
             if crate::solver::validate::validate(self.puzzle, &regions) {
                 self.solution_regions = Some(regions);
+                return Vec::new();
             }
-            return;
+            // Leaf validation failure: all current decisions contributed.
+            return self.current_decision_edges();
         }
 
         let Some((e, score)) = self.select_edge() else {
-            return;
+            return Vec::new();
         };
 
         // Rose-pair branching: resolve the final rose ambiguity near the leaves
@@ -1143,8 +1176,7 @@ impl<'a> Solver<'a> {
             || self.rose_by_type.iter().any(|t| t.len() == 2);
         if self.rose_bits_all != 0 && pair_pays && self.curr_unknown <= rose_branch_thr {
             if let Some((c1, c2)) = self.select_rose_pair(score) {
-                self.branch_on_pair(c1, c2);
-                return;
+                return self.branch_on_pair(c1, c2);
             }
         }
 
@@ -1155,20 +1187,67 @@ impl<'a> Solver<'a> {
             &[EdgeState::Uncut, EdgeState::Cut]
         };
 
-        for &val in order {
+        let mut conflict: Vec<EdgeId> = Vec::new();
+        for (i, &val) in order.iter().enumerate() {
             if self.solution_regions.is_some() || self.timed_out {
-                return;
+                return Vec::new();
             }
+            // LDS: the first value is the heuristic choice (0 discrepancies);
+            // the second value costs 1 discrepancy.
+            let disc_cost = if i == 0 { 0 } else { 1 };
+            if self.discrepancies + disc_cost > self.max_discrepancies {
+                continue; // LDS: skip this branch, exceeds discrepancy budget
+            }
+            self.discrepancies += disc_cost;
             let snap = self.snapshot();
             if !self.set_edge(e, val) {
+                self.discrepancies -= disc_cost;
+                if !conflict.contains(&e) {
+                    conflict.push(e);
+                }
                 continue;
             }
             match self.propagate() {
-                Ok(_) => self.backtrack_edges(),
-                Err(_) => {}
+                Ok(_) => {
+                    let child_conflict = self.backtrack_edges();
+                    if self.solution_regions.is_some() {
+                        self.discrepancies -= disc_cost;
+                        return Vec::new();
+                    }
+                    for &ce in &child_conflict {
+                        if !conflict.contains(&ce) {
+                            conflict.push(ce);
+                        }
+                    }
+                }
+                Err(_) => {
+                    if !conflict.contains(&e) {
+                        conflict.push(e);
+                    }
+                }
             }
             self.restore(snap);
+            self.discrepancies -= disc_cost;
+            // CBJ: if edge e is NOT in the conflict set, the failure below
+            // doesn't depend on e's value — the second branch is irrelevant.
+            if !conflict.contains(&e) {
+                return conflict;
+            }
         }
+        // Both branches failed and e IS in the conflict set: e contributed to
+        // the failure.  Remove e before propagating upward (the parent will
+        // decide about e's parent edge).
+        conflict.retain(|&x| x != e);
+        conflict
+    }
+
+    /// Collect the edge IDs of all current search decisions (edges that were
+    /// Unknown at the root but are now decided).  Used for leaf-validation
+    /// failure conflict sets.
+    fn current_decision_edges(&self) -> Vec<EdgeId> {
+        // Approximation: all currently-decided edges that were changed during
+        // this search path (tracked in `self.changed`).
+        self.changed.iter().map(|&(e, _)| e).collect()
     }
 }
 

@@ -570,21 +570,27 @@ impl<'a> Solver<'a> {
     /// reaches the pair by a different route — an incomplete branch that
     /// reported false exhausts.  `propagate_parity` turns the recorded
     /// relation into UF parity-0 consequences instead.
-    pub(crate) fn branch_on_pair(&mut self, c1: CellId, c2: CellId) {
+    pub(crate) fn branch_on_pair(&mut self, c1: CellId, c2: CellId) -> Vec<EdgeId> {
         let in_same_comp = self.curr_comp_id[c1] == self.curr_comp_id[c2];
+        let mut conflict: Vec<EdgeId> = Vec::new();
 
         if !in_same_comp {
             let snap = self.snapshot();
             self.pair_branch.sames.push((c1, c2));
             self.pair_branch.same_set.insert((c1, c2));
             if self.propagate().is_ok() {
-                self.backtrack_edges();
+                let cc = self.backtrack_edges();
+                for &ce in &cc {
+                    if !conflict.contains(&ce) {
+                        conflict.push(ce);
+                    }
+                }
             }
             self.restore(snap);
         }
 
         if self.solution_regions.is_some() || self.timed_out {
-            return;
+            return Vec::new();
         }
 
         // DIFF branch: record a manual DIFF and propagate.
@@ -592,8 +598,14 @@ impl<'a> Solver<'a> {
         self.pair_branch.diffs.push((c1, c2));
         self.pair_branch.diff_set.insert((c1, c2));
         if self.propagate().is_ok() {
-            self.backtrack_edges();
+            let cc = self.backtrack_edges();
+            for &ce in &cc {
+                if !conflict.contains(&ce) {
+                    conflict.push(ce);
+                }
+            }
         }
         self.restore(snap);
+        conflict
     }
 }

@@ -699,6 +699,9 @@ fn edge_constraints_ok(
         match kind {
             "inequality" => {
                 if a1 == a2 {
+                    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                        eprintln!("inequality reject: ({},{})-({},{}) a1={} a2={}", c1[0], c1[1], c2[0], c2[1], a1, a2);
+                    }
                     return false;
                 }
             }
@@ -706,6 +709,9 @@ fn edge_constraints_ok(
                 let diff = (a1 as i64 - a2 as i64).unsigned_abs() as usize;
                 if let Some(target) = val {
                     if diff != target as usize {
+                        if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                            eprintln!("difference reject: ({},{})-({},{}) diff={} target={}", c1[0], c1[1], c2[0], c2[1], diff, target);
+                        }
                         return false;
                     }
                 }

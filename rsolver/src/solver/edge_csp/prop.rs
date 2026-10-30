@@ -1018,6 +1018,11 @@ impl<'a> Solver<'a> {
             // homogeneous puzzles.
             if self.rules.homogeneous || !self.gemini_edges.is_empty() {
                 progress |= self.force_gemini_shape(num_comp)?;
+                // Gemini double-growing compatibility: both sides growing
+                // must be extendable to the same shape.
+                if std::env::var("EDGE_CSP_SHAPE_CHECK").is_ok() {
+                    self.check_gemini_double_growing(num_comp)?;
+                }
             }
             // Shape embeddability: growing components must be extendable to
             // some polyomino of their target area.  Prunes partial shapes that
@@ -5030,6 +5035,66 @@ impl<'a> Solver<'a> {
             .collect();
         coords.sort();
         Some(coords)
+    }
+
+    /// Gemini double-growing compatibility: when both sides of a gemini edge
+    /// are growing, their partial shapes must be extendable to the SAME shape.
+    /// Check if the union of both partial shapes can be extended to some
+    /// polyomino of the target area.
+    fn check_gemini_double_growing(&self, num_comp: usize) -> Result<(), ()> {
+        if self.gemini_edges.is_empty() {
+            return Ok(());
+        }
+        for i in 0..self.gemini_edges.len() {
+            let e = self.gemini_edges[i];
+            if self.edges[e] != EdgeState::Cut {
+                continue;
+            }
+            let (c1, c2) = self.grid.edge_cells(e);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let ci1 = self.curr_comp_id[c1];
+            let ci2 = self.curr_comp_id[c2];
+            if ci1 == ci2 || ci1 >= num_comp || ci2 >= num_comp {
+                continue;
+            }
+            // Both growing.
+            if !self.is_growing(ci1) || !self.is_growing(ci2) {
+                continue;
+            }
+            // Get target area (both must be the same for gemini).
+            let Some(target) = self.curr_target_area[ci1] else {
+                continue;
+            };
+            if self.curr_target_area[ci2] != Some(target) {
+                return Err(());
+            }
+            if target > 8 {
+                continue;
+            }
+            // Collect union of both components' cells as relative coordinates.
+            let cells1 = &self.comp_cells[ci1];
+            let cells2 = &self.comp_cells[ci2];
+            if cells1.is_empty() || cells2.is_empty() {
+                continue;
+            }
+            // Use ci1's first cell as base.
+            let base_r = cells1[0] / self.grid.cols;
+            let base_c = cells1[0] % self.grid.cols;
+            let mut union: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+            for &c in cells1.iter().chain(cells2.iter()) {
+                let r = (c / self.grid.cols) as i32;
+                let col = (c % self.grid.cols) as i32;
+                union.insert((r - base_r as i32, col - base_c as i32));
+            }
+            let partial: Vec<(i32, i32)> = union.into_iter().collect();
+            // Check if the union can be extended to a polyomino of target area.
+            if !Self::is_shape_embeddable(&partial, target) {
+                return Err(());
+            }
+        }
+        Ok(())
     }
 
     /// Shape embeddability check: for each growing component with a target area

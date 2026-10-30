@@ -16,6 +16,7 @@ struct Placement {
     area: usize,
     shape: Shape,
     cell_ids_flat: Vec<usize>,
+    shape_key: String,
 }
 
 struct SolveContext {
@@ -340,6 +341,7 @@ fn push_area_placements(
                     placements.push(Placement {
                         cells,
                         area: target,
+                        shape_key: crate::shapes::dihedral_key(&canonical),
                         shape: canonical,
                         cell_ids_flat: flat,
                     });
@@ -385,6 +387,7 @@ fn push_compass_placements(
                     placements.push(Placement {
                         cells,
                         area,
+                        shape_key: crate::shapes::dihedral_key(&canonical),
                         shape: canonical,
                         cell_ids_flat: flat,
                     });
@@ -437,6 +440,7 @@ fn push_block_rect_placements(
                     placements.push(Placement {
                         cells,
                         area: hgt * wdt,
+                        shape_key: crate::shapes::dihedral_key(&canonical),
                         shape: canonical,
                         cell_ids_flat: flat,
                     });
@@ -477,7 +481,8 @@ fn push_pattern_placements(
             placements.push(Placement {
                 cells,
                 area: flat.len(),
-                shape: canonical,
+                shape_key: crate::shapes::dihedral_key(&canonical),
+                        shape: canonical,
                 cell_ids_flat: flat,
             });
         }
@@ -583,6 +588,87 @@ fn gemini_shape_rows_ok(
         }
     }
     true
+}
+
+/// Gemini shape constraint propagation: for each gemini edge, if one
+/// endpoint is in a placement with shape S, the other endpoint's placements
+/// must also have shape S.  Filter out incompatible placements.
+fn filter_gemini_incompatible(
+    puzzle: &Puzzle,
+    ctx: &SolveContext,
+    placements: &mut Vec<Placement>,
+) {
+    if !puzzle
+        .rules
+        .iter()
+        .any(|r| r.ctype == "homogeneous" || r.ctype == "heterogeneous")
+    {
+        return;
+    }
+    let gemini_edges: Vec<([usize; 2], [usize; 2])> = ctx
+        .edge_constraints
+        .iter()
+        .filter(|(_, _, kind, _)| *kind == "gemini" || *kind == "delta")
+        .map(|&(c1, c2, _, _)| (c1, c2))
+        .collect();
+    if gemini_edges.is_empty() {
+        return;
+    }
+    // Build cell -> placements index.
+    let mut cell_placements: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (i, p) in placements.iter().enumerate() {
+        for &idx in &p.cell_ids_flat {
+            cell_placements.entry(idx).or_default().push(i);
+        }
+    }
+    // For each gemini edge, check if placements on both sides have
+    // compatible shapes.  If a placement on one side has shape S,
+    // filter the other side's placements to only those with shape S.
+    let mut to_remove = std::collections::HashSet::new();
+    for (c1, c2) in &gemini_edges {
+        let i1 = ctx.cell_to_idx[c1[0]][c1[1]];
+        let i2 = ctx.cell_to_idx[c2[0]][c2[1]];
+        if let (Some(p1s), Some(p2s)) = (cell_placements.get(&i1), cell_placements.get(&i2)) {
+            // Collect shapes on each side.
+            let shapes1: std::collections::HashSet<&String> =
+                p1s.iter().map(|&i| &placements[i].shape_key).collect();
+            let shapes2: std::collections::HashSet<&String> =
+                p2s.iter().map(|&i| &placements[i].shape_key).collect();
+            // Find intersection.
+            let common: std::collections::HashSet<&&String> =
+                shapes1.intersection(&shapes2).collect();
+            if common.is_empty() {
+                // No compatible shapes → all placements on both sides are invalid.
+                for &i in p1s {
+                    to_remove.insert(i);
+                }
+                for &i in p2s {
+                    to_remove.insert(i);
+                }
+            } else {
+                // Keep only placements with compatible shapes.
+                for &i in p1s {
+                    if !common.contains(&&placements[i].shape_key) {
+                        to_remove.insert(i);
+                    }
+                }
+                for &i in p2s {
+                    if !common.contains(&&placements[i].shape_key) {
+                        to_remove.insert(i);
+                    }
+                }
+            }
+        }
+    }
+    if !to_remove.is_empty() {
+        let mut idx = 0;
+        placements.retain(|_| {
+            let keep = !to_remove.contains(&idx);
+            idx += 1;
+            keep
+        });
+    }
 }
 
 /// `different` (Mismatch): chosen rows must have pairwise distinct shapes.
@@ -714,6 +800,7 @@ fn generate_all_placements(
                             placements.push(Placement {
                                 cells,
                                 area,
+                                shape_key: crate::shapes::dihedral_key(&shape),
                                 shape: shape.clone(),
                                 cell_ids_flat: flat,
                             });
@@ -755,7 +842,8 @@ fn generate_all_placements(
                                 placements.push(Placement {
                                     cells,
                                     area,
-                                    shape: shape.clone(),
+                                    shape_key: crate::shapes::dihedral_key(&shape),
+                                shape: shape.clone(),
                                     cell_ids_flat: flat,
                                 });
                             }
@@ -782,6 +870,9 @@ fn generate_all_placements(
         ids.sort();
         seen.insert(ids)
     });
+
+    // Gemini shape constraint propagation
+    filter_gemini_incompatible(puzzle, ctx, &mut placements);
 
     // `solitary`: each region holds exactly one clue cell.  A placement that
     // spans two or more clue cells can never be part of a valid partition, so

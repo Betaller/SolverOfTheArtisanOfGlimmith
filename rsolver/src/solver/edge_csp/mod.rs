@@ -1011,6 +1011,45 @@ impl<'a> Solver<'a> {
         0
     }
 
+    /// Gemini coordination bonus: encourage synchronized growth of components
+    /// connected by gemini edges.  When a component has a gemini-connected
+    /// growing partner, prefer edges that grow the smaller component to keep
+    /// sizes synchronized.
+    fn gemini_coordination_bonus(&self, ci1: usize, ci2: usize) -> i32 {
+        if self.gemini_edges.is_empty() {
+            return 0;
+        }
+        // Check if either component has a gemini-connected growing partner.
+        for &ge in &self.gemini_edges {
+            let (c1, c2) = self.grid.edge_cells(ge);
+            if !self.grid.cell_exists[c1] || !self.grid.cell_exists[c2] {
+                continue;
+            }
+            let gi1 = self.curr_comp_id[c1];
+            let gi2 = self.curr_comp_id[c2];
+            if gi1 == gi2 {
+                continue;
+            }
+            // If ci1 or ci2 is a gemini partner, give a bonus for growing the
+            // smaller one (to synchronize sizes).
+            for (me, partner) in [(gi1, gi2), (gi2, gi1)] {
+                if me == ci1 || me == ci2 {
+                    if self.is_growing(partner) {
+                        let my_sz = self.curr_comp_sz[me];
+                        let partner_sz = self.curr_comp_sz[partner];
+                        if my_sz < partner_sz {
+                            return 40; // strong bonus for growing the smaller one
+                        }
+                        if my_sz == partner_sz {
+                            return 20; // moderate bonus for synchronized growth
+                        }
+                    }
+                }
+            }
+        }
+        0
+    }
+
     fn select_edge(&mut self) -> Option<(EdgeId, i32)> {
         let num_edges = self.grid.num_edges();
         if self.curr_comp_id.is_empty() {
@@ -1075,6 +1114,7 @@ impl<'a> Solver<'a> {
             score += self.watchtower_edge_bonus(c1, c2);
             score += self.compass_edge_bonus(c1, c2);
             score += self.area_edge_bonus(c1, c2);
+            score += self.gemini_coordination_bonus(ci1, ci2);
 
             // Edge incident to a watchtower vertex.
             if !self.watchtower_vertices.is_empty() {

@@ -418,7 +418,8 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     let has_compass_clues = has_constrained_compass(puzzle);
 
     let has_block = puzzle.rules.iter().any(|r| r.ctype == "block");
-    if has_shape_pool || has_area_clues || has_compass_clues || has_block {
+    let has_precise = puzzle.rules.iter().any(|r| r.ctype == "precise");
+    if has_shape_pool || has_area_clues || has_compass_clues || has_block || has_precise {
         // Try piece-based solver first
         let p_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
         let p_start = Instant::now();

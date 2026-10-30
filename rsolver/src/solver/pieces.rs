@@ -149,6 +149,11 @@ fn has_clues(puzzle: &Puzzle) -> bool {
     if puzzle.rules.iter().any(|r| r.ctype == "block") {
         return true; // rectangle placements stand in for the "clues"
     }
+    // `precise` gives a uniform area for all regions → shape pool is all
+    // polyominoes of that area.
+    if puzzle.rules.iter().any(|r| r.ctype == "precise") {
+        return true;
+    }
     for r in 0..puzzle.height {
         for c in 0..puzzle.width {
             let cell = &puzzle.cells[r][c];
@@ -649,6 +654,45 @@ fn generate_all_placements(
 
     // 2. Area number placements
     push_area_placements(puzzle, ctx, &rose_types, &mut placements);
+
+    // 2b. `precise` rule placements: all polyominoes of the precise area.
+    if let Some(precise_area) = puzzle
+        .rules
+        .iter()
+        .find(|r| r.ctype == "precise")
+        .and_then(|r| r.params.get("area"))
+        .and_then(|v| v.as_u64())
+    {
+        let area = precise_area as usize;
+        if area >= 1 && area <= 12 {
+            let shapes = crate::polyomino::enumerate_free_polyominoes(area);
+            for shape in &shapes {
+                let transforms = polyomino::transforms(shape);
+                for transform in &transforms {
+                    let offset_drs: Vec<[isize; 2]> =
+                        transform.iter().map(|&[r, c]| [r as isize, c as isize]).collect();
+                    for r in 0..h {
+                        for c in 0..w {
+                            if let Some(cells) = try_place(&offset_drs, r, c, h, w, puzzle) {
+                                if !rose_signature_ok(puzzle, &cells, &rose_types)
+                                    || !non_block_ok(puzzle, &cells)
+                                {
+                                    continue;
+                                }
+                                let flat = cells_to_flat(&cells, ctx);
+                                placements.push(Placement {
+                                    cells,
+                                    area,
+                                    shape: shape.clone(),
+                                    cell_ids_flat: flat,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // 3. Compass clue placements
     push_compass_placements(puzzle, ctx, &rose_types, deadline, &mut placements);

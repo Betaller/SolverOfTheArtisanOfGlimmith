@@ -185,6 +185,11 @@ fn has_clues(puzzle: &Puzzle) -> bool {
     if puzzle.rules.iter().any(|r| r.ctype == "precise") {
         return true;
     }
+    // `range` gives min/max area bounds → shape pool is all polyominoes
+    // in that range.
+    if puzzle.rules.iter().any(|r| r.ctype == "range") {
+        return true;
+    }
     for r in 0..puzzle.height {
         for c in 0..puzzle.width {
             let cell = &puzzle.cells[r][c];
@@ -302,6 +307,63 @@ fn collect_edge_constraints_data(
 /// `validate`, but filtering here collapses the DLX row count by orders of
 /// magnitude, e.g. 0223's shape_pool tiling).  No-op without `rose_window`.
 
+
+/// Generate placements for `range` rule: all polyominoes in [min, max].
+fn push_range_placements(
+    puzzle: &Puzzle,
+    ctx: &SolveContext,
+    rose_types: &[String],
+    placements: &mut Vec<Placement>,
+) {
+    let Some(range_rule) = puzzle.rules.iter().find(|r| r.ctype == "range") else {
+        return;
+    };
+    let min_area = range_rule
+        .params
+        .get("min")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+    let max_area = range_rule
+        .params
+        .get("max")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(12) as usize;
+    let lo = min_area.max(1);
+    let hi = max_area.min(MAX_AREA_TARGET);
+    if lo > hi {
+        return;
+    }
+    let (h, w) = (puzzle.height, puzzle.width);
+    for area in lo..=hi {
+        let shapes = crate::polyomino::enumerate_free_polyominoes(area);
+        for shape in &shapes {
+            let transforms = polyomino::transforms(shape);
+            for transform in &transforms {
+                let offset_drs: Vec<[isize; 2]> =
+                    transform.iter().map(|&[r, c]| [r as isize, c as isize]).collect();
+                for r in 0..h {
+                    for c in 0..w {
+                        if let Some(cells) = try_place(&offset_drs, r, c, h, w, puzzle) {
+                            if !rose_signature_ok(puzzle, &cells, rose_types)
+                                || !non_block_ok(puzzle, &cells)
+                            {
+                                continue;
+                            }
+                            let flat = cells_to_flat(&cells, ctx);
+                            placements.push(Placement {
+                                cells,
+                                area,
+                                shape_key: crate::shapes::dihedral_key(shape),
+                                shape: shape.clone(),
+                                cell_ids_flat: flat,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 fn push_area_placements(
     puzzle: &Puzzle,
@@ -927,6 +989,9 @@ fn generate_all_placements(
             }
         }
     }
+
+    // 2c. `range` rule placements: all polyominoes in the range [min, max].
+    push_range_placements(puzzle, ctx, &rose_types, &mut placements);
 
     // 3. Compass clue placements
     push_compass_placements(puzzle, ctx, &rose_types, deadline, &mut placements);

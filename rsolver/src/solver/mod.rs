@@ -419,7 +419,8 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
 
     let has_block = puzzle.rules.iter().any(|r| r.ctype == "block");
     let has_precise = puzzle.rules.iter().any(|r| r.ctype == "precise");
-    if has_shape_pool || has_area_clues || has_compass_clues || has_block || has_precise {
+    let has_range = puzzle.rules.iter().any(|r| r.ctype == "range");
+    if has_shape_pool || has_area_clues || has_compass_clues || has_block || has_precise || has_range {
         // Try piece-based solver first
         let p_timeout = pieces_timeout(puzzle, timeout_ms);
         let p_deadline = Instant::now() + std::time::Duration::from_millis(p_timeout);

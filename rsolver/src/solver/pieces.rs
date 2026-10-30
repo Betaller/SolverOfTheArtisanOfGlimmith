@@ -1013,6 +1013,7 @@ fn generate_all_placements(
 
     // Pre-filter: remove placements that include cells with area numbers but
     // have the wrong area.  This reduces the DLX search space.
+    let before_count = placements.len();
     placements.retain(|p| {
         for &[r, c] in &p.cells {
             if let Some(n) = puzzle.cells[r][c].number {
@@ -1023,6 +1024,9 @@ fn generate_all_placements(
         }
         true
     });
+    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+        eprintln!("pieces: pre-filter {} -> {} placements", before_count, placements.len());
+    }
 
     // Deduplicate
     let mut seen: BTreeSet<Vec<usize>> = BTreeSet::new();

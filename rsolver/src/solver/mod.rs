@@ -421,9 +421,10 @@ pub fn solve(puzzle: &Puzzle, timeout_ms: u64) -> Solution {
     let has_precise = puzzle.rules.iter().any(|r| r.ctype == "precise");
     if has_shape_pool || has_area_clues || has_compass_clues || has_block || has_precise {
         // Try piece-based solver first
-        let p_deadline = Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        let p_timeout = pieces_timeout(puzzle, timeout_ms);
+        let p_deadline = Instant::now() + std::time::Duration::from_millis(p_timeout);
         let p_start = Instant::now();
-        let outcome = pieces::solve_pieces(puzzle, &start, timeout_ms);
+        let outcome = pieces::solve_pieces(puzzle, &start, p_timeout);
         let elapsed = p_start.elapsed().as_millis() as u64;
         match outcome {
             ModuleOutcome::Solved(regions) => {
@@ -689,6 +690,16 @@ fn has_constrained_compass(puzzle: &Puzzle) -> bool {
         }
     }
     false
+}
+
+/// Pieces solver timeout: area+homogeneous puzzles need more DLX search time.
+fn pieces_timeout(puzzle: &Puzzle, timeout_ms: u64) -> u64 {
+    let has_homogeneous = puzzle.rules.iter().any(|r| r.ctype == "homogeneous");
+    if has_homogeneous {
+        timeout_ms * 2
+    } else {
+        timeout_ms
+    }
 }
 
 /// Pre-search topology check: ring / brick constraints may already be violated

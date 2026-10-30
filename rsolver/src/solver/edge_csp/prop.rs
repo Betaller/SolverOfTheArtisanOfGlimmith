@@ -1013,6 +1013,13 @@ impl<'a> Solver<'a> {
             if self.rules.homogeneous {
                 self.check_homogeneous_sealed_pairs(num_comp)?;
             }
+            // Shape embeddability: growing components must be extendable to
+            // some polyomino of their target area.  Prunes partial shapes that
+            // can't form a valid region.  Opt-in via EDGE_CSP_SHAPE_CHECK=1
+            // (default off: too slow for the pruning power on most puzzles).
+            if std::env::var("EDGE_CSP_SHAPE_CHECK").is_ok() {
+                self.check_shape_embeddability(num_comp)?;
+            }
         }
         // Gemini/Delta shape-identity: sealed regions across a gemini edge must
         // share a canonical shape; across a delta edge they must differ.
@@ -4850,6 +4857,114 @@ impl<'a> Solver<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Shape embeddability check: for each growing component with a target area
+    /// under homogeneous/heterogeneous rules, verify its current cells can be
+    /// extended to some free polyomino of the target area.  Prunes partial
+    /// shapes that can't form a valid region (e.g., disconnected gaps, shapes
+    /// that would need to overlap themselves).
+    fn check_shape_embeddability(&self, num_comp: usize) -> Result<(), ()> {
+        // Only check when the target area is small enough for enumeration
+        // (≤ 8 → ≤ 365 free polyominoes).
+        for &ci in &self.prop.growing_list {
+            if ci >= num_comp {
+                continue;
+            }
+            let Some(target) = self.curr_target_area[ci] else {
+                continue;
+            };
+            if target > 8 || target == 0 {
+                continue;
+            }
+            let sz = self.curr_comp_sz[ci];
+            if sz >= target {
+                continue; // already at or above target, no extension needed
+            }
+            // Collect the component's current cells (relative to first cell).
+            let cells = &self.comp_cells[ci];
+            if cells.is_empty() {
+                continue;
+            }
+            let base_r = cells[0] / self.grid.cols;
+            let base_c = cells[0] % self.grid.cols;
+            let partial: Vec<(i32, i32)> = cells
+                .iter()
+                .map(|&c| {
+                    let r = (c / self.grid.cols) as i32;
+                    let col = (c % self.grid.cols) as i32;
+                    (r - base_r as i32, col - base_c as i32)
+                })
+                .collect();
+            // Check if any polyomino of `target` area contains `partial` as a
+            // sub-shape (after dihedral transforms).
+            if !Self::is_shape_embeddable(&partial, target) {
+                return Err(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if `partial` (a set of relative cell positions) is a sub-shape of
+    /// some free polyomino of `target` area.  Uses cached polyomino enumeration.
+    fn is_shape_embeddable(partial: &[(i32, i32)], target: usize) -> bool {
+        use std::cell::RefCell;
+        thread_local! {
+            static POLYOMINO_CACHE: RefCell<Vec<Option<Vec<Vec<[usize; 2]>>>>> =
+                RefCell::new(Vec::new());
+        }
+        POLYOMINO_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() <= target {
+                cache.resize(target + 1, None);
+            }
+            if cache[target].is_none() {
+                cache[target] = Some(crate::polyomino::enumerate_free_polyominoes(target));
+            }
+            let shapes = cache[target].as_ref().unwrap();
+            for shape in shapes {
+                if Self::is_sub_shape(partial, shape) {
+                    return true;
+                }
+            }
+            false
+        })
+    }
+
+    /// Check if `partial` is a sub-shape of `full` (both as relative cell sets).
+    /// Tries all 8 dihedral transforms of `partial`.
+    fn is_sub_shape(partial: &[(i32, i32)], full: &[[usize; 2]]) -> bool {
+        let full_set: std::collections::HashSet<(i32, i32)> =
+            full.iter().map(|&[r, c]| (r as i32, c as i32)).collect();
+        // Try all 8 dihedral transforms of partial.
+        for &reflect in &[false, true] {
+            for &rot in &[0u8, 1, 2, 3] {
+                let transformed: Vec<(i32, i32)> = partial
+                    .iter()
+                    .map(|&(r, c)| {
+                        let (r, c) = if reflect { (r, -c) } else { (r, c) };
+                        match rot {
+                            0 => (r, c),
+                            1 => (c, -r),
+                            2 => (-r, -c),
+                            _ => (-c, r),
+                        }
+                    })
+                    .collect();
+                // Normalize to origin.
+                let min_r = transformed.iter().map(|&(r, _)| r).min().unwrap();
+                let min_c = transformed.iter().map(|&(_, c)| c).min().unwrap();
+                let normalized: std::collections::HashSet<(i32, i32)> = transformed
+                    .iter()
+                    .map(|&(r, c)| (r - min_r, c - min_c))
+                    .collect();
+                // Check if normalized is a subset of full_set.
+                if normalized.is_subset(&full_set) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Shape-identity propagation for Gemini (same shape) and Delta (different

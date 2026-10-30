@@ -717,6 +717,9 @@ fn edge_constraints_ok(
             }
             "gemini" => {
                 if placements[row_ids[p1]].shape_key != placements[row_ids[p2]].shape_key {
+                    if std::env::var("EDGE_CSP_DEBUG").is_ok() {
+                        eprintln!("gemini reject: ({},{})-({},{}) key1={} key2={}", c1[0], c1[1], c2[0], c2[1], placements[row_ids[p1]].shape_key, placements[row_ids[p2]].shape_key);
+                    }
                     return false;
                 }
             }
